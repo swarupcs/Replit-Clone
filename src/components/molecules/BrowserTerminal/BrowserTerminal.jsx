@@ -45,6 +45,7 @@ export const BrowserTerminal = () => {
 
     return () => {
       term.dispose();
+      terminalSocket?.close();
     };
   }, [terminalSocket]);
 
@@ -52,8 +53,7 @@ export const BrowserTerminal = () => {
     <div
       ref={terminalRef}
       style={{
-        height: "25vh",
-        overflow: "auto",
+        width: "100vw",
       }}
       className="terminal"
       id="terminal-container"
