@@ -34,16 +34,25 @@ export const BrowserTerminal = () => {
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-    fitAddon.fit();
 
-    // Keep the terminal sized to its Allotment pane instead of fitting once.
-    const resizeObserver = new ResizeObserver(() => {
+    // fit() reads the renderer's cell dimensions, which do not exist until the
+    // element has actually been laid out. Inside an Allotment pane the first
+    // layout pass reports 0x0, so fitting unconditionally throws.
+    function safeFit() {
+      if (!container || container.clientWidth === 0 || container.clientHeight === 0) {
+        return;
+      }
       try {
         fitAddon.fit();
       } catch {
-        // fit() throws if the element is momentarily detached; ignore.
+        // The element can be detached mid-resize; the next tick will refit.
       }
-    });
+    }
+
+    safeFit();
+
+    // Keep the terminal sized to its Allotment pane instead of fitting once.
+    const resizeObserver = new ResizeObserver(safeFit);
     resizeObserver.observe(container);
 
     function attach() {
