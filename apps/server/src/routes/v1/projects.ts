@@ -5,6 +5,7 @@ import {
   deleteProjectController,
   getProjectTree,
   listProjectsController,
+  listTemplatesController,
 } from "../../controllers/projectController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
@@ -27,6 +28,7 @@ const createLimiter = rateLimit({
 
 router.use(requireAuth);
 
+router.get("/templates", asyncHandler(listTemplatesController));
 router.get("/", asyncHandler(listProjectsController));
 router.post("/", createLimiter, asyncHandler(createProjectController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));

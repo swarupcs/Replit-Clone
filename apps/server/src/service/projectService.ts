@@ -1,17 +1,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import directoryTree from "directory-tree";
-import type { DirectoryTree } from "directory-tree";
 import type { Project } from "../generated/prisma/client.js";
-import { env, PROJECTS_ROOT } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
-import { execPromisified } from "../utils/execUtility.js";
 import { NotFoundError } from "../utils/errors.js";
-
-export { PROJECTS_ROOT };
+import { projectRoot } from "../utils/projectPaths.js";
+import {
+  DEFAULT_TEMPLATE_ID,
+  getTemplate,
+  TEMPLATE_FILES_ROOT,
+} from "../templates/registry.js";
+import { removeContainer } from "../containers/containerManager.js";
 
 export function projectDir(projectId: string): string {
-  return path.join(PROJECTS_ROOT, projectId);
+  return projectRoot(projectId);
 }
 
 export async function listProjects(ownerId: string): Promise<Project[]> {
@@ -23,10 +24,7 @@ export async function listProjects(ownerId: string): Promise<Project[]> {
 
 /** Loads a project and asserts the caller owns it.
  *
- *  Every route and socket handler that touches project data must go through
- *  this. Previously an unguessable project id WAS the access control, which
- *  meant a leaked URL granted a shell on the host.
- *
+ *  Every route and socket handler that touches project data goes through this.
  *  A project owned by someone else reports 404 rather than 403 so the endpoint
  *  cannot be used to probe which project ids exist.
  */
@@ -36,8 +34,9 @@ export async function assertProjectAccess(
 ): Promise<Project> {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
 
-  if (!project) throw new NotFoundError("Project not found");
-  if (project.ownerId !== userId) throw new NotFoundError("Project not found");
+  if (!project || project.ownerId !== userId) {
+    throw new NotFoundError("Project not found");
+  }
 
   return project;
 }
@@ -45,28 +44,32 @@ export async function assertProjectAccess(
 export async function createProjectService(
   ownerId: string,
   name?: string,
+  templateId: string = DEFAULT_TEMPLATE_ID,
 ): Promise<Project> {
-  if (!env.REACT_PROJECT_COMMAND) {
-    throw new Error("REACT_PROJECT_COMMAND is not configured");
-  }
+  const template = getTemplate(templateId);
 
   const project = await prisma.project.create({
     data: {
-      name: name?.trim() || "Untitled project",
+      name: name?.trim() || template.label,
       ownerId,
-      template: "react-vite",
+      template: template.id,
     },
   });
 
   const dir = projectDir(project.id);
 
   try {
-    // `recursive` also creates PROJECTS_ROOT, which is gitignored and so absent
-    // on a fresh clone.
     await fs.mkdir(dir, { recursive: true });
-    await execPromisified(env.REACT_PROJECT_COMMAND, { cwd: dir });
+
+    // Copy committed starter files rather than shelling out to `npm create`
+    // on the HOST. That call ran an arbitrary configured command outside any
+    // sandbox, needed the network, and produced a nested `sandbox/` directory
+    // so the bind-mount root and the app root disagreed by one level.
+    await fs.cp(path.join(TEMPLATE_FILES_ROOT, template.filesDir), dir, {
+      recursive: true,
+    });
   } catch (error) {
-    // Do not leave a DB row pointing at a directory that was never scaffolded.
+    // Never leave a DB row pointing at a directory that was not scaffolded.
     await prisma.project.delete({ where: { id: project.id } }).catch(() => {});
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     throw error;
@@ -81,16 +84,9 @@ export async function deleteProjectService(
 ): Promise<void> {
   await assertProjectAccess(projectId, userId);
 
+  await removeContainer(projectId);
   await prisma.project.delete({ where: { id: projectId } });
   await fs.rm(projectDir(projectId), { recursive: true, force: true });
-}
-
-export async function getProjectTreeService(
-  projectId: string,
-  userId: string,
-): Promise<DirectoryTree | null> {
-  await assertProjectAccess(projectId, userId);
-  return directoryTree(projectDir(projectId));
 }
 
 export async function touchProject(projectId: string): Promise<void> {
@@ -100,4 +96,3 @@ export async function touchProject(projectId: string): Promise<void> {
       // A socket for a deleted project is not worth failing the request over.
     });
 }
-

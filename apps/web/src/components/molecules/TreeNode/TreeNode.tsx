@@ -1,100 +1,105 @@
-import { useState } from "react";
 import type { MouseEvent } from "react";
 import { IoIosArrowDown, IoIosArrowForward } from "react-icons/io";
+import { FaFolder, FaFolderOpen } from "react-icons/fa";
 import type { TreeNodeData } from "@replit-clone/shared";
+import { fileExtension } from "@replit-clone/shared";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
+import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
+import { useActiveFileTabStore } from "../../../store/activeFileTabStore.ts";
 
 interface TreeNodeProps {
-  fileFolderData: TreeNodeData | null;
+  node: TreeNodeData | null;
+  depth?: number;
 }
 
-function computeExtension(node: TreeNodeData): string | undefined {
-  const parts = node.name.split(".");
-  return parts.length > 1 ? parts[parts.length - 1] : undefined;
-}
-
-export const TreeNode = ({ fileFolderData }: TreeNodeProps) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-
+export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
   const { editorSocket } = useEditorSocketStore();
-  const {
-    setFile,
-    setIsOpen: setFileContextMenuIsOpen,
-    setX: setFileContextMenuX,
-    setY: setFileContextMenuY,
-  } = useFileContextMenuStore();
+  const { expandedPaths, toggleExpanded } = useTreeStructureStore();
+  const { activeFileTab } = useActiveFileTabStore();
+  const { open: openContextMenu } = useFileContextMenuStore();
 
-  if (!fileFolderData) return null;
+  if (!node) return null;
 
-  const children = fileFolderData.children;
-  const isFolder = Array.isArray(children);
+  const isFolder = node.type === "directory";
+  // The root node is always expanded; it has no row of its own to click.
+  const isExpanded = node.relPath === "" || expandedPaths.has(node.relPath);
+  const isActive = activeFileTab?.relPath === node.relPath;
 
-  function handleDoubleClick(node: TreeNodeData) {
-    editorSocket?.emit("readFile", { pathToFileOrFolder: node.path });
+  function handleContextMenu(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!node) return;
+    openContextMenu(event.clientX, event.clientY, node);
   }
 
-  function handleContextMenuForFiles(e: MouseEvent, path: string) {
-    e.preventDefault();
-    setFile(path);
-    setFileContextMenuX(e.clientX);
-    setFileContextMenuY(e.clientY);
-    setFileContextMenuIsOpen(true);
-  }
+  const rowStyle = {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "4px 8px",
+    paddingLeft: `${8 + depth * 14}px`,
+    cursor: "pointer",
+    fontSize: "13px",
+    color: isActive ? "#f8f8f2" : "#c8cad4",
+    backgroundColor: isActive ? "#44475a" : "transparent",
+    userSelect: "none",
+    borderRadius: "4px",
+  } as const;
 
   return (
-    <div style={{ paddingLeft: "15px", color: "white" }}>
-      {isFolder ? (
-        <button
-          onClick={() => setIsExpanded((prev) => !prev)}
-          style={{
-            border: "none",
-            cursor: "pointer",
-            outline: "none",
-            color: "white",
-            backgroundColor: "transparent",
-            padding: "15px",
-            fontSize: "16px",
-            marginTop: "10px",
-          }}
-        >
-          {isExpanded ? <IoIosArrowDown /> : <IoIosArrowForward />}
-          {fileFolderData.name}
-        </button>
-      ) : (
+    <div>
+      {node.relPath !== "" && (
         <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "start",
+          style={rowStyle}
+          onContextMenu={handleContextMenu}
+          onClick={() => {
+            if (isFolder) {
+              toggleExpanded(node.relPath);
+            } else {
+              // Single click opens, matching every real editor. It used to
+              // require a double click.
+              editorSocket?.emit("readFile", { relPath: node.relPath });
+            }
           }}
         >
-          <FileIcon extension={computeExtension(fileFolderData)} />
-          <p
+          {isFolder ? (
+            <>
+              {isExpanded ? (
+                <IoIosArrowDown size={12} />
+              ) : (
+                <IoIosArrowForward size={12} />
+              )}
+              {isExpanded ? (
+                <FaFolderOpen color="#f1fa8c" size={14} />
+              ) : (
+                <FaFolder color="#f1fa8c" size={14} />
+              )}
+            </>
+          ) : (
+            <>
+              <span style={{ width: 12 }} />
+              <FileIcon extension={fileExtension(node.name)} />
+            </>
+          )}
+          <span
             style={{
-              paddingTop: "15px",
-              paddingBottom: "15px",
-              marginTop: "8px",
-              fontSize: "15px",
-              cursor: "pointer",
-              marginLeft: "18px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
             }}
-            onContextMenu={(e) =>
-              handleContextMenuForFiles(e, fileFolderData.path)
-            }
-            onDoubleClick={() => handleDoubleClick(fileFolderData)}
           >
-            {fileFolderData.name}
-          </p>
+            {node.name}
+          </span>
         </div>
       )}
 
-      {isExpanded &&
-        children?.map((child) => (
-          // Keyed by path, not name — sibling names are unique but names alone
-          // collide across the remounts React does when the tree refetches.
-          <TreeNode fileFolderData={child} key={child.path} />
+      {isFolder &&
+        isExpanded &&
+        node.children?.map((child) => (
+          // Keyed by relPath: names alone collide across refetches.
+          <TreeNode key={child.relPath} node={child} depth={depth + 1} />
         ))}
     </div>
   );

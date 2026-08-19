@@ -12,11 +12,20 @@ import type {
   SocketData,
 } from "@replit-clone/shared";
 import apiRouter from "./routes/index.js";
-import { env } from "./config/env.js";
+import { createPreviewProxy, previewGuard } from "./routes/preview.js";
+import { env, isProduction } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";
 import { projectDir, touchProject } from "./service/projectService.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
+import { installTerminalGateway } from "./terminal/terminalGateway.js";
+import {
+  attach,
+  detach,
+  ensureNetwork,
+  startIdleReaper,
+  stopAllContainers,
+} from "./containers/containerManager.js";
 import {
   handleEditorSocketEvents,
   type EditorSocket,
@@ -38,17 +47,35 @@ const io = new Server<
     methods: ["GET", "POST"],
     credentials: true,
   },
+  // engine.io destroys any upgrade request it does not recognise. The terminal
+  // WebSocket shares this HTTP server, so that default would kill every
+  // /terminal upgrade before our own handler could take it.
+  destroyUpgrade: false,
 });
 
-app.use(helmet());
+app.use(
+  helmet({
+    // The preview proxy serves arbitrary user apps; helmet's default CSP and
+    // COEP headers would break them, and they are not ours to police.
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    // Previews are framed by the editor, which is a different port.
+    crossOriginResourcePolicy: false,
+  }),
+);
 app.use(cors({ origin: env.WEB_ORIGIN, credentials: true }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 app.get("/ping", (_req, res) => {
   res.json({ message: "pong" });
 });
+
+// Mounted BEFORE the body parsers: the proxy has to stream the original request
+// body through, and express.json would have already consumed it.
+app.use("/preview/:projectId", previewGuard, createPreviewProxy());
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", apiRouter);
 
@@ -65,15 +92,17 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
   // whole namespace, leaking other users' file paths.
   void socket.join(projectId);
   void touchProject(projectId);
+  attach(projectId);
 
   const watcher: FSWatcher = chokidar.watch(projectDir(projectId), {
     ignored: (target: string) => target.includes("node_modules"),
     persistent: true,
-    awaitWriteFinish: { stabilityThreshold: 2000 },
+    awaitWriteFinish: { stabilityThreshold: 500 },
     ignoreInitial: true,
   });
 
-  // The watcher used to only console.log, so the client's tree never refreshed.
+  // The watcher used to only console.log, so the client's tree never refreshed
+  // when a command in the terminal created files.
   watcher.on("all", () => {
     editorNamespace.to(projectId).emit("treeChanged");
   });
@@ -82,21 +111,58 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
 
   // The watcher previously outlived the socket, leaking one per connection.
   socket.on("disconnect", () => {
+    detach(projectId);
     void watcher.close();
   });
 });
 
-server.listen(env.PORT, () => {
-  console.log(`Server is running on port ${env.PORT}`);
-});
+// The terminal was a second Express app on its own port with no npm script.
+installTerminalGateway(server);
+
+async function start(): Promise<void> {
+  await ensureNetwork();
+  startIdleReaper();
+
+  // A `tsx watch` restart can race the previous process releasing the port on
+  // Windows, which otherwise kills the dev server outright.
+  let attemptsLeft = 10;
+
+  server.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code !== "EADDRINUSE" || attemptsLeft-- <= 0) {
+      console.error(error);
+      process.exit(1);
+    }
+    setTimeout(() => server.listen(env.PORT), 300);
+  });
+
+  server.listen(env.PORT, () => {
+    console.log(`Server is running on port ${env.PORT}`);
+  });
+}
+
+let shuttingDown = false;
 
 async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
   console.log(`\n${signal} received, shutting down`);
+
   io.close();
   server.close();
+
+  // Only on a real shutdown: otherwise a restart leaves orphaned containers
+  // holding the VM's memory. In development, tearing down every container on
+  // each file save would make iteration painfully slow.
+  if (isProduction) {
+    await stopAllContainers();
+  }
+
   await prisma.$disconnect();
   process.exit(0);
 }
 
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+void start();

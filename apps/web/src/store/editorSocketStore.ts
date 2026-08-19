@@ -6,17 +6,20 @@ import type {
 } from "@replit-clone/shared";
 import { useActiveFileTabStore } from "./activeFileTabStore.ts";
 import { useTreeStructureStore } from "./treeStructureStore.ts";
-import { usePortStore } from "./portStore.ts";
 
 export type EditorSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 interface EditorSocketStore {
   editorSocket: EditorSocket | null;
+  lastError: string | null;
   setEditorSocket: (socket: EditorSocket | null) => void;
+  clearError: () => void;
 }
 
 export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
   editorSocket: null,
+  lastError: null,
+  clearError: () => set({ lastError: null }),
   setEditorSocket: (incomingSocket) => {
     if (!incomingSocket) {
       set({ editorSocket: null });
@@ -24,33 +27,23 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
     }
 
     const setActiveFileTab = useActiveFileTabStore.getState().setActiveFileTab;
-    const refreshTreeStructure =
-      useTreeStructureStore.getState().setTreeStructure;
-    const setPort = usePortStore.getState().setPort;
+    const refreshTree = useTreeStructureStore.getState().refreshTree;
 
-    incomingSocket.on("readFileSuccess", ({ path, value }) => {
-      const fileExtension = path.split(".").pop();
-      setActiveFileTab(path, value, fileExtension);
+    incomingSocket.on("readFileSuccess", ({ relPath, value }) => {
+      setActiveFileTab(relPath, value);
     });
 
-    incomingSocket.on("deleteFileSuccess", () => {
-      void refreshTreeStructure();
-    });
-
-    // Emitted by the server's chokidar watcher. It previously only logged, so
-    // files created inside the container never showed up in the tree.
+    // Emitted by the server's chokidar watcher, and after any mutation. The
+    // watcher previously only logged, so files created by a terminal command
+    // never appeared in the tree.
     incomingSocket.on("treeChanged", () => {
-      void refreshTreeStructure();
+      void refreshTree();
     });
 
-    incomingSocket.on("getPortSuccess", ({ port }) => {
-      setPort(port ?? null);
+    incomingSocket.on("error", ({ message }) => {
+      set({ lastError: message });
     });
 
-    incomingSocket.on("error", ({ data }) => {
-      console.error("Editor socket error:", data);
-    });
-
-    set({ editorSocket: incomingSocket });
+    set({ editorSocket: incomingSocket, lastError: null });
   },
 }));

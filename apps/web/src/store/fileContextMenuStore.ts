@@ -1,24 +1,21 @@
 import { create } from "zustand";
+import type { TreeNodeData } from "@replit-clone/shared";
 
 interface FileContextMenuStore {
-  x: number | null;
-  y: number | null;
+  x: number;
+  y: number;
   isOpen: boolean;
-  /** Path of the file the menu was opened on. */
-  file: string | null;
-  setX: (x: number | null) => void;
-  setY: (y: number | null) => void;
-  setIsOpen: (isOpen: boolean) => void;
-  setFile: (file: string | null) => void;
+  /** The node the menu was opened on. */
+  node: TreeNodeData | null;
+  open: (x: number, y: number, node: TreeNodeData) => void;
+  close: () => void;
 }
 
 export const useFileContextMenuStore = create<FileContextMenuStore>((set) => ({
-  x: null,
-  y: null,
+  x: 0,
+  y: 0,
   isOpen: false,
-  file: null,
-  setX: (x) => set({ x }),
-  setY: (y) => set({ y }),
-  setIsOpen: (isOpen) => set({ isOpen }),
-  setFile: (file) => set({ file }),
+  node: null,
+  open: (x, y, node) => set({ x, y, node, isOpen: true }),
+  close: () => set({ isOpen: false, node: null }),
 }));

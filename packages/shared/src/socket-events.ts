@@ -1,56 +1,53 @@
 /** Typed socket.io contract for the `/editor` namespace.
  *
- *  NOTE (Phase 0): this mirrors the pre-existing JS wire format verbatim so the
- *  TypeScript conversion is behaviour-preserving. `pathToFileOrFolder` is a
- *  client-supplied ABSOLUTE host path, which is the path-traversal hole called
- *  out in the plan — Phase 2 replaces it with `{ projectId, relPath }`.
+ *  Every path is a POSIX path RELATIVE to the project root. The server resolves
+ *  it against the project directory and rejects anything that escapes — see
+ *  `resolveInProject`. The projectId is not part of these payloads: it is fixed
+ *  at handshake time and verified against the caller's ownership, so a socket
+ *  cannot reach into another project by changing a field.
  */
 
 export interface PathPayload {
-  pathToFileOrFolder: string;
+  relPath: string;
 }
 
 export interface WriteFilePayload extends PathPayload {
   data: string;
 }
 
-export interface GetPortPayload {
-  containerName: string;
+export interface RenamePayload {
+  relPath: string;
+  newName: string;
 }
 
 /** Events the browser emits to the server. */
 export interface ClientToServerEvents {
+  readFile: (payload: PathPayload) => void;
   writeFile: (payload: WriteFilePayload) => void;
   createFile: (payload: PathPayload) => void;
-  readFile: (payload: PathPayload) => void;
   deleteFile: (payload: PathPayload) => void;
   createFolder: (payload: PathPayload) => void;
   deleteFolder: (payload: PathPayload) => void;
-  getPort: (payload: GetPortPayload) => void;
+  renameEntry: (payload: RenamePayload) => void;
 }
 
 /** Events the server emits to the browser. */
 export interface ServerToClientEvents {
-  writeFileSuccess: (payload: { data: string; path: string }) => void;
-  createFileSuccess: (payload: { data: string }) => void;
-  readFileSuccess: (payload: { value: string; path: string }) => void;
-  deleteFileSuccess: (payload: { data: string }) => void;
-  createFolderSuccess: (payload: { data: string }) => void;
-  deleteFolderSuccess: (payload: { data: string }) => void;
-  getPortSuccess: (payload: { port: string | undefined }) => void;
+  readFileSuccess: (payload: { relPath: string; value: string }) => void;
+  writeFileSuccess: (payload: { relPath: string }) => void;
+  createFileSuccess: (payload: { relPath: string }) => void;
+  deleteFileSuccess: (payload: { relPath: string }) => void;
+  createFolderSuccess: (payload: { relPath: string }) => void;
+  deleteFolderSuccess: (payload: { relPath: string }) => void;
+  renameEntrySuccess: (payload: { relPath: string; newRelPath: string }) => void;
   /** The project's files changed on disk; the client should refetch the tree. */
   treeChanged: () => void;
-  error: (payload: { data: string }) => void;
+  error: (payload: { code: string; message: string }) => void;
 }
 
-/** Data attached server-side to each connected socket, established by the
- *  handshake auth middleware before any handler runs. */
+/** Data attached server-side to each socket by the handshake auth middleware,
+ *  before any handler is registered. */
 export interface SocketData {
   userId: string;
-  projectId: string;
-}
-
-/** Handshake query the client sends when opening the `/editor` namespace. */
-export interface EditorHandshakeQuery {
   projectId: string;
 }

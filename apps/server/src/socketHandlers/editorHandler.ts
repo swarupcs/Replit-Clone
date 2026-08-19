@@ -1,11 +1,13 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import type { Namespace, Socket } from "socket.io";
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
   SocketData,
 } from "@replit-clone/shared";
-import { getContainerPort } from "../containers/handleContainerCreate.js";
+import { resolveInProject } from "../utils/projectPaths.js";
+import { AppError } from "../utils/errors.js";
 
 export type EditorSocket = Socket<
   ClientToServerEvents,
@@ -21,6 +23,10 @@ export type EditorNamespace = Namespace<
   SocketData
 >;
 
+/** Largest file the editor will open. Monaco is unusable past this, and it
+ *  stops a stray binary or log file from pinning the process. */
+const MAX_FILE_BYTES = 2 * 1024 * 1024;
+
 async function exists(target: string): Promise<boolean> {
   try {
     await fs.stat(target);
@@ -34,88 +40,170 @@ export const handleEditorSocketEvents = (
   socket: EditorSocket,
   editorNamespace: EditorNamespace,
 ): void => {
-  socket.on("writeFile", async ({ data, pathToFileOrFolder }) => {
-    try {
-      await fs.writeFile(pathToFileOrFolder, data);
-      // Scoped to this project's room; it previously went to every connected
-      // socket in the namespace, leaking other users' file paths.
-      editorNamespace.to(socket.data.projectId).emit("writeFileSuccess", {
-        data: "File written successfully",
-        path: pathToFileOrFolder,
-      });
-    } catch (error) {
-      console.error("Error writing the file", error);
-      socket.emit("error", { data: "Error writing the file" });
-    }
-  });
+  const { projectId } = socket.data;
 
-  socket.on("createFile", async ({ pathToFileOrFolder }) => {
-    // `fs.stat` REJECTS when the path is absent, so the previous truthiness
-    // check never ran and an existing file was silently truncated.
-    if (await exists(pathToFileOrFolder)) {
-      socket.emit("error", { data: "File already exists" });
-      return;
-    }
+  /** Runs a handler with uniform error reporting.
+   *
+   *  A path that escapes the project root surfaces as a typed error rather
+   *  than a filesystem operation, and unexpected failures never leak an
+   *  internal message or a host path to the client.
+   */
+  function handle(
+    action: string,
+    fn: () => Promise<void>,
+  ): () => Promise<void> {
+    return async () => {
+      try {
+        await fn();
+      } catch (error) {
+        if (error instanceof AppError) {
+          socket.emit("error", { code: error.code, message: error.message });
+          return;
+        }
+        console.error(`editor:${action} failed for ${projectId}:`, error);
+        socket.emit("error", {
+          code: "OPERATION_FAILED",
+          message: `Could not ${action}`,
+        });
+      }
+    };
+  }
 
-    try {
-      await fs.writeFile(pathToFileOrFolder, "");
-      socket.emit("createFileSuccess", { data: "File created successfully" });
-    } catch (error) {
-      console.error("Error creating the file", error);
-      socket.emit("error", { data: "Error creating the file" });
-    }
-  });
+  /** Tells every other socket in this project to refetch the tree. Scoped to
+   *  the project room — success events previously went to the entire
+   *  namespace, leaking other users' file paths. */
+  function announceTreeChange(): void {
+    editorNamespace.to(projectId).emit("treeChanged");
+  }
 
-  socket.on("readFile", async ({ pathToFileOrFolder }) => {
-    try {
-      const contents = await fs.readFile(pathToFileOrFolder);
-      socket.emit("readFileSuccess", {
-        value: contents.toString(),
-        path: pathToFileOrFolder,
-      });
-    } catch (error) {
-      console.error("Error reading the file", error);
-      socket.emit("error", { data: "Error reading the file" });
-    }
-  });
+  socket.on("readFile", ({ relPath }) =>
+    handle("read the file", async () => {
+      const absolute = resolveInProject(projectId, relPath);
 
-  socket.on("deleteFile", async ({ pathToFileOrFolder }) => {
-    try {
-      await fs.unlink(pathToFileOrFolder);
-      socket.emit("deleteFileSuccess", { data: "File deleted successfully" });
-    } catch (error) {
-      console.error("Error deleting the file", error);
-      socket.emit("error", { data: "Error deleting the file" });
-    }
-  });
+      const stats = await fs.stat(absolute);
+      if (stats.size > MAX_FILE_BYTES) {
+        socket.emit("error", {
+          code: "FILE_TOO_LARGE",
+          message: "File is too large to open in the editor",
+        });
+        return;
+      }
 
-  socket.on("createFolder", async ({ pathToFileOrFolder }) => {
-    try {
-      await fs.mkdir(pathToFileOrFolder);
-      socket.emit("createFolderSuccess", {
-        data: "Folder created successfully",
-      });
-    } catch (error) {
-      console.error("Error creating the folder", error);
-      socket.emit("error", { data: "Error creating the folder" });
-    }
-  });
+      const contents = await fs.readFile(absolute, "utf8");
+      socket.emit("readFileSuccess", { relPath, value: contents });
+    })(),
+  );
 
-  socket.on("deleteFolder", async ({ pathToFileOrFolder }) => {
-    try {
+  socket.on("writeFile", ({ relPath, data }) =>
+    handle("write the file", async () => {
+      const absolute = resolveInProject(projectId, relPath);
+      await fs.writeFile(absolute, data, "utf8");
+
+      editorNamespace.to(projectId).emit("writeFileSuccess", { relPath });
+    })(),
+  );
+
+  socket.on("createFile", ({ relPath }) =>
+    handle("create the file", async () => {
+      const absolute = resolveInProject(projectId, relPath);
+
+      // `fs.stat` REJECTS when the path is absent, so the original truthiness
+      // check never fired and an existing file was silently truncated.
+      if (await exists(absolute)) {
+        socket.emit("error", {
+          code: "ALREADY_EXISTS",
+          message: "A file with that name already exists",
+        });
+        return;
+      }
+
+      await fs.mkdir(path.dirname(absolute), { recursive: true });
+      await fs.writeFile(absolute, "", "utf8");
+
+      socket.emit("createFileSuccess", { relPath });
+      announceTreeChange();
+    })(),
+  );
+
+  socket.on("deleteFile", ({ relPath }) =>
+    handle("delete the file", async () => {
+      await fs.unlink(resolveInProject(projectId, relPath));
+
+      socket.emit("deleteFileSuccess", { relPath });
+      announceTreeChange();
+    })(),
+  );
+
+  socket.on("createFolder", ({ relPath }) =>
+    handle("create the folder", async () => {
+      const absolute = resolveInProject(projectId, relPath);
+
+      if (await exists(absolute)) {
+        socket.emit("error", {
+          code: "ALREADY_EXISTS",
+          message: "A folder with that name already exists",
+        });
+        return;
+      }
+
+      await fs.mkdir(absolute, { recursive: true });
+
+      socket.emit("createFolderSuccess", { relPath });
+      announceTreeChange();
+    })(),
+  );
+
+  socket.on("deleteFolder", ({ relPath }) =>
+    handle("delete the folder", async () => {
+      const absolute = resolveInProject(projectId, relPath);
+
+      // Deleting the project root itself would empty the bind mount.
+      if (relPath === "" || relPath === "." || relPath === "/") {
+        socket.emit("error", {
+          code: "FORBIDDEN",
+          message: "Cannot delete the project root",
+        });
+        return;
+      }
+
       // `fs.rmdir` with `recursive` is deprecated and a no-op on newer Node.
-      await fs.rm(pathToFileOrFolder, { recursive: true, force: true });
-      socket.emit("deleteFolderSuccess", {
-        data: "Folder deleted successfully",
-      });
-    } catch (error) {
-      console.error("Error deleting the folder", error);
-      socket.emit("error", { data: "Error deleting the folder" });
-    }
-  });
+      await fs.rm(absolute, { recursive: true, force: true });
 
-  socket.on("getPort", async ({ containerName }) => {
-    const port = await getContainerPort(containerName);
-    socket.emit("getPortSuccess", { port });
-  });
+      socket.emit("deleteFolderSuccess", { relPath });
+      announceTreeChange();
+    })(),
+  );
+
+  socket.on("renameEntry", ({ relPath, newName }) =>
+    handle("rename", async () => {
+      // A name, not a path: allowing separators here would be a traversal
+      // vector through the destination argument.
+      if (!newName || /[\/\0]/.test(newName) || newName === "." || newName === "..") {
+        socket.emit("error", {
+          code: "INVALID_NAME",
+          message: "Name cannot contain a path separator",
+        });
+        return;
+      }
+
+      const absolute = resolveInProject(projectId, relPath);
+      const parentRelPath = path.posix.dirname(relPath);
+      const newRelPath =
+        parentRelPath === "." ? newName : `${parentRelPath}/${newName}`;
+      const newAbsolute = resolveInProject(projectId, newRelPath);
+
+      if (await exists(newAbsolute)) {
+        socket.emit("error", {
+          code: "ALREADY_EXISTS",
+          message: "Something with that name already exists",
+        });
+        return;
+      }
+
+      await fs.rename(absolute, newAbsolute);
+
+      socket.emit("renameEntrySuccess", { relPath, newRelPath });
+      announceTreeChange();
+    })(),
+  );
 };

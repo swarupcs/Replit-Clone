@@ -50,5 +50,29 @@ export function verifyRefreshToken(token: string): RefreshTokenClaims {
 
 export const REFRESH_COOKIE_NAME = "refresh_token";
 
+/** Cookie carrying preview authorisation.
+ *
+ *  The preview iframe and Vite's HMR client cannot set an Authorization
+ *  header, so /preview authenticates by cookie instead of bearer token. */
+export const PREVIEW_COOKIE_NAME = "preview_token";
+
+export function signPreviewToken(userId: string): string {
+  return jwt.sign({ sub: userId }, env.JWT_ACCESS_SECRET, {
+    expiresIn: `${env.REFRESH_TOKEN_TTL_DAYS}d`,
+  } as SignOptions);
+}
+
+export function verifyPreviewToken(token: string): { sub: string } {
+  try {
+    const payload = jwt.verify(token, env.JWT_ACCESS_SECRET);
+    if (typeof payload === "string" || !payload.sub) {
+      throw new UnauthorizedError("Malformed preview token");
+    }
+    return { sub: payload.sub };
+  } catch {
+    throw new UnauthorizedError("Invalid or expired preview token");
+  }
+}
+
 export const refreshCookieMaxAgeMs =
   env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000;

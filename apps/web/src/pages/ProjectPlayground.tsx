@@ -1,47 +1,29 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { io } from "socket.io-client";
-import { Button } from "antd";
-import { Allotment } from "allotment";
-import "allotment/dist/style.css";
+import { Alert, Button, Flex, Typography } from "antd";
+import { ArrowLeftOutlined } from "@ant-design/icons";
+import { SplitPane } from "../components/layout/SplitPane.tsx";
 import { EditorComponent } from "../components/molecules/EditorComponent/EditorComponent.tsx";
 import { BrowserTerminal } from "../components/molecules/BrowserTerminal/BrowserTerminal.tsx";
 import { TreeStructure } from "../components/organisms/TreeStructure/TreeStructure.tsx";
 import { Browser } from "../components/organisms/Browser/Browser.tsx";
 import { useTreeStructureStore } from "../store/treeStructureStore.ts";
 import { useEditorSocketStore } from "../store/editorSocketStore.ts";
-import { useTerminalSocketStore } from "../store/terminalSocketStore.ts";
+import { useActiveFileTabStore } from "../store/activeFileTabStore.ts";
 import { useAuthStore } from "../store/authStore.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
-/** Terminal websocket endpoint.
- *
- *  Defaults to the backend host rather than a hardcoded ws://localhost:4000,
- *  which could never work once the backend moved off the viewer's machine.
- *  Phase 2 folds this into the main server so the separate port disappears.
- */
-function terminalWsUrl(projectId: string): string {
-  const explicit = import.meta.env.VITE_TERMINAL_WS_URL;
-  const base =
-    explicit ??
-    (() => {
-      const backend = new URL(import.meta.env.VITE_BACKEND_URL);
-      const wsProtocol = backend.protocol === "https:" ? "wss:" : "ws:";
-      return `${wsProtocol}//${backend.hostname}:4000`;
-    })();
-
-  return `${base}/terminal?projectId=${encodeURIComponent(projectId)}`;
-}
-
 export const ProjectPlayground = () => {
   const { projectId: projectIdFromUrl } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
 
   const accessToken = useAuthStore((state) => state.accessToken);
-  const { setProjectId, projectId } = useTreeStructureStore();
-  const { setEditorSocket } = useEditorSocketStore();
-  const { terminalSocket, setTerminalSocket } = useTerminalSocketStore();
+  const { setProjectId } = useTreeStructureStore();
+  const { setEditorSocket, lastError, clearError } = useEditorSocketStore();
+  const { activeFileTab, clearActiveFileTab } = useActiveFileTabStore();
 
-  const [loadBrowser, setLoadBrowser] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     if (!projectIdFromUrl || !accessToken) return;
@@ -59,72 +41,104 @@ export const ProjectPlayground = () => {
     );
     setEditorSocket(editorSocketConn);
 
-    // The browser WebSocket API cannot set an Authorization header, and a token
-    // in the query string lands in access logs, so it rides the subprotocol.
-    const ws = new WebSocket(terminalWsUrl(projectIdFromUrl), [
-      "auth",
-      accessToken,
-    ]);
-    setTerminalSocket(ws);
-
-    // Both sockets are owned here, so they are torn down here too.
     return () => {
       editorSocketConn.disconnect();
       setEditorSocket(null);
-      ws.close();
-      setTerminalSocket(null);
+      clearActiveFileTab();
     };
   }, [
-    setProjectId,
     projectIdFromUrl,
     accessToken,
+    setProjectId,
     setEditorSocket,
-    setTerminalSocket,
+    clearActiveFileTab,
   ]);
 
   return (
-    <div style={{ display: "flex" }}>
-      {projectId && (
-        <div
-          style={{
-            backgroundColor: "#333254",
-            paddingRight: "10px",
-            paddingTop: "0.3vh",
-            minWidth: "250px",
-            maxWidth: "25%",
-            height: "100vh",
-            overflow: "auto",
-          }}
-        >
-          <TreeStructure />
-        </div>
+    <Flex vertical style={{ height: "100vh", backgroundColor: "#282a36" }}>
+      <Flex
+        align="center"
+        justify="space-between"
+        style={{
+          padding: "6px 12px",
+          backgroundColor: "#22212b",
+          borderBottom: "1px solid #44475a",
+        }}
+      >
+        <Flex align="center" gap={10}>
+          <Button
+            size="small"
+            type="text"
+            icon={<ArrowLeftOutlined />}
+            style={{ color: "#c8cad4" }}
+            onClick={() => navigate("/")}
+          />
+          <Typography.Text style={{ color: "#c8cad4", fontSize: 13 }}>
+            {activeFileTab?.relPath ?? "No file open"}
+          </Typography.Text>
+        </Flex>
+
+        <Button size="small" onClick={() => setShowPreview((value) => !value)}>
+          {showPreview ? "Hide preview" : "Show preview"}
+        </Button>
+      </Flex>
+
+      {lastError && (
+        <Alert
+          type="error"
+          banner
+          closable
+          message={lastError}
+          onClose={clearError}
+        />
       )}
 
-      <div style={{ width: "100vw", height: "100vh" }}>
-        <Allotment>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              width: "100%",
-              height: "100%",
-              backgroundColor: "#282a36",
-            }}
-          >
-            <Allotment vertical>
-              <EditorComponent />
-              <BrowserTerminal />
-            </Allotment>
-          </div>
-
-          <div>
-            <Button onClick={() => setLoadBrowser(true)}>Load my browser</Button>
-            {loadBrowser && projectIdFromUrl && terminalSocket && (
-              <Browser projectId={projectIdFromUrl} />
-            )}
-          </div>
-        </Allotment>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <SplitPane
+          direction="horizontal"
+          defaultSize={260}
+          minSize={180}
+          maxSize={520}
+          first={
+            <div
+              style={{
+                height: "100%",
+                overflow: "auto",
+                backgroundColor: "#21222c",
+              }}
+            >
+              <TreeStructure />
+            </div>
+          }
+          second={
+            <SplitPane
+              direction="horizontal"
+              defaultSize={700}
+              minSize={320}
+              showSecond={showPreview}
+              first={
+                <SplitPane
+                  direction="vertical"
+                  defaultSize={420}
+                  minSize={120}
+                  first={<EditorComponent />}
+                  second={
+                    projectIdFromUrl && accessToken ? (
+                      <BrowserTerminal
+                        projectId={projectIdFromUrl}
+                        accessToken={accessToken}
+                      />
+                    ) : null
+                  }
+                />
+              }
+              second={
+                projectIdFromUrl ? <Browser projectId={projectIdFromUrl} /> : null
+              }
+            />
+          }
+        />
       </div>
-    </div>
+    </Flex>
   );
 };

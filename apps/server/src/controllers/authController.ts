@@ -7,9 +7,11 @@ import {
   registerUser,
 } from "../service/authService.js";
 import {
+  PREVIEW_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
   refreshCookieMaxAgeMs,
   signAccessToken,
+  signPreviewToken,
   signRefreshToken,
   verifyRefreshToken,
 } from "../service/tokenService.js";
@@ -26,13 +28,22 @@ const refreshCookieOptions: CookieOptions = {
   path: "/api/v1/auth",
 };
 
+/** Scoped to /preview so it is sent with the preview iframe and its HMR
+ *  socket, and with nothing else. */
+const previewCookieOptions: CookieOptions = {
+  ...refreshCookieOptions,
+  path: "/preview",
+};
+
 function issueSession(
   res: Response,
   user: { id: string; email: string },
   message: string,
 ): void {
   const accessToken = signAccessToken({ sub: user.id, email: user.email });
+
   res.cookie(REFRESH_COOKIE_NAME, signRefreshToken(user.id), refreshCookieOptions);
+  res.cookie(PREVIEW_COOKIE_NAME, signPreviewToken(user.id), previewCookieOptions);
 
   res.json({ success: true, message, data: { user, accessToken } });
 }
@@ -62,6 +73,7 @@ export async function refresh(req: Request, res: Response): Promise<void> {
 
 export async function logout(_req: Request, res: Response): Promise<void> {
   res.clearCookie(REFRESH_COOKIE_NAME, { ...refreshCookieOptions, maxAge: undefined });
+  res.clearCookie(PREVIEW_COOKIE_NAME, { ...previewCookieOptions, maxAge: undefined });
   res.json({ success: true, message: "Signed out", data: null });
 }
 

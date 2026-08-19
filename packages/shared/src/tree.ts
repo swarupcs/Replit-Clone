@@ -1,21 +1,27 @@
 /** A node in a project's file tree.
  *
- *  NOTE (Phase 0): this mirrors what the `directory-tree` package emits today,
- *  including `path`, which is an ABSOLUTE HOST PATH. Phase 2 replaces `path`
- *  with a project-relative `relPath` so host paths never reach a client.
+ *  Paths are ALWAYS relative to the project root and POSIX-style. The server
+ *  previously sent absolute host paths (straight from `directory-tree`), which
+ *  is what made the client send absolute paths back for every file operation.
  */
 export interface TreeNodeData {
   name: string;
-  /** Absolute host path (see note above). */
-  path: string;
-  size: number;
-  /** Present on files only, e.g. ".ts". Absent on directories. */
-  extension?: string;
-  type?: "file" | "directory";
-  /** Present on directories only — this is how a folder is detected today. */
+  /** POSIX path relative to the project root, e.g. "src/main.tsx".
+   *  The root node itself has "". */
+  relPath: string;
+  type: "file" | "directory";
+  /** Present on directories only. */
   children?: TreeNodeData[];
+  /** Bytes; files only. */
+  size?: number;
 }
 
 export function isDirectory(node: TreeNodeData): boolean {
-  return Array.isArray(node.children);
+  return node.type === "directory";
+}
+
+/** Bare extension without the dot, or undefined for extensionless names. */
+export function fileExtension(name: string): string | undefined {
+  const index = name.lastIndexOf(".");
+  return index > 0 ? name.slice(index + 1) : undefined;
 }

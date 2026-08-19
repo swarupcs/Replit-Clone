@@ -1,73 +1,65 @@
-import { useEffect, useRef } from "react";
-import { Input, Row } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
-import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
-import { usePortStore } from "../../../store/portStore.ts";
+import { useRef, useState } from "react";
+import { Button, Flex, Input } from "antd";
+import { ReloadOutlined, ExportOutlined } from "@ant-design/icons";
 
 interface BrowserProps {
   projectId: string;
 }
 
-/** Host the project's dev server is published on.
- *
- *  Derived from VITE_BACKEND_URL so this keeps working when the backend is on
- *  the VM rather than the viewer's machine. Phase 2 replaces the whole
- *  published-port scheme with a `/preview/:projectId/` reverse proxy.
- */
-function previewOrigin(port: string): string {
-  const backendUrl = import.meta.env.VITE_BACKEND_URL;
-  const host = backendUrl ? new URL(backendUrl).hostname : window.location.hostname;
-  return `http://${host}:${port}`;
+/** The preview is served by the backend's reverse proxy, NOT by a published
+ *  container port. Containers expose nothing to the host, and this URL works
+ *  from any machine that can reach the backend. */
+function previewUrl(projectId: string): string {
+  return `${import.meta.env.VITE_BACKEND_URL}/preview/${projectId}/`;
 }
 
 export const Browser = ({ projectId }: BrowserProps) => {
-  const browserRef = useRef<HTMLIFrameElement>(null);
-  const { port } = usePortStore();
-  const { editorSocket } = useEditorSocketStore();
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [cacheBust, setCacheBust] = useState(0);
 
-  useEffect(() => {
-    if (!port) {
-      editorSocket?.emit("getPort", { containerName: projectId });
-    }
-  }, [port, editorSocket, projectId]);
-
-  if (!port) {
-    return <div>Loading....</div>;
-  }
-
-  const src = previewOrigin(port);
+  const src = previewUrl(projectId);
 
   function handleRefresh() {
-    const iframe = browserRef.current;
-    if (!iframe) return;
-    // Re-setting the src attribute forces a reload; the iframe is cross-origin
-    // so contentWindow.location.reload() is not available to us.
-    const current = iframe.src;
-    iframe.src = "about:blank";
-    iframe.src = current;
+    // Remounting via key is more reliable than poking .src on a cross-origin
+    // iframe, whose contentWindow we cannot touch.
+    setCacheBust((value) => value + 1);
   }
 
   return (
-    <Row style={{ backgroundColor: "#22212b" }}>
-      <Input
-        style={{
-          width: "100%",
-          height: "30px",
-          color: "white",
-          fontFamily: "Fira Code, monospace",
-          backgroundColor: "#282a35",
-        }}
-        prefix={<ReloadOutlined onClick={handleRefresh} />}
-        value={src}
-        readOnly
-      />
+    <Flex vertical style={{ height: "100%", backgroundColor: "#22212b" }}>
+      <Flex gap={6} style={{ padding: 6 }}>
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          onClick={handleRefresh}
+          title="Reload preview"
+        />
+        <Input
+          size="small"
+          value={src}
+          readOnly
+          style={{
+            color: "#f8f8f2",
+            fontFamily: "Fira Code, monospace",
+            fontSize: 12,
+            backgroundColor: "#282a35",
+          }}
+        />
+        <Button
+          size="small"
+          icon={<ExportOutlined />}
+          onClick={() => window.open(src, "_blank", "noopener")}
+          title="Open in a new tab"
+        />
+      </Flex>
 
       <iframe
-        ref={browserRef}
+        key={cacheBust}
+        ref={iframeRef}
         src={src}
         title="Project preview"
-        style={{ width: "100%", height: "95vh", border: "none" }}
+        style={{ flex: 1, width: "100%", border: "none", background: "white" }}
       />
-    </Row>
+    </Flex>
   );
 };
