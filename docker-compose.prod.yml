@@ -1,0 +1,81 @@
+# Deployment stack for a small VM (LAN access, no TLS).
+#
+# Set HOST_IP to the VM's LAN address before building: the web bundle bakes
+# VITE_BACKEND_URL at build time, so it must be the URL browsers will actually
+# use — "localhost" would only work on the VM itself.
+#
+#   HOST_IP=192.168.0.50 docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-replit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-replit_clone}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-replit}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Not published: only the server needs it.
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-replit}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-replit_clone}?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
+      WEB_ORIGIN: http://${HOST_IP:-localhost}
+      PROJECTS_DIR: /data/projects
+      CONTAINER_MEMORY_MB: ${CONTAINER_MEMORY_MB:-512}
+      CONTAINER_CPUS: ${CONTAINER_CPUS:-0.5}
+      CONTAINER_IDLE_MINUTES: ${CONTAINER_IDLE_MINUTES:-20}
+      MAX_CONCURRENT_CONTAINERS: ${MAX_CONCURRENT_CONTAINERS:-3}
+      # The server is on the sandbox network, so it can reach project
+      # containers directly and nothing is published to the host.
+      PREVIEW_TARGET_MODE: container-ip
+    ports:
+      - "8080:3000"
+    volumes:
+      # Equivalent to host root. Auth and path confinement are what make this
+      # acceptable; do not expose this service to the internet.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # MUST be a host path, identical on both sides: the server asks the host's
+      # Docker daemon to bind-mount project directories, and the daemon resolves
+      # that path on the HOST, not inside this container.
+      - /data/projects:/data/projects
+    networks:
+      - default
+      - sandbox
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_BACKEND_URL: http://${HOST_IP:-localhost}:8080
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+
+volumes:
+  postgres-data:
+
+networks:
+  sandbox:
+    name: replit-clone-sandbox
+    external: true

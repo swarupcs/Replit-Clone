@@ -37,3 +37,16 @@ export type ListProjectsResponse = ApiSuccess<Project[]>;
 
 /** GET /api/v1/projects/:projectId/tree */
 export type ProjectTreeResponse = ApiSuccess<TreeNodeData | null>;
+
+/** A project template offered at creation time. */
+export interface TemplateSummary {
+  id: string;
+  label: string;
+  /** Port the dev server listens on inside the container. */
+  devPort: number;
+  /** Shown in the UI so the user knows what to run. */
+  startCommand: string;
+}
+
+/** GET /api/v1/projects/templates */
+export type ListTemplatesResponse = ApiSuccess<TemplateSummary[]>;

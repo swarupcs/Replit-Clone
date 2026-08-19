@@ -20,7 +20,7 @@ export const TreeStructure = () => {
           fontSize: 11,
           letterSpacing: "0.08em",
           textTransform: "uppercase",
-          color: "#6272a4",
+          color: "var(--rc-text-subtle)",
         }}
       >
         Files

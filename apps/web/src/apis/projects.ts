@@ -1,4 +1,6 @@
 import type {
+  ListTemplatesResponse,
+  TemplateSummary,
   CreateProjectResponse,
   ListProjectsResponse,
   Project,
@@ -7,10 +9,21 @@ import type {
 } from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
-export const createProjectApi = async (name?: string): Promise<Project> => {
+export const createProjectApi = async (
+  name?: string,
+  template?: string,
+): Promise<Project> => {
   const response = await axios.post<CreateProjectResponse>("/api/v1/projects", {
     name,
+    template,
   });
+  return response.data.data;
+};
+
+export const listTemplatesApi = async (): Promise<TemplateSummary[]> => {
+  const response = await axios.get<ListTemplatesResponse>(
+    "/api/v1/projects/templates",
+  );
   return response.data.data;
 };
 

@@ -12,6 +12,15 @@ export interface TemplateDefinition {
   devPort: number;
   /** Shown in the UI so the user knows what to run. */
   startCommand: string;
+  /** True when the dev server is configured to serve under the proxy's
+   *  /preview/<projectId>/ prefix (Vite's `base`), so the proxy must forward
+   *  the path unchanged. False for servers that expect to be at the root, in
+   *  which case the proxy strips the prefix.
+   *
+   *  Prefix-stripping only works for apps whose assets use relative URLs; an
+   *  absolute "/styles.css" would escape the prefix. The starter templates are
+   *  written accordingly. */
+  expectsPreviewBase: boolean;
   /** Directory under `templates/files` copied into a new project. */
   filesDir: string;
 }
@@ -30,6 +39,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     devPort: 5173,
     startCommand: "npm install && npm run dev",
     filesDir: "react-vite",
+    expectsPreviewBase: true,
   },
   "node-express": {
     id: "node-express",
@@ -38,6 +48,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     devPort: 3000,
     startCommand: "npm install && npm start",
     filesDir: "node-express",
+    expectsPreviewBase: false,
   },
   "static-html": {
     id: "static-html",
@@ -46,6 +57,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     devPort: 8080,
     startCommand: "npx --yes serve -l 8080 .",
     filesDir: "static-html",
+    expectsPreviewBase: false,
   },
   "python-flask": {
     id: "python-flask",
@@ -54,6 +66,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     devPort: 5000,
     startCommand: "pip install -r requirements.txt && python app.py",
     filesDir: "python-flask",
+    expectsPreviewBase: false,
   },
 };
 

@@ -4,7 +4,9 @@ import {
   ensureContainer,
   getPreviewTarget,
 } from "../containers/containerManager.js";
+import { prisma } from "../lib/prisma.js";
 import { assertProjectAccess } from "../service/projectService.js";
+import { getTemplate } from "../templates/registry.js";
 import { PREVIEW_COOKIE_NAME, verifyPreviewToken } from "../service/tokenService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
 import { UnauthorizedError } from "../utils/errors.js";
@@ -13,6 +15,12 @@ import { UnauthorizedError } from "../utils/errors.js";
  *  template, which is why 5173 is no longer hardcoded in four places. */
 async function resolveTarget(projectId: string): Promise<string | undefined> {
   return getPreviewTarget(projectId);
+}
+
+async function expectsPreviewBase(projectId: string): Promise<boolean> {
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) return false;
+  return getTemplate(project.template).expectsPreviewBase;
 }
 
 /** Authorises a preview request from the `preview_token` cookie.
@@ -56,6 +64,7 @@ export function previewGuard(
       }
 
       targets.set(req, target);
+      keepsPrefix.set(req, await expectsPreviewBase(projectId));
       next();
     } catch (error) {
       next(error);
@@ -76,6 +85,9 @@ code{background:#44475a;padding:2px 6px;border-radius:4px}</style></head>
  *  A WeakMap keeps it off `req` and lets it be collected with the request. */
 const targets = new WeakMap<Request, string>();
 
+/** Whether this project's dev server expects to see the /preview/<id> prefix. */
+const keepsPrefix = new WeakMap<Request, boolean>();
+
 /** Reverse proxy for project previews.
  *
  *  Replaces publishing a random HOST port per container and pointing an iframe
@@ -89,10 +101,12 @@ export function createPreviewProxy(): RequestHandler {
     changeOrigin: true,
     // Vite's HMR socket rides this same path.
     ws: true,
-    // Express strips the mount prefix from req.url, but the dev server is
-    // configured with base=/preview/<id>/ and expects to SEE that prefix, so
-    // the original path is restored rather than rewritten away.
-    pathRewrite: (_pathname, req) => req.originalUrl,
+    // Express already strips the mount prefix from req.url. Vite is configured
+    // with base=/preview/<id>/ and expects to SEE that prefix, so for those
+    // templates the original path is restored; every other dev server serves
+    // from the root and gets the stripped path.
+    pathRewrite: (pathname, req) =>
+      keepsPrefix.get(req) ? req.originalUrl : pathname,
     on: {
       error: (error, _req, res) => {
         console.error("Preview proxy error:", error.message);

@@ -1,21 +1,49 @@
-FROM ubuntu:20.04
-# Setup user
-RUN useradd -ms /bin/bash sandbox 
+# Build stage: compiles the workspace with dev dependencies present.
+FROM node:22-bookworm-slim AS build
 
-# Setup working directory
-WORKDIR /home/sandbox
+RUN corepack enable
+WORKDIR /app
 
-# update the ubuntu machine
-RUN apt update && apt upgrade -y
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY packages/shared/package.json packages/shared/
+COPY apps/server/package.json apps/server/
 
-# Install nano and curl
-RUN apt install nano curl -y 
+RUN pnpm install --frozen-lockfile --filter @replit-clone/server... --filter @replit-clone/shared
 
-# Install nodejs
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs
+COPY tsconfig.base.json ./
+COPY packages/shared packages/shared
+COPY apps/server apps/server
 
-# configuring terminal to display current working directory
-RUN echo "PS1='\w '" >> /home/sandbox/.bashrc
+RUN pnpm --filter @replit-clone/shared build \
+    && pnpm --filter @replit-clone/server exec prisma generate \
+    && pnpm --filter @replit-clone/server build
 
-# Setup final working directory
-WORKDIR /home/sandbox/app
+# Runtime stage: production dependencies only.
+FROM node:22-bookworm-slim AS runtime
+
+RUN corepack enable
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY packages/shared/package.json packages/shared/
+COPY apps/server/package.json apps/server/
+
+RUN pnpm install --frozen-lockfile --prod \
+      --filter @replit-clone/server... --filter @replit-clone/shared \
+    && pnpm store prune
+
+COPY --from=build /app/packages/shared/dist packages/shared/dist
+COPY --from=build /app/apps/server/dist apps/server/dist
+COPY --from=build /app/apps/server/src/generated apps/server/src/generated
+COPY apps/server/prisma apps/server/prisma
+COPY apps/server/prisma.config.ts apps/server/
+# Starter files are read at runtime when a project is scaffolded.
+COPY apps/server/templates apps/server/templates
+
+WORKDIR /app/apps/server
+
+# Runs as root because it needs the Docker socket. That socket is equivalent to
+# host root, which is why auth and path confinement sit in front of it.
+CMD ["node", "dist/index.js"]

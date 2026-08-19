@@ -4,7 +4,7 @@ import type {
   ClientToServerEvents,
   ServerToClientEvents,
 } from "@replit-clone/shared";
-import { useActiveFileTabStore } from "./activeFileTabStore.ts";
+import { useOpenTabsStore } from "./openTabsStore.ts";
 import { useTreeStructureStore } from "./treeStructureStore.ts";
 
 export type EditorSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -20,20 +20,33 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
   editorSocket: null,
   lastError: null,
   clearError: () => set({ lastError: null }),
+
   setEditorSocket: (incomingSocket) => {
     if (!incomingSocket) {
       set({ editorSocket: null });
       return;
     }
 
-    const setActiveFileTab = useActiveFileTabStore.getState().setActiveFileTab;
+    const tabs = useOpenTabsStore.getState();
     const refreshTree = useTreeStructureStore.getState().refreshTree;
 
     incomingSocket.on("readFileSuccess", ({ relPath, value }) => {
-      setActiveFileTab(relPath, value);
+      tabs.openTab(relPath, value);
     });
 
-    // Emitted by the server's chokidar watcher, and after any mutation. The
+    incomingSocket.on("writeFileSuccess", ({ relPath }) => {
+      useOpenTabsStore.getState().markDirty(relPath, false);
+    });
+
+    incomingSocket.on("renameEntrySuccess", ({ relPath, newRelPath }) => {
+      useOpenTabsStore.getState().renameTab(relPath, newRelPath);
+    });
+
+    incomingSocket.on("deleteFileSuccess", ({ relPath }) => {
+      useOpenTabsStore.getState().closeTab(relPath);
+    });
+
+    // Emitted by the server's chokidar watcher and after any mutation. The
     // watcher previously only logged, so files created by a terminal command
     // never appeared in the tree.
     incomingSocket.on("treeChanged", () => {

@@ -115,7 +115,7 @@ export const SplitPane = ({
           style={{
             flex: `0 0 ${DIVIDER}px`,
             cursor: isHorizontal ? "col-resize" : "row-resize",
-            backgroundColor: dragging ? "#6272a4" : "#44475a",
+            backgroundColor: dragging ? "var(--rc-text-subtle)" : "var(--rc-border)",
             transition: dragging ? undefined : "background-color 120ms",
           }}
         />

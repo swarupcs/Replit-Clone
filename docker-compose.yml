@@ -1,3 +1,5 @@
+# Development stack: Postgres only. Run the apps with `pnpm dev`.
+# For the VM deployment see docker-compose.prod.yml.
 services:
   postgres:
     image: postgres:17-alpine

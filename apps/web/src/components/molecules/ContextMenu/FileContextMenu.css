@@ -3,10 +3,10 @@
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  min-width: 160px;
+  min-width: 170px;
   padding: 4px;
-  background-color: #22212b;
-  border: 1px solid #44475a;
+  background-color: var(--rc-surface-raised);
+  border: 1px solid var(--rc-border);
   border-radius: 6px;
   box-shadow: 0 6px 20px rgb(0 0 0 / 45%);
 }
@@ -15,7 +15,7 @@
   padding: 7px 10px;
   font-size: 13px;
   text-align: left;
-  color: #f8f8f2;
+  color: var(--rc-text);
   cursor: pointer;
   background-color: transparent;
   border: none;
@@ -23,9 +23,9 @@
 }
 
 .fileContextButton:hover {
-  background-color: #44475a;
+  background-color: var(--rc-selection);
 }
 
 .fileContextButtonDanger {
-  color: #ff5555;
+  color: var(--rc-red);
 }

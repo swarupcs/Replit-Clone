@@ -7,7 +7,7 @@ import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
-import { useActiveFileTabStore } from "../../../store/activeFileTabStore.ts";
+import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 
 interface TreeNodeProps {
   node: TreeNodeData | null;
@@ -17,7 +17,7 @@ interface TreeNodeProps {
 export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
   const { editorSocket } = useEditorSocketStore();
   const { expandedPaths, toggleExpanded } = useTreeStructureStore();
-  const { activeFileTab } = useActiveFileTabStore();
+  const activeRelPath = useOpenTabsStore((state) => state.activeRelPath);
   const { open: openContextMenu } = useFileContextMenuStore();
 
   if (!node) return null;
@@ -25,7 +25,7 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
   const isFolder = node.type === "directory";
   // The root node is always expanded; it has no row of its own to click.
   const isExpanded = node.relPath === "" || expandedPaths.has(node.relPath);
-  const isActive = activeFileTab?.relPath === node.relPath;
+  const isActive = activeRelPath === node.relPath;
 
   function handleContextMenu(event: MouseEvent) {
     event.preventDefault();
@@ -42,8 +42,8 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
     paddingLeft: `${8 + depth * 14}px`,
     cursor: "pointer",
     fontSize: "13px",
-    color: isActive ? "#f8f8f2" : "#c8cad4",
-    backgroundColor: isActive ? "#44475a" : "transparent",
+    color: isActive ? "var(--rc-text)" : "var(--rc-text-muted)",
+    backgroundColor: isActive ? "var(--rc-selection)" : "transparent",
     userSelect: "none",
     borderRadius: "4px",
   } as const;
@@ -72,9 +72,9 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
                 <IoIosArrowForward size={12} />
               )}
               {isExpanded ? (
-                <FaFolderOpen color="#f1fa8c" size={14} />
+                <FaFolderOpen color="var(--rc-yellow)" size={14} />
               ) : (
-                <FaFolder color="#f1fa8c" size={14} />
+                <FaFolder color="var(--rc-yellow)" size={14} />
               )}
             </>
           ) : (

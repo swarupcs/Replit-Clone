@@ -18,7 +18,7 @@ export const ProtectedRoute = ({ children }: { children: ReactNode }) => {
       <Flex
         align="center"
         justify="center"
-        style={{ minHeight: "100vh", backgroundColor: "#282a36" }}
+        style={{ minHeight: "100vh", backgroundColor: "var(--rc-surface)" }}
       >
         <Spin size="large" />
       </Flex>

@@ -79,5 +79,14 @@ export async function listTemplatesController(
   _req: Request,
   res: Response,
 ): Promise<void> {
-  res.json({ success: true, message: "Templates", data: listTemplates() });
+  // `image` and `filesDir` are server-side details; the client only needs
+  // enough to render the picker.
+  const data = listTemplates().map(({ id, label, devPort, startCommand }) => ({
+    id,
+    label,
+    devPort,
+    startCommand,
+  }));
+
+  res.json({ success: true, message: "Templates", data });
 }

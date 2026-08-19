@@ -54,7 +54,7 @@ export const AuthForm = ({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: "#282a36",
+        backgroundColor: "var(--rc-surface)",
       }}
     >
       <Card style={{ width: 380 }}>

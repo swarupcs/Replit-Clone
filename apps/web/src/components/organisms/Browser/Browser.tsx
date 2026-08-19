@@ -26,7 +26,7 @@ export const Browser = ({ projectId }: BrowserProps) => {
   }
 
   return (
-    <Flex vertical style={{ height: "100%", backgroundColor: "#22212b" }}>
+    <Flex vertical style={{ height: "100%", backgroundColor: "var(--rc-surface-raised)" }}>
       <Flex gap={6} style={{ padding: 6 }}>
         <Button
           size="small"
@@ -39,10 +39,10 @@ export const Browser = ({ projectId }: BrowserProps) => {
           value={src}
           readOnly
           style={{
-            color: "#f8f8f2",
-            fontFamily: "Fira Code, monospace",
+            color: "var(--rc-text)",
+            fontFamily: "var(--rc-mono)",
             fontSize: 12,
-            backgroundColor: "#282a35",
+            backgroundColor: "var(--rc-surface)",
           }}
         />
         <Button

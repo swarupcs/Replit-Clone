@@ -38,6 +38,8 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
 
     const term = new Terminal({
       cursorBlink: true,
+      // xterm paints to its own surface and cannot read CSS custom
+      // properties, so these mirror the --rc-* tokens in index.css.
       theme: {
         background: "#282a36",
         foreground: "#f8f8f2",
@@ -59,14 +61,19 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
 
     // The browser WebSocket API cannot set an Authorization header, and a token
     // in the query string lands in access logs, so it rides the subprotocol.
+    let disposed = false;
+
     const socket = new WebSocket(terminalWsUrl(projectId), ["auth", accessToken]);
     socket.binaryType = "arraybuffer";
-
-    let disposed = false;
 
     /** fit() reads renderer cell dimensions that do not exist until the element
      *  is laid out; the first layout pass reports 0x0. */
     function syncSize() {
+      // Every guard here matters: fit() and focus() both touch the renderer,
+      // which throws "Cannot read properties of undefined (reading
+      // 'dimensions')" once the Terminal has been disposed — and React 19's
+      // StrictMode disposes one on every mount.
+      if (disposed) return;
       if (!container || container.clientWidth === 0 || container.clientHeight === 0) {
         return;
       }
@@ -93,6 +100,7 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
     });
 
     socket.addEventListener("open", () => {
+      if (disposed) return;
       syncSize();
       term.focus();
       // The shell prints its prompt the moment the exec starts, which can land
@@ -128,7 +136,7 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
   return (
     <div
       ref={containerRef}
-      style={{ width: "100%", height: "100%", padding: 4, backgroundColor: "#282a36" }}
+      style={{ width: "100%", height: "100%", padding: 4, backgroundColor: "var(--rc-surface)" }}
       id="terminal-container"
     />
   );

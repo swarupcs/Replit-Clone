@@ -1,4 +1,62 @@
+/* Dracula palette as tokens.
+ *
+ * These colours were previously inline hex literals repeated across six
+ * components, so changing the theme meant editing every file. */
+:root {
+  --rc-bg: #282a36;
+  --rc-surface: #282a36;
+  --rc-surface-sunken: #21222c;
+  --rc-surface-raised: #22212b;
+  --rc-border: #44475a;
+  --rc-selection: #44475a;
+
+  --rc-text: #f8f8f2;
+  --rc-text-muted: #c8cad4;
+  --rc-text-subtle: #6272a4;
+
+  --rc-accent: #bd93f9;
+  --rc-green: #50fa7c;
+  --rc-yellow: #f1fa8c;
+  --rc-red: #ff5555;
+  --rc-cyan: #8be9fd;
+
+  --rc-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 * {
-    margin: 0;
-    padding: 0;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--rc-bg);
+  color: var(--rc-text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* Thin dark scrollbars so panes do not get bright native bars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rc-border) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--rc-border);
+  border-radius: 5px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
 }

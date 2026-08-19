@@ -5,12 +5,13 @@ import { Alert, Button, Flex, Typography } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { SplitPane } from "../components/layout/SplitPane.tsx";
 import { EditorComponent } from "../components/molecules/EditorComponent/EditorComponent.tsx";
+import { EditorTabs } from "../components/molecules/EditorTabs/EditorTabs.tsx";
 import { BrowserTerminal } from "../components/molecules/BrowserTerminal/BrowserTerminal.tsx";
 import { TreeStructure } from "../components/organisms/TreeStructure/TreeStructure.tsx";
 import { Browser } from "../components/organisms/Browser/Browser.tsx";
 import { useTreeStructureStore } from "../store/treeStructureStore.ts";
 import { useEditorSocketStore } from "../store/editorSocketStore.ts";
-import { useActiveFileTabStore } from "../store/activeFileTabStore.ts";
+import { useOpenTabsStore, selectActiveTab } from "../store/openTabsStore.ts";
 import { useAuthStore } from "../store/authStore.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
@@ -21,7 +22,8 @@ export const ProjectPlayground = () => {
   const accessToken = useAuthStore((state) => state.accessToken);
   const { setProjectId } = useTreeStructureStore();
   const { setEditorSocket, lastError, clearError } = useEditorSocketStore();
-  const { activeFileTab, clearActiveFileTab } = useActiveFileTabStore();
+  const activeTab = useOpenTabsStore(selectActiveTab);
+  const closeAllTabs = useOpenTabsStore((state) => state.closeAll);
 
   const [showPreview, setShowPreview] = useState(false);
 
@@ -44,25 +46,25 @@ export const ProjectPlayground = () => {
     return () => {
       editorSocketConn.disconnect();
       setEditorSocket(null);
-      clearActiveFileTab();
+      closeAllTabs();
     };
   }, [
     projectIdFromUrl,
     accessToken,
     setProjectId,
     setEditorSocket,
-    clearActiveFileTab,
+    closeAllTabs,
   ]);
 
   return (
-    <Flex vertical style={{ height: "100vh", backgroundColor: "#282a36" }}>
+    <Flex vertical style={{ height: "100vh", backgroundColor: "var(--rc-surface)" }}>
       <Flex
         align="center"
         justify="space-between"
         style={{
           padding: "6px 12px",
-          backgroundColor: "#22212b",
-          borderBottom: "1px solid #44475a",
+          backgroundColor: "var(--rc-surface-raised)",
+          borderBottom: "1px solid var(--rc-border)",
         }}
       >
         <Flex align="center" gap={10}>
@@ -70,11 +72,11 @@ export const ProjectPlayground = () => {
             size="small"
             type="text"
             icon={<ArrowLeftOutlined />}
-            style={{ color: "#c8cad4" }}
+            style={{ color: "var(--rc-text-muted)" }}
             onClick={() => navigate("/")}
           />
-          <Typography.Text style={{ color: "#c8cad4", fontSize: 13 }}>
-            {activeFileTab?.relPath ?? "No file open"}
+          <Typography.Text style={{ color: "var(--rc-text-muted)", fontSize: 13 }}>
+            {activeTab?.relPath ?? "No file open"}
           </Typography.Text>
         </Flex>
 
@@ -104,7 +106,7 @@ export const ProjectPlayground = () => {
               style={{
                 height: "100%",
                 overflow: "auto",
-                backgroundColor: "#21222c",
+                backgroundColor: "var(--rc-surface-sunken)",
               }}
             >
               <TreeStructure />
@@ -121,7 +123,20 @@ export const ProjectPlayground = () => {
                   direction="vertical"
                   defaultSize={420}
                   minSize={120}
-                  first={<EditorComponent />}
+                  first={
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        height: "100%",
+                      }}
+                    >
+                      <EditorTabs />
+                      <div style={{ flex: 1, minHeight: 0 }}>
+                        <EditorComponent />
+                      </div>
+                    </div>
+                  }
                   second={
                     projectIdFromUrl && accessToken ? (
                       <BrowserTerminal
