@@ -37,7 +37,9 @@ export const handleEditorSocketEvents = (
   socket.on("writeFile", async ({ data, pathToFileOrFolder }) => {
     try {
       await fs.writeFile(pathToFileOrFolder, data);
-      editorNamespace.emit("writeFileSuccess", {
+      // Scoped to this project's room; it previously went to every connected
+      // socket in the namespace, leaking other users' file paths.
+      editorNamespace.to(socket.data.projectId).emit("writeFileSuccess", {
         data: "File written successfully",
         path: pathToFileOrFolder,
       });

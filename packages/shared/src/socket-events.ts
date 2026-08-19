@@ -38,11 +38,15 @@ export interface ServerToClientEvents {
   createFolderSuccess: (payload: { data: string }) => void;
   deleteFolderSuccess: (payload: { data: string }) => void;
   getPortSuccess: (payload: { port: string | undefined }) => void;
+  /** The project's files changed on disk; the client should refetch the tree. */
+  treeChanged: () => void;
   error: (payload: { data: string }) => void;
 }
 
-/** Data attached server-side to each connected socket. */
+/** Data attached server-side to each connected socket, established by the
+ *  handshake auth middleware before any handler runs. */
 export interface SocketData {
+  userId: string;
   projectId: string;
 }
 

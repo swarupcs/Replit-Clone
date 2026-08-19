@@ -37,6 +37,12 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
       void refreshTreeStructure();
     });
 
+    // Emitted by the server's chokidar watcher. It previously only logged, so
+    // files created inside the container never showed up in the tree.
+    incomingSocket.on("treeChanged", () => {
+      void refreshTreeStructure();
+    });
+
     incomingSocket.on("getPortSuccess", ({ port }) => {
       setPort(port ?? null);
     });

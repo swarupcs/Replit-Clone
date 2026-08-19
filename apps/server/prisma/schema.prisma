@@ -1,0 +1,35 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  projects     Project[]
+
+  @@map("users")
+}
+
+model Project {
+  id       String @id @default(uuid())
+  name     String
+  /// Template id from the server-side template registry, e.g. "react-vite".
+  template String @default("react-vite")
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  /// Last time a socket or terminal attached; drives the idle container reaper.
+  lastActiveAt DateTime?
+
+  @@index([ownerId])
+  @@map("projects")
+}

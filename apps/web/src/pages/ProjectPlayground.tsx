@@ -11,6 +11,7 @@ import { Browser } from "../components/organisms/Browser/Browser.tsx";
 import { useTreeStructureStore } from "../store/treeStructureStore.ts";
 import { useEditorSocketStore } from "../store/editorSocketStore.ts";
 import { useTerminalSocketStore } from "../store/terminalSocketStore.ts";
+import { useAuthStore } from "../store/authStore.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 /** Terminal websocket endpoint.
@@ -35,6 +36,7 @@ function terminalWsUrl(projectId: string): string {
 export const ProjectPlayground = () => {
   const { projectId: projectIdFromUrl } = useParams<{ projectId: string }>();
 
+  const accessToken = useAuthStore((state) => state.accessToken);
   const { setProjectId, projectId } = useTreeStructureStore();
   const { setEditorSocket } = useEditorSocketStore();
   const { terminalSocket, setTerminalSocket } = useTerminalSocketStore();
@@ -42,17 +44,27 @@ export const ProjectPlayground = () => {
   const [loadBrowser, setLoadBrowser] = useState(false);
 
   useEffect(() => {
-    if (!projectIdFromUrl) return;
+    if (!projectIdFromUrl || !accessToken) return;
 
     setProjectId(projectIdFromUrl);
 
     const editorSocketConn: EditorSocket = io(
       `${import.meta.env.VITE_BACKEND_URL}/editor`,
-      { query: { projectId: projectIdFromUrl } },
+      {
+        query: { projectId: projectIdFromUrl },
+        // The handshake is rejected without this; the server also verifies the
+        // caller owns this project before registering any handler.
+        auth: { token: accessToken },
+      },
     );
     setEditorSocket(editorSocketConn);
 
-    const ws = new WebSocket(terminalWsUrl(projectIdFromUrl));
+    // The browser WebSocket API cannot set an Authorization header, and a token
+    // in the query string lands in access logs, so it rides the subprotocol.
+    const ws = new WebSocket(terminalWsUrl(projectIdFromUrl), [
+      "auth",
+      accessToken,
+    ]);
     setTerminalSocket(ws);
 
     // Both sockets are owned here, so they are torn down here too.
@@ -62,7 +74,13 @@ export const ProjectPlayground = () => {
       ws.close();
       setTerminalSocket(null);
     };
-  }, [setProjectId, projectIdFromUrl, setEditorSocket, setTerminalSocket]);
+  }, [
+    setProjectId,
+    projectIdFromUrl,
+    accessToken,
+    setEditorSocket,
+    setTerminalSocket,
+  ]);
 
   return (
     <div style={{ display: "flex" }}>

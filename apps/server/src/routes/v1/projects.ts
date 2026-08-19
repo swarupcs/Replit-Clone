@@ -1,13 +1,35 @@
 import express from "express";
+import rateLimit from "express-rate-limit";
 import {
   createProjectController,
+  deleteProjectController,
   getProjectTree,
+  listProjectsController,
 } from "../../controllers/projectController.js";
+import { asyncHandler } from "../../middlewares/errorHandler.js";
+import { requireAuth } from "../../middlewares/requireAuth.js";
 
 const router = express.Router();
 
-router.post("/", createProjectController);
+// Scaffolding a project spawns a process and writes to disk, so it gets a
+// budget of its own.
+const createLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many projects created. Try again later.",
+  },
+});
 
-router.get("/:projectId/tree", getProjectTree);
+router.use(requireAuth);
+
+router.get("/", asyncHandler(listProjectsController));
+router.post("/", createLimiter, asyncHandler(createProjectController));
+router.get("/:projectId/tree", asyncHandler(getProjectTree));
+router.delete("/:projectId", asyncHandler(deleteProjectController));
 
 export default router;

@@ -1,19 +1,39 @@
 import type { TreeNodeData } from "./tree.js";
 
-/** GET /ping and GET /api/v1/ping */
+/** Every REST response uses this envelope. */
+export interface ApiSuccess<T> {
+  success: true;
+  message: string;
+  data: T;
+}
+
+export interface ApiFailure {
+  success: false;
+  code: string;
+  message: string;
+}
+
+export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
+
+export interface Project {
+  id: string;
+  name: string;
+  template: string;
+  ownerId: string;
+  createdAt: string;
+  lastActiveAt: string | null;
+}
+
+/** GET /ping */
 export interface PingResponse {
   message: string;
 }
 
-/** POST /api/v1/projects — `data` is the new project's id. */
-export interface CreateProjectResponse {
-  message: string;
-  data: string;
-}
+/** POST /api/v1/projects */
+export type CreateProjectResponse = ApiSuccess<Project>;
+
+/** GET /api/v1/projects */
+export type ListProjectsResponse = ApiSuccess<Project[]>;
 
 /** GET /api/v1/projects/:projectId/tree */
-export interface ProjectTreeResponse {
-  success: boolean;
-  message: string;
-  data: TreeNodeData | null;
-}
+export type ProjectTreeResponse = ApiSuccess<TreeNodeData | null>;
