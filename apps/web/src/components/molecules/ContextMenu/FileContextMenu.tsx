@@ -5,12 +5,13 @@ import "./FileContextMenu.css";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 
-type PendingAction = "newFile" | "newFolder" | "rename";
+type PendingAction = "newFile" | "newFolder" | "rename" | "delete";
 
 const ACTION_COPY: Record<PendingAction, { title: string; okText: string }> = {
   newFile: { title: "New file", okText: "Create" },
   newFolder: { title: "New folder", okText: "Create" },
   rename: { title: "Rename", okText: "Rename" },
+  delete: { title: "Delete", okText: "Delete" },
 };
 
 export const FileContextMenu = () => {
@@ -55,6 +56,7 @@ export const FileContextMenu = () => {
     setTarget(node);
     setPending(action);
     setName(action === "rename" ? node.name : "");
+
     close();
   }
 
@@ -89,16 +91,25 @@ export const FileContextMenu = () => {
     closeDialog();
   }
 
-  function handleDelete() {
-    if (!editorSocket || !node) return;
+  /** Deletion is recursive on the server and has no undo, so it always
+   *  confirms. A folder additionally has to be named, the way destructive
+   *  actions elsewhere do — one slipped click used to be enough to destroy a
+   *  whole source tree. */
+  function confirmDelete() {
+    if (!editorSocket || !target) return;
+    if (target.type === "directory" && name.trim() !== target.name) return;
 
-    if (node.type === "directory") {
-      editorSocket.emit("deleteFolder", { relPath: node.relPath });
+    if (target.type === "directory") {
+      editorSocket.emit("deleteFolder", { relPath: target.relPath });
     } else {
-      editorSocket.emit("deleteFile", { relPath: node.relPath });
+      editorSocket.emit("deleteFile", { relPath: target.relPath });
     }
-    close();
+
+    closeDialog();
   }
+
+  const isDeletingFolder = pending === "delete" && target?.type === "directory";
+  const deleteBlocked = isDeletingFolder && name.trim() !== target.name;
 
   return (
     <>
@@ -113,7 +124,10 @@ export const FileContextMenu = () => {
           <button className="fileContextButton" onClick={() => startAction("rename")}>
             Rename
           </button>
-          <button className="fileContextButton fileContextButtonDanger" onClick={handleDelete}>
+          <button
+            className="fileContextButton fileContextButtonDanger"
+            onClick={() => startAction("delete")}
+          >
             Delete
           </button>
         </div>
@@ -123,18 +137,44 @@ export const FileContextMenu = () => {
         open={pending !== null}
         title={pending ? ACTION_COPY[pending].title : ""}
         okText={pending ? ACTION_COPY[pending].okText : "OK"}
-        onOk={confirmAction}
+        onOk={pending === "delete" ? confirmDelete : confirmAction}
         onCancel={closeDialog}
-        okButtonProps={{ disabled: !name.trim() }}
+        okButtonProps={
+          pending === "delete"
+            ? { danger: true, disabled: deleteBlocked }
+            : { disabled: !name.trim() }
+        }
         destroyOnHidden
       >
-        <Input
-          autoFocus
-          value={name}
-          placeholder="name"
-          onChange={(event) => setName(event.target.value)}
-          onPressEnter={confirmAction}
-        />
+        {pending === "delete" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <span style={{ color: "var(--rc-text-muted)" }}>
+              Delete <b>{target?.name}</b>
+              {isDeletingFolder ? " and everything inside it" : ""}? This
+              removes it from disk and cannot be undone.
+            </span>
+
+            {/* A folder can hold work that exists nowhere else, so removing one
+                takes more than a click in the same place the menu just was. */}
+            {isDeletingFolder && (
+              <Input
+                autoFocus
+                value={name}
+                placeholder={`Type "${target.name}" to confirm`}
+                onChange={(event) => setName(event.target.value)}
+                onPressEnter={confirmDelete}
+              />
+            )}
+          </div>
+        ) : (
+          <Input
+            autoFocus
+            value={name}
+            placeholder="name"
+            onChange={(event) => setName(event.target.value)}
+            onPressEnter={confirmAction}
+          />
+        )}
       </Modal>
     </>
   );
