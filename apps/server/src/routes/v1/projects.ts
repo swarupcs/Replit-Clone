@@ -1,14 +1,35 @@
 import express from "express";
+import multer from "multer";
 import rateLimit from "express-rate-limit";
 import {
   createProjectController,
   deleteProjectController,
+  duplicateProjectController,
+  exportProjectController,
+  getProjectEnvController,
+  getProjectPorts,
   getProjectTree,
   listProjectsController,
   listTemplatesController,
+  renameProjectController,
+  setProjectEnvController,
 } from "../../controllers/projectController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
+import {
+  createShareLinkController,
+  listSharingController,
+  previewShareLinkController,
+  redeemShareLinkController,
+  removeCollaboratorController,
+  revokeShareLinkController,
+  setCollaboratorController,
+} from "../../controllers/sharingController.js";
+import {
+  downloadFileController,
+  MAX_UPLOAD_BYTES,
+  uploadFilesController,
+} from "../../controllers/fileTransferController.js";
 
 const router = express.Router();
 
@@ -26,12 +47,47 @@ const createLimiter = rateLimit({
   },
 });
 
+/** Uploads are held in memory rather than spooled to a temp directory: they
+ *  are bounded below, and a temp file is one more thing to clean up after a
+ *  failed request. */
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 20 },
+});
+
 router.use(requireAuth);
 
 router.get("/templates", asyncHandler(listTemplatesController));
 router.get("/", asyncHandler(listProjectsController));
 router.post("/", createLimiter, asyncHandler(createProjectController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
+router.get("/:projectId/ports", asyncHandler(getProjectPorts));
+router.patch("/:projectId", asyncHandler(renameProjectController));
+router.post("/:projectId/duplicate", createLimiter, asyncHandler(duplicateProjectController));
+router.get("/:projectId/export", asyncHandler(exportProjectController));
+router.get("/:projectId/env", asyncHandler(getProjectEnvController));
+router.post(
+  "/:projectId/files",
+  upload.array("files", 20),
+  asyncHandler(uploadFilesController),
+);
+router.get("/:projectId/files", asyncHandler(downloadFileController));
+
+// --- Sharing -------------------------------------------------------------
+// `share/preview` and `share/redeem` are not scoped to a project id, because
+// the caller has a token rather than an id — that is the whole point of a link.
+router.get("/share/preview", asyncHandler(previewShareLinkController));
+router.post("/share/redeem", asyncHandler(redeemShareLinkController));
+
+router.get("/:projectId/sharing", asyncHandler(listSharingController));
+router.put("/:projectId/collaborators", asyncHandler(setCollaboratorController));
+router.delete(
+  "/:projectId/collaborators/:userId",
+  asyncHandler(removeCollaboratorController),
+);
+router.post("/:projectId/share-link", asyncHandler(createShareLinkController));
+router.delete("/:projectId/share-link", asyncHandler(revokeShareLinkController));
+router.put("/:projectId/env", asyncHandler(setProjectEnvController));
 router.delete("/:projectId", asyncHandler(deleteProjectController));
 
 export default router;

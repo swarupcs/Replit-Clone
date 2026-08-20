@@ -6,12 +6,19 @@ import type {
 } from "@replit-clone/shared";
 import { useOpenTabsStore } from "./openTabsStore.ts";
 import { useTreeStructureStore } from "./treeStructureStore.ts";
+import { discardWrite } from "../lib/pendingWrites.ts";
 
 export type EditorSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 interface EditorSocketStore {
   editorSocket: EditorSocket | null;
   lastError: string | null;
+  /** What this connection may do. Unknown until the server says, which is why
+   *  it starts null rather than assuming either answer. */
+  accessLevel: "viewer" | "editor" | "owner" | null;
+  /** Files that changed on disk while open — a terminal command, a build step.
+   *  Reported rather than merged, so nobody's in-progress work vanishes. */
+  externallyChanged: string[];
   setEditorSocket: (socket: EditorSocket | null) => void;
   clearError: () => void;
 }
@@ -19,11 +26,13 @@ interface EditorSocketStore {
 export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
   editorSocket: null,
   lastError: null,
-  clearError: () => set({ lastError: null }),
+  accessLevel: null,
+  externallyChanged: [],
+  clearError: () => set({ lastError: null, externallyChanged: [] }),
 
   setEditorSocket: (incomingSocket) => {
     if (!incomingSocket) {
-      set({ editorSocket: null });
+      set({ editorSocket: null, accessLevel: null });
       return;
     }
 
@@ -42,7 +51,17 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
       useOpenTabsStore.getState().renameTab(relPath, newRelPath);
     });
 
+    // A move is a rename with a different parent as far as an open tab is
+    // concerned; leaving it on the old path would make the next save recreate
+    // the file where it used to be.
+    incomingSocket.on("moveEntrySuccess", ({ relPath, newRelPath }) => {
+      useOpenTabsStore.getState().renameTab(relPath, newRelPath);
+    });
+
     incomingSocket.on("deleteFileSuccess", ({ relPath }) => {
+      // Dropped rather than flushed: a queued write for a file that has just
+      // been deleted would recreate it moments later.
+      discardWrite(relPath);
       useOpenTabsStore.getState().closeTab(relPath);
     });
 
@@ -53,10 +72,33 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
       void refreshTree();
     });
 
+    incomingSocket.on("projectAccess", ({ level }) => {
+      set({ accessLevel: level });
+    });
+
+    incomingSocket.on("docExternalChange", ({ relPath }) => {
+      set((state) =>
+        state.externallyChanged.includes(relPath)
+          ? state
+          : { externallyChanged: [...state.externallyChanged, relPath] },
+      );
+    });
+
     incomingSocket.on("error", ({ message }) => {
       set({ lastError: message });
     });
 
-    set({ editorSocket: incomingSocket, lastError: null });
+    set({
+      editorSocket: incomingSocket,
+      lastError: null,
+      accessLevel: null,
+      externallyChanged: [],
+    });
   },
 }));
+
+/** True once the server has confirmed this connection may change the project.
+ *  Null — not yet known — counts as read-only, so nothing is offered before
+ *  it is certain to work. */
+export const selectCanEdit = (state: EditorSocketStore): boolean =>
+  state.accessLevel === "editor" || state.accessLevel === "owner";

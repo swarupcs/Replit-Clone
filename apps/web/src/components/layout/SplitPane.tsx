@@ -13,6 +13,10 @@ interface SplitPaneProps {
   showSecond?: boolean;
   first: ReactNode;
   second: ReactNode;
+  /** Called when the user finishes a drag, so the size can be remembered.
+   *  Fired on release rather than per pointer move: persisting during a drag
+   *  would write to storage dozens of times a second. */
+  onResizeEnd?: (size: number) => void;
 }
 
 const DIVIDER = 5;
@@ -33,11 +37,17 @@ export const SplitPane = ({
   showSecond = true,
   first,
   second,
+  onResizeEnd,
 }: SplitPaneProps) => {
   const isHorizontal = direction === "horizontal";
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState(defaultSize);
   const [dragging, setDragging] = useState(false);
+
+  /** The live size, readable from the pointerup handler without making it a
+   *  dependency of the effect that registers it. */
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
 
   const handleMove = useCallback(
     (event: PointerEvent) => {
@@ -58,7 +68,10 @@ export const SplitPane = ({
   useEffect(() => {
     if (!dragging) return;
 
-    const stop = () => setDragging(false);
+    const stop = () => {
+      setDragging(false);
+      onResizeEnd?.(sizeRef.current);
+    };
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", stop);
 
@@ -74,7 +87,7 @@ export const SplitPane = ({
       document.body.style.userSelect = previousUserSelect;
       document.body.style.cursor = "";
     };
-  }, [dragging, handleMove, isHorizontal]);
+  }, [dragging, handleMove, isHorizontal, onResizeEnd]);
 
   const bothVisible = showFirst && showSecond;
 

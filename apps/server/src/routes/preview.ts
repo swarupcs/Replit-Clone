@@ -1,3 +1,6 @@
+import type { IncomingMessage, Server } from "node:http";
+import type { Socket } from "node:net";
+import type { Duplex } from "node:stream";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import {
@@ -10,11 +13,30 @@ import { getTemplate } from "../templates/registry.js";
 import { PREVIEW_COOKIE_NAME, verifyPreviewToken } from "../service/tokenService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
 import { UnauthorizedError } from "../utils/errors.js";
+import { env } from "../config/env.js";
+import { logger } from "../lib/logger.js";
+import { increment } from "../lib/metrics.js";
 
 /** Resolves the project's dev server address. The port comes from the
  *  template, which is why 5173 is no longer hardcoded in four places. */
-async function resolveTarget(projectId: string): Promise<string | undefined> {
-  return getPreviewTarget(projectId);
+async function resolveTarget(
+  projectId: string,
+  port?: number,
+): Promise<string | undefined> {
+  return getPreviewTarget(projectId, port);
+}
+
+/** Which container port this request wants previewed.
+ *
+ *  A project often serves more than one thing — a frontend and the API beside
+ *  it — and the registry now declares which ports each template may use.
+ *  Anything not on that list is ignored rather than dialled.
+ */
+function requestedPort(raw: unknown): number | undefined {
+  if (typeof raw !== "string") return undefined;
+
+  const port = Number(raw);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
 }
 
 async function expectsPreviewBase(projectId: string): Promise<boolean> {
@@ -23,12 +45,14 @@ async function expectsPreviewBase(projectId: string): Promise<boolean> {
   return getTemplate(project.template).expectsPreviewBase;
 }
 
+/** Restricts who may frame a preview. `self` covers opening one in its own tab. */
+const frameAncestors = `frame-ancestors 'self' ${env.WEB_ORIGIN}`;
+
 /** Authorises a preview request from the `preview_token` cookie.
  *
  *  The preview is loaded in an iframe and its HMR socket is opened by Vite's
  *  own client, so neither can attach an Authorization header — a cookie scoped
- *  to /preview is the only credential both carry. It is SameSite=Lax, so an
- *  unrelated site cannot frame the preview and have the cookie sent.
+ *  to /preview is the only credential both carry.
  */
 export async function authorisePreview(
   projectId: string,
@@ -37,7 +61,8 @@ export async function authorisePreview(
   if (!cookieValue) throw new UnauthorizedError("No preview session");
 
   const { sub } = verifyPreviewToken(cookieValue);
-  await assertProjectAccess(assertValidProjectId(projectId), sub);
+  // Watching the preview is exactly what read-only access is for.
+  await assertProjectAccess(assertValidProjectId(projectId), sub, "viewer");
 }
 
 /** Express guard: checks ownership, makes sure the container is running, and
@@ -52,10 +77,19 @@ export function previewGuard(
       const projectId = assertValidProjectId(req.params.projectId);
       const cookies = req.cookies as Record<string, string> | undefined;
 
+      // Only the editor may frame a preview. Helmet's CSP is switched off for
+      // this route, and the comment below about SameSite=Lax stopping a
+      // third-party frame does not hold in a split deployment, where the
+      // cookie is deliberately SameSite=None so it can travel to the API host.
+      res.setHeader("Content-Security-Policy", frameAncestors);
+
       await authorisePreview(projectId, cookies?.[PREVIEW_COOKIE_NAME]);
       await ensureContainer(projectId);
 
-      const target = await resolveTarget(projectId);
+      const target = await resolveTarget(
+        projectId,
+        requestedPort(req.query["port"]),
+      );
       if (!target) {
         // The container is up but nothing is listening yet. An iframe deserves
         // a readable page rather than a JSON error body.
@@ -86,11 +120,21 @@ font-family:ui-monospace,monospace;font-size:13px}</style></head>
 then reload this preview.</p></div></body></html>`;
 
 /** Target resolved by the guard, handed to the proxy for the same request.
- *  A WeakMap keeps it off `req` and lets it be collected with the request. */
-const targets = new WeakMap<Request, string>();
+ *  A WeakMap keeps it off `req` and lets it be collected with the request.
+ *  Keyed on IncomingMessage because a WebSocket upgrade never becomes an
+ *  Express Request — see installPreviewUpgrade. */
+const targets = new WeakMap<IncomingMessage, string>();
 
 /** Whether this project's dev server expects to see the /preview/<id> prefix. */
-const keepsPrefix = new WeakMap<Request, boolean>();
+const keepsPrefix = new WeakMap<IncomingMessage, boolean>();
+
+/** Removes the viewer's credentials from a request on its way to the sandbox. */
+function stripCredentials(proxyReq: {
+  removeHeader: (name: string) => void;
+}): void {
+  proxyReq.removeHeader("cookie");
+  proxyReq.removeHeader("authorization");
+}
 
 /** Reverse proxy for project previews.
  *
@@ -99,7 +143,12 @@ const keepsPrefix = new WeakMap<Request, boolean>();
  *  viewer's own machine and opened one host port per project. Containers now
  *  publish nothing at all.
  */
-export function createPreviewProxy(): RequestHandler {
+export function createPreviewProxy(): PreviewProxy {
+  // http-proxy-middleware's handler is declared as returning Promise<void>,
+  // while Express's RequestHandler is declared as returning void. Express
+  // ignores a handler's return value entirely, so the two are compatible in
+  // practice and only the declarations disagree.
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
   return createProxyMiddleware<Request, Response>({
     router: (req) => targets.get(req) ?? "http://127.0.0.1:1",
     changeOrigin: true,
@@ -109,11 +158,31 @@ export function createPreviewProxy(): RequestHandler {
     // with base=/preview/<id>/ and expects to SEE that prefix, so for those
     // templates the original path is restored; every other dev server serves
     // from the root and gets the stripped path.
-    pathRewrite: (pathname, req) =>
-      keepsPrefix.get(req) ? req.originalUrl : pathname,
+    //
+    // An upgrade has no originalUrl, because Express never handled it — that
+    // path normalises req.url itself before handing over.
+    pathRewrite: (pathname, req) => {
+      const original: string | undefined = req.originalUrl;
+      if (original === undefined) return pathname;
+      return keepsPrefix.get(req) ? original : pathname;
+    },
     on: {
+      // The guard has already authorised the request; the container never needs
+      // the credential itself, and it is running code the platform treats as
+      // untrusted. Forwarding the header verbatim handed every dependency in
+      // the project a working preview cookie on every single request.
+      proxyReq: stripCredentials,
+      proxyReqWs: stripCredentials,
+      // Reasserted here because the proxy copies the dev server's own headers
+      // onto the response, which would otherwise replace ours.
+      proxyRes: (proxyRes, _req, res) => {
+        delete proxyRes.headers["content-security-policy"];
+        delete proxyRes.headers["content-security-policy-report-only"];
+        res.setHeader("Content-Security-Policy", frameAncestors);
+      },
       error: (error, _req, res) => {
-        console.error("Preview proxy error:", error.message);
+        increment("preview_errors");
+        logger.warn("preview proxy error", { reason: error.message });
         if ("writeHead" in res && !res.headersSent) {
           res.writeHead(502, { "Content-Type": "text/html; charset=utf-8" });
           res.end(
@@ -129,6 +198,113 @@ export function createPreviewProxy(): RequestHandler {
 export function extractProjectId(urlOrPath: string): string | undefined {
   const match = /\/preview\/([0-9a-f-]{36})/i.exec(urlOrPath);
   return match?.[1];
+}
+
+/** The proxy middleware, which also exposes an upgrade handler. */
+export type PreviewProxy = RequestHandler & {
+  upgrade: (req: Request, socket: Socket, head: Buffer) => void;
+};
+
+/** Reads one cookie out of a raw header.
+ *
+ *  An upgrade never reaches Express, so `cookie-parser` has not run and
+ *  `req.cookies` does not exist.
+ */
+function cookieFromHeader(header: string | undefined, name: string) {
+  if (!header) return undefined;
+
+  for (const part of header.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator === -1) continue;
+    if (part.slice(0, separator).trim() !== name) continue;
+
+    try {
+      return decodeURIComponent(part.slice(separator + 1).trim());
+    } catch {
+      // A malformed value is simply not a usable credential.
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+/** Strips the `/preview/<id>` mount prefix from an upgrade's path.
+ *
+ *  Express does this for ordinary requests but never sees an upgrade, so a dev
+ *  server that serves from the root would be asked for /preview/<id>/... and
+ *  404. Collapses to "/" rather than "" when nothing follows the prefix, since
+ *  a proxied request with no path at all is not a valid one.
+ */
+export function stripPreviewPrefix(
+  pathname: string,
+  search: string,
+  projectId: string,
+): string {
+  const prefix = `/preview/${projectId}`;
+  return `${pathname.slice(prefix.length) || "/"}${search}`;
+}
+
+/** Authorises and routes the preview's WebSocket upgrades.
+ *
+ *  Express middleware does not run for upgrades, so `previewGuard` never saw
+ *  them: the proxy asked for a target that had never been recorded, fell back
+ *  to its dead-end address, and Vite's HMR socket could not connect. The
+ *  upgrade also skipped the ownership check entirely.
+ *
+ *  This owns the upgrade the same way the terminal gateway owns its own, and
+ *  performs the identical checks the HTTP guard does before handing over.
+ */
+export function installPreviewUpgrade(
+  server: Server,
+  proxy: PreviewProxy,
+): void {
+  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+
+    // socket.io and the terminal gateway handle their own upgrades.
+    if (!url.pathname.startsWith("/preview/")) return;
+
+    void (async () => {
+      try {
+        const projectId = assertValidProjectId(
+          extractProjectId(url.pathname) ?? "",
+        );
+
+        await authorisePreview(
+          projectId,
+          cookieFromHeader(req.headers.cookie, PREVIEW_COOKIE_NAME),
+        );
+        await ensureContainer(projectId);
+
+        const target = await resolveTarget(
+          projectId,
+          requestedPort(url.searchParams.get("port") ?? undefined),
+        );
+        if (!target) throw new Error("The dev server is not listening");
+
+        const keepPrefix = await expectsPreviewBase(projectId);
+        targets.set(req, target);
+        keepsPrefix.set(req, keepPrefix);
+
+        // Express strips the mount prefix on ordinary requests. Nothing does
+        // for an upgrade, so a dev server that serves from the root would be
+        // asked for /preview/<id>/... and 404.
+        if (!keepPrefix) {
+          req.url = stripPreviewPrefix(url.pathname, url.search, projectId);
+        }
+
+        proxy.upgrade(req as Request, socket as Socket, head);
+      } catch (error) {
+        increment("preview_upgrades_rejected");
+        logger.warn("preview upgrade rejected", {
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+      }
+    })();
+  });
 }
 
 export { PREVIEW_COOKIE_NAME };

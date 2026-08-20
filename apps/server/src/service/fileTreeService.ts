@@ -4,8 +4,10 @@ import type { TreeNodeData } from "@replit-clone/shared";
 import { projectRoot } from "../utils/projectPaths.js";
 
 /** Directories never worth sending to the client — huge, and the editor has no
- *  business browsing them. */
-const IGNORED = new Set([
+ *  business browsing them. Exported so the file watcher hides the same set:
+ *  broadcasting a change to something the tree never shows only makes every
+ *  client refetch for nothing. */
+export const IGNORED_DIRECTORIES = [
   "node_modules",
   ".git",
   "dist",
@@ -13,7 +15,9 @@ const IGNORED = new Set([
   ".next",
   "__pycache__",
   ".venv",
-]);
+] as const;
+
+const IGNORED = new Set<string>(IGNORED_DIRECTORIES);
 
 /** Guards against a symlink loop or a pathological tree pinning the process. */
 const MAX_DEPTH = 12;

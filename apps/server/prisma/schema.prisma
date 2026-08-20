@@ -8,13 +8,121 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  passwordHash String
-  createdAt    DateTime  @default(now())
-  projects     Project[]
+  id    String @id @default(uuid())
+  email String @unique
+
+  /// Null for an account created through an identity provider, which has no
+  /// password of its own to store.
+  passwordHash String?
+
+  /// Set once the address has been confirmed. Unverified accounts can still
+  /// sign in — locking people out of a tool they just signed up for is worse
+  /// than the risk — but the state is recorded so it can be acted on.
+  emailVerifiedAt DateTime?
+
+  /// GitHub's numeric user id, when the account is linked. Stable across
+  /// username changes, which is why it and not the login is what is stored.
+  githubId  String? @unique
+  avatarUrl String?
+
+  createdAt DateTime @default(now())
+
+  projects      Project[]
+  refreshTokens RefreshToken[]
+  collaborations ProjectCollaborator[]
+  tokens        UserToken[]
 
   @@map("users")
+}
+
+/// One-time tokens for flows that arrive by email.
+///
+/// A single table rather than one per purpose: they share every field, the
+/// same hashing, the same expiry handling, and the same "used exactly once"
+/// rule. Only the purpose differs.
+model UserToken {
+  id String @id @default(uuid())
+
+  /// SHA-256 of the token. The value goes in the email and is never stored, so
+  /// a leaked database does not hand over anyone's account.
+  tokenHash String @unique
+
+  purpose UserTokenPurpose
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, purpose])
+  @@index([expiresAt])
+  @@map("user_tokens")
+}
+
+enum UserTokenPurpose {
+  PASSWORD_RESET
+  EMAIL_VERIFICATION
+}
+
+/// Someone other than the owner who may open a project.
+model ProjectCollaborator {
+  id String @id @default(uuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role      ProjectRole @default(VIEWER)
+  createdAt DateTime    @default(now())
+
+  /// One row per person per project.
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@map("project_collaborators")
+}
+
+enum ProjectRole {
+  /// May read files and watch the preview. Cannot write, run, or open a shell.
+  VIEWER
+  /// Everything the owner can do except delete the project or manage access.
+  EDITOR
+}
+
+/// One issued refresh token.
+///
+/// Refresh tokens used to be stateless JWTs, so signing out only cleared the
+/// browser's cookie: anyone holding the value kept a working session for its
+/// full lifetime, and a compromised account could not be cut off short of
+/// rotating the signing secret and ending every session on the platform.
+model RefreshToken {
+  id String @id @default(uuid())
+
+  /// SHA-256 of the token. The value itself is never stored, so a leaked
+  /// database backup does not hand over live sessions.
+  tokenHash String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Set when the token is rotated or explicitly revoked. A token presented
+  /// after this is a replay, and revokes its whole family — the standard
+  /// signal that a token was stolen.
+  revokedAt DateTime?
+
+  /// Groups every token descended from one sign-in.
+  familyId String
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }
 
 model Project {
@@ -27,8 +135,25 @@ model Project {
   owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   /// Last time a socket or terminal attached; drives the idle container reaper.
   lastActiveAt DateTime?
+
+  /// Environment variables injected into this project's container, as a JSON
+  /// object of string values. Stored per project rather than in a file so they
+  /// are not committed, exported, or visible in the file tree.
+  envVars Json @default("{}")
+
+  /// Secret in the share link, when one has been created. Null means the
+  /// project is not shared by link at all; revoking clears it, which
+  /// invalidates every link already handed out.
+  shareToken String? @unique
+  /// What a link holder may do. Deliberately capped at VIEWER for now: handing
+  /// write access to anyone holding a URL is a different risk from handing it
+  /// to a named account.
+  shareRole ProjectRole @default(VIEWER)
+
+  collaborators ProjectCollaborator[]
 
   @@index([ownerId])
   @@map("projects")

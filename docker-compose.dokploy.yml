@@ -43,6 +43,11 @@ services:
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
       WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN to your web domain, e.g. https://app.yourdomain.com}
+      # Dokploy's Traefik terminates TLS in front of this service, so the
+      # client address arrives in X-Forwarded-For. Without this every request
+      # looks like it came from Traefik and the per-IP rate limits are shared
+      # by the whole deployment.
+      TRUSTED_PROXY_HOPS: 1
       PROJECTS_DIR: /data/projects
       CONTAINER_MEMORY_MB: ${CONTAINER_MEMORY_MB:-512}
       CONTAINER_CPUS: ${CONTAINER_CPUS:-0.5}
@@ -51,6 +56,14 @@ services:
       # The server is on the sandbox network, so it can reach project
       # containers directly and nothing is published to the host.
       PREVIEW_TARGET_MODE: container-ip
+    # /health checks Postgres and the Docker daemon; /ping always answered 200
+    # no matter what state the process was in.
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     # No `ports:` -- Dokploy's Traefik reaches this over the network it
     # attaches, not a published host port. Assign it a domain in the UI.
     expose:

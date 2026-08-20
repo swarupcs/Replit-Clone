@@ -5,10 +5,13 @@ import { VscAdd, VscChromeClose, VscOutput, VscTerminal } from "react-icons/vsc"
 import { BrowserTerminal } from "../../molecules/BrowserTerminal/BrowserTerminal.tsx";
 import { RunOutput } from "../../molecules/RunOutput/RunOutput.tsx";
 import { useRunStore } from "../../../store/runStore.ts";
+import {
+  selectCanEdit,
+  useEditorSocketStore,
+} from "../../../store/editorSocketStore.ts";
 
 interface BottomPanelProps {
   projectId: string;
-  accessToken: string;
 }
 
 /** `output` is the dev server log; every other tab is an independent shell. */
@@ -26,7 +29,7 @@ type ActiveTab = { kind: "output" } | { kind: "terminal"; id: number };
  *  WebSocket and a PTY, so unmounting it to switch tabs would kill the shell
  *  and lose its scrollback.
  */
-export const BottomPanel = ({ projectId, accessToken }: BottomPanelProps) => {
+export const BottomPanel = ({ projectId }: BottomPanelProps) => {
   const [terminals, setTerminals] = useState<number[]>([1]);
   const [active, setActive] = useState<ActiveTab>({ kind: "terminal", id: 1 });
   /** Monotonic, so closing terminal 2 and opening another gives 3 rather than
@@ -34,6 +37,7 @@ export const BottomPanel = ({ projectId, accessToken }: BottomPanelProps) => {
   const nextId = useRef(2);
 
   const status = useRunStore((store) => store.state.status);
+  const canEdit = useEditorSocketStore(selectCanEdit);
 
   // Pull attention to the output when a run starts, since that is where the
   // install/build progress and any failure will appear.
@@ -160,11 +164,33 @@ export const BottomPanel = ({ projectId, accessToken }: BottomPanelProps) => {
       </div>
 
       {/* Hidden with display:none rather than unmounted -- see the note above. */}
-      {terminals.map((id) => (
-        <Pane key={id} visible={active.kind === "terminal" && active.id === id}>
-          <BrowserTerminal projectId={projectId} accessToken={accessToken} />
+      {canEdit ? (
+        terminals.map((id) => (
+          <Pane key={id} visible={active.kind === "terminal" && active.id === id}>
+            <BrowserTerminal projectId={projectId} />
+          </Pane>
+        ))
+      ) : (
+        <Pane visible={active.kind === "terminal"}>
+          <div
+            style={{
+              height: "100%",
+              display: "grid",
+              placeItems: "center",
+              padding: 24,
+              textAlign: "center",
+              fontSize: 12.5,
+              color: "var(--rc-text-subtle)",
+            }}
+          >
+            {/* A shell can write anything the project can, so read-only access
+                is not enough for one. Said here rather than letting the
+                connection be refused with no explanation. */}
+            You have read-only access to this project, so terminals are not
+            available.
+          </div>
         </Pane>
-      ))}
+      )}
 
       <Pane visible={active.kind === "output"}>
         <RunOutput />

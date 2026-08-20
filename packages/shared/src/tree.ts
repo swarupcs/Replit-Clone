@@ -16,10 +16,6 @@ export interface TreeNodeData {
   size?: number;
 }
 
-export function isDirectory(node: TreeNodeData): boolean {
-  return node.type === "directory";
-}
-
 /** Bare extension without the dot, or undefined for extensionless names. */
 export function fileExtension(name: string): string | undefined {
   const index = name.lastIndexOf(".");

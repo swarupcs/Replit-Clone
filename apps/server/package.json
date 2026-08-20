@@ -12,13 +12,17 @@
     "build": "prisma generate && tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy"
+    "prisma:migrate": "prisma migrate deploy",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "@replit-clone/shared": "workspace:*",
+    "archiver": "^7.0.1",
     "argon2": "^0.45.1",
     "chokidar": "^4.0.3",
     "cookie-parser": "^1.4.7",
@@ -30,22 +34,27 @@
     "helmet": "^8.3.0",
     "http-proxy-middleware": "^4.2.0",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^2.2.0",
     "pg": "^8.23.0",
+    "prisma": "^7.9.1",
     "socket.io": "^4.8.1",
     "ws": "^8.18.0",
+    "yjs": "^13.6.32",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.4",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.17",
     "@types/dockerode": "^3.3.34",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.2.0",
     "@types/node": "^22.13.1",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.5.14",
-    "prisma": "^7.9.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.7"
   }
 }

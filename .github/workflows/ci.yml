@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push supersedes whatever is still running for the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+
+    # Refresh-token rotation is enforced by real rows — unique hashes, replay
+    # detection, revocation — so those tests need a database. They skip locally
+    # when TEST_DATABASE_URL is unset; here they always run.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: replit_clone_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/replit_clone_test?schema=public
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The apps import `@replit-clone/shared` from its build output, and the
+      # server's types come from a generated Prisma client, so both have to
+      # exist before anything is typechecked.
+      - name: Build shared package
+        run: pnpm --filter @replit-clone/shared build
+
+      - name: Generate Prisma client
+        run: pnpm --filter @replit-clone/server exec prisma generate
+        env:
+          # `prisma generate` only needs a syntactically valid URL; nothing here
+          # connects to a database.
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
+
+      - run: pnpm -r typecheck
+
+      - run: pnpm -r lint
+
+      - name: Apply migrations to the test database
+        run: pnpm --filter @replit-clone/server exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+
+      - run: pnpm -r test
+
+      - name: Build
+        run: pnpm --parallel --filter "./apps/*" build
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
+
+  images:
+    name: Sandbox images
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Project containers are only as reproducible as these, and a broken one
+      # is invisible until someone opens a playground.
+      - name: Build sandbox images
+        run: |
+          docker build -t sandbox-node:latest images/node
+          docker build -t sandbox-python:latest images/python
+          docker build -t sandbox-go:latest images/go
+
+      # The bind mount is owned by the host, so the sandbox user must be able to
+      # write a directory it does not own. Regressing this breaks every
+      # `npm install` and nothing else would catch it.
+      - name: Sandbox user can write a host-owned bind mount
+        run: |
+          mkdir -p /tmp/probe && echo 'ok' > /tmp/probe/existing.txt
+          docker run --rm -u 1001:0 -v /tmp/probe:/home/sandbox/app \
+            sandbox-node:latest \
+            bash -lc 'touch /home/sandbox/app/created.txt && test -w "$HOME"'
+          test -f /tmp/probe/created.txt

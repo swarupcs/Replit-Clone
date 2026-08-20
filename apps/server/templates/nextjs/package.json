@@ -1,0 +1,14 @@
+{
+  "name": "my-next-app",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0 --port 3000",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0 --port 3000"
+  },
+  "dependencies": {
+    "next": "^15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

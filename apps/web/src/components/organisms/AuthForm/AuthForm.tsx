@@ -1,14 +1,21 @@
 import { useState } from "react";
-import { Alert, Button, Form, Input, Typography } from "antd";
+import { useQuery } from "@tanstack/react-query";
+import { Alert, Button, Divider, Form, Input, Typography } from "antd";
+import { GithubOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { credentialsSchema } from "@replit-clone/shared";
 import type { Credentials } from "@replit-clone/shared";
+import { getAuthProvidersApi, githubSignInUrl } from "../../../apis/auth.ts";
 
 interface AuthFormProps {
   title: string;
   subtitle: string;
   submitLabel: string;
   footer: { prompt: string; linkText: string; to: string };
+  /** Shown on sign-in only; there is nothing to reset while signing up. */
+  showForgotPassword?: boolean;
+  /** Sign-up wants a new-password field, sign-in a current-password one. */
+  passwordAutoComplete?: string;
   onSubmit: (credentials: Credentials) => Promise<void>;
 }
 
@@ -47,10 +54,21 @@ export const AuthForm = ({
   subtitle,
   submitLabel,
   footer,
+  showForgotPassword = false,
+  passwordAutoComplete = "current-password",
   onSubmit,
 }: AuthFormProps) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /** Only offered when the server has it configured; a button that leads to
+   *  "not configured" is worse than no button. */
+  const { data: providers } = useQuery({
+    queryKey: ["authProviders"],
+    queryFn: getAuthProvidersApi,
+    staleTime: Infinity,
+    retry: false,
+  });
 
   async function handleFinish(values: Credentials) {
     setError(null);
@@ -181,9 +199,28 @@ export const AuthForm = ({
             />
           )}
 
+          {providers?.github && (
+            <>
+              <Button
+                block
+                size="large"
+                icon={<GithubOutlined />}
+                // A full navigation: the OAuth round trip is the browser
+                // visiting GitHub and being sent back, not a fetch.
+                onClick={() => window.location.assign(githubSignInUrl())}
+              >
+                Continue with GitHub
+              </Button>
+
+              <Divider style={{ color: "var(--rc-text-subtle)", fontSize: 12 }}>
+                or
+              </Divider>
+            </>
+          )}
+
           <Form
             layout="vertical"
-            onFinish={handleFinish}
+            onFinish={(values: Credentials) => void handleFinish(values)}
             requiredMark={false}
             size="large"
           >
@@ -206,10 +243,18 @@ export const AuthForm = ({
               style={{ marginBottom: 24 }}
             >
               <Input.Password
-                autoComplete="current-password"
+                autoComplete={passwordAutoComplete}
                 placeholder="At least 8 characters"
               />
             </Form.Item>
+
+            {showForgotPassword && (
+              <div style={{ textAlign: "right", marginTop: -16, marginBottom: 16 }}>
+                <Link to="/forgot-password" style={{ fontSize: 13 }}>
+                  Forgot your password?
+                </Link>
+              </div>
+            )}
 
             <Button
               type="primary"

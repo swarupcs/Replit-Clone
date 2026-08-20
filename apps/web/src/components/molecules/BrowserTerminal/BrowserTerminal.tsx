@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Tooltip } from "antd";
+import { useAuthStore } from "../../../store/authStore.ts";
 import { VscClearAll, VscDebugRestart } from "react-icons/vsc";
 import "@xterm/xterm/css/xterm.css";
 
 interface BrowserTerminalProps {
   projectId: string;
-  accessToken: string;
 }
 
 type ConnectionState = "connecting" | "open" | "closed";
@@ -39,9 +39,17 @@ function terminalWsUrl(projectId: string): string {
  *  simply lost and the terminal rendered blank. Creating the socket here
  *  attaches the listener in the same tick.
  */
-export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps) => {
+export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+
+  /** Whether a session exists at all — NOT its token.
+   *
+   *  This flips false to true once, when the boot-time refresh settles, and
+   *  then stays true across every rotation. Depending on it reconnects a
+   *  terminal that mounted before the session was ready, without reconnecting
+   *  one every time the token behind it changes. */
+  const hasSession = useAuthStore((state) => state.accessToken !== null);
 
   const [status, setStatus] = useState<ConnectionState>("connecting");
   /** Bumping this tears the effect down and builds a fresh socket + terminal,
@@ -50,7 +58,16 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || !accessToken) return;
+    if (!container) return;
+
+    // Read imperatively, and deliberately NOT a dependency. The access token
+    // rotates roughly every fifteen minutes, and having it in the dependency
+    // array tore down every shell each time it did: scrollback, working
+    // directory, shell history and any foreground process all went with it.
+    // Only the handshake needs a live token; the socket survives on its own
+    // afterwards.
+    const accessToken = useAuthStore.getState().accessToken;
+    if (!accessToken) return;
 
     setStatus("connecting");
 
@@ -171,7 +188,7 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
       term.dispose();
       termRef.current = null;
     };
-  }, [projectId, accessToken, reconnectNonce]);
+  }, [projectId, hasSession, reconnectNonce]);
 
   const handleClear = useCallback(() => {
     termRef.current?.clear();

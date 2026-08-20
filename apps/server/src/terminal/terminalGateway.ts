@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer } from "ws";
-import type { WebSocket } from "ws";
+import type { RawData, WebSocket } from "ws";
 import {
   attach,
   detach,
@@ -12,6 +12,21 @@ import type { AttachInput } from "../containers/handleTerminalCreation.js";
 import { assertProjectAccess, touchProject } from "../service/projectService.js";
 import { verifyAccessToken } from "../service/tokenService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
+import { logger } from "../lib/logger.js";
+import { increment } from "../lib/metrics.js";
+
+/** Decodes a client frame to text.
+ *
+ *  `ws` hands over a Buffer, an ArrayBuffer, or — for a fragmented message —
+ *  an array of Buffers. Calling `.toString()` on the last of those returns the
+ *  fragments joined by commas rather than the text, so a long paste or a large
+ *  terminal frame arrived corrupted.
+ */
+function decodeMessage(data: RawData): string {
+  if (Array.isArray(data)) return Buffer.concat(data).toString("utf8");
+  if (Buffer.isBuffer(data)) return data.toString("utf8");
+  return Buffer.from(data).toString("utf8");
+}
 
 /** Reads the access token from the WebSocket subprotocol.
  *
@@ -60,18 +75,20 @@ export function installTerminalGateway(server: Server): void {
 
         // A terminal is a shell inside the project's container, so it needs the
         // same ownership check as any other project operation.
-        const project = await assertProjectAccess(projectId, claims.sub);
+        // A shell can write anything the project can, so read-only access is
+        // not enough for one.
+        const project = await assertProjectAccess(projectId, claims.sub, "editor");
 
         wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
           // Buffer client input from the instant the socket exists. Starting
           // the container and the exec is asynchronous, but the terminal sends
-          // its initial resize the moment it connects � without this the PTY
+          // its initial resize the moment it connects — without this the PTY
           // stayed at 0x0 and every early keystroke was dropped.
           const inbox: string[] = [];
           let sink: ((data: string) => void) | null = null;
 
           ws.on("message", (data) => {
-            const text = data.toString();
+            const text = decodeMessage(data);
             if (sink) sink(text);
             else inbox.push(text);
           });
@@ -84,7 +101,9 @@ export function installTerminalGateway(server: Server): void {
           void startTerminal(ws, projectId, project.template, attachInput);
         });
       } catch (error) {
-        console.error("Terminal upgrade rejected:", error);
+        logger.warn("terminal upgrade rejected", {
+          reason: error instanceof Error ? error.message : String(error),
+        });
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
       }
@@ -99,6 +118,7 @@ async function startTerminal(
   attachInput: AttachInput,
 ): Promise<void> {
   attach(projectId);
+  increment("terminal_sessions");
   ws.on("close", () => detach(projectId));
 
   try {
@@ -107,7 +127,7 @@ async function startTerminal(
     const container = await ensureContainer(projectId);
     handleTerminalCreation(container, ws, templateId, attachInput);
   } catch (error) {
-    console.error(`Could not start terminal for ${projectId}:`, error);
+    logger.error("could not start terminal", error, { projectId });
     detach(projectId);
     ws.close(1011, "Could not start the project container");
   }

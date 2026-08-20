@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import { Input, Spin, Tooltip } from "antd";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Input, Spin, Tooltip, message } from "antd";
 import {
+  VscCloudUpload,
   VscCollapseAll,
   VscNewFile,
   VscNewFolder,
@@ -12,6 +13,8 @@ import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { TreeNode } from "../../molecules/TreeNode/TreeNode.tsx";
 import { FileContextMenu } from "../../molecules/ContextMenu/FileContextMenu.tsx";
 import { NewEntryPrompt } from "../../molecules/ContextMenu/NewEntryPrompt.tsx";
+import { uploadFilesApi } from "../../../apis/projects.ts";
+import { useTreeSelectionStore } from "../../../store/treeSelectionStore.ts";
 
 /** Prunes the tree to nodes whose path matches `query`, keeping the folders
  *  that lead to a match so the result still reads as a tree rather than a flat
@@ -32,6 +35,27 @@ function filterTree(node: TreeNodeData, query: string): TreeNodeData | null {
   return null;
 }
 
+/** The rows as they appear on screen, top to bottom.
+ *
+ *  A shift-click range has to mean what the user sees, so it is measured
+ *  against this rather than against the tree's own recursion — a collapsed
+ *  folder's children are not on screen and must not be swept up in a range.
+ */
+function visibleRows(
+  node: TreeNodeData,
+  expanded: Set<string>,
+  into: string[] = [],
+): string[] {
+  if (node.relPath) into.push(node.relPath);
+
+  const isOpen = node.relPath === "" || expanded.has(node.relPath);
+  if (node.type === "directory" && isOpen) {
+    node.children?.forEach((child) => visibleRows(child, expanded, into));
+  }
+
+  return into;
+}
+
 /** Every folder path in the tree -- used to expand everything while filtering,
  *  since a match hidden inside a collapsed folder is not a useful result. */
 function folderPaths(node: TreeNodeData, into: string[] = []): string[] {
@@ -50,10 +74,41 @@ export const TreeStructure = () => {
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [creating, setCreating] = useState<"file" | "folder" | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [messageApi, contextHolder] = message.useMessage();
+
+  /** A hidden input, because a styled button cannot open a file picker on its
+   *  own. */
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleUpload(files: FileList | null) {
+    if (!files || files.length === 0 || !projectId) return;
+
+    setUploading(true);
+    try {
+      const paths = await uploadFilesApi(projectId, [...files]);
+      await refreshTree();
+      void messageApi.success(
+        `Uploaded ${String(paths.length)} file${paths.length === 1 ? "" : "s"}`,
+      );
+    } catch (error) {
+      const detail = (
+        error as { response?: { data?: { message?: string } } }
+      ).response?.data?.message;
+      void messageApi.error(detail ?? "Could not upload those files.");
+    } finally {
+      setUploading(false);
+      // Cleared so choosing the same file twice in a row still fires a change.
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
 
   useEffect(() => {
     if (projectId && !treeStructure) void refreshTree();
   }, [projectId, treeStructure, refreshTree]);
+
+  const expandedPaths = useTreeStructureStore((state) => state.expandedPaths);
+  const setVisibleOrder = useTreeSelectionStore((state) => state.setVisibleOrder);
 
   const trimmedQuery = query.trim().toLowerCase();
 
@@ -62,6 +117,12 @@ export const TreeStructure = () => {
     if (!trimmedQuery) return treeStructure;
     return filterTree(treeStructure, trimmedQuery);
   }, [treeStructure, trimmedQuery]);
+
+  // Republished whenever the tree or what is expanded changes, so a range
+  // selection is always measured against what is actually on screen.
+  useEffect(() => {
+    setVisibleOrder(visibleTree ? visibleRows(visibleTree, expandedPaths) : []);
+  }, [visibleTree, expandedPaths, setVisibleOrder]);
 
   // Filtering is useless against collapsed folders, so reveal every path that
   // survived the filter.
@@ -90,6 +151,16 @@ export const TreeStructure = () => {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {contextHolder}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(event) => void handleUpload(event.target.files)}
+      />
+
       <div className="rc-pane-label" style={{ justifyContent: "space-between" }}>
         <span>Explorer</span>
 
@@ -110,6 +181,16 @@ export const TreeStructure = () => {
               aria-label="New folder"
             >
               <VscNewFolder size={14} />
+            </button>
+          </Tooltip>
+          <Tooltip title="Upload files">
+            <button
+              className="rc-icon-button"
+              data-spinning={uploading}
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Upload files"
+            >
+              <VscCloudUpload size={14} />
             </button>
           </Tooltip>
           <Tooltip title="Refresh">

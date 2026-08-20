@@ -7,9 +7,13 @@ export interface TemplateDefinition {
   label: string;
   /** Docker image, built by `pnpm images:build`. */
   image: string;
-  /** Port the dev server listens on INSIDE the container. The preview proxy
-   *  targets this; no host port is ever published. */
+  /** Port the dev server listens on INSIDE the container, and the one the
+   *  preview proxy targets by default. No host port is ever published. */
   devPort: number;
+  /** Other ports a project of this kind commonly listens on — an API beside a
+   *  frontend, a database UI, a docs server. The preview can be pointed at any
+   *  of them; the registry used to allow exactly one. */
+  extraPorts?: number[];
   /** Shown in the UI so the user knows what to run. */
   startCommand: string;
   /** True when the dev server is configured to serve under the proxy's
@@ -37,6 +41,8 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     label: "React (Vite)",
     image: "sandbox-node:latest",
     devPort: 5173,
+    // A Vite app very often has an API beside it on 3000.
+    extraPorts: [3000, 8080],
     startCommand: "npm install && npm run dev",
     filesDir: "react-vite",
     expectsPreviewBase: true,
@@ -46,6 +52,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     label: "Node (Express)",
     image: "sandbox-node:latest",
     devPort: 3000,
+    extraPorts: [5173, 8080],
     startCommand: "npm install && npm start",
     filesDir: "node-express",
     expectsPreviewBase: false,
@@ -55,17 +62,72 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     label: "Static HTML",
     image: "sandbox-node:latest",
     devPort: 8080,
-    startCommand: "npx --yes serve -l 8080 .",
+    extraPorts: [3000, 5173],
+    startCommand: "serve -l 8080 .",
     filesDir: "static-html",
     expectsPreviewBase: false,
+  },
+  "nextjs": {
+    id: "nextjs",
+    label: "Next.js",
+    image: "sandbox-node:latest",
+    devPort: 3000,
+    extraPorts: [5173, 8080],
+    startCommand: "npm install && npm run dev",
+    filesDir: "nextjs",
+    // Next emits absolute /_next/... asset URLs, so it is told the prefix
+    // through basePath rather than having it stripped.
+    expectsPreviewBase: true,
+  },
+  "vue-vite": {
+    id: "vue-vite",
+    label: "Vue (Vite)",
+    image: "sandbox-node:latest",
+    devPort: 5173,
+    extraPorts: [3000, 8080],
+    startCommand: "npm install && npm run dev",
+    filesDir: "vue-vite",
+    expectsPreviewBase: true,
+  },
+  "svelte-vite": {
+    id: "svelte-vite",
+    label: "Svelte (Vite)",
+    image: "sandbox-node:latest",
+    devPort: 5173,
+    extraPorts: [3000, 8080],
+    startCommand: "npm install && npm run dev",
+    filesDir: "svelte-vite",
+    expectsPreviewBase: true,
   },
   "python-flask": {
     id: "python-flask",
     label: "Python (Flask)",
     image: "sandbox-python:latest",
     devPort: 5000,
+    extraPorts: [8000, 8080],
     startCommand: "pip install -r requirements.txt && python app.py",
     filesDir: "python-flask",
+    expectsPreviewBase: false,
+  },
+  "python-fastapi": {
+    id: "python-fastapi",
+    label: "Python (FastAPI)",
+    image: "sandbox-python:latest",
+    devPort: 8000,
+    extraPorts: [5000, 8080],
+    startCommand:
+      "pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
+    filesDir: "python-fastapi",
+    expectsPreviewBase: false,
+  },
+  "go-http": {
+    id: "go-http",
+    label: "Go (net/http)",
+    image: "sandbox-go:latest",
+    devPort: 8080,
+    extraPorts: [3000, 8000],
+    startCommand: "go run .",
+    filesDir: "go-http",
     expectsPreviewBase: false,
   },
 };

@@ -13,9 +13,28 @@ export interface OpenTab {
   isDirty: boolean;
 }
 
+/** The editor can show two files side by side. Tabs are shared; only which
+ *  file each pane displays differs. */
+export type PaneId = "primary" | "secondary";
+
 interface OpenTabsStore {
   tabs: OpenTab[];
+  /** The focused pane's active file. Kept as its own field because almost
+   *  everything — the breadcrumb, the status bar, Ctrl+S — means "the file the
+   *  user is looking at", not "some pane's file". */
   activeRelPath: string | null;
+  /** What the second pane shows, when it is open. */
+  secondaryRelPath: string | null;
+  /** Whether the second pane is showing at all. */
+  splitOpen: boolean;
+  /** Which pane new files open into, and which one `activeRelPath` tracks. */
+  focusedPane: PaneId;
+  /** Where to put the cursor once a file finishes opening.
+   *
+   *  Opening is asynchronous — the contents arrive over the socket — so a
+   *  search result cannot jump to its line at click time. It leaves the
+   *  position here and the editor consumes it on arrival. */
+  pendingReveal: { relPath: string; line: number; column: number } | null;
   openTab: (relPath: string, value: string) => void;
   closeTab: (relPath: string) => void;
   setActive: (relPath: string) => void;
@@ -23,6 +42,12 @@ interface OpenTabsStore {
   /** Applies an external change (rename or delete) coming from the tree. */
   renameTab: (relPath: string, newRelPath: string) => void;
   closeAll: () => void;
+  /** Opens a file in the other pane, opening the split if it is closed. */
+  openToSide: (relPath: string) => void;
+  closeSplit: () => void;
+  focusPane: (pane: PaneId) => void;
+  requestReveal: (relPath: string, line: number, column: number) => void;
+  consumeReveal: () => { relPath: string; line: number; column: number } | null;
 }
 
 function baseName(relPath: string): string {
@@ -32,14 +57,24 @@ function baseName(relPath: string): string {
 export const useOpenTabsStore = create<OpenTabsStore>((set, get) => ({
   tabs: [],
   activeRelPath: null,
+  secondaryRelPath: null,
+  splitOpen: false,
+  focusedPane: "primary",
+  pendingReveal: null,
 
   openTab: (relPath, value) => {
     const existing = get().tabs.find((tab) => tab.relPath === relPath);
 
+    /** Which pane a newly opened file lands in. */
+    const target = (state: OpenTabsStore) =>
+      state.focusedPane === "secondary" && state.splitOpen
+        ? { secondaryRelPath: relPath }
+        : { activeRelPath: relPath };
+
     if (existing) {
       // Re-opening a file refreshes its contents but keeps its tab position.
       set((state) => ({
-        activeRelPath: relPath,
+        ...target(state),
         tabs: state.tabs.map((tab) =>
           tab.relPath === relPath ? { ...tab, value, isDirty: false } : tab,
         ),
@@ -49,7 +84,7 @@ export const useOpenTabsStore = create<OpenTabsStore>((set, get) => ({
 
     const name = baseName(relPath);
     set((state) => ({
-      activeRelPath: relPath,
+      ...target(state),
       tabs: [
         ...state.tabs,
         { relPath, name, extension: fileExtension(name), value, isDirty: false },
@@ -62,14 +97,42 @@ export const useOpenTabsStore = create<OpenTabsStore>((set, get) => ({
       const index = state.tabs.findIndex((tab) => tab.relPath === relPath);
       const tabs = state.tabs.filter((tab) => tab.relPath !== relPath);
 
-      if (state.activeRelPath !== relPath) return { tabs };
-
       // Focus the neighbour on the left, matching every editor's behaviour.
-      const next = tabs[Math.max(0, index - 1)];
-      return { tabs, activeRelPath: next?.relPath ?? null };
+      const next = tabs[Math.max(0, index - 1)]?.relPath ?? null;
+
+      // Both panes have to be checked: the same file can be showing in each,
+      // and a pane left pointing at a closed tab renders nothing at all.
+      return {
+        tabs,
+        activeRelPath: state.activeRelPath === relPath ? next : state.activeRelPath,
+        secondaryRelPath:
+          state.secondaryRelPath === relPath ? next : state.secondaryRelPath,
+      };
     }),
 
-  setActive: (relPath) => set({ activeRelPath: relPath }),
+  setActive: (relPath) =>
+    set((state) =>
+      state.focusedPane === "secondary" && state.splitOpen
+        ? { secondaryRelPath: relPath }
+        : { activeRelPath: relPath },
+    ),
+
+  openToSide: (relPath) =>
+    set((state) => ({
+      splitOpen: true,
+      focusedPane: "secondary",
+      // If the split is already open showing this file, this is a no-op that
+      // simply moves focus there.
+      secondaryRelPath: relPath,
+      // Seed the primary if nothing is in it, so an empty pane is not left
+      // beside the new one.
+      activeRelPath: state.activeRelPath ?? relPath,
+    })),
+
+  closeSplit: () =>
+    set({ splitOpen: false, secondaryRelPath: null, focusedPane: "primary" }),
+
+  focusPane: (pane) => set({ focusedPane: pane }),
 
   markDirty: (relPath, isDirty) =>
     set((state) => ({
@@ -89,12 +152,44 @@ export const useOpenTabsStore = create<OpenTabsStore>((set, get) => ({
         ),
         activeRelPath:
           state.activeRelPath === relPath ? newRelPath : state.activeRelPath,
+        secondaryRelPath:
+          state.secondaryRelPath === relPath ? newRelPath : state.secondaryRelPath,
       };
     }),
 
-  closeAll: () => set({ tabs: [], activeRelPath: null }),
+  closeAll: () =>
+    set({
+      tabs: [],
+      activeRelPath: null,
+      secondaryRelPath: null,
+      splitOpen: false,
+      focusedPane: "primary",
+      pendingReveal: null,
+    }),
+
+  requestReveal: (relPath, line, column) =>
+    set({ pendingReveal: { relPath, line, column } }),
+
+  consumeReveal: () => {
+    const pending = get().pendingReveal;
+    if (pending) set({ pendingReveal: null });
+    return pending;
+  },
 }));
 
 /** The currently focused tab, or null. */
 export const selectActiveTab = (state: OpenTabsStore): OpenTab | null =>
   state.tabs.find((tab) => tab.relPath === state.activeRelPath) ?? null;
+
+/** The tab a given pane is showing. */
+export const selectPaneTab =
+  (pane: PaneId) =>
+  (state: OpenTabsStore): OpenTab | null => {
+    const relPath =
+      pane === "secondary" ? state.secondaryRelPath : state.activeRelPath;
+    return state.tabs.find((tab) => tab.relPath === relPath) ?? null;
+  };
+
+/** True while any open file has edits that have not reached the server. */
+export const selectHasUnsavedWork = (state: OpenTabsStore): boolean =>
+  state.tabs.some((tab) => tab.isDirty);

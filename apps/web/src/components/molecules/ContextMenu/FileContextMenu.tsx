@@ -1,21 +1,60 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Input, Modal } from "antd";
+import type { TreeNodeData } from "@replit-clone/shared";
 import "./FileContextMenu.css";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
+import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
+import { fileDownloadUrl } from "../../../apis/projects.ts";
+import {
+  selectOrderedSelection,
+  useTreeSelectionStore,
+} from "../../../store/treeSelectionStore.ts";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 
-type PendingAction = "newFile" | "newFolder" | "rename";
+type PendingAction = "newFile" | "newFolder" | "rename" | "delete";
 
 const ACTION_COPY: Record<PendingAction, { title: string; okText: string }> = {
   newFile: { title: "New file", okText: "Create" },
   newFolder: { title: "New folder", okText: "Create" },
   rename: { title: "Rename", okText: "Rename" },
+  delete: { title: "Delete", okText: "Delete" },
 };
 
 export const FileContextMenu = () => {
   const { x, y, isOpen, node, close } = useFileContextMenuStore();
   const { editorSocket } = useEditorSocketStore();
+  const projectId = useTreeStructureStore((state) => state.projectId);
+  /** What Delete will act on: the selection when this row is part of one,
+   *  otherwise just this row. */
+  const selection = useTreeSelectionStore(selectOrderedSelection);
+  const treeStructure = useTreeStructureStore((state) => state.treeStructure);
 
+  /** Which paths are folders, so a delete emits the right event for each.
+   *  Derived from the tree rather than guessed from the name — a file can be
+   *  called anything, including something that looks like a directory. */
+  const folderPaths = useMemo(() => {
+    const paths = new Set<string>();
+
+    const walk = (entry: TreeNodeData) => {
+      if (entry.type === "directory") {
+        if (entry.relPath) paths.add(entry.relPath);
+        entry.children?.forEach(walk);
+      }
+    };
+
+    if (treeStructure) walk(treeStructure);
+    return paths;
+  }, [treeStructure]);
+
+  /** The node the dialog is acting on.
+   *
+   *  Deliberately a local copy rather than the store's `node`: opening a dialog
+   *  also closes the menu, and `close()` clears that node. Reading it from the
+   *  store meant the render that should have shown the dialog bailed out at the
+   *  null guard instead, so New file, New folder and Rename all did nothing —
+   *  and the stale `pending` then made a dialog appear on the NEXT right-click.
+   */
+  const [target, setTarget] = useState<TreeNodeData | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [name, setName] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
@@ -40,24 +79,37 @@ export const FileContextMenu = () => {
     };
   }, [isOpen, close]);
 
-  if (!node) return null;
-
-  const isFolder = node.type === "directory";
-  /** New entries land inside a folder, or beside a file. */
-  const parentPath = isFolder
-    ? node.relPath
-    : node.relPath.split("/").slice(0, -1).join("/");
-
   function startAction(action: PendingAction) {
+    if (!node) return;
+    setTarget(node);
     setPending(action);
-    setName(action === "rename" ? (node?.name ?? "") : "");
+    setName(action === "rename" ? node.name : "");
+
+    if (action === "delete") {
+      // The selection when this row is part of one; otherwise just this row.
+      setDeleteTargets(
+        selection.includes(node.relPath) ? selection : [node.relPath],
+      );
+    }
+
     close();
+  }
+
+  function closeDialog() {
+    setPending(null);
+    setTarget(null);
+    setName("");
   }
 
   function confirmAction() {
     const trimmed = name.trim();
-    if (!trimmed || !editorSocket || !node) return;
+    if (!trimmed || !editorSocket || !target) return;
 
+    /** New entries land inside a folder, or beside a file. */
+    const parentPath =
+      target.type === "directory"
+        ? target.relPath
+        : target.relPath.split("/").slice(0, -1).join("/");
     const childPath = parentPath ? `${parentPath}/${trimmed}` : trimmed;
 
     if (pending === "newFile") {
@@ -66,29 +118,47 @@ export const FileContextMenu = () => {
       editorSocket.emit("createFolder", { relPath: childPath });
     } else if (pending === "rename") {
       editorSocket.emit("renameEntry", {
-        relPath: node.relPath,
+        relPath: target.relPath,
         newName: trimmed,
       });
     }
 
-    setPending(null);
-    setName("");
+    closeDialog();
   }
 
-  function handleDelete() {
-    if (!editorSocket || !node) return;
+  /** Deletion is recursive on the server and has no undo, so it always
+   *  confirms. A folder additionally has to be named, the way destructive
+   *  actions elsewhere do — one slipped click used to be enough to destroy a
+   *  whole source tree. */
+  /** Everything Delete will remove. Captured when the dialog opens so it
+   *  cannot change underneath the confirmation the user is reading. */
+  const [deleteTargets, setDeleteTargets] = useState<string[]>([]);
 
-    if (node.type === "directory") {
-      editorSocket.emit("deleteFolder", { relPath: node.relPath });
-    } else {
-      editorSocket.emit("deleteFile", { relPath: node.relPath });
+  function confirmDelete() {
+    if (!editorSocket || !target) return;
+    if (isDeletingFolder && name.trim() !== confirmWord) return;
+
+    for (const relPath of deleteTargets) {
+      // A folder and a file are different events; the tree knows which each
+      // path is, so ask it rather than guessing from the name.
+      const isFolder = folderPaths.has(relPath);
+      editorSocket.emit(isFolder ? "deleteFolder" : "deleteFile", { relPath });
     }
-    close();
+
+    useTreeSelectionStore.getState().clear();
+    closeDialog();
   }
+
+  /** Confirmation is required whenever a folder is involved, because that is
+   *  the case where one slip destroys work that exists nowhere else. */
+  const isDeletingFolder =
+    pending === "delete" && deleteTargets.some((path) => folderPaths.has(path));
+  const confirmWord = deleteTargets.length > 1 ? "delete" : (target?.name ?? "");
+  const deleteBlocked = isDeletingFolder && name.trim() !== confirmWord;
 
   return (
     <>
-      {isOpen && (
+      {isOpen && node && (
         <div ref={menuRef} className="fileContextOptionsWrapper" style={{ left: x, top: y }}>
           <button className="fileContextButton" onClick={() => startAction("newFile")}>
             New file
@@ -99,7 +169,23 @@ export const FileContextMenu = () => {
           <button className="fileContextButton" onClick={() => startAction("rename")}>
             Rename
           </button>
-          <button className="fileContextButton fileContextButtonDanger" onClick={handleDelete}>
+          {node.type === "file" && projectId && (
+            <button
+              className="fileContextButton"
+              onClick={() => {
+                // A real navigation, so the browser honours the filename the
+                // server sends in Content-Disposition.
+                window.location.assign(fileDownloadUrl(projectId, node.relPath));
+                close();
+              }}
+            >
+              Download
+            </button>
+          )}
+          <button
+            className="fileContextButton fileContextButtonDanger"
+            onClick={() => startAction("delete")}
+          >
             Delete
           </button>
         </div>
@@ -109,18 +195,53 @@ export const FileContextMenu = () => {
         open={pending !== null}
         title={pending ? ACTION_COPY[pending].title : ""}
         okText={pending ? ACTION_COPY[pending].okText : "OK"}
-        onOk={confirmAction}
-        onCancel={() => setPending(null)}
-        okButtonProps={{ disabled: !name.trim() }}
+        onOk={pending === "delete" ? confirmDelete : confirmAction}
+        onCancel={closeDialog}
+        okButtonProps={
+          pending === "delete"
+            ? { danger: true, disabled: deleteBlocked }
+            : { disabled: !name.trim() }
+        }
         destroyOnHidden
       >
-        <Input
-          autoFocus
-          value={name}
-          placeholder="name"
-          onChange={(event) => setName(event.target.value)}
-          onPressEnter={confirmAction}
-        />
+        {pending === "delete" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <span style={{ color: "var(--rc-text-muted)" }}>
+              {deleteTargets.length > 1 ? (
+                <>
+                  Delete <b>{deleteTargets.length} items</b>
+                  {isDeletingFolder ? ", including folders and everything inside them" : ""}?
+                </>
+              ) : (
+                <>
+                  Delete <b>{target?.name}</b>
+                  {isDeletingFolder ? " and everything inside it" : ""}?
+                </>
+              )}{" "}
+              This removes them from disk and cannot be undone.
+            </span>
+
+            {/* A folder can hold work that exists nowhere else, so removing one
+                takes more than a click in the same place the menu just was. */}
+            {isDeletingFolder && (
+              <Input
+                autoFocus
+                value={name}
+                placeholder={`Type "${confirmWord}" to confirm`}
+                onChange={(event) => setName(event.target.value)}
+                onPressEnter={confirmDelete}
+              />
+            )}
+          </div>
+        ) : (
+          <Input
+            autoFocus
+            value={name}
+            placeholder="name"
+            onChange={(event) => setName(event.target.value)}
+            onPressEnter={confirmAction}
+          />
+        )}
       </Modal>
     </>
   );

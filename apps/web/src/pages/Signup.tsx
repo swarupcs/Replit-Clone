@@ -11,10 +11,11 @@ export const Signup = () => {
       title="Create your account"
       subtitle="Free to start. No credit card, no setup."
       submitLabel="Create account"
+      passwordAutoComplete="new-password"
       footer={{ prompt: "Already registered?", linkText: "Sign in", to: "/login" }}
       onSubmit={async (credentials) => {
         await signup(credentials);
-        navigate("/", { replace: true });
+        void navigate("/", { replace: true });
       }}
     />
   );

@@ -1,4 +1,5 @@
-import type { CSSProperties, MouseEvent } from "react";
+import { useState } from "react";
+import type { CSSProperties, DragEvent, MouseEvent } from "react";
 import { IoIosArrowForward } from "react-icons/io";
 import { FaFolder, FaFolderOpen } from "react-icons/fa";
 import type { TreeNodeData } from "@replit-clone/shared";
@@ -8,6 +9,10 @@ import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
+import {
+  selectOrderedSelection,
+  useTreeSelectionStore,
+} from "../../../store/treeSelectionStore.ts";
 
 interface TreeNodeProps {
   node: TreeNodeData | null;
@@ -19,6 +24,12 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
   const { expandedPaths, toggleExpanded } = useTreeStructureStore();
   const activeRelPath = useOpenTabsStore((state) => state.activeRelPath);
   const { open: openContextMenu } = useFileContextMenuStore();
+  /** Highlighted while something is being dragged over this row. */
+  const [dropping, setDropping] = useState(false);
+  const click = useTreeSelectionStore((state) => state.click);
+  const isSelected = useTreeSelectionStore((state) =>
+    node ? state.selected.has(node.relPath) : false,
+  );
 
   if (!node) return null;
 
@@ -31,7 +42,50 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
     event.preventDefault();
     event.stopPropagation();
     if (!node) return;
+
+    // Right-clicking outside the selection acts on that row alone, the way
+    // every file manager behaves; inside it, the selection is kept.
+    const selection = useTreeSelectionStore.getState();
+    if (!selection.selected.has(node.relPath)) {
+      selection.selectOnly(node.relPath);
+    }
+
     openContextMenu(event.clientX, event.clientY, node);
+  }
+
+  /** The folder this row represents as a drop target: itself when it is a
+   *  folder, otherwise the folder it sits in. */
+  function dropTarget(): string {
+    if (!node) return "";
+    return isFolder ? node.relPath : node.relPath.split("/").slice(0, -1).join("/");
+  }
+
+  function handleDrop(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    setDropping(false);
+
+    const source = event.dataTransfer.getData("text/rc-path");
+    if (!source || !node) return;
+
+    const destDir = dropTarget();
+
+    // Dragging a selected row moves the whole selection; dragging an unselected
+    // one moves only it.
+    const selection = useTreeSelectionStore.getState();
+    const moving = selection.selected.has(source)
+      ? selectOrderedSelection(selection)
+      : [source];
+
+    for (const relPath of moving) {
+      // Skip anything already in the destination, and never drop a folder into
+      // itself or into one of its own descendants.
+      const currentDir = relPath.split("/").slice(0, -1).join("/");
+      if (currentDir === destDir) continue;
+      if (destDir === relPath || destDir.startsWith(`${relPath}/`)) continue;
+
+      editorSocket?.emit("moveEntry", { relPath, destDir });
+    }
   }
 
   return (
@@ -40,9 +94,32 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
         <div
           className="rc-tree-row"
           data-active={isActive}
+          data-selected={isSelected}
+          data-dropping={dropping}
           style={{ paddingLeft: `${8 + depth * 14}px` }}
+          draggable
+          onDragStart={(event) => {
+            // A custom type, so a drag from elsewhere in the page cannot be
+            // mistaken for one of ours.
+            event.dataTransfer.setData("text/rc-path", node.relPath);
+            event.dataTransfer.effectAllowed = "move";
+          }}
+          onDragOver={(event) => {
+            if (!event.dataTransfer.types.includes("text/rc-path")) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            setDropping(true);
+          }}
+          onDragLeave={() => setDropping(false)}
+          onDrop={handleDrop}
           onContextMenu={handleContextMenu}
-          onClick={() => {
+          onClick={(event) => {
+            const meta = event.metaKey || event.ctrlKey;
+            click(node.relPath, { meta, shift: event.shiftKey });
+
+            // A modified click is selecting, not navigating.
+            if (meta || event.shiftKey) return;
+
             if (isFolder) {
               toggleExpanded(node.relPath);
             } else {

@@ -11,7 +11,8 @@
     "build": "pnpm --filter @replit-clone/shared build && pnpm --parallel --filter \"./apps/*\" build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
-    "images:build": "docker build -t sandbox-node:latest images/node && docker build -t sandbox-python:latest images/python",
+    "test": "pnpm -r test",
+    "images:build": "docker build -t sandbox-node:latest images/node && docker build -t sandbox-python:latest images/python && docker build -t sandbox-go:latest images/go",
     "db:up": "docker compose up -d"
   },
   "pnpm": {
@@ -21,5 +22,11 @@
       "@prisma/client",
       "prisma"
     ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^15.15.0",
+    "typescript-eslint": "^8.67.0"
   }
 }

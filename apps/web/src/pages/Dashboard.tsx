@@ -1,26 +1,41 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
+  Dropdown,
   Empty,
   Input,
   Modal,
-  Popconfirm,
   Segmented,
+  Select,
   Spin,
-  Tooltip,
   Typography,
   message,
 } from "antd";
-import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import {
+  CopyOutlined,
+  DeleteOutlined,
+  DownloadOutlined,
+  EditOutlined,
+  MoreOutlined,
+  ShareAltOutlined,
+  TeamOutlined,
+  PlusOutlined,
+  SearchOutlined,
+} from "@ant-design/icons";
+import type { Project } from "@replit-clone/shared";
 import {
   createProjectApi,
   deleteProjectApi,
+  duplicateProjectApi,
   listProjectsApi,
   listTemplatesApi,
+  projectExportUrl,
+  renameProjectApi,
 } from "../apis/projects.ts";
 import { useAuth } from "../hooks/useAuth.ts";
+import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx";
 
 /** Relative time for the card footer -- "3 days ago" reads better than a date
  *  when you're scanning a list of things you made recently. */
@@ -42,6 +57,36 @@ function relativeTime(iso: string): string {
   return "just now";
 }
 
+type SortKey = "recent" | "created" | "name";
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "recent", label: "Last opened" },
+  { value: "created", label: "Newest" },
+  { value: "name", label: "Name" },
+];
+
+/** Most recent activity first, falling back to creation for a project that has
+ *  never been opened. */
+function sortProjects(projects: Project[], by: SortKey): Project[] {
+  const sorted = [...projects];
+
+  if (by === "name") {
+    sorted.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+    );
+  } else if (by === "created") {
+    sorted.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  } else {
+    const activity = (project: Project) =>
+      new Date(project.lastActiveAt ?? project.createdAt).getTime();
+    sorted.sort((a, b) => activity(b) - activity(a));
+  }
+
+  return sorted;
+}
+
 export const Dashboard = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -52,6 +97,17 @@ export const Dashboard = () => {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [template, setTemplate] = useState<string | null>(null);
+
+  /** Filter and ordering. The list was created-descending with no way to find
+   *  anything, which stops being usable at about a dozen projects. */
+  const [query, setQuery] = useState("");
+  const [sortBy, setSortBy] = useState<SortKey>("recent");
+
+  /** The project being renamed, and the name being typed for it. */
+  const [renaming, setRenaming] = useState<Project | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [deleting, setDeleting] = useState<Project | null>(null);
+  const [sharing, setSharing] = useState<Project | null>(null);
 
   const { data: projects, isLoading } = useQuery({
     queryKey: ["projects"],
@@ -64,10 +120,53 @@ export const Dashboard = () => {
     staleTime: Infinity,
   });
 
+  const refreshProjects = () =>
+    queryClient.invalidateQueries({ queryKey: ["projects"] });
+
   const deleteMutation = useMutation({
     mutationFn: deleteProjectApi,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects"] }),
+    onSuccess: refreshProjects,
+    onError: () => {
+      // Silence here used to mean a card that simply stayed put.
+      void messageApi.error("Could not delete the project.");
+    },
   });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, next }: { id: string; next: string }) =>
+      renameProjectApi(id, next),
+    onSuccess: async () => {
+      setRenaming(null);
+      await refreshProjects();
+    },
+    onError: () => {
+      void messageApi.error("Could not rename the project.");
+    },
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: (id: string) => duplicateProjectApi(id),
+    onSuccess: async (project) => {
+      await refreshProjects();
+      void messageApi.success(`Created "${project.name}".`);
+    },
+    onError: () => {
+      void messageApi.error("Could not duplicate the project.");
+    },
+  });
+
+  const visibleProjects = useMemo(() => {
+    const trimmed = query.trim().toLowerCase();
+    const matching = trimmed
+      ? (projects ?? []).filter(
+          (project) =>
+            project.name.toLowerCase().includes(trimmed) ||
+            project.template.toLowerCase().includes(trimmed),
+        )
+      : (projects ?? []);
+
+    return sortProjects(matching, sortBy);
+  }, [projects, query, sortBy]);
 
   const selectedTemplate = template ?? templates?.[0]?.id ?? "react-vite";
   const activeTemplate = templates?.find((t) => t.id === selectedTemplate);
@@ -77,7 +176,7 @@ export const Dashboard = () => {
     try {
       const project = await createProjectApi(name || undefined, selectedTemplate);
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
-      navigate(`/project/${project.id}`);
+      void navigate(`/project/${project.id}`);
     } catch {
       void messageApi.error("Could not create the project. Check the server logs.");
     } finally {
@@ -145,26 +244,47 @@ export const Dashboard = () => {
             </h1>
             <p style={{ color: "var(--rc-text-subtle)", fontSize: 14 }}>
               {projects?.length
-                ? `${projects.length} playground${projects.length === 1 ? "" : "s"}`
+                ? query.trim()
+                  ? `${visibleProjects.length} of ${projects.length} shown`
+                  : `${projects.length} playground${projects.length === 1 ? "" : "s"}`
                 : "Nothing here yet — create your first playground."}
             </p>
           </div>
 
-          <Button
-            type="primary"
-            size="large"
-            icon={<PlusOutlined />}
-            onClick={() => setIsCreating(true)}
-          >
-            New playground
-          </Button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <Input
+              allowClear
+              placeholder="Search projects"
+              prefix={<SearchOutlined style={{ color: "var(--rc-text-subtle)" }} />}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              style={{ width: 220 }}
+            />
+
+            <Select
+              value={sortBy}
+              onChange={setSortBy}
+              options={SORT_OPTIONS}
+              style={{ width: 150 }}
+              aria-label="Sort projects"
+            />
+
+            <Button
+              type="primary"
+              size="large"
+              icon={<PlusOutlined />}
+              onClick={() => setIsCreating(true)}
+            >
+              New playground
+            </Button>
+          </div>
         </div>
 
         {isLoading ? (
           <div style={{ display: "grid", placeItems: "center", padding: 80 }}>
             <Spin size="large" />
           </div>
-        ) : projects && projects.length > 0 ? (
+        ) : visibleProjects.length > 0 ? (
           <div
             style={{
               display: "grid",
@@ -172,17 +292,17 @@ export const Dashboard = () => {
               gap: 18,
             }}
           >
-            {projects.map((project) => (
+            {visibleProjects.map((project) => (
               <div
                 key={project.id}
                 className="rc-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => navigate(`/project/${project.id}`)}
+                onClick={() => void navigate(`/project/${project.id}`)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    navigate(`/project/${project.id}`);
+                    void navigate(`/project/${project.id}`);
                   }
                 }}
               >
@@ -194,30 +314,93 @@ export const Dashboard = () => {
                     gap: 8,
                   }}
                 >
-                  <span className="rc-badge">{project.template}</span>
+                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span className="rc-badge">{project.template}</span>
+                    {project.ownerId !== user?.id && (
+                      <span
+                        className="rc-badge"
+                        title="Shared with you"
+                        style={{ display: "flex", alignItems: "center", gap: 4 }}
+                      >
+                        <TeamOutlined /> Shared
+                      </span>
+                    )}
+                  </span>
 
-                  {/* Stop propagation so the confirm popup doesn't also open
-                      the project behind it. */}
+                  {/* Stop propagation so a menu click doesn't also open the
+                      project behind it. */}
                   <div
                     onClick={(event) => event.stopPropagation()}
                     onKeyDown={(event) => event.stopPropagation()}
                   >
-                    <Popconfirm
-                      title="Delete this project?"
-                      description="The files are removed from disk permanently."
-                      okText="Delete"
-                      okButtonProps={{ danger: true }}
-                      onConfirm={() => deleteMutation.mutate(project.id)}
+                    <Dropdown
+                      trigger={["click"]}
+                      menu={{
+                        items: [
+                          // A project shared with you is not yours to rename,
+                          // share on, or delete — the menu says so by omission
+                          // rather than by offering something that will fail.
+                          ...(project.ownerId === user?.id
+                            ? [
+                                {
+                                  key: "share",
+                                  icon: <ShareAltOutlined />,
+                                  label: "Share",
+                                  onClick: () => setSharing(project),
+                                },
+                              ]
+                            : []),
+                          ...(project.ownerId === user?.id
+                            ? [
+                                {
+                                  key: "rename",
+                                  icon: <EditOutlined />,
+                                  label: "Rename",
+                                  onClick: () => {
+                                    setRenaming(project);
+                                    setRenameValue(project.name);
+                                  },
+                                },
+                              ]
+                            : []),
+                          {
+                            key: "duplicate",
+                            icon: <CopyOutlined />,
+                            label: "Duplicate",
+                            onClick: () => duplicateMutation.mutate(project.id),
+                          },
+                          {
+                            key: "export",
+                            icon: <DownloadOutlined />,
+                            label: "Download as zip",
+                            // A real navigation, so the browser honours the
+                            // Content-Disposition filename.
+                            onClick: () => {
+                              window.location.assign(projectExportUrl(project.id));
+                            },
+                          },
+                          ...(project.ownerId === user?.id
+                            ? [
+                                { type: "divider" as const },
+                                {
+                                  key: "delete",
+                                  icon: <DeleteOutlined />,
+                                  label: "Delete",
+                                  danger: true,
+                                  onClick: () => setDeleting(project),
+                                },
+                              ]
+                            : []),
+                        ],
+                      }}
                     >
-                      <Tooltip title="Delete">
-                        <Button
-                          danger
-                          type="text"
-                          size="small"
-                          icon={<DeleteOutlined />}
-                        />
-                      </Tooltip>
-                    </Popconfirm>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<MoreOutlined />}
+                        aria-label={`Actions for ${project.name}`}
+                      />
+                    </Dropdown>
                   </div>
                 </div>
 
@@ -235,7 +418,12 @@ export const Dashboard = () => {
                 </div>
 
                 <div style={{ color: "var(--rc-text-subtle)", fontSize: 12.5 }}>
-                  Created {relativeTime(project.createdAt)}
+                  {/* lastActiveAt was written on every connect and never shown;
+                      "created" is the least useful thing to know about a
+                      project you are looking for. */}
+                  {project.lastActiveAt
+                    ? `Opened ${relativeTime(project.lastActiveAt)}`
+                    : `Created ${relativeTime(project.createdAt)}`}
                 </div>
               </div>
             ))}
@@ -245,21 +433,81 @@ export const Dashboard = () => {
             <Empty
               description={
                 <span style={{ color: "var(--rc-text-subtle)" }}>
-                  No projects yet
+                  {query.trim()
+                    ? `Nothing matches "${query.trim()}"`
+                    : "No projects yet"}
                 </span>
               }
             >
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => setIsCreating(true)}
-              >
-                Create one
-              </Button>
+              {query.trim() ? (
+                <Button onClick={() => setQuery("")}>Clear search</Button>
+              ) : (
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setIsCreating(true)}
+                >
+                  Create one
+                </Button>
+              )}
             </Empty>
           </div>
         )}
       </main>
+
+      {sharing && (
+        <ShareDialog
+          projectId={sharing.id}
+          projectName={sharing.name}
+          open
+          onClose={() => setSharing(null)}
+        />
+      )}
+
+      <Modal
+        open={renaming !== null}
+        title="Rename project"
+        okText="Rename"
+        confirmLoading={renameMutation.isPending}
+        okButtonProps={{ disabled: !renameValue.trim() }}
+        onOk={() => {
+          if (renaming) {
+            renameMutation.mutate({ id: renaming.id, next: renameValue });
+          }
+        }}
+        onCancel={() => setRenaming(null)}
+        destroyOnHidden
+      >
+        <Input
+          autoFocus
+          value={renameValue}
+          onChange={(event) => setRenameValue(event.target.value)}
+          onPressEnter={() => {
+            if (renaming && renameValue.trim()) {
+              renameMutation.mutate({ id: renaming.id, next: renameValue });
+            }
+          }}
+        />
+      </Modal>
+
+      <Modal
+        open={deleting !== null}
+        title="Delete this project?"
+        okText="Delete"
+        okButtonProps={{ danger: true }}
+        confirmLoading={deleteMutation.isPending}
+        onOk={() => {
+          if (deleting) deleteMutation.mutate(deleting.id);
+          setDeleting(null);
+        }}
+        onCancel={() => setDeleting(null)}
+        destroyOnHidden
+      >
+        <span style={{ color: "var(--rc-text-muted)" }}>
+          <b>{deleting?.name}</b> and its files are removed from disk
+          permanently. Download it first if you want to keep a copy.
+        </span>
+      </Modal>
 
       <Modal
         open={isCreating}

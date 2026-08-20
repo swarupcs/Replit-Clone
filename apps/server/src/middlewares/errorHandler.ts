@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { ZodError } from "zod";
 import { AppError } from "../utils/errors.js";
+import { logger } from "../lib/logger.js";
 
 export function notFoundHandler(_req: Request, res: Response): void {
   res
@@ -30,6 +31,25 @@ export function errorHandler(
     return;
   }
 
+  // multer rejects an oversized or over-count upload with its own error type,
+  // which would otherwise surface as a bare 500.
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { name?: string }).name === "MulterError"
+  ) {
+    const code = (error as { code?: string }).code ?? "UPLOAD_FAILED";
+    res.status(code === "LIMIT_FILE_SIZE" ? 413 : 400).json({
+      success: false,
+      code,
+      message:
+        code === "LIMIT_FILE_SIZE"
+          ? "That file is too large to upload"
+          : "Could not accept that upload",
+    });
+    return;
+  }
+
   if (error instanceof AppError) {
     res.status(error.statusCode).json({
       success: false,
@@ -39,7 +59,7 @@ export function errorHandler(
     return;
   }
 
-  console.error("Unhandled error:", error);
+  logger.error("unhandled error", error);
   res.status(500).json({
     success: false,
     code: "INTERNAL_ERROR",

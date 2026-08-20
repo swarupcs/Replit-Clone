@@ -5,6 +5,8 @@ import type { RunState } from "@replit-clone/shared";
 import { ensureContainer, getPreviewTarget } from "./containerManager.js";
 import { getTemplate } from "../templates/registry.js";
 import { prisma } from "../lib/prisma.js";
+import { logger } from "../lib/logger.js";
+import { increment } from "../lib/metrics.js";
 
 /** How much output to retain per project so a client that connects late (or
  *  reconnects) can rebuild the log pane. Bounded so a chatty dev server cannot
@@ -19,22 +21,81 @@ const READY_POLL_MS = 1000;
  *  test run) never listen on a port at all. */
 const READY_TIMEOUT_MS = 3 * 60 * 1000;
 
-interface RunSession {
+export interface RunSession {
   state: RunState;
   history: string[];
   stream?: Duplex;
   exec?: Exec;
   readyTimer?: NodeJS.Timeout;
   readyDeadline?: number;
+  /** Process group the run was started in; see startRun. */
+  pgid?: string;
+  /** Output held back while the process group id's marker line is still
+   *  potentially incomplete. */
+  pgidBuffer?: string;
 }
 
 const sessions = new Map<string, RunSession>();
+
+/** Prefix the launcher prints the run's process group id behind.
+ *
+ *  Printable, because it travels as a shell argument — a NUL would truncate it
+ *  — and distinctive enough that build output cannot be mistaken for it. It is
+ *  stripped from the log before the user ever sees it. */
+export const PGID_MARKER = "__rc_pgid__:";
+
+const PGID_PATTERN = new RegExp(`${PGID_MARKER}(\\d+)\\r?\\n`);
+
+/** How much output to hold while waiting for the marker line. It is the first
+ *  thing the launcher writes, so this only ever covers a chunk boundary. */
+const PGID_BUFFER_LIMIT = 4096;
+
+/** Wraps a string as a single-quoted shell word. */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Takes the marker line out of the stream, returning what is left to display.
+ *
+ *  Buffered rather than matched per chunk: the marker could in principle be
+ *  split across two reads, and losing it would leave the run with no way to be
+ *  stopped.
+ */
+export function takeProcessGroupId(
+  current: RunSession,
+  text: string,
+): string {
+  if (current.pgid !== undefined) return text;
+
+  const buffered = (current.pgidBuffer ?? "") + text;
+  const match = PGID_PATTERN.exec(buffered);
+
+  if (match) {
+    current.pgid = match[1];
+    current.pgidBuffer = undefined;
+    return buffered.replace(match[0], "");
+  }
+
+  // Still might be mid-marker. Give up once it is clear it is not coming, and
+  // release what was held so the user is not staring at an empty log.
+  if (buffered.length > PGID_BUFFER_LIMIT) {
+    current.pgidBuffer = undefined;
+    return buffered;
+  }
+
+  current.pgidBuffer = buffered;
+  return "";
+}
 
 type Listener = (event: RunEvent) => void;
 
 export type RunEvent =
   | { type: "state"; state: RunState }
-  | { type: "output"; chunk: string };
+  | { type: "output"; chunk: string }
+  // The dev server just started answering, so the preview is worth loading.
+  // Without this the pane sat on whatever it had until the user pressed
+  // reload, with nothing telling them when to.
+  | { type: "ready"; port: number };
 
 /** Subscribers are per project, not per socket, so every tab watching the same
  *  project sees the same log and status. */
@@ -139,6 +200,13 @@ function probeUntilReady(projectId: string): void {
       if (await isListening(projectId)) {
         stopProbing(live);
         setState(projectId, { status: "running", command: live.state.command });
+
+        const template = await templateForProject(projectId).catch(
+          () => undefined,
+        );
+        if (template) {
+          emit(projectId, { type: "ready", port: template.devPort });
+        }
       }
     })();
   }, READY_POLL_MS);
@@ -169,17 +237,34 @@ export async function startRun(projectId: string): Promise<void> {
   const template = await templateForProject(projectId);
 
   current.history = [];
+  current.pgid = undefined;
+  current.pgidBuffer = undefined;
+  increment("runs_started");
+  logger.info("run started", { projectId, command: template.startCommand });
   setState(projectId, { status: "starting", command: template.startCommand });
   pushOutput(projectId, `$ ${template.startCommand}\r\n`);
 
-  // `bash -lc` so the command string can use shell operators (&&, pipes) the
-  // way the registry writes them.
+  // `setsid` puts the run in a session — and so a process group — of its own,
+  // which is what lets stopRun signal exactly what this run started, including
+  // the dev server `npm run dev` spawns as a child, and nothing else.
+  //
+  // The inner shell reports its own `$$` rather than the launcher reporting
+  // `$!`: setsid makes that shell the session leader, so its pid IS the group
+  // id, whether or not setsid had to fork to get there. `bash -lc` so the
+  // command can use the shell operators the registry writes it with.
+  const runScript = `echo "${PGID_MARKER}$$"; ${template.startCommand}`;
   const exec = await container.exec({
-    Cmd: ["/bin/bash", "-lc", template.startCommand],
+    Cmd: [
+      "/bin/bash",
+      "-lc",
+      `setsid /bin/bash -lc ${shellQuote(runScript)} & wait $!`,
+    ],
     AttachStdout: true,
     AttachStderr: true,
     Tty: true,
-    User: "sandbox",
+    // `User` deliberately unset: Docker then inherits the container's own user,
+    // which containerManager matched to the bind mount's owner. Naming a uid
+    // here again is how the two drift apart.
     WorkingDir: "/home/sandbox/app",
     Env: [
       "TERM=xterm-256color",
@@ -189,15 +274,16 @@ export async function startRun(projectId: string): Promise<void> {
     ],
   });
 
-  const stream = await exec.start({ hijack: true, stdin: false });
+  const stream: Duplex = await exec.start({ hijack: true, stdin: false });
 
   current.exec = exec;
-  current.stream = stream as unknown as Duplex;
+  current.stream = stream;
 
   // Tty: true means Docker does NOT multiplex the stream, so chunks are raw
   // terminal bytes and need no 8-byte header parsing.
-  (stream as unknown as Duplex).on("data", (chunk: Buffer) => {
-    pushOutput(projectId, chunk.toString("utf8"));
+  stream.on("data", (chunk: Buffer) => {
+    const visible = takeProcessGroupId(current, chunk.toString("utf8"));
+    if (visible) pushOutput(projectId, visible);
   });
 
   const finish = (): void => {
@@ -208,9 +294,16 @@ export async function startRun(projectId: string): Promise<void> {
       stopProbing(live);
 
       const info = await exec.inspect().catch(() => undefined);
+      const exitCode = info?.ExitCode ?? undefined;
+
+      if (exitCode !== undefined && exitCode !== 0) {
+        increment("runs_failed");
+        logger.warn("run exited non-zero", { projectId, exitCode });
+      }
+
       setState(projectId, {
         status: "exited",
-        exitCode: info?.ExitCode ?? undefined,
+        exitCode,
         command: template.startCommand,
       });
       live.stream = undefined;
@@ -218,8 +311,8 @@ export async function startRun(projectId: string): Promise<void> {
     })();
   };
 
-  (stream as unknown as Duplex).on("end", finish);
-  (stream as unknown as Duplex).on("close", finish);
+  stream.on("end", finish);
+  stream.on("close", finish);
 
   probeUntilReady(projectId);
 }
@@ -227,8 +320,16 @@ export async function startRun(projectId: string): Promise<void> {
 /** Stops the run.
  *
  *  Killing the exec's own PID is not enough: `npm run dev` spawns the actual
- *  dev server as a child, and Docker will not reap it. Matching on the port
- *  the template listens on is the reliable way to free it.
+ *  dev server as a child, and Docker will not reap it. `startRun` therefore
+ *  puts the command in a process group of its own, and this signals the whole
+ *  group — which is exactly what the run started, and nothing else.
+ *
+ *  The previous approach, `pkill -f 'npm|node|vite|next|python|serve'`, killed
+ *  every Node and Python process in the container no matter which shell had
+ *  started it. Because `pkill -f` matches whole command lines, and that pattern
+ *  contains the word "node", it also matched the very shell running it. Its
+ *  `fuser` fallback never did anything either: neither sandbox image installs
+ *  psmisc.
  */
 export async function stopRun(projectId: string): Promise<void> {
   const current = sessions.get(projectId);
@@ -236,22 +337,25 @@ export async function stopRun(projectId: string): Promise<void> {
 
   stopProbing(current);
 
-  const template = await templateForProject(projectId).catch(() => undefined);
+  const { pgid } = current;
 
   try {
     const container = await ensureContainer(projectId);
-    // pkill the process group started by the run, then anything still holding
-    // the dev port. `|| true` so a no-match exit code is not an error.
+
+    // SIGTERM first so a dev server can close its port cleanly, then SIGKILL
+    // for anything still up. `|| true` so a group that has already exited is
+    // not an error.
     const killer = await container.exec({
       Cmd: [
         "/bin/bash",
         "-lc",
-        `pkill -f 'npm|node|vite|next|python|serve' || true; ` +
-          (template ? `fuser -k ${String(template.devPort)}/tcp 2>/dev/null || true` : "true"),
+        pgid
+          ? `kill -TERM -${pgid} 2>/dev/null || true; ` +
+            `sleep 1; kill -KILL -${pgid} 2>/dev/null || true`
+          : "true",
       ],
       AttachStdout: false,
       AttachStderr: false,
-      User: "sandbox",
     });
     await killer.start({ hijack: false, stdin: false });
   } catch {
@@ -261,9 +365,39 @@ export async function stopRun(projectId: string): Promise<void> {
   current.stream?.destroy();
   current.stream = undefined;
   current.exec = undefined;
+  current.pgid = undefined;
+  current.pgidBuffer = undefined;
 
   setState(projectId, { status: "idle" });
   pushOutput(projectId, "\r\n\x1b[33mStopped.\x1b[0m\r\n");
+}
+
+/** Stops the run and starts it again.
+ *
+ *  Restarting used to mean pressing Stop, waiting, and pressing Run — and
+ *  pressing Run too early silently did nothing, because startRun returns early
+ *  while the previous run is still shutting down.
+ */
+export async function restartRun(projectId: string): Promise<void> {
+  await stopRun(projectId);
+
+  // stopRun signals the group and returns; the processes take a moment to go.
+  // Starting into a port that is not yet free is the failure this avoids.
+  await waitForPortRelease(projectId);
+
+  await startRun(projectId);
+}
+
+/** Waits for the dev port to stop answering, up to a bounded time. */
+async function waitForPortRelease(projectId: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+
+  while (Date.now() < deadline) {
+    if (!(await isListening(projectId))) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  logger.warn("dev port still held after stop; starting anyway", { projectId });
 }
 
 /** Drops all state for a project, e.g. when it is deleted. */

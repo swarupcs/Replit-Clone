@@ -17,6 +17,8 @@ interface TreeStructureStore {
    *  revealed (used by the filter, which must show matches inside collapsed
    *  folders). */
   revealPath: (relPath: string) => void;
+  /** Restores a remembered set of open folders. */
+  setExpandedPaths: (paths: string[]) => void;
 }
 
 export const useTreeStructureStore = create<TreeStructureStore>((set, get) => ({
@@ -48,6 +50,8 @@ export const useTreeStructureStore = create<TreeStructureStore>((set, get) => ({
     }),
 
   collapseAll: () => set({ expandedPaths: new Set<string>() }),
+
+  setExpandedPaths: (paths) => set({ expandedPaths: new Set(paths) }),
 
   revealPath: (relPath) =>
     set((state) => {

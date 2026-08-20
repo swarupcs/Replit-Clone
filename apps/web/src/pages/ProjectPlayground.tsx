@@ -1,8 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { io } from "socket.io-client";
 import { Alert, Button, Flex, Tooltip, Typography } from "antd";
-import { VscLayoutPanel, VscLayoutSidebarLeft } from "react-icons/vsc";
+import {
+  VscFiles,
+  VscLayoutPanel,
+  VscLayoutSidebarLeft,
+  VscKey,
+  VscSearch,
+  VscSettingsGear,
+} from "react-icons/vsc";
 import {
   ArrowLeftOutlined,
   EyeInvisibleOutlined,
@@ -22,37 +29,89 @@ import { useRunStore } from "../store/runStore.ts";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
 import { QuickOpen } from "../components/organisms/QuickOpen/QuickOpen.tsx";
+import { EnvVarsDialog } from "../components/organisms/EnvVarsDialog/EnvVarsDialog.tsx";
+import { EditorSettingsDialog } from "../components/organisms/EditorSettingsDialog/EditorSettingsDialog.tsx";
+import { SearchPanel } from "../components/organisms/SearchPanel/SearchPanel.tsx";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
+import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
+import { useWorkspaceSession } from "../hooks/useWorkspaceSession.ts";
+import { installCollab } from "../lib/collab.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 export const ProjectPlayground = () => {
   const { projectId: projectIdFromUrl } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
 
-  const accessToken = useAuthStore((state) => state.accessToken);
+  /** Whether a session exists — NOT the token itself. It rotates roughly every
+   *  fifteen minutes, and depending on its value tore down the editor socket
+   *  (and, through the panel, every terminal) each time it did. */
+  const hasSession = useAuthStore((state) => state.accessToken !== null);
   const { setProjectId } = useTreeStructureStore();
   const { setEditorSocket, lastError, clearError } = useEditorSocketStore();
+  const externallyChanged = useEditorSocketStore((state) => state.externallyChanged);
   const activeTab = useOpenTabsStore(selectActiveTab);
   const closeAllTabs = useOpenTabsStore((state) => state.closeAll);
+  const splitOpen = useOpenTabsStore((state) => state.splitOpen);
 
-  const [showPreview, setShowPreview] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(true);
-  const [showPanel, setShowPanel] = useState(true);
+  const editorSocket = useEditorSocketStore((state) => state.editorSocket);
+  const { restored, remember } = useWorkspaceSession(projectIdFromUrl, editorSocket);
+
+  // Seeded from the remembered arrangement, so a reload comes back to the
+  // layout the user left rather than the defaults.
+  const [showPreview, setShowPreview] = useState(restored?.showPreview ?? false);
+  const [showSidebar, setShowSidebar] = useState(restored?.showSidebar ?? true);
+  const [showPanel, setShowPanel] = useState(restored?.showPanel ?? true);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [envOpen, setEnvOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Which sidebar view is showing. */
+  const [sidebarView, setSidebarView] = useState<"files" | "search">("files");
 
   const closeActiveTab = useOpenTabsStore((state) => state.closeTab);
+  /** The project whose tabs are currently loaded, so re-running the effect for
+   *  the same project does not discard them. */
+  const openedProjectRef = useRef<string | undefined>(undefined);
+
+  useUnsavedWorkGuard();
+
+  // Each toggle records its new state, so the arrangement survives a reload.
+  const toggleSidebar = useCallback(() => {
+    setShowSidebar((value) => {
+      remember({ showSidebar: !value });
+      return !value;
+    });
+  }, [remember]);
+
+  const togglePanel = useCallback(() => {
+    setShowPanel((value) => {
+      remember({ showPanel: !value });
+      return !value;
+    });
+  }, [remember]);
+
+  const togglePreview = useCallback(() => {
+    setShowPreview((value) => {
+      remember({ showPreview: !value });
+      return !value;
+    });
+  }, [remember]);
 
   useHotkeys(
     useMemo(
       () => [
         { key: "p", mod: true, handler: () => setQuickOpen(true) },
-        { key: "b", mod: true, handler: () => setShowSidebar((value) => !value) },
-        { key: "`", mod: true, handler: () => setShowPanel((value) => !value) },
         {
-          key: "j",
+          key: "f",
           mod: true,
-          handler: () => setShowPreview((value) => !value),
+          shift: true,
+          handler: () => {
+            setSidebarView("search");
+            setShowSidebar(true);
+          },
         },
+        { key: "b", mod: true, handler: () => toggleSidebar() },
+        { key: "`", mod: true, handler: () => togglePanel() },
+        { key: "j", mod: true, handler: () => togglePreview() },
         {
           // Ctrl+W is the browser's own close-tab and cannot be reclaimed, so
           // closing an editor tab uses the Alt variant.
@@ -65,12 +124,21 @@ export const ProjectPlayground = () => {
           },
         },
       ],
-      [closeActiveTab],
+      [closeActiveTab, toggleSidebar, togglePanel, togglePreview],
     ),
   );
 
   useEffect(() => {
-    if (!projectIdFromUrl || !accessToken) return;
+    if (!projectIdFromUrl || !hasSession) return;
+
+    // Cleared on the way IN rather than on the way out. Doing it in the
+    // cleanup emptied the tab list while the workspace subscription was still
+    // listening, which wrote "nothing open" over the session that reload was
+    // about to restore.
+    if (openedProjectRef.current !== projectIdFromUrl) {
+      openedProjectRef.current = projectIdFromUrl;
+      closeAllTabs();
+    }
 
     setProjectId(projectIdFromUrl);
 
@@ -78,12 +146,20 @@ export const ProjectPlayground = () => {
       `${import.meta.env.VITE_BACKEND_URL}/editor`,
       {
         query: { projectId: projectIdFromUrl },
-        // The handshake is rejected without this; the server also verifies the
-        // caller owns this project before registering any handler.
-        auth: { token: accessToken },
+        // Resolved per connection attempt rather than captured, so a reconnect
+        // after the token rotated presents the current one. The handshake is
+        // rejected without it; the server also verifies the caller owns this
+        // project before registering any handler.
+        auth: (cb: (data: Record<string, unknown>) => void) => {
+          cb({ token: useAuthStore.getState().accessToken });
+        },
       },
     );
     setEditorSocket(editorSocketConn);
+
+    // Shared editing rides this same socket rather than opening a second one,
+    // so there is one connection, one auth surface, and one reconnect path.
+    const teardownCollab = installCollab(editorSocketConn);
 
     // Dev server state lives on the server and survives a page reload, so ask
     // for it rather than assuming "idle" on every mount.
@@ -95,17 +171,32 @@ export const ProjectPlayground = () => {
     editorSocketConn.on("runHistory", ({ chunks }) => {
       useRunStore.getState().replaceOutput(chunks);
     });
+    editorSocketConn.on("previewReady", () => {
+      useRunStore.getState().markPreviewReady();
+    });
+    editorSocketConn.on("containerStats", (stats) => {
+      useRunStore.getState().setStats(stats);
+    });
     editorSocketConn.emit("runSubscribe");
 
+    // One sample a few seconds apart. Docker computes CPU from the delta since
+    // the previous reading, so the first is always zero; polling is what makes
+    // the number mean anything.
+    const statsTimer = setInterval(() => {
+      editorSocketConn.emit("statsRequest");
+    }, 5000);
+    editorSocketConn.emit("statsRequest");
+
     return () => {
+      clearInterval(statsTimer);
+      teardownCollab();
       editorSocketConn.disconnect();
       setEditorSocket(null);
-      closeAllTabs();
       useRunStore.getState().reset();
     };
   }, [
     projectIdFromUrl,
-    accessToken,
+    hasSession,
     setProjectId,
     setEditorSocket,
     closeAllTabs,
@@ -129,7 +220,7 @@ export const ProjectPlayground = () => {
             type="text"
             icon={<ArrowLeftOutlined />}
             style={{ color: "var(--rc-text-muted)" }}
-            onClick={() => navigate("/")}
+            onClick={() => void navigate("/")}
           />
           <span
             aria-hidden
@@ -156,12 +247,30 @@ export const ProjectPlayground = () => {
           <RunControl />
 
           <Flex align="center" gap={2}>
+            <Tooltip title="Editor settings">
+              <button
+                className="rc-icon-button"
+                aria-label="Editor settings"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <VscSettingsGear size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip title="Environment variables">
+              <button
+                className="rc-icon-button"
+                aria-label="Environment variables"
+                onClick={() => setEnvOpen(true)}
+              >
+                <VscKey size={15} />
+              </button>
+            </Tooltip>
             <Tooltip title="Toggle file tree (Ctrl+B)">
               <button
                 className="rc-icon-button"
                 data-on={showSidebar}
                 aria-label="Toggle file tree"
-                onClick={() => setShowSidebar((value) => !value)}
+                onClick={toggleSidebar}
               >
                 <VscLayoutSidebarLeft size={15} />
               </button>
@@ -171,7 +280,7 @@ export const ProjectPlayground = () => {
                 className="rc-icon-button"
                 data-on={showPanel}
                 aria-label="Toggle panel"
-                onClick={() => setShowPanel((value) => !value)}
+                onClick={togglePanel}
               >
                 <VscLayoutPanel size={15} />
               </button>
@@ -181,7 +290,7 @@ export const ProjectPlayground = () => {
                 className="rc-icon-button"
                 data-on={showPreview}
                 aria-label="Toggle preview"
-                onClick={() => setShowPreview((value) => !value)}
+                onClick={togglePreview}
               >
                 {showPreview ? (
                   <EyeInvisibleOutlined />
@@ -204,38 +313,114 @@ export const ProjectPlayground = () => {
         />
       )}
 
+      {externallyChanged.length > 0 && (
+        <Alert
+          type="warning"
+          banner
+          closable
+          message={
+            `${externallyChanged.slice(0, 3).join(", ")}` +
+            (externallyChanged.length > 3
+              ? ` and ${String(externallyChanged.length - 3)} more`
+              : "") +
+            " changed on disk while open. Your version is still what will be saved — " +
+            "close and reopen the file to take the version on disk instead."
+          }
+          onClose={clearError}
+        />
+      )}
+
       <div style={{ flex: 1, minHeight: 0 }}>
         <SplitPane
           direction="horizontal"
-          defaultSize={260}
+          defaultSize={restored?.sidebarWidth ?? 260}
           minSize={180}
           maxSize={520}
           showFirst={showSidebar}
+          onResizeEnd={(size) => remember({ sidebarWidth: size })}
           first={
             <div
               style={{
                 height: "100%",
-                overflow: "auto",
+                display: "flex",
                 backgroundColor: "var(--rc-surface-sunken)",
               }}
             >
-              <ErrorBoundary label="The file tree">
-                <TreeStructure />
-              </ErrorBoundary>
+              {/* Activity rail. Both views stay mounted: search holds a query
+                  and its results, and losing them on every glance at the tree
+                  would make it useless. */}
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                  padding: "8px 4px",
+                  borderRight: "1px solid var(--rc-border)",
+                  flex: "none",
+                }}
+              >
+                <Tooltip title="Explorer" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "files"}
+                    aria-label="Explorer"
+                    onClick={() => setSidebarView("files")}
+                  >
+                    <VscFiles size={16} />
+                  </button>
+                </Tooltip>
+                <Tooltip title="Search (Ctrl+Shift+F)" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "search"}
+                    aria-label="Search"
+                    onClick={() => setSidebarView("search")}
+                  >
+                    <VscSearch size={16} />
+                  </button>
+                </Tooltip>
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                <div
+                  style={{
+                    height: "100%",
+                    display: sidebarView === "files" ? "block" : "none",
+                    overflow: "auto",
+                  }}
+                >
+                  <ErrorBoundary label="The file tree">
+                    <TreeStructure />
+                  </ErrorBoundary>
+                </div>
+
+                <div
+                  style={{
+                    height: "100%",
+                    display: sidebarView === "search" ? "block" : "none",
+                  }}
+                >
+                  <ErrorBoundary label="Search">
+                    <SearchPanel />
+                  </ErrorBoundary>
+                </div>
+              </div>
             </div>
           }
           second={
             <SplitPane
               direction="horizontal"
-              defaultSize={700}
+              defaultSize={restored?.previewWidth ?? 700}
               minSize={320}
               showSecond={showPreview}
+              onResizeEnd={(size) => remember({ previewWidth: size })}
               first={
                 <SplitPane
                   direction="vertical"
-                  defaultSize={420}
+                  defaultSize={restored?.panelHeight ?? 420}
                   minSize={120}
                   showSecond={showPanel}
+                  onResizeEnd={(size) => remember({ panelHeight: size })}
                   first={
                     <div
                       style={{
@@ -246,19 +431,34 @@ export const ProjectPlayground = () => {
                     >
                       <EditorTabs />
                       <div style={{ flex: 1, minHeight: 0 }}>
-                        <ErrorBoundary label="The editor">
-                          <EditorComponent />
-                        </ErrorBoundary>
+                        {/* Two panes over one tab list and one write queue, so
+                            the same file open in both stays in step. */}
+                        <SplitPane
+                          direction="horizontal"
+                          defaultSize={restored?.editorSplitWidth ?? 480}
+                          minSize={240}
+                          showSecond={splitOpen}
+                          onResizeEnd={(size) =>
+                            remember({ editorSplitWidth: size })
+                          }
+                          first={
+                            <ErrorBoundary label="The editor">
+                              <EditorComponent pane="primary" />
+                            </ErrorBoundary>
+                          }
+                          second={
+                            <ErrorBoundary label="The second editor pane">
+                              <EditorComponent pane="secondary" />
+                            </ErrorBoundary>
+                          }
+                        />
                       </div>
                     </div>
                   }
                   second={
-                    projectIdFromUrl && accessToken ? (
+                    projectIdFromUrl ? (
                       <ErrorBoundary label="The terminal panel">
-                        <BottomPanel
-                          projectId={projectIdFromUrl}
-                          accessToken={accessToken}
-                        />
+                        <BottomPanel projectId={projectIdFromUrl} />
                       </ErrorBoundary>
                     ) : null
                   }
@@ -277,6 +477,19 @@ export const ProjectPlayground = () => {
       </div>
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
+
+      <EditorSettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
+
+      {projectIdFromUrl && (
+        <EnvVarsDialog
+          projectId={projectIdFromUrl}
+          open={envOpen}
+          onClose={() => setEnvOpen(false)}
+        />
+      )}
     </Flex>
   );
 };

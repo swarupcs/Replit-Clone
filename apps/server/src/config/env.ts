@@ -17,8 +17,34 @@ const envSchema = z.object({
     .min(32, "JWT_REFRESH_SECRET must be >= 32 chars"),
   ACCESS_TOKEN_TTL: z.string().default("15m"),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  /** The preview cookie is sent to a container running untrusted project code,
+   *  so it is short-lived. Every session refresh reissues it, which happens
+   *  well inside this window for anyone actually using the editor. */
+  PREVIEW_TOKEN_TTL_HOURS: z.coerce.number().int().positive().default(12),
 
-  WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
+  WEB_ORIGIN: z.string().url().default("http://localhost:5273"),
+
+  /** This server's own public origin. Needed because an OAuth redirect_uri has
+   *  to be absolute and has to match what is registered with the provider. */
+  API_ORIGIN: z.string().url().default("http://localhost:3000"),
+
+  /** GitHub sign-in. Both empty means the feature is simply off. */
+  GITHUB_CLIENT_ID: z.string().optional(),
+  GITHUB_CLIENT_SECRET: z.string().optional(),
+
+  /** How many reverse proxies sit in front of this server.
+   *
+   *  Express needs this to work out which entry in X-Forwarded-For is the real
+   *  client. Left at 0 every request behind Traefik or nginx reports the
+   *  proxy's own address, so per-IP rate limits apply to the whole deployment
+   *  at once: one person mistyping their password locks everyone out, while an
+   *  attacker spread across many addresses is never counted individually.
+   *
+   *  Deliberately a hop COUNT and not `true`. Trusting every hop lets a client
+   *  put whatever it likes at the front of X-Forwarded-For and be rate-limited
+   *  as that instead. Set it to the number of proxies you actually run: 1 for
+   *  a single nginx or Traefik, 2 behind Cloudflare in front of one of those. */
+  TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
 
   PROJECTS_DIR: z.string().default("projects"),
 
@@ -27,6 +53,22 @@ const envSchema = z.object({
   CONTAINER_MEMORY_MB: z.coerce.number().int().positive().default(512),
   CONTAINER_CPUS: z.coerce.number().positive().default(0.5),
   CONTAINER_IDLE_MINUTES: z.coerce.number().int().positive().default(20),
+  /** Ceiling on a single project's working tree.
+   *
+   *  Containers get memory, CPU and PID limits; storage had none, and the
+   *  project directory is a bind mount of a real host path — so one socket
+   *  writing in a loop, or one runaway `npm install`, could fill the VM's disk
+   *  and take Postgres and every other project down with it. */
+  PROJECT_DISK_QUOTA_MB: z.coerce.number().int().positive().default(512),
+
+  /** Per-user limits.
+   *
+   *  Only a global container cap existed, so one account could take every slot
+   *  and fill the disk on its own. These bound what any single user costs the
+   *  deployment, independently of how busy it is overall. */
+  MAX_PROJECTS_PER_USER: z.coerce.number().int().positive().default(20),
+  USER_DISK_QUOTA_MB: z.coerce.number().int().positive().default(2048),
+  MAX_CONTAINERS_PER_USER: z.coerce.number().int().positive().default(2),
   MAX_CONCURRENT_CONTAINERS: z.coerce.number().int().positive().default(3),
 
   /** How the preview proxy reaches a project's dev server.

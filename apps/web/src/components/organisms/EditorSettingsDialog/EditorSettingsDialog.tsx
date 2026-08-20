@@ -1,0 +1,144 @@
+import { Button, InputNumber, Modal, Switch, Typography } from "antd";
+import {
+  EDITOR_SETTING_LIMITS,
+  useEditorSettingsStore,
+} from "../../../store/editorSettingsStore.ts";
+
+interface EditorSettingsDialogProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+/** One labelled row, so the settings read as a list rather than a form. */
+const Row = ({
+  label,
+  hint,
+  control,
+}: {
+  label: string;
+  hint?: string;
+  control: React.ReactNode;
+}) => (
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 16,
+      padding: "10px 0",
+      borderBottom: "1px solid var(--rc-border)",
+    }}
+  >
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 14 }}>{label}</div>
+      {hint && (
+        <div style={{ fontSize: 12, color: "var(--rc-text-subtle)", marginTop: 2 }}>
+          {hint}
+        </div>
+      )}
+    </div>
+    <div style={{ flex: "none" }}>{control}</div>
+  </div>
+);
+
+/** Editor preferences.
+ *
+ *  Font size, tab width, wrapping and the minimap were hardcoded, so anyone
+ *  who found the defaults uncomfortable had no recourse at all.
+ */
+export const EditorSettingsDialog = ({ open, onClose }: EditorSettingsDialogProps) => {
+  const settings = useEditorSettingsStore();
+
+  return (
+    <Modal
+      open={open}
+      title="Editor settings"
+      onCancel={onClose}
+      // Applied as they change rather than on a Save, so the effect is visible
+      // behind the dialog while choosing.
+      footer={
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <Button onClick={settings.reset}>Reset to defaults</Button>
+          <Button type="primary" onClick={onClose}>
+            Done
+          </Button>
+        </div>
+      }
+      destroyOnHidden
+    >
+      <Typography.Paragraph style={{ color: "var(--rc-text-subtle)", fontSize: 13 }}>
+        Changes apply immediately and are remembered on this device.
+      </Typography.Paragraph>
+
+      <Row
+        label="Font size"
+        control={
+          <InputNumber
+            min={EDITOR_SETTING_LIMITS.fontSize.min}
+            max={EDITOR_SETTING_LIMITS.fontSize.max}
+            value={settings.fontSize}
+            onChange={(value) => settings.set("fontSize", value ?? 14)}
+            style={{ width: 84 }}
+          />
+        }
+      />
+
+      <Row
+        label="Tab size"
+        hint="Spaces inserted per indent level"
+        control={
+          <InputNumber
+            min={EDITOR_SETTING_LIMITS.tabSize.min}
+            max={EDITOR_SETTING_LIMITS.tabSize.max}
+            value={settings.tabSize}
+            onChange={(value) => settings.set("tabSize", value ?? 2)}
+            style={{ width: 84 }}
+          />
+        }
+      />
+
+      <Row
+        label="Word wrap"
+        hint="Wrap long lines instead of scrolling sideways"
+        control={
+          <Switch
+            checked={settings.wordWrap}
+            onChange={(value) => settings.set("wordWrap", value)}
+          />
+        }
+      />
+
+      <Row
+        label="Line numbers"
+        control={
+          <Switch
+            checked={settings.lineNumbers}
+            onChange={(value) => settings.set("lineNumbers", value)}
+          />
+        }
+      />
+
+      <Row
+        label="Minimap"
+        hint="The overview strip down the right edge"
+        control={
+          <Switch
+            checked={settings.minimap}
+            onChange={(value) => settings.set("minimap", value)}
+          />
+        }
+      />
+
+      <Row
+        label="Format on save"
+        hint="Runs the built-in formatter for the file's language before writing"
+        control={
+          <Switch
+            checked={settings.formatOnSave}
+            onChange={(value) => settings.set("formatOnSave", value)}
+          />
+        }
+      />
+    </Modal>
+  );
+};
