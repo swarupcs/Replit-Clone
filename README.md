@@ -70,9 +70,10 @@ React that is `npm install && npm run dev`. Then click **Show preview**.
 
 ## What it does
 
-**Projects** — create from nine templates (React, Vue, Svelte, Next.js, Node,
-static HTML, Flask, FastAPI, Go), rename, duplicate, download as a zip, and
-set environment variables that are injected into the container.
+**Projects** — create from twelve templates (React, Vue, Svelte, Next.js, Node,
+static HTML, Flask, FastAPI, Go, and TypeScript variants of React, Node and
+Next.js), rename, duplicate, download as a zip, and set environment variables
+that are injected into the container.
 
 **Editing** — Monaco with per-file tabs, split panes, full-text search across
 the project, quick-open, a diff against what is on disk, format on save, and
@@ -305,15 +306,22 @@ wrong doesn't error, login just silently stops working.
 
 ## Templates
 
-`react-vite`, `node-express`, `static-html`, `python-flask`. Each declares its
-image, the port its dev server listens on, and its start command in
+`react-vite`, `react-vite-ts`, `node-express`, `node-express-ts`,
+`static-html`, `nextjs`, `nextjs-ts`, `vue-vite`, `svelte-vite`,
+`python-flask`, `python-fastapi`, `go-http`. Each declares its image, the port
+its dev server listens on, and its start command in
 `apps/server/src/templates/registry.ts`; starter files live beside it in
 `apps/server/templates/`.
 
-Vite is configured with `base=/preview/<projectId>/` so its assets and HMR
-socket resolve through the proxy. The other templates serve from the root and
-the proxy strips the prefix instead — which means their assets must use relative
-URLs.
+The TypeScript variants are the same apps with types and a `typecheck` script.
+`node-express-ts` runs through `tsx watch`, so a save reloads the server with
+no build step in between.
+
+Vite is configured with `base=/preview/<projectId>/`, and Next with a matching
+`basePath`, so their assets and HMR sockets resolve through the proxy — both
+emit absolute asset URLs that would otherwise escape the prefix. The remaining
+templates serve from the root and the proxy strips the prefix instead, which
+means their assets must use relative URLs.
 
 ## Scripts
 

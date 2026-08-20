@@ -47,6 +47,16 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     filesDir: "react-vite",
     expectsPreviewBase: true,
   },
+  "react-vite-ts": {
+    id: "react-vite-ts",
+    label: "React (Vite) + TypeScript",
+    image: "sandbox-node:latest",
+    devPort: 5173,
+    extraPorts: [3000, 8080],
+    startCommand: "npm install && npm run dev",
+    filesDir: "react-vite-ts",
+    expectsPreviewBase: true,
+  },
   "node-express": {
     id: "node-express",
     label: "Node (Express)",
@@ -55,6 +65,18 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     extraPorts: [5173, 8080],
     startCommand: "npm install && npm start",
     filesDir: "node-express",
+    expectsPreviewBase: false,
+  },
+  "node-express-ts": {
+    id: "node-express-ts",
+    label: "Node (Express) + TypeScript",
+    image: "sandbox-node:latest",
+    devPort: 3000,
+    extraPorts: [5173, 8080],
+    // tsx runs the TypeScript directly and reloads on save, so there is no
+    // build step between editing a file and seeing the result.
+    startCommand: "npm install && npm start",
+    filesDir: "node-express-ts",
     expectsPreviewBase: false,
   },
   "static-html": {
@@ -77,6 +99,18 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     filesDir: "nextjs",
     // Next emits absolute /_next/... asset URLs, so it is told the prefix
     // through basePath rather than having it stripped.
+    expectsPreviewBase: true,
+  },
+  "nextjs-ts": {
+    id: "nextjs-ts",
+    label: "Next.js + TypeScript",
+    image: "sandbox-node:latest",
+    devPort: 3000,
+    extraPorts: [5173, 8080],
+    startCommand: "npm install && npm run dev",
+    filesDir: "nextjs-ts",
+    // Same reason as the JavaScript template: absolute /_next/... URLs mean
+    // the prefix has to be configured, not stripped.
     expectsPreviewBase: true,
   },
   "vue-vite": {
