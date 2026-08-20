@@ -19,6 +19,7 @@ import { useOpenTabsStore, selectActiveTab } from "../store/openTabsStore.ts";
 import { useAuthStore } from "../store/authStore.ts";
 import { useRunStore } from "../store/runStore.ts";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
+import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 export const ProjectPlayground = () => {
@@ -154,7 +155,9 @@ export const ProjectPlayground = () => {
                 backgroundColor: "var(--rc-surface-sunken)",
               }}
             >
-              <TreeStructure />
+              <ErrorBoundary label="The file tree">
+                <TreeStructure />
+              </ErrorBoundary>
             </div>
           }
           second={
@@ -178,22 +181,30 @@ export const ProjectPlayground = () => {
                     >
                       <EditorTabs />
                       <div style={{ flex: 1, minHeight: 0 }}>
-                        <EditorComponent />
+                        <ErrorBoundary label="The editor">
+                          <EditorComponent />
+                        </ErrorBoundary>
                       </div>
                     </div>
                   }
                   second={
                     projectIdFromUrl && accessToken ? (
-                      <BottomPanel
-                        projectId={projectIdFromUrl}
-                        accessToken={accessToken}
-                      />
+                      <ErrorBoundary label="The terminal panel">
+                        <BottomPanel
+                          projectId={projectIdFromUrl}
+                          accessToken={accessToken}
+                        />
+                      </ErrorBoundary>
                     ) : null
                   }
                 />
               }
               second={
-                projectIdFromUrl ? <Browser projectId={projectIdFromUrl} /> : null
+                projectIdFromUrl ? (
+                  <ErrorBoundary label="The preview">
+                    <Browser projectId={projectIdFromUrl} />
+                  </ErrorBoundary>
+                ) : null
               }
             />
           }

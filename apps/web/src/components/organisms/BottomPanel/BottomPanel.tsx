@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import { VscOutput, VscTerminal } from "react-icons/vsc";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { Tooltip } from "antd";
+import { VscAdd, VscChromeClose, VscOutput, VscTerminal } from "react-icons/vsc";
 import { BrowserTerminal } from "../../molecules/BrowserTerminal/BrowserTerminal.tsx";
 import { RunOutput } from "../../molecules/RunOutput/RunOutput.tsx";
 import { useRunStore } from "../../../store/runStore.ts";
@@ -9,28 +11,63 @@ interface BottomPanelProps {
   accessToken: string;
 }
 
-type PanelTab = "terminal" | "output";
+/** `output` is the dev server log; every other tab is an independent shell. */
+type ActiveTab = { kind: "output" } | { kind: "terminal"; id: number };
 
-/** Terminal and dev-server output, side by side as tabs.
+/** Terminals and dev-server output as tabs.
  *
- *  Both stay MOUNTED regardless of which is visible: the terminal owns a
+ *  Multiple terminals matter because the dev server occupies one once it is
+ *  running -- without a second shell you cannot `npm install` a package or run
+ *  git without killing the server first. The backend already supported this:
+ *  each /terminal socket opens its own `docker exec`, and container
+ *  attachments are refcounted.
+ *
+ *  Every pane stays MOUNTED regardless of which is visible. A terminal owns a
  *  WebSocket and a PTY, so unmounting it to switch tabs would kill the shell
- *  and lose scrollback.
+ *  and lose its scrollback.
  */
 export const BottomPanel = ({ projectId, accessToken }: BottomPanelProps) => {
-  const [tab, setTab] = useState<PanelTab>("terminal");
+  const [terminals, setTerminals] = useState<number[]>([1]);
+  const [active, setActive] = useState<ActiveTab>({ kind: "terminal", id: 1 });
+  /** Monotonic, so closing terminal 2 and opening another gives 3 rather than
+   *  reusing an id whose React subtree was just torn down. */
+  const nextId = useRef(2);
+
   const status = useRunStore((store) => store.state.status);
 
   // Pull attention to the output when a run starts, since that is where the
   // install/build progress and any failure will appear.
   useEffect(() => {
-    if (status === "starting") setTab("output");
+    if (status === "starting") setActive({ kind: "output" });
   }, [status]);
 
-  const TABS: { id: PanelTab; label: string; icon: React.ReactNode }[] = [
-    { id: "terminal", label: "Terminal", icon: <VscTerminal size={13} /> },
-    { id: "output", label: "Output", icon: <VscOutput size={13} /> },
-  ];
+  function addTerminal() {
+    const id = nextId.current;
+    nextId.current += 1;
+    setTerminals((current) => [...current, id]);
+    setActive({ kind: "terminal", id });
+  }
+
+  function closeTerminal(id: number) {
+    setTerminals((current) => {
+      const remaining = current.filter((entry) => entry !== id);
+
+      // Never leave the panel with no shell at all.
+      if (remaining.length === 0) {
+        const replacement = nextId.current;
+        nextId.current += 1;
+        setActive({ kind: "terminal", id: replacement });
+        return [replacement];
+      }
+
+      setActive((currentActive) =>
+        currentActive.kind === "terminal" && currentActive.id === id
+          ? { kind: "terminal", id: remaining.at(-1) ?? remaining[0]! }
+          : currentActive,
+      );
+      return remaining;
+    });
+  }
 
   return (
     <div
@@ -45,41 +82,99 @@ export const BottomPanel = ({ projectId, accessToken }: BottomPanelProps) => {
       <div
         style={{
           display: "flex",
+          alignItems: "center",
           flex: "none",
           borderBottom: "1px solid var(--rc-border)",
+          overflowX: "auto",
         }}
       >
-        {TABS.map((entry) => (
+        {terminals.map((id, index) => {
+          const selected = active.kind === "terminal" && active.id === id;
+
+          return (
+            <button
+              key={id}
+              className="rc-panel-tab"
+              data-active={selected}
+              onClick={() => setActive({ kind: "terminal", id })}
+              onAuxClick={(event) => {
+                if (event.button === 1) closeTerminal(id);
+              }}
+            >
+              <VscTerminal size={13} />
+              {/* Numbered by position, not id: after closing tabs the ids get
+                  gappy and "Terminal 1, Terminal 4" reads as a bug. */}
+              Shell {index + 1}
+
+              {/* A lone terminal has no close button -- closing it would only
+                  immediately spawn a replacement. */}
+              {terminals.length > 1 && (
+                <span
+                  role="button"
+                  aria-label={`Close shell ${String(index + 1)}`}
+                  className="rc-panel-tab-close"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    closeTerminal(id);
+                  }}
+                >
+                  <VscChromeClose size={10} />
+                </span>
+              )}
+            </button>
+          );
+        })}
+
+        <Tooltip title="New shell">
           <button
-            key={entry.id}
-            className="rc-panel-tab"
-            data-active={tab === entry.id}
-            onClick={() => setTab(entry.id)}
+            className="rc-icon-button"
+            style={{ margin: "0 6px", flex: "none" }}
+            onClick={addTerminal}
+            aria-label="New shell"
           >
-            {entry.icon}
-            {entry.label}
-            {entry.id === "output" && status === "running" && (
-              <span
-                aria-label="Dev server running"
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 999,
-                  background: "var(--rc-green)",
-                }}
-              />
-            )}
+            <VscAdd size={13} />
           </button>
-        ))}
+        </Tooltip>
+
+        <span style={{ flex: 1 }} />
+
+        <button
+          className="rc-panel-tab"
+          data-active={active.kind === "output"}
+          onClick={() => setActive({ kind: "output" })}
+        >
+          <VscOutput size={13} />
+          Output
+          {status === "running" && (
+            <span
+              aria-label="Dev server running"
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 999,
+                background: "var(--rc-green)",
+              }}
+            />
+          )}
+        </button>
       </div>
 
-      {/* Kept mounted, hidden with display:none -- see the note above. */}
-      <div style={{ flex: 1, minHeight: 0, display: tab === "terminal" ? "block" : "none" }}>
-        <BrowserTerminal projectId={projectId} accessToken={accessToken} />
-      </div>
-      <div style={{ flex: 1, minHeight: 0, display: tab === "output" ? "block" : "none" }}>
+      {/* Hidden with display:none rather than unmounted -- see the note above. */}
+      {terminals.map((id) => (
+        <Pane key={id} visible={active.kind === "terminal" && active.id === id}>
+          <BrowserTerminal projectId={projectId} accessToken={accessToken} />
+        </Pane>
+      ))}
+
+      <Pane visible={active.kind === "output"}>
         <RunOutput />
-      </div>
+      </Pane>
     </div>
   );
 };
+
+const Pane = ({ visible, children }: { visible: boolean; children: ReactNode }) => (
+  <div style={{ flex: 1, minHeight: 0, display: visible ? "block" : "none" }}>
+    {children}
+  </div>
+);

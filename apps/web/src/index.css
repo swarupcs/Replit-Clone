@@ -560,6 +560,31 @@ body {
   color: var(--rc-text);
 }
 
+/* Close affordance on a shell tab: quiet until hovered or selected. */
+.rc-panel-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 1px;
+  border-radius: 3px;
+  opacity: 0;
+  transition:
+    opacity 0.15s var(--rc-ease),
+    background-color 0.15s var(--rc-ease);
+}
+
+.rc-panel-tab:hover .rc-panel-tab-close,
+.rc-panel-tab[data-active="true"] .rc-panel-tab-close {
+  opacity: 0.75;
+}
+
+.rc-panel-tab-close:hover {
+  opacity: 1;
+  background-color: var(--rc-selection);
+}
+
 .rc-panel-tab[data-active="true"]::after {
   content: "";
   position: absolute;
