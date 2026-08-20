@@ -39,6 +39,11 @@ import {
 const app = express();
 const server = createServer(app);
 
+// How far to look into X-Forwarded-For for the real client address. Without it
+// every request behind a reverse proxy reports the proxy's own IP, and the
+// per-IP rate limits below end up shared by the entire deployment.
+app.set("trust proxy", env.TRUSTED_PROXY_HOPS);
+
 const io = new Server<
   ClientToServerEvents,
   ServerToClientEvents,

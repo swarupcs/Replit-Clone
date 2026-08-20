@@ -38,6 +38,9 @@ services:
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
       WEB_ORIGIN: http://${HOST_IP:-localhost}
+      # No reverse proxy in this stack -- the server's port is published
+      # directly -- so the client address is already the real one.
+      TRUSTED_PROXY_HOPS: 0
       PROJECTS_DIR: /data/projects
       CONTAINER_MEMORY_MB: ${CONTAINER_MEMORY_MB:-512}
       CONTAINER_CPUS: ${CONTAINER_CPUS:-0.5}

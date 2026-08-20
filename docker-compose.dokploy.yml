@@ -43,6 +43,11 @@ services:
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
       WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN to your web domain, e.g. https://app.yourdomain.com}
+      # Dokploy's Traefik terminates TLS in front of this service, so the
+      # client address arrives in X-Forwarded-For. Without this every request
+      # looks like it came from Traefik and the per-IP rate limits are shared
+      # by the whole deployment.
+      TRUSTED_PROXY_HOPS: 1
       PROJECTS_DIR: /data/projects
       CONTAINER_MEMORY_MB: ${CONTAINER_MEMORY_MB:-512}
       CONTAINER_CPUS: ${CONTAINER_CPUS:-0.5}

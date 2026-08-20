@@ -53,6 +53,11 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN to your Vercel URL}
       COOKIE_SAME_SITE: none
       COOKIE_SECURE: "true"
+      # Dokploy's Traefik terminates TLS in front of this service, so the
+      # client address arrives in X-Forwarded-For. Without this every request
+      # looks like it came from Traefik and the per-IP rate limits are shared
+      # by the whole deployment.
+      TRUSTED_PROXY_HOPS: 1
       PROJECTS_DIR: /data/projects
       CONTAINER_MEMORY_MB: ${CONTAINER_MEMORY_MB:-512}
       CONTAINER_CPUS: ${CONTAINER_CPUS:-0.5}

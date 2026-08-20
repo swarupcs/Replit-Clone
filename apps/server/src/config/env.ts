@@ -22,7 +22,21 @@ const envSchema = z.object({
    *  well inside this window for anyone actually using the editor. */
   PREVIEW_TOKEN_TTL_HOURS: z.coerce.number().int().positive().default(12),
 
-  WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
+  WEB_ORIGIN: z.string().url().default("http://localhost:5273"),
+
+  /** How many reverse proxies sit in front of this server.
+   *
+   *  Express needs this to work out which entry in X-Forwarded-For is the real
+   *  client. Left at 0 every request behind Traefik or nginx reports the
+   *  proxy's own address, so per-IP rate limits apply to the whole deployment
+   *  at once: one person mistyping their password locks everyone out, while an
+   *  attacker spread across many addresses is never counted individually.
+   *
+   *  Deliberately a hop COUNT and not `true`. Trusting every hop lets a client
+   *  put whatever it likes at the front of X-Forwarded-For and be rate-limited
+   *  as that instead. Set it to the number of proxies you actually run: 1 for
+   *  a single nginx or Traefik, 2 behind Cloudflare in front of one of those. */
+  TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
 
   PROJECTS_DIR: z.string().default("projects"),
 
