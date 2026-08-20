@@ -170,15 +170,65 @@ function startTokenPrune(): void {
   setInterval(sweep, 60 * 60 * 1000).unref();
 }
 
+/** How long a Docker call at boot may take before we give up on it.
+ *
+ *  The daemon can accept a connection and then never answer -- it is
+ *  restarting, or busy recreating a container. Those calls have no timeout of
+ *  their own, so without this the await never settles. */
+const DOCKER_BOOT_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(
+  work: Promise<T>,
+  label: string,
+): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      settled = true;
+      logger.error(`${label} timed out`, undefined, {
+        afterMs: DOCKER_BOOT_TIMEOUT_MS,
+        hint: "is the Docker daemon running?",
+      });
+      resolve(undefined);
+    }, DOCKER_BOOT_TIMEOUT_MS);
+
+    work.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        // A call we already gave up on will usually reject later anyway.
+        // Logging that too would report one failure twice, the second time
+        // for a stage boot has long since moved past.
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        logger.error(`${label} failed`, error);
+        resolve(undefined);
+      },
+    );
+  });
+}
+
 async function start(): Promise<void> {
-  await ensureNetwork();
+  // Docker is deliberately NOT allowed to gate the listener. Signing in,
+  // refreshing a session and listing projects need no daemon at all, so a
+  // Docker outage should cost the container features and nothing else.
+  //
+  // It used to be awaited unbounded, which meant a daemon that was merely slow
+  // -- restarting, or mid `compose up` -- left the process alive, silent, and
+  // listening on nothing. From a browser that is indistinguishable from a
+  // server that is not running, and `tsx watch` never retries because nothing
+  // ever crashed.
+  await withTimeout(ensureNetwork(), "docker network setup");
 
   // A crash or a `docker kill` leaves containers whose project is gone, and
   // directories with no row. Neither used to be cleaned up, ever.
-  const reconciled = await reconcileOnBoot().catch((error: unknown) => {
-    logger.error("boot reconcile failed", error);
-    return undefined;
-  });
+  const reconciled = await withTimeout(reconcileOnBoot(), "boot reconcile");
   if (reconciled) logger.info("reconciled state", { ...reconciled });
 
   startIdleReaper();
@@ -203,11 +253,12 @@ async function start(): Promise<void> {
 
 /** Reports a fatal startup failure and exits.
  *
- *  `start` awaits the Docker daemon before it ever calls `listen`, so a daemon
- *  that is not up yet — an ordinary race on a rebooting VM — takes the whole
- *  process down. Node already does that on its own for an unhandled rejection;
- *  this only replaces a bare stack trace with a line saying which stage failed,
- *  which is the difference between a legible restart loop and a puzzling one.
+ *  `start` no longer lets Docker stop it reaching `listen` — a daemon that is
+ *  down or slow is logged and survived, since the API is useful without it.
+ *  What remains fatal is a failure to bind the port. Node exits on an unhandled
+ *  rejection on its own; this only replaces a bare stack trace with a line
+ *  saying which stage failed, which is the difference between a legible restart
+ *  loop and a puzzling one.
  *
  *  Deliberately no `unhandledRejection` listener: registering one would stop
  *  Node exiting by default, which is the behaviour we want here.
