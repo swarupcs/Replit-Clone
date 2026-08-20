@@ -16,6 +16,9 @@ interface EditorSocketStore {
   /** What this connection may do. Unknown until the server says, which is why
    *  it starts null rather than assuming either answer. */
   accessLevel: "viewer" | "editor" | "owner" | null;
+  /** Files that changed on disk while open — a terminal command, a build step.
+   *  Reported rather than merged, so nobody's in-progress work vanishes. */
+  externallyChanged: string[];
   setEditorSocket: (socket: EditorSocket | null) => void;
   clearError: () => void;
 }
@@ -24,7 +27,8 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
   editorSocket: null,
   lastError: null,
   accessLevel: null,
-  clearError: () => set({ lastError: null }),
+  externallyChanged: [],
+  clearError: () => set({ lastError: null, externallyChanged: [] }),
 
   setEditorSocket: (incomingSocket) => {
     if (!incomingSocket) {
@@ -72,11 +76,24 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
       set({ accessLevel: level });
     });
 
+    incomingSocket.on("docExternalChange", ({ relPath }) => {
+      set((state) =>
+        state.externallyChanged.includes(relPath)
+          ? state
+          : { externallyChanged: [...state.externallyChanged, relPath] },
+      );
+    });
+
     incomingSocket.on("error", ({ message }) => {
       set({ lastError: message });
     });
 
-    set({ editorSocket: incomingSocket, lastError: null, accessLevel: null });
+    set({
+      editorSocket: incomingSocket,
+      lastError: null,
+      accessLevel: null,
+      externallyChanged: [],
+    });
   },
 }));
 

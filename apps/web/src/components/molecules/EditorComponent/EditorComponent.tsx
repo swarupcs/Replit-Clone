@@ -27,6 +27,16 @@ import {
   queueWrite,
   setWriteEmitter,
 } from "../../../lib/pendingWrites.ts";
+import {
+  bindDoc,
+  colorFor,
+  isCollaborative,
+  peerCount,
+  releaseDoc,
+  retainDoc,
+  subscribeCollab,
+} from "../../../lib/collab.ts";
+import { useAuthStore } from "../../../store/authStore.ts";
 
 const WRITE_DEBOUNCE_MS = 800;
 
@@ -70,6 +80,12 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const markDirty = useOpenTabsStore((state) => state.markDirty);
   const { editorSocket } = useEditorSocketStore();
   const canEdit = useEditorSocketStore(selectCanEdit);
+  const user = useAuthStore((state) => state.user);
+
+  /** Bumped whenever a document syncs or someone joins, so the peer badge and
+   *  the "server owns saving" decision re-render. */
+  const [collabTick, setCollabTick] = useState(0);
+  useEffect(() => subscribeCollab(() => setCollabTick((value) => value + 1)), []);
   const settings = useEditorSettingsStore();
 
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
@@ -156,6 +172,33 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
 
     codeEditor.focus();
   }, [activeTab]);
+
+  /** Shared editing for whichever file this pane is showing.
+   *
+   *  Retained per pane: two panes on one file share the document, and it is
+   *  released only when the last of them moves away.
+   */
+  useEffect(() => {
+    const relPath = activeTab?.relPath;
+    const monaco = monacoRef.current;
+    const codeEditor = editorRef.current;
+
+    // A viewer's edits would be rejected anyway, and a CRDT binding that can
+    // write would let them type into a buffer nobody will save.
+    if (!relPath || !editorSocket || !monaco || !codeEditor || !canEdit) return;
+
+    retainDoc(editorSocket, relPath, {
+      name: user?.email ?? "Someone",
+      color: colorFor(user?.id ?? "anonymous"),
+    });
+
+    const model = monaco.editor.getModel(modelUri(monaco, relPath));
+    if (model) bindDoc(relPath, model, codeEditor);
+
+    return () => {
+      releaseDoc(editorSocket, relPath);
+    };
+  }, [activeTab?.relPath, editorSocket, canEdit, user?.email, user?.id]);
 
   /** Dispose models for files that are no longer open, so a long session does
    *  not accumulate them. */
@@ -260,6 +303,11 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
    *  while they can still act on it, rather than after a silent round trip.
    */
   function queueIfAllowed(relPath: string, data: string, delay: number) {
+    // While a file is edited collaboratively the SERVER writes it, from the
+    // merged document. A client write here would clobber whatever the others
+    // have typed since this buffer was last in step.
+    if (isCollaborative(relPath)) return;
+
     if (new Blob([data]).size > MAX_FILE_BYTES) {
       setWriteError(
         `This file is over the ${String(MAX_FILE_BYTES / 1024 / 1024)} MB editor limit and was not saved.`,
@@ -315,6 +363,12 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const segments = activeTab.relPath.split("/");
   const language = extensionToFileType(activeTab.extension, activeTab.name);
 
+  // `collabTick` is what makes these re-read after a sync; the values live
+  // outside React so nothing else would.
+  void collabTick;
+  const shared = isCollaborative(activeTab.relPath);
+  const others = Math.max(0, peerCount(activeTab.relPath) - 1);
+
   return (
     <div
       style={{
@@ -347,6 +401,24 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
           );
         })}
 
+        {others > 0 && (
+          <Tooltip
+            title={`${String(others)} other ${others === 1 ? "person is" : "people are"} editing this file`}
+          >
+            <span
+              style={{
+                marginLeft: "auto",
+                marginRight: 8,
+                fontSize: 11,
+                fontFamily: "var(--rc-mono)",
+                color: "var(--rc-green)",
+              }}
+            >
+              +{others}
+            </span>
+          </Tooltip>
+        )}
+
         {/* Compares the buffer against what is on disk. Monaco ships the diff
             editor; nothing surfaced it, so there was no way to see what a save
             would actually change. */}
@@ -361,7 +433,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         >
           <button
             className="rc-icon-button"
-            style={{ marginLeft: "auto", marginRight: 8 }}
+            style={{ marginLeft: others > 0 ? 0 : "auto", marginRight: 8 }}
             data-on={showDiff}
             disabled={!activeTab.isDirty && !showDiff}
             aria-label="Show unsaved changes"
@@ -460,9 +532,11 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
               ? "Read-only"
               : writeError
                 ? "Too large"
-                : activeTab.isDirty
-                  ? "Unsaved"
-                  : "Saved"}
+                : shared
+                  ? "Shared"
+                  : activeTab.isDirty
+                    ? "Unsaved"
+                    : "Saved"}
           </span>
         </span>
       </div>

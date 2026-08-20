@@ -20,6 +20,7 @@ import { prisma } from "./lib/prisma.js";
 import { logger } from "./lib/logger.js";
 import { touchProject } from "./service/projectService.js";
 import { retainProjectWatcher } from "./service/projectWatcher.js";
+import { reportExternalChanges } from "./service/collabWatch.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
 import { pruneExpiredRefreshTokens } from "./service/refreshTokenService.js";
 import { pruneUserTokens } from "./service/userTokenService.js";
@@ -126,6 +127,12 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
   // two refetch broadcasts per change.
   const releaseWatcher = retainProjectWatcher(projectId, () => {
     editorNamespace.to(projectId).emit("treeChanged");
+
+    // A terminal command or a build step may have rewritten a file somebody is
+    // editing. There is nothing to merge against — an external writer produces
+    // whole new contents with no record of the edits that made them — so this
+    // reports the conflict and leaves the document alone.
+    void reportExternalChanges(projectId, editorNamespace);
   });
 
   handleEditorSocketEvents(socket, editorNamespace);

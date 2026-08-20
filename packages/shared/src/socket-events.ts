@@ -115,6 +115,21 @@ export interface ClientToServerEvents {
   statsRequest: () => void;
   /** Search the project's file contents. */
   search: (payload: SearchOptions) => void;
+
+  // --- Shared editing ----------------------------------------------------
+  //
+  // While a file is open collaboratively the SERVER owns writing it to disk.
+  // The client stops sending `writeFile` for that file entirely, so there is
+  // one writer rather than two racing.
+
+  /** Start editing a file together. The server replies with `docSync`. */
+  docJoin: (payload: PathPayload) => void;
+  /** Stop editing it. */
+  docLeave: (payload: PathPayload) => void;
+  /** A Yjs update produced locally. */
+  docUpdate: (payload: { relPath: string; update: ArrayBuffer }) => void;
+  /** Cursor and selection, for everyone else's benefit. Not persisted. */
+  docAwareness: (payload: { relPath: string; update: ArrayBuffer }) => void;
 }
 
 /** Events the server emits to the browser. */
@@ -132,6 +147,21 @@ export interface ServerToClientEvents {
   /** Sent once on connect. The client uses it to present read-only access as
    *  read-only rather than letting every action fail one at a time. */
   projectAccess: (payload: { level: SocketData["accessLevel"] }) => void;
+
+  /** The document's full state, in reply to `docJoin`. */
+  docSync: (payload: { relPath: string; state: ArrayBuffer }) => void;
+  /** Someone else's change. */
+  docUpdate: (payload: { relPath: string; update: ArrayBuffer }) => void;
+  /** Someone else's cursor. */
+  docAwareness: (payload: { relPath: string; update: ArrayBuffer }) => void;
+  /** How many people are editing this file, this client included. */
+  docPeers: (payload: { relPath: string; count: number }) => void;
+  /** The file changed on disk outside the editor while it was open.
+   *
+   *  Reported rather than merged: an external writer produces whole new
+   *  contents with no record of which edits made them, so there is nothing to
+   *  merge against. The people editing decide what to do. */
+  docExternalChange: (payload: { relPath: string }) => void;
   /** Dev server lifecycle changed. Broadcast to the whole project room so
    *  every open tab agrees on the state. */
   runState: (payload: RunState) => void;

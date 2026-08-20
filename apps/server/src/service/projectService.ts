@@ -15,6 +15,7 @@ import {
 } from "../containers/containerManager.js";
 import { forgetRun } from "../containers/runner.js";
 import { forgetUsage } from "./diskUsageService.js";
+import { forgetProject as forgetCollab } from "./collabService.js";
 import { assertCanCreateProject } from "./userQuotaService.js";
 
 export function projectDir(projectId: string): string {
@@ -93,6 +94,7 @@ export async function deleteProjectService(
   // state and a log from the deleted one.
   forgetRun(projectId);
   forgetUsage(projectId);
+  forgetCollab(projectId);
   await prisma.project.delete({ where: { id: projectId } });
   await fs.rm(projectDir(projectId), { recursive: true, force: true });
 }

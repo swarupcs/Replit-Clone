@@ -35,6 +35,7 @@ import { SearchPanel } from "../components/organisms/SearchPanel/SearchPanel.tsx
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.ts";
+import { installCollab } from "../lib/collab.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 export const ProjectPlayground = () => {
@@ -47,6 +48,7 @@ export const ProjectPlayground = () => {
   const hasSession = useAuthStore((state) => state.accessToken !== null);
   const { setProjectId } = useTreeStructureStore();
   const { setEditorSocket, lastError, clearError } = useEditorSocketStore();
+  const externallyChanged = useEditorSocketStore((state) => state.externallyChanged);
   const activeTab = useOpenTabsStore(selectActiveTab);
   const closeAllTabs = useOpenTabsStore((state) => state.closeAll);
   const splitOpen = useOpenTabsStore((state) => state.splitOpen);
@@ -155,6 +157,10 @@ export const ProjectPlayground = () => {
     );
     setEditorSocket(editorSocketConn);
 
+    // Shared editing rides this same socket rather than opening a second one,
+    // so there is one connection, one auth surface, and one reconnect path.
+    const teardownCollab = installCollab(editorSocketConn);
+
     // Dev server state lives on the server and survives a page reload, so ask
     // for it rather than assuming "idle" on every mount.
     const run = useRunStore.getState();
@@ -183,6 +189,7 @@ export const ProjectPlayground = () => {
 
     return () => {
       clearInterval(statsTimer);
+      teardownCollab();
       editorSocketConn.disconnect();
       setEditorSocket(null);
       useRunStore.getState().reset();
@@ -302,6 +309,23 @@ export const ProjectPlayground = () => {
           banner
           closable
           message={lastError}
+          onClose={clearError}
+        />
+      )}
+
+      {externallyChanged.length > 0 && (
+        <Alert
+          type="warning"
+          banner
+          closable
+          message={
+            `${externallyChanged.slice(0, 3).join(", ")}` +
+            (externallyChanged.length > 3
+              ? ` and ${String(externallyChanged.length - 3)} more`
+              : "") +
+            " changed on disk while open. Your version is still what will be saved — " +
+            "close and reopen the file to take the version on disk instead."
+          }
           onClose={clearError}
         />
       )}

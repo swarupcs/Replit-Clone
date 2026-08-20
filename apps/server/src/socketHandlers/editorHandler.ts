@@ -3,6 +3,13 @@ import path from "node:path";
 import type { Namespace, Socket } from "socket.io";
 import { MAX_FILE_BYTES } from "@replit-clone/shared";
 import { searchProject } from "../service/searchService.js";
+import {
+  applyDocUpdate,
+  docsForSocket,
+  isLive,
+  joinDoc,
+  leaveDoc,
+} from "../service/collabService.js";
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -178,6 +185,11 @@ export const handleEditorSocketEvents = (
 
   socket.on("writeFile", ({ relPath, data }) =>
     handle("write the file", async () => {
+      // While a file is open collaboratively the server owns writing it, and
+      // a client write would clobber whatever the others have typed since.
+      // The client stops sending these, so this is the belt to that braces.
+      if (isLive(projectId, relPath)) return;
+
       const absolute = resolveInProject(projectId, relPath);
 
       // Reads were already capped; writes were not, so a client could put a
@@ -345,6 +357,72 @@ export const handleEditorSocketEvents = (
     }, true)(),
   );
 
+  // --- Shared editing ----------------------------------------------------
+  //
+  // Rooms are per file, so an update only reaches the people who have that
+  // file open rather than everyone in the project.
+
+  function docRoom(relPath: string): string {
+    return `${projectId}:doc:${relPath}`;
+  }
+
+  function announcePeers(relPath: string): void {
+    const room = editorNamespace.adapter.rooms.get(docRoom(relPath));
+    editorNamespace
+      .to(docRoom(relPath))
+      .emit("docPeers", { relPath, count: room?.size ?? 0 });
+  }
+
+  socket.on("docJoin", ({ relPath }) =>
+    handle("open the shared document", async () => {
+      const { state } = await joinDoc(projectId, relPath, socket.id);
+
+      await socket.join(docRoom(relPath));
+      socket.emit("docSync", { relPath, state: toArrayBuffer(state) });
+      announcePeers(relPath);
+    })(),
+  );
+
+  socket.on("docLeave", ({ relPath }) =>
+    handle("close the shared document", async () => {
+      await socket.leave(docRoom(relPath));
+      await leaveDoc(projectId, relPath, socket.id);
+      announcePeers(relPath);
+    })(),
+  );
+
+  socket.on("docUpdate", ({ relPath, update }) =>
+    handle(
+      "apply the change",
+      async () => {
+        const bytes = new Uint8Array(update);
+        if (!applyDocUpdate(projectId, relPath, bytes, socket.id)) return;
+
+        // To the room minus the sender: they already have their own change,
+        // and echoing it back would be pure traffic.
+        socket.to(docRoom(relPath)).emit("docUpdate", { relPath, update });
+        await Promise.resolve();
+      },
+      true,
+    )(),
+  );
+
+  socket.on("docAwareness", ({ relPath, update }) => {
+    // Cursors are ephemeral and never touch disk, so a viewer may broadcast
+    // theirs — seeing where someone is reading is the point.
+    socket.to(docRoom(relPath)).emit("docAwareness", { relPath, update });
+  });
+
+  // Leaving without saying so — a closed laptop, a dropped connection — must
+  // still flush and release every document this socket held.
+  socket.on("disconnect", () => {
+    for (const entry of docsForSocket(socket.id)) {
+      void leaveDoc(entry.projectId, entry.relPath, socket.id).then(() => {
+        announcePeers(entry.relPath);
+      });
+    }
+  });
+
   // --- Dev server (the Run button) ---------------------------------------
   //
   // Run state is per PROJECT, not per socket: two tabs on the same project
@@ -398,3 +476,11 @@ export const handleEditorSocketEvents = (
 
   socket.on("disconnect", releaseRelay);
 };
+
+/** socket.io sends a Buffer as-is; the browser wants an ArrayBuffer. */
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+}
