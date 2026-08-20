@@ -9,7 +9,7 @@ TypeScript throughout, in a pnpm workspace.
 apps/web        React 19 + Vite 6 (TSX)      the IDE
 apps/server     Express + socket.io + dockerode   API, editor sockets, terminals, preview proxy
 packages/shared TypeScript contracts shared by both
-images/         Sandbox base images (node, python)
+images/         Sandbox base images (node, python, go)
 ```
 
 `packages/shared` is the point of the monorepo: the socket event map, REST
@@ -20,6 +20,7 @@ sides, so a renamed event is a compile error rather than a silent no-op.
 
 - Node 22+, pnpm 10+
 - Docker (the server talks to the daemon to run project containers)
+- Postgres (a `docker compose` file is included for development)
 
 ## Getting started
 
@@ -58,9 +59,53 @@ Copy `apps/web/.env.example` to `apps/web/.env`, then run both apps:
 pnpm dev
 ```
 
+Optional: set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` to offer GitHub
+sign-in, and `VITE_PREVIEW_ORIGIN` to serve previews from their own host (see
+the security notes below). Without a mailer configured, password-reset links
+are written to the server log rather than sent.
+
 The IDE is at http://localhost:5273. Sign up, create a playground, and in its
 terminal run the template's start command (shown when you create it) — for
 React that is `npm install && npm run dev`. Then click **Show preview**.
+
+## What it does
+
+**Projects** — create from nine templates (React, Vue, Svelte, Next.js, Node,
+static HTML, Flask, FastAPI, Go), rename, duplicate, download as a zip, and
+set environment variables that are injected into the container.
+
+**Editing** — Monaco with per-file tabs, split panes, full-text search across
+the project, quick-open, a diff against what is on disk, format on save, and
+settings that persist. Open tabs, expanded folders and pane sizes survive a
+reload. Files can be uploaded, downloaded, dragged between folders, and
+selected in bulk.
+
+**Collaboration** — share a project by email at viewer or editor level, or by
+a revocable view-only link. Two people editing one file merge through a CRDT
+rather than overwriting each other, with cursors visible in the margin.
+
+**Running** — one container per project with a real shell, a Run/Stop/Restart
+control, a preview that reloads itself the moment the dev server answers, and
+a readout of the container's memory and CPU against its budget.
+
+**Accounts** — password sign-in with reset by email, optional GitHub sign-in,
+revocable sessions, and per-user quotas on projects, disk and containers.
+
+## Working on it
+
+```bash
+pnpm typecheck     # all three packages
+pnpm lint
+pnpm test          # 291 tests
+pnpm build
+```
+
+Tests that need a database skip unless `TEST_DATABASE_URL` points at a
+throwaway Postgres with the migrations applied. CI always sets it:
+
+```bash
+TEST_DATABASE_URL="postgresql://..." pnpm test
+```
 
 ## How it works
 
@@ -74,6 +119,13 @@ bind-mounting the project directory at `/home/sandbox/app`. Each is capped at
 all capabilities dropped and `no-new-privileges`, and sits on an isolated bridge
 network. Containers stop after 20 minutes idle and restart on next use with the
 files intact. Tune all of it through the environment.
+
+**Shared editing** keeps one Yjs document per open file, relayed over the
+editor socket rather than a second WebSocket. While a document is live the
+server owns writing it to disk — one writer, not two racing — and releases it
+once the last editor leaves, so the next reader loads from disk again. A change
+made outside the editor is reported rather than merged: an external writer
+produces whole new contents with no record of the edits behind them.
 
 **Terminals** are a `docker exec` into that container, streamed over a WebSocket
 that shares the main HTTP port. The access token travels in the WebSocket
@@ -95,8 +147,17 @@ It defaults by detecting whether the server is itself containerised.
 ## Security model
 
 The project id is **not** the access control. Every REST route and socket event
-verifies a JWT and asserts the caller owns the project, and someone else's
-project reports 404 rather than 403 so ids cannot be enumerated.
+verifies a JWT and checks the caller's access level — viewer, editor or owner —
+and a project the caller cannot reach reports 404 rather than 403 so ids cannot
+be enumerated. A viewer may read files and watch the preview; writing, running
+and opening a shell need editor; deleting, renaming and managing access are the
+owner's alone. The socket checks per event rather than at connect, because a
+viewer is allowed to connect precisely so they can read.
+
+Sessions are revocable: refresh tokens are recorded as hashes, rotate on every
+use, and replaying a spent one revokes the whole family. Access, refresh and
+preview tokens each carry a type that is checked on verify, so one cannot be
+replayed as another.
 
 Client file operations name a path **relative to the project root**. The server
 resolves it through a single choke point that rejects traversal, absolute paths,
