@@ -15,6 +15,18 @@ import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
 
 const WRITE_DEBOUNCE_MS = 800;
 
+/** Builds the model URI for a path.
+ *
+ *  `Uri.parse` would PARSE the path, so a `#` started a fragment, a `?`
+ *  started a query, and a space was escaped — none of which survive a round
+ *  trip back through `uri.path`. Files named that way lost their view state,
+ *  never had their models disposed, and could collide with each other.
+ *  `Uri.from` takes the path as given.
+ */
+function modelUri(monaco: Monaco, relPath: string) {
+  return monaco.Uri.from({ scheme: "inmemory", path: `/${relPath}` });
+}
+
 export const EditorComponent = () => {
   /** Debounced writes still in flight, keyed by path.
    *
@@ -31,8 +43,17 @@ export const EditorComponent = () => {
   );
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
-  /** Per-file scroll position and folded regions. */
+  /** Per-file scroll position and folded regions, keyed by relPath. */
   const viewStates = useRef(new Map<string, editor.ICodeEditorViewState | null>());
+  /** Path currently attached to the editor.
+   *
+   *  Tracked here rather than recovered from `model.uri`: a URI does not always
+   *  round-trip back to the path it was built from, so paths with a space, a
+   *  `#` or a `?` lost their view state and leaked their models. */
+  const openedPath = useRef<string | null>(null);
+  /** Set while the editor's contents are being replaced programmatically, so
+   *  the resulting change event is not mistaken for the user typing. */
+  const suppressChange = useRef(false);
 
   const activeTab = useOpenTabsStore(selectActiveTab);
   const markDirty = useOpenTabsStore((state) => state.markDirty);
@@ -77,12 +98,12 @@ export const EditorComponent = () => {
     const codeEditor = editorRef.current;
     if (!monaco || !codeEditor || !activeTab) return;
 
-    const previousModel = codeEditor.getModel();
-    if (previousModel) {
-      viewStates.current.set(previousModel.uri.path.slice(1), codeEditor.saveViewState());
+    const previousPath = openedPath.current;
+    if (previousPath !== null && codeEditor.getModel()) {
+      viewStates.current.set(previousPath, codeEditor.saveViewState());
     }
 
-    const uri = monaco.Uri.parse(`inmemory:///${activeTab.relPath}`);
+    const uri = modelUri(monaco, activeTab.relPath);
     const language = extensionToFileType(activeTab.extension, activeTab.name);
 
     let model = monaco.editor.getModel(uri);
@@ -91,8 +112,16 @@ export const EditorComponent = () => {
     } else if (!activeTab.isDirty && model.getValue() !== activeTab.value) {
       // Only when the server's copy genuinely differs AND we have no unsaved
       // local edits, so a reopen does not clobber in-flight typing.
+      //
+      // Suppressed because setValue raises a content-change event exactly like
+      // a keystroke: without this, merely reopening a file marked it dirty and
+      // queued a write of the contents it had just been given.
+      suppressChange.current = true;
       model.setValue(activeTab.value);
+      suppressChange.current = false;
     }
+
+    openedPath.current = activeTab.relPath;
 
     codeEditor.setModel(model);
 
@@ -109,12 +138,15 @@ export const EditorComponent = () => {
     if (!monaco) return;
 
     const open = new Set(openPaths.split("\u0000").filter(Boolean));
+    const wanted = new Set([...open].map((path) => modelUri(monaco, path).toString()));
+
     for (const model of monaco.editor.getModels()) {
-      const path = model.uri.path.slice(1);
-      if (!open.has(path)) {
-        viewStates.current.delete(path);
-        model.dispose();
-      }
+      if (wanted.has(model.uri.toString())) continue;
+      model.dispose();
+    }
+
+    for (const path of viewStates.current.keys()) {
+      if (!open.has(path)) viewStates.current.delete(path);
     }
   }, [openPaths]);
 
@@ -189,6 +221,7 @@ export const EditorComponent = () => {
   }
 
   function handleChange(value: string | undefined) {
+    if (suppressChange.current) return;
     if (value === undefined || !activeTab) return;
 
     const { relPath } = activeTab;
