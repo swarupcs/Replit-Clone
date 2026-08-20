@@ -183,7 +183,7 @@ export const AuthForm = ({
 
           <Form
             layout="vertical"
-            onFinish={handleFinish}
+            onFinish={(values: Credentials) => void handleFinish(values)}
             requiredMark={false}
             size="large"
           >

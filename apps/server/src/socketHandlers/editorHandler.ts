@@ -255,7 +255,7 @@ export const handleEditorSocketEvents = (
     handle("rename", async () => {
       // A name, not a path: allowing separators here would be a traversal
       // vector through the destination argument.
-      if (!newName || /[\/\0]/.test(newName) || newName === "." || newName === "..") {
+      if (!newName || /[/\0]/.test(newName) || newName === "." || newName === "..") {
         socket.emit("error", {
           code: "INVALID_NAME",
           message: "Name cannot contain a path separator",

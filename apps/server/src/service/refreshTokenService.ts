@@ -65,7 +65,10 @@ export async function rotateRefreshToken(
   presented: string,
 ): Promise<{ userId: string; token: string }> {
   // Signature first: an unsigned value is not worth a database round trip.
-  const { sub: userId } = verifyRefreshToken(presented);
+  // The subject is deliberately taken from the stored row rather than the
+  // token, so a valid signature cannot assert a different user than the one
+  // the row was issued to.
+  verifyRefreshToken(presented);
 
   const record = await prisma.refreshToken.findUnique({
     where: { tokenHash: hash(presented) },

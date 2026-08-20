@@ -259,14 +259,14 @@ export async function startRun(projectId: string): Promise<void> {
     ],
   });
 
-  const stream = await exec.start({ hijack: true, stdin: false });
+  const stream: Duplex = await exec.start({ hijack: true, stdin: false });
 
   current.exec = exec;
-  current.stream = stream as unknown as Duplex;
+  current.stream = stream;
 
   // Tty: true means Docker does NOT multiplex the stream, so chunks are raw
   // terminal bytes and need no 8-byte header parsing.
-  (stream as unknown as Duplex).on("data", (chunk: Buffer) => {
+  stream.on("data", (chunk: Buffer) => {
     const visible = takeProcessGroupId(current, chunk.toString("utf8"));
     if (visible) pushOutput(projectId, visible);
   });
@@ -289,8 +289,8 @@ export async function startRun(projectId: string): Promise<void> {
     })();
   };
 
-  (stream as unknown as Duplex).on("end", finish);
-  (stream as unknown as Duplex).on("close", finish);
+  stream.on("end", finish);
+  stream.on("close", finish);
 
   probeUntilReady(projectId);
 }

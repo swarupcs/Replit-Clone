@@ -122,6 +122,11 @@ function stripCredentials(proxyReq: {
  *  publish nothing at all.
  */
 export function createPreviewProxy(): PreviewProxy {
+  // http-proxy-middleware's handler is declared as returning Promise<void>,
+  // while Express's RequestHandler is declared as returning void. Express
+  // ignores a handler's return value entirely, so the two are compatible in
+  // practice and only the declarations disagree.
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
   return createProxyMiddleware<Request, Response>({
     router: (req) => targets.get(req) ?? "http://127.0.0.1:1",
     changeOrigin: true,

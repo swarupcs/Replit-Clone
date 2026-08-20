@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer } from "ws";
-import type { WebSocket } from "ws";
+import type { RawData, WebSocket } from "ws";
 import {
   attach,
   detach,
@@ -12,6 +12,19 @@ import type { AttachInput } from "../containers/handleTerminalCreation.js";
 import { assertProjectAccess, touchProject } from "../service/projectService.js";
 import { verifyAccessToken } from "../service/tokenService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
+
+/** Decodes a client frame to text.
+ *
+ *  `ws` hands over a Buffer, an ArrayBuffer, or — for a fragmented message —
+ *  an array of Buffers. Calling `.toString()` on the last of those returns the
+ *  fragments joined by commas rather than the text, so a long paste or a large
+ *  terminal frame arrived corrupted.
+ */
+function decodeMessage(data: RawData): string {
+  if (Array.isArray(data)) return Buffer.concat(data).toString("utf8");
+  if (Buffer.isBuffer(data)) return data.toString("utf8");
+  return Buffer.from(data).toString("utf8");
+}
 
 /** Reads the access token from the WebSocket subprotocol.
  *
@@ -71,7 +84,7 @@ export function installTerminalGateway(server: Server): void {
           let sink: ((data: string) => void) | null = null;
 
           ws.on("message", (data) => {
-            const text = data.toString();
+            const text = decodeMessage(data);
             if (sink) sink(text);
             else inbox.push(text);
           });

@@ -189,8 +189,14 @@ async function shutdown(signal: string): Promise<void> {
 
   console.log(`\n${signal} received, shutting down`);
 
-  io.close();
-  server.close();
+  // Awaited so in-flight requests and sockets are given a chance to finish;
+  // these used to be fired and forgotten a line before process.exit.
+  await io.close();
+  await new Promise<void>((resolve) => {
+    server.close(() => {
+      resolve();
+    });
+  });
 
   // Only on a real shutdown: otherwise a restart leaves orphaned containers
   // holding the VM's memory. In development, tearing down every container on

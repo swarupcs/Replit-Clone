@@ -75,7 +75,7 @@ export async function deleteProjectController(
   res.json({ success: true, message: "Project deleted", data: null });
 }
 
-export async function listTemplatesController(
+export function listTemplatesController(
   _req: Request,
   res: Response,
 ): Promise<void> {
@@ -89,4 +89,5 @@ export async function listTemplatesController(
   }));
 
   res.json({ success: true, message: "Templates", data });
+  return Promise.resolve();
 }

@@ -14,7 +14,7 @@ export const Login = () => {
       footer={{ prompt: "No account?", linkText: "Create one", to: "/signup" }}
       onSubmit={async (credentials) => {
         await login(credentials);
-        navigate("/", { replace: true });
+        void navigate("/", { replace: true });
       }}
     />
   );

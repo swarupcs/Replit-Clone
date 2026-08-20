@@ -61,7 +61,13 @@ axiosInstance.interceptors.response.use(
       return axiosInstance(config);
     } catch (refreshError) {
       useAuthStore.getState().clearSession();
-      return Promise.reject(refreshError);
+      // Normalised so callers always get an Error with a usable stack, rather
+      // than whatever value the refresh happened to throw.
+      return Promise.reject(
+        refreshError instanceof Error
+          ? refreshError
+          : new Error("Could not refresh the session"),
+      );
     }
   },
 );

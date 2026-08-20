@@ -143,7 +143,7 @@ export const Browser = ({ projectId }: BrowserProps) => {
         <Segmented
           size="small"
           value={device}
-          onChange={(value) => setDevice(value as DeviceValue)}
+          onChange={(value) => setDevice(value)}
           options={DEVICES.map((d) => ({
             value: d.value,
             label: <Tooltip title={d.title}>{d.label}</Tooltip>,

@@ -139,7 +139,7 @@ export const ProjectPlayground = () => {
             type="text"
             icon={<ArrowLeftOutlined />}
             style={{ color: "var(--rc-text-muted)" }}
-            onClick={() => navigate("/")}
+            onClick={() => void navigate("/")}
           />
           <span
             aria-hidden

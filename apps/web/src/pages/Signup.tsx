@@ -14,7 +14,7 @@ export const Signup = () => {
       footer={{ prompt: "Already registered?", linkText: "Sign in", to: "/login" }}
       onSubmit={async (credentials) => {
         await signup(credentials);
-        navigate("/", { replace: true });
+        void navigate("/", { replace: true });
       }}
     />
   );

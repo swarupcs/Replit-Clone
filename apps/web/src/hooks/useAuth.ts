@@ -34,7 +34,7 @@ export function useAuth() {
       // Otherwise the next user to sign in sees the previous one's cached
       // project list before the refetch lands.
       queryClient.clear();
-      navigate("/login");
+      void navigate("/login");
     }
   }, [clearSession, navigate]);
 

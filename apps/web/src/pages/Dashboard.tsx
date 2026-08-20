@@ -77,7 +77,7 @@ export const Dashboard = () => {
     try {
       const project = await createProjectApi(name || undefined, selectedTemplate);
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
-      navigate(`/project/${project.id}`);
+      void navigate(`/project/${project.id}`);
     } catch {
       void messageApi.error("Could not create the project. Check the server logs.");
     } finally {
@@ -178,11 +178,11 @@ export const Dashboard = () => {
                 className="rc-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => navigate(`/project/${project.id}`)}
+                onClick={() => void navigate(`/project/${project.id}`)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    navigate(`/project/${project.id}`);
+                    void navigate(`/project/${project.id}`);
                   }
                 }}
               >
