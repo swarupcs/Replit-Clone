@@ -55,7 +55,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     label: "Static HTML",
     image: "sandbox-node:latest",
     devPort: 8080,
-    startCommand: "npx --yes serve -l 8080 .",
+    startCommand: "serve -l 8080 .",
     filesDir: "static-html",
     expectsPreviewBase: false,
   },

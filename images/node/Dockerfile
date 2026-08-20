@@ -25,6 +25,11 @@ RUN useradd --create-home --shell /bin/bash --uid 1001 --gid 0 sandbox \
     && chown -R sandbox:0 /home/sandbox \
     && chmod -R g=u /home/sandbox
 
+# Preinstalled so the static template starts offline and instantly, rather than
+# re-fetching it through `npx --yes` on every run.
+RUN npm install --global serve@14 \
+    && npm cache clean --force
+
 USER 1001:0
 ENV HOME=/home/sandbox
 WORKDIR /home/sandbox/app

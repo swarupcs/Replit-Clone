@@ -24,11 +24,6 @@ export interface Project {
   lastActiveAt: string | null;
 }
 
-/** GET /ping */
-export interface PingResponse {
-  message: string;
-}
-
 /** POST /api/v1/projects */
 export type CreateProjectResponse = ApiSuccess<Project>;
 
