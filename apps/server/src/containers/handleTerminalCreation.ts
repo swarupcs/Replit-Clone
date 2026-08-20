@@ -78,7 +78,7 @@ export const handleTerminalCreation = (
           return;
         }
 
-        processStreamOutput(stream, ws);
+        forwardOutput(stream, ws);
 
         // Docker accepts a resize on a freshly started exec without erroring
         // but silently drops it, leaving the PTY at 0x0. Rather than guess a
@@ -128,41 +128,17 @@ export const handleTerminalCreation = (
   );
 };
 
-/** Demultiplexes Docker's stream framing.
+/** Forwards the exec's output to the client.
  *
- *  Each frame is an 8-byte header — a big-endian uint32 stream type followed by
- *  a big-endian uint32 payload length — then that many payload bytes. We buffer
- *  until a whole frame is available, forward the payload, and repeat.
+ *  The exec is created with `Tty: true`, and Docker only frames a stream when
+ *  there is NO TTY — with one, the bytes arrive raw. Parsing the 8-byte
+ *  stream header anyway consumed the first eight bytes of the shell's output
+ *  as a length prefix and then blocked forever waiting for a payload that size,
+ *  so the terminal never rendered anything. `runner.ts` already documents the
+ *  raw behaviour for its own exec; the two now agree.
  */
-function processStreamOutput(stream: Duplex, ws: WebSocket): void {
-  let nextDataType: number | null = null;
-  let nextDataLength: number | null = null;
-  let buffer: Buffer = Buffer.alloc(0);
-
-  function takeFromBuffer(end: number): Buffer {
-    const output = buffer.subarray(0, end);
-    buffer = Buffer.from(buffer.subarray(end));
-    return output;
-  }
-
-  function processStreamData(data?: Buffer): void {
-    if (data) buffer = Buffer.concat([buffer, data]);
-
-    if (nextDataType === null) {
-      if (buffer.length >= 8) {
-        const header = takeFromBuffer(8);
-        nextDataType = header.readUInt32BE(0);
-        nextDataLength = header.readUInt32BE(4);
-        processStreamData();
-      }
-    } else if (nextDataLength !== null && buffer.length >= nextDataLength) {
-      const content = takeFromBuffer(nextDataLength);
-      if (ws.readyState === ws.OPEN) ws.send(content);
-      nextDataType = null;
-      nextDataLength = null;
-      processStreamData();
-    }
-  }
-
-  stream.on("data", (chunk: Buffer) => processStreamData(chunk));
+function forwardOutput(stream: Duplex, ws: WebSocket): void {
+  stream.on("data", (chunk: Buffer) => {
+    if (ws.readyState === ws.OPEN) ws.send(chunk);
+  });
 }
