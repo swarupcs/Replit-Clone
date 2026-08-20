@@ -8,13 +8,47 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
+  id           String         @id @default(uuid())
+  email        String         @unique
   passwordHash String
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime       @default(now())
   projects     Project[]
+  refreshTokens RefreshToken[]
 
   @@map("users")
+}
+
+/// One issued refresh token.
+///
+/// Refresh tokens used to be stateless JWTs, so signing out only cleared the
+/// browser's cookie: anyone holding the value kept a working session for its
+/// full lifetime, and a compromised account could not be cut off short of
+/// rotating the signing secret and ending every session on the platform.
+model RefreshToken {
+  id String @id @default(uuid())
+
+  /// SHA-256 of the token. The value itself is never stored, so a leaked
+  /// database backup does not hand over live sessions.
+  tokenHash String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Set when the token is rotated or explicitly revoked. A token presented
+  /// after this is a replay, and revokes its whole family — the standard
+  /// signal that a token was stolen.
+  revokedAt DateTime?
+
+  /// Groups every token descended from one sign-in.
+  familyId String
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }
 
 model Project {

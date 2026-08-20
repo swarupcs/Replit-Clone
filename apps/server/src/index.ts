@@ -21,6 +21,7 @@ import { env, isProduction } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";
 import { projectDir, touchProject } from "./service/projectService.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
+import { pruneExpiredRefreshTokens } from "./service/refreshTokenService.js";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
 import { installTerminalGateway } from "./terminal/terminalGateway.js";
 import {
@@ -128,9 +129,27 @@ installTerminalGateway(server);
 // for upgrades — so this authorises and routes them itself.
 installPreviewUpgrade(server, previewProxy);
 
+/** Clears refresh tokens that can no longer authorise anything.
+ *
+ *  Rotation writes a row per refresh, so without this the table grows for the
+ *  lifetime of the deployment. Hourly is far more often than needed for a
+ *  30-day expiry; it just keeps the first sweep after a restart soon.
+ */
+function startTokenPrune(): void {
+  const sweep = (): void => {
+    void pruneExpiredRefreshTokens().catch((error: unknown) => {
+      console.error("Could not prune refresh tokens:", error);
+    });
+  };
+
+  sweep();
+  setInterval(sweep, 60 * 60 * 1000).unref();
+}
+
 async function start(): Promise<void> {
   await ensureNetwork();
   startIdleReaper();
+  startTokenPrune();
 
   // A `tsx watch` restart can race the previous process releasing the port on
   // Windows, which otherwise kills the dev server outright.

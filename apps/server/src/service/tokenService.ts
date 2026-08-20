@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import jwt from "jsonwebtoken";
 import type { SignOptions } from "jsonwebtoken";
 import { env } from "../config/env.js";
@@ -62,8 +63,20 @@ export function signAccessToken(claims: AccessTokenClaims): string {
   } as SignOptions);
 }
 
+/** Every refresh token carries a random id.
+ *
+ *  Without one the payload is just a subject, a type and second-granularity
+ *  timestamps, so two tokens minted for the same user within the same second
+ *  are byte-identical — and the store, which keys on the token's hash, rejects
+ *  the second as a duplicate. Signing in twice quickly, or rotating twice, is
+ *  enough to hit that.
+ */
 export function signRefreshToken(userId: string): string {
-  const payload: BaseClaims = { sub: userId, typ: "refresh" };
+  const payload: BaseClaims & { jti: string } = {
+    sub: userId,
+    typ: "refresh",
+    jti: randomUUID(),
+  };
 
   return jwt.sign(payload, env.JWT_REFRESH_SECRET, {
     expiresIn: `${String(env.REFRESH_TOKEN_TTL_DAYS)}d`,

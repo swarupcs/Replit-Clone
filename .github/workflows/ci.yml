@@ -15,6 +15,27 @@ jobs:
     name: Typecheck, lint, test, build
     runs-on: ubuntu-latest
 
+    # Refresh-token rotation is enforced by real rows — unique hashes, replay
+    # detection, revocation — so those tests need a database. They skip locally
+    # when TEST_DATABASE_URL is unset; here they always run.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: replit_clone_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/replit_clone_test?schema=public
+
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +64,11 @@ jobs:
       - run: pnpm -r typecheck
 
       - run: pnpm -r lint
+
+      - name: Apply migrations to the test database
+        run: pnpm --filter @replit-clone/server exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
 
       - run: pnpm -r test
 

@@ -13,9 +13,12 @@ import {
   refreshCookieMaxAgeMs,
   signAccessToken,
   signPreviewToken,
-  signRefreshToken,
-  verifyRefreshToken,
 } from "../service/tokenService.js";
+import {
+  issueRefreshToken,
+  revokeRefreshToken,
+  rotateRefreshToken,
+} from "../service/refreshTokenService.js";
 import { getAuthContext } from "../middlewares/requireAuth.js";
 import { UnauthorizedError } from "../utils/errors.js";
 
@@ -45,14 +48,20 @@ const previewCookieOptions: CookieOptions = {
   maxAge: previewCookieMaxAgeMs,
 };
 
+/** Writes the session cookies and returns the access token.
+ *
+ *  `refreshToken` is supplied by the caller rather than minted here, because a
+ *  sign-in starts a new token family while a refresh continues an existing one.
+ */
 function issueSession(
   res: Response,
   user: { id: string; email: string },
+  refreshToken: string,
   message: string,
 ): void {
   const accessToken = signAccessToken({ sub: user.id, email: user.email });
 
-  res.cookie(REFRESH_COOKIE_NAME, signRefreshToken(user.id), refreshCookieOptions);
+  res.cookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions);
   res.cookie(PREVIEW_COOKIE_NAME, signPreviewToken(user.id), previewCookieOptions);
 
   res.json({ success: true, message, data: { user, accessToken } });
@@ -61,27 +70,40 @@ function issueSession(
 export async function signup(req: Request, res: Response): Promise<void> {
   const { email, password } = credentialsSchema.parse(req.body);
   const user = await registerUser(email, password);
-  issueSession(res, user, "Account created");
+  const { token } = await issueRefreshToken(user.id);
+
+  issueSession(res, user, token, "Account created");
 }
 
 export async function login(req: Request, res: Response): Promise<void> {
   const { email, password } = credentialsSchema.parse(req.body);
   const user = await authenticateUser(email, password);
-  issueSession(res, user, "Signed in");
+  const { token } = await issueRefreshToken(user.id);
+
+  issueSession(res, user, token, "Signed in");
 }
 
 export async function refresh(req: Request, res: Response): Promise<void> {
-  const token = req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined;
-  if (!token) throw new UnauthorizedError("No refresh token");
+  const presented = req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined;
+  if (!presented) throw new UnauthorizedError("No refresh token");
 
-  const { sub } = verifyRefreshToken(token);
-  const user = await getUserById(sub);
+  // Rotates: the presented token is spent, and presenting it again revokes the
+  // whole family. See refreshTokenService.
+  const { userId, token } = await rotateRefreshToken(presented);
+
+  const user = await getUserById(userId);
   if (!user) throw new UnauthorizedError("Account no longer exists");
 
-  issueSession(res, user, "Session refreshed");
+  issueSession(res, user, token, "Session refreshed");
 }
 
-export async function logout(_req: Request, res: Response): Promise<void> {
+export async function logout(req: Request, res: Response): Promise<void> {
+  const presented = req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined;
+
+  // The point of the record: clearing the cookie alone left the token itself
+  // working for anyone who had captured it.
+  if (presented) await revokeRefreshToken(presented);
+
   res.clearCookie(REFRESH_COOKIE_NAME, { ...refreshCookieOptions, maxAge: undefined });
   res.clearCookie(PREVIEW_COOKIE_NAME, { ...previewCookieOptions, maxAge: undefined });
   res.json({ success: true, message: "Signed out", data: null });
