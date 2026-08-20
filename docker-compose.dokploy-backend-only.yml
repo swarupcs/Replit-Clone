@@ -1,0 +1,86 @@
+# Backend-only stack for a Dokploy deployment, paired with the frontend on
+# Vercel (see apps/web/vercel.json and README.md "Split deployment").
+#
+# Point Dokploy's "Docker Compose" application type at this file. Dokploy's
+# built-in Traefik terminates TLS and proxies to the `server` service --
+# assign it a domain (e.g. api.yourdomain.com) pointing at container port
+# 3000, with WebSocket support on (Traefik does this by default).
+#
+# Required Dokploy environment variables:
+#   POSTGRES_PASSWORD, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET
+#   WEB_ORIGIN        -- your Vercel URL, e.g. https://my-app.vercel.app
+#
+# The sandbox network and /data/projects directory must exist on the VM
+# first -- see README.md.
+#
+# If you'd rather deploy both frontend and backend on Dokploy (no Vercel,
+# no cross-site cookies to worry about), use docker-compose.dokploy.yml
+# instead -- see README.md "All-in-one Dokploy deployment".
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-replit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-replit_clone}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-replit}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Not published: only the server needs it.
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-replit}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-replit_clone}?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
+      # Must be the Vercel URL. It is a DIFFERENT domain from the API, which is
+      # exactly the case COOKIE_SAME_SITE=none exists for -- see env.ts.
+      WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN to your Vercel URL}
+      COOKIE_SAME_SITE: none
+      COOKIE_SECURE: "true"
+      PROJECTS_DIR: /data/projects
+      CONTAINER_MEMORY_MB: ${CONTAINER_MEMORY_MB:-512}
+      CONTAINER_CPUS: ${CONTAINER_CPUS:-0.5}
+      CONTAINER_IDLE_MINUTES: ${CONTAINER_IDLE_MINUTES:-20}
+      MAX_CONCURRENT_CONTAINERS: ${MAX_CONCURRENT_CONTAINERS:-3}
+      # The server is on the sandbox network, so it can reach project
+      # containers directly and nothing is published to the host.
+      PREVIEW_TARGET_MODE: container-ip
+    # No `ports:` -- Dokploy's Traefik reaches this over the network it
+    # attaches, not a published host port.
+    expose:
+      - "3000"
+    volumes:
+      # Equivalent to host root. Auth and path confinement are what make this
+      # acceptable; do not expose this service to the internet without them.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # MUST be a host path, identical on both sides: the server asks the
+      # host's Docker daemon to bind-mount project directories, and the daemon
+      # resolves that path on the HOST, not inside this container.
+      - /data/projects:/data/projects
+    networks:
+      - default
+      - sandbox
+
+volumes:
+  postgres-data:
+
+networks:
+  sandbox:
+    name: replit-clone-sandbox
+    external: true

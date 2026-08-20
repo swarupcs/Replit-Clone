@@ -1,54 +1,48 @@
-# Backend-only stack for a Dokploy deployment, paired with the frontend on
-# Vercel (see apps/web/vercel.json and README.md "Split deployment").
+# All-in-one Dokploy deployment: server + web as two services in one Dokploy
+# "Docker Compose" application, using an EXTERNAL Postgres instance (no
+# bundled `postgres` service) -- point DATABASE_URL at a database you already
+# run in Dokploy (or anywhere reachable from this stack).
 #
-# Point Dokploy's "Docker Compose" application type at this file. Dokploy's
-# built-in Traefik terminates TLS and proxies to the `server` service --
-# assign it a domain (e.g. api.yourdomain.com) pointing at container port
-# 3000, with WebSocket support on (Traefik does this by default).
+# Assign both services a domain in Dokploy, on the SAME registrable domain,
+# e.g.:
+#   web    -> app.yourdomain.com
+#   server -> api.yourdomain.com
+# Different subdomains of one domain are still "same-site" for cookies, so
+# the default COOKIE_SAME_SITE=lax / COOKIE_SECURE=true (from NODE_ENV=
+# production) works with no extra config -- this is NOT the Vercel case.
+# Enable WebSocket support on both domains (Traefik does this by default);
+# socket.io and the terminal need it.
+#
+# If your external Postgres lives in another Dokploy project, either:
+#   - put this stack on the same Dokploy "project network" as that DB, or
+#   - use its publicly reachable host:port (Dokploy can expose Postgres on
+#     its own domain/port under Advanced > expose ports).
+# Either way, DATABASE_URL just needs to resolve and be reachable from the
+# `server` container.
 #
 # Required Dokploy environment variables:
-#   POSTGRES_PASSWORD, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET
-#   WEB_ORIGIN        -- your Vercel URL, e.g. https://my-app.vercel.app
+#   DATABASE_URL       -- postgresql://user:pass@host:5432/dbname?schema=public
+#   JWT_ACCESS_SECRET, JWT_REFRESH_SECRET
+#   WEB_ORIGIN          -- https://app.yourdomain.com (must match the web domain)
+#   VITE_BACKEND_URL_BUILD_ARG -- https://api.yourdomain.com (baked into the
+#                                  web bundle at build time, see below)
 #
 # The sandbox network and /data/projects directory must exist on the VM
-# first -- see README.md.
+# first -- see README.md "Deploying to a VM".
 
 services:
-  postgres:
-    image: postgres:17-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-replit}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-replit_clone}
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-replit}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    # Not published: only the server needs it.
-
   server:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-replit}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-replit_clone}?schema=public
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL to your external Postgres instance}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
-      # Must be the Vercel URL. It is a DIFFERENT domain from the API, which is
-      # exactly the case COOKIE_SAME_SITE=none exists for -- see env.ts.
-      WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN to your Vercel URL}
-      COOKIE_SAME_SITE: none
-      COOKIE_SECURE: "true"
+      WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN to your web domain, e.g. https://app.yourdomain.com}
       PROJECTS_DIR: /data/projects
       CONTAINER_MEMORY_MB: ${CONTAINER_MEMORY_MB:-512}
       CONTAINER_CPUS: ${CONTAINER_CPUS:-0.5}
@@ -58,7 +52,7 @@ services:
       # containers directly and nothing is published to the host.
       PREVIEW_TARGET_MODE: container-ip
     # No `ports:` -- Dokploy's Traefik reaches this over the network it
-    # attaches, not a published host port.
+    # attaches, not a published host port. Assign it a domain in the UI.
     expose:
       - "3000"
     volumes:
@@ -66,15 +60,27 @@ services:
       # acceptable; do not expose this service to the internet without them.
       - /var/run/docker.sock:/var/run/docker.sock
       # MUST be a host path, identical on both sides: the server asks the
-      # host's Docker daemon to bind-mount project directories, and the daemon
-      # resolves that path on the HOST, not inside this container.
+      # host's Docker daemon to bind-mount project directories, and the
+      # daemon resolves that path on the HOST, not inside this container.
       - /data/projects:/data/projects
     networks:
       - default
       - sandbox
 
-volumes:
-  postgres-data:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Baked into the JS bundle at build time -- must be the public API
+        # domain, not a container-internal name.
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL_BUILD_ARG:?set VITE_BACKEND_URL_BUILD_ARG to your API domain, e.g. https://api.yourdomain.com}
+    restart: unless-stopped
+    depends_on:
+      - server
+    # No `ports:` -- assign this service its own domain in Dokploy too.
+    expose:
+      - "80"
 
 networks:
   sandbox:

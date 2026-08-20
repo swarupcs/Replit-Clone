@@ -133,7 +133,54 @@ On 2 GB, budget roughly: Postgres ~200 MB, server ~150 MB, nginx ~10 MB, leaving
 about three concurrent 512 MB projects. `MAX_CONCURRENT_CONTAINERS` returns a
 clear "at capacity" error rather than letting Docker OOM-kill something.
 
+## All-in-one Dokploy deployment (recommended)
+
+Deploy `docker-compose.dokploy.yml` as a single Dokploy "Docker Compose"
+application: `server` and `web` as two services, both getting a domain from
+Dokploy's Traefik (with automatic TLS). This is the simplest option -- one
+dashboard, one set of logs, and since both services end up on subdomains of
+the *same* registrable domain (e.g. `app.yourdomain.com` /
+`api.yourdomain.com`), cookies stay same-site: no `COOKIE_SAME_SITE=none`
+config needed, unlike the Vercel split below.
+
+This variant has **no bundled Postgres service** -- it expects
+`DATABASE_URL` to point at a database you already run (e.g. another Dokploy
+project's Postgres instance, or any reachable host:port).
+
+**Setup**
+
+- Create the sandbox network and projects directory on the VM once:
+  ```bash
+  docker network create replit-clone-sandbox
+  mkdir -p /data/projects
+  ```
+- In Dokploy, create a "Docker Compose" application pointing at
+  `docker-compose.dokploy.yml`.
+- Set env vars in Dokploy's UI:
+  - `DATABASE_URL` -- your existing Postgres connection string. If it's
+    another service in Dokploy, either put this stack on the same project
+    network as that DB, or expose the DB on a reachable host:port.
+  - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`
+  - `WEB_ORIGIN` -- the domain you'll assign `web`, e.g.
+    `https://app.yourdomain.com`
+  - `VITE_BACKEND_URL_BUILD_ARG` -- the domain you'll assign `server`, e.g.
+    `https://api.yourdomain.com`. This is **baked into the web bundle at
+    build time** -- know your API domain before the first build, and
+    redeploy `web` (not just restart) if it ever changes.
+- Assign both services domains in Dokploy, on the same root domain, with
+  WebSocket support on (default for Traefik) -- socket.io and the terminal
+  need it.
+
+Run `prisma migrate deploy` against `DATABASE_URL` before first boot if the
+schema isn't already applied to your existing database.
+
 ## Split deployment: Vercel (frontend) + Dokploy (backend)
+
+An alternative if you'd rather host the frontend on Vercel specifically (its
+CDN, per-PR preview deploys). Adds real complexity the all-in-one option
+above avoids: two dashboards, a circular env-var dependency between the two
+deploys, and cross-site cookies. Use `docker-compose.dokploy-backend-only.yml`
+for this path, not `docker-compose.dokploy.yml`.
 
 Vercel can only host the static frontend -- it has no Docker socket, which the
 backend needs to run project containers. The backend has to live somewhere
@@ -154,7 +201,7 @@ wrong doesn't error, login just silently stops working.
   mkdir -p /data/projects
   ```
 - In Dokploy, create a "Docker Compose" application pointing at
-  `docker-compose.dokploy.yml` in this repo.
+  `docker-compose.dokploy-backend-only.yml` in this repo.
 - Set the required env vars in Dokploy's UI: `POSTGRES_PASSWORD`,
   `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, and `WEB_ORIGIN` (your Vercel URL,
   set in step 2 -- circular, so come back and set this after step 2 if you
@@ -163,8 +210,8 @@ wrong doesn't error, login just silently stops working.
   with WebSocket support on -- Traefik proxies WebSocket upgrades by default,
   which both socket.io and the terminal need.
 - `COOKIE_SAME_SITE=none` and `COOKIE_SECURE=true` are already set in
-  `docker-compose.dokploy.yml`; both require HTTPS, which Dokploy's Traefik
-  provides via Let's Encrypt.
+  `docker-compose.dokploy-backend-only.yml`; both require HTTPS, which
+  Dokploy's Traefik provides via Let's Encrypt.
 
 **2. Frontend on Vercel**
 
