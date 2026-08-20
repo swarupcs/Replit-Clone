@@ -657,3 +657,9 @@ body {
   outline: 1px solid var(--rc-accent);
   outline-offset: -1px;
 }
+
+/* Part of a multi-row selection. Distinct from the active file, which is a
+   different thing: one row is open, several may be selected. */
+.rc-tree-row[data-selected="true"] {
+  background: var(--rc-selection);
+}

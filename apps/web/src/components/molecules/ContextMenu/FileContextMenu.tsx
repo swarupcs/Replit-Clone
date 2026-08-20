@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Input, Modal } from "antd";
 import type { TreeNodeData } from "@replit-clone/shared";
 import "./FileContextMenu.css";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
 import { fileDownloadUrl } from "../../../apis/projects.ts";
+import {
+  selectOrderedSelection,
+  useTreeSelectionStore,
+} from "../../../store/treeSelectionStore.ts";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 
 type PendingAction = "newFile" | "newFolder" | "rename" | "delete";
@@ -20,6 +24,27 @@ export const FileContextMenu = () => {
   const { x, y, isOpen, node, close } = useFileContextMenuStore();
   const { editorSocket } = useEditorSocketStore();
   const projectId = useTreeStructureStore((state) => state.projectId);
+  /** What Delete will act on: the selection when this row is part of one,
+   *  otherwise just this row. */
+  const selection = useTreeSelectionStore(selectOrderedSelection);
+  const treeStructure = useTreeStructureStore((state) => state.treeStructure);
+
+  /** Which paths are folders, so a delete emits the right event for each.
+   *  Derived from the tree rather than guessed from the name — a file can be
+   *  called anything, including something that looks like a directory. */
+  const folderPaths = useMemo(() => {
+    const paths = new Set<string>();
+
+    const walk = (entry: TreeNodeData) => {
+      if (entry.type === "directory") {
+        if (entry.relPath) paths.add(entry.relPath);
+        entry.children?.forEach(walk);
+      }
+    };
+
+    if (treeStructure) walk(treeStructure);
+    return paths;
+  }, [treeStructure]);
 
   /** The node the dialog is acting on.
    *
@@ -60,6 +85,13 @@ export const FileContextMenu = () => {
     setPending(action);
     setName(action === "rename" ? node.name : "");
 
+    if (action === "delete") {
+      // The selection when this row is part of one; otherwise just this row.
+      setDeleteTargets(
+        selection.includes(node.relPath) ? selection : [node.relPath],
+      );
+    }
+
     close();
   }
 
@@ -98,21 +130,31 @@ export const FileContextMenu = () => {
    *  confirms. A folder additionally has to be named, the way destructive
    *  actions elsewhere do — one slipped click used to be enough to destroy a
    *  whole source tree. */
+  /** Everything Delete will remove. Captured when the dialog opens so it
+   *  cannot change underneath the confirmation the user is reading. */
+  const [deleteTargets, setDeleteTargets] = useState<string[]>([]);
+
   function confirmDelete() {
     if (!editorSocket || !target) return;
-    if (target.type === "directory" && name.trim() !== target.name) return;
+    if (isDeletingFolder && name.trim() !== confirmWord) return;
 
-    if (target.type === "directory") {
-      editorSocket.emit("deleteFolder", { relPath: target.relPath });
-    } else {
-      editorSocket.emit("deleteFile", { relPath: target.relPath });
+    for (const relPath of deleteTargets) {
+      // A folder and a file are different events; the tree knows which each
+      // path is, so ask it rather than guessing from the name.
+      const isFolder = folderPaths.has(relPath);
+      editorSocket.emit(isFolder ? "deleteFolder" : "deleteFile", { relPath });
     }
 
+    useTreeSelectionStore.getState().clear();
     closeDialog();
   }
 
-  const isDeletingFolder = pending === "delete" && target?.type === "directory";
-  const deleteBlocked = isDeletingFolder && name.trim() !== target.name;
+  /** Confirmation is required whenever a folder is involved, because that is
+   *  the case where one slip destroys work that exists nowhere else. */
+  const isDeletingFolder =
+    pending === "delete" && deleteTargets.some((path) => folderPaths.has(path));
+  const confirmWord = deleteTargets.length > 1 ? "delete" : (target?.name ?? "");
+  const deleteBlocked = isDeletingFolder && name.trim() !== confirmWord;
 
   return (
     <>
@@ -165,9 +207,18 @@ export const FileContextMenu = () => {
         {pending === "delete" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <span style={{ color: "var(--rc-text-muted)" }}>
-              Delete <b>{target?.name}</b>
-              {isDeletingFolder ? " and everything inside it" : ""}? This
-              removes it from disk and cannot be undone.
+              {deleteTargets.length > 1 ? (
+                <>
+                  Delete <b>{deleteTargets.length} items</b>
+                  {isDeletingFolder ? ", including folders and everything inside them" : ""}?
+                </>
+              ) : (
+                <>
+                  Delete <b>{target?.name}</b>
+                  {isDeletingFolder ? " and everything inside it" : ""}?
+                </>
+              )}{" "}
+              This removes them from disk and cannot be undone.
             </span>
 
             {/* A folder can hold work that exists nowhere else, so removing one
@@ -176,7 +227,7 @@ export const FileContextMenu = () => {
               <Input
                 autoFocus
                 value={name}
-                placeholder={`Type "${target.name}" to confirm`}
+                placeholder={`Type "${confirmWord}" to confirm`}
                 onChange={(event) => setName(event.target.value)}
                 onPressEnter={confirmDelete}
               />

@@ -14,6 +14,7 @@ import { TreeNode } from "../../molecules/TreeNode/TreeNode.tsx";
 import { FileContextMenu } from "../../molecules/ContextMenu/FileContextMenu.tsx";
 import { NewEntryPrompt } from "../../molecules/ContextMenu/NewEntryPrompt.tsx";
 import { uploadFilesApi } from "../../../apis/projects.ts";
+import { useTreeSelectionStore } from "../../../store/treeSelectionStore.ts";
 
 /** Prunes the tree to nodes whose path matches `query`, keeping the folders
  *  that lead to a match so the result still reads as a tree rather than a flat
@@ -32,6 +33,27 @@ function filterTree(node: TreeNodeData, query: string): TreeNodeData | null {
   if (selfMatches) return node;
   if (children.length > 0) return { ...node, children };
   return null;
+}
+
+/** The rows as they appear on screen, top to bottom.
+ *
+ *  A shift-click range has to mean what the user sees, so it is measured
+ *  against this rather than against the tree's own recursion — a collapsed
+ *  folder's children are not on screen and must not be swept up in a range.
+ */
+function visibleRows(
+  node: TreeNodeData,
+  expanded: Set<string>,
+  into: string[] = [],
+): string[] {
+  if (node.relPath) into.push(node.relPath);
+
+  const isOpen = node.relPath === "" || expanded.has(node.relPath);
+  if (node.type === "directory" && isOpen) {
+    node.children?.forEach((child) => visibleRows(child, expanded, into));
+  }
+
+  return into;
 }
 
 /** Every folder path in the tree -- used to expand everything while filtering,
@@ -85,6 +107,9 @@ export const TreeStructure = () => {
     if (projectId && !treeStructure) void refreshTree();
   }, [projectId, treeStructure, refreshTree]);
 
+  const expandedPaths = useTreeStructureStore((state) => state.expandedPaths);
+  const setVisibleOrder = useTreeSelectionStore((state) => state.setVisibleOrder);
+
   const trimmedQuery = query.trim().toLowerCase();
 
   const visibleTree = useMemo(() => {
@@ -92,6 +117,12 @@ export const TreeStructure = () => {
     if (!trimmedQuery) return treeStructure;
     return filterTree(treeStructure, trimmedQuery);
   }, [treeStructure, trimmedQuery]);
+
+  // Republished whenever the tree or what is expanded changes, so a range
+  // selection is always measured against what is actually on screen.
+  useEffect(() => {
+    setVisibleOrder(visibleTree ? visibleRows(visibleTree, expandedPaths) : []);
+  }, [visibleTree, expandedPaths, setVisibleOrder]);
 
   // Filtering is useless against collapsed folders, so reveal every path that
   // survived the filter.
