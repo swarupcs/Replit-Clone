@@ -29,7 +29,10 @@ export const ProjectPlayground = () => {
   const { projectId: projectIdFromUrl } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
 
-  const accessToken = useAuthStore((state) => state.accessToken);
+  /** Whether a session exists — NOT the token itself. It rotates roughly every
+   *  fifteen minutes, and depending on its value tore down the editor socket
+   *  (and, through the panel, every terminal) each time it did. */
+  const hasSession = useAuthStore((state) => state.accessToken !== null);
   const { setProjectId } = useTreeStructureStore();
   const { setEditorSocket, lastError, clearError } = useEditorSocketStore();
   const activeTab = useOpenTabsStore(selectActiveTab);
@@ -70,7 +73,7 @@ export const ProjectPlayground = () => {
   );
 
   useEffect(() => {
-    if (!projectIdFromUrl || !accessToken) return;
+    if (!projectIdFromUrl || !hasSession) return;
 
     setProjectId(projectIdFromUrl);
 
@@ -78,9 +81,13 @@ export const ProjectPlayground = () => {
       `${import.meta.env.VITE_BACKEND_URL}/editor`,
       {
         query: { projectId: projectIdFromUrl },
-        // The handshake is rejected without this; the server also verifies the
-        // caller owns this project before registering any handler.
-        auth: { token: accessToken },
+        // Resolved per connection attempt rather than captured, so a reconnect
+        // after the token rotated presents the current one. The handshake is
+        // rejected without it; the server also verifies the caller owns this
+        // project before registering any handler.
+        auth: (cb: (data: Record<string, unknown>) => void) => {
+          cb({ token: useAuthStore.getState().accessToken });
+        },
       },
     );
     setEditorSocket(editorSocketConn);
@@ -105,7 +112,7 @@ export const ProjectPlayground = () => {
     };
   }, [
     projectIdFromUrl,
-    accessToken,
+    hasSession,
     setProjectId,
     setEditorSocket,
     closeAllTabs,
@@ -253,12 +260,9 @@ export const ProjectPlayground = () => {
                     </div>
                   }
                   second={
-                    projectIdFromUrl && accessToken ? (
+                    projectIdFromUrl ? (
                       <ErrorBoundary label="The terminal panel">
-                        <BottomPanel
-                          projectId={projectIdFromUrl}
-                          accessToken={accessToken}
-                        />
+                        <BottomPanel projectId={projectIdFromUrl} />
                       </ErrorBoundary>
                     ) : null
                   }

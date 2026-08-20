@@ -8,7 +8,6 @@ import { useRunStore } from "../../../store/runStore.ts";
 
 interface BottomPanelProps {
   projectId: string;
-  accessToken: string;
 }
 
 /** `output` is the dev server log; every other tab is an independent shell. */
@@ -26,7 +25,7 @@ type ActiveTab = { kind: "output" } | { kind: "terminal"; id: number };
  *  WebSocket and a PTY, so unmounting it to switch tabs would kill the shell
  *  and lose its scrollback.
  */
-export const BottomPanel = ({ projectId, accessToken }: BottomPanelProps) => {
+export const BottomPanel = ({ projectId }: BottomPanelProps) => {
   const [terminals, setTerminals] = useState<number[]>([1]);
   const [active, setActive] = useState<ActiveTab>({ kind: "terminal", id: 1 });
   /** Monotonic, so closing terminal 2 and opening another gives 3 rather than
@@ -162,7 +161,7 @@ export const BottomPanel = ({ projectId, accessToken }: BottomPanelProps) => {
       {/* Hidden with display:none rather than unmounted -- see the note above. */}
       {terminals.map((id) => (
         <Pane key={id} visible={active.kind === "terminal" && active.id === id}>
-          <BrowserTerminal projectId={projectId} accessToken={accessToken} />
+          <BrowserTerminal projectId={projectId} />
         </Pane>
       ))}
 
