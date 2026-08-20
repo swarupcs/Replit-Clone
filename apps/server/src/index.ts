@@ -149,6 +149,22 @@ async function start(): Promise<void> {
   });
 }
 
+/** Reports a fatal startup failure and exits.
+ *
+ *  `start` awaits the Docker daemon before it ever calls `listen`, so a daemon
+ *  that is not up yet — an ordinary race on a rebooting VM — takes the whole
+ *  process down. Node already does that on its own for an unhandled rejection;
+ *  this only replaces a bare stack trace with a line saying which stage failed,
+ *  which is the difference between a legible restart loop and a puzzling one.
+ *
+ *  Deliberately no `unhandledRejection` listener: registering one would stop
+ *  Node exiting by default, which is the behaviour we want here.
+ */
+function die(reason: string, error: unknown): never {
+  console.error(`${reason}:`, error);
+  process.exit(1);
+}
+
 let shuttingDown = false;
 
 async function shutdown(signal: string): Promise<void> {
@@ -174,4 +190,6 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-void start();
+start().catch((error: unknown) => {
+  die("Could not start the server", error);
+});
