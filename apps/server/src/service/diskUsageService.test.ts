@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
+import { canSymlink } from "../test/capabilities.js";
 import { env } from "../config/env.js";
 import { projectRoot } from "../utils/projectPaths.js";
 import {
@@ -41,14 +42,17 @@ describe("usedBytes", () => {
     expect(await usedBytes(PROJECT)).toBeLessThan(4096);
   });
 
-  it("does not follow a symlink out of the project", async () => {
-    await seed({ "a.txt": 1024 });
-    await fs.symlink("/usr", `${root}/escape`);
-    forgetUsage(PROJECT);
+  it.skipIf(!canSymlink)(
+    "does not follow a symlink out of the project",
+    async () => {
+      await seed({ "a.txt": 1024 });
+      await fs.symlink("/usr", `${root}/escape`);
+      forgetUsage(PROJECT);
 
-    // /usr is far larger than any quota; counting it would blow this up.
-    expect(await usedBytes(PROJECT)).toBeLessThan(1024 * 1024);
-  });
+      // /usr is far larger than any quota; counting it would blow this up.
+      expect(await usedBytes(PROJECT)).toBeLessThan(1024 * 1024);
+    },
+  );
 });
 
 describe("assertWithinQuota", () => {
