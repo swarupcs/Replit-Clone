@@ -34,11 +34,3 @@ export const canSymlink = ((): boolean => {
     }
   }
 })();
-
-/** Explains a skip in the runner's output, so a skipped test reads as an
- *  environment limitation rather than as something switched off and forgotten.
- */
-export const SKIP_REASON = {
-  bash: "needs a POSIX shell (/bin/bash)",
-  symlink: "needs permission to create symlinks",
-} as const;
