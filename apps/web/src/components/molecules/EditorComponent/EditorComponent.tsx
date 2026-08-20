@@ -10,7 +10,10 @@ import { VscDiff } from "react-icons/vsc";
 import { MAX_FILE_BYTES } from "@replit-clone/shared";
 import draculaTheme from "../../../theme/dracula.json";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
-import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
+import {
+  selectCanEdit,
+  useEditorSocketStore,
+} from "../../../store/editorSocketStore.ts";
 import {
   useOpenTabsStore,
   selectPaneTab,
@@ -66,6 +69,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const splitOpen = useOpenTabsStore((state) => state.splitOpen);
   const markDirty = useOpenTabsStore((state) => state.markDirty);
   const { editorSocket } = useEditorSocketStore();
+  const canEdit = useEditorSocketStore(selectCanEdit);
   const settings = useEditorSettingsStore();
 
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
@@ -401,6 +405,9 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
           width="100%"
           theme="dracula"
           options={{
+            // Read-only access is presented as read-only rather than letting
+            // every keystroke be rejected one at a time.
+            readOnly: !canEdit,
             fontSize: settings.fontSize,
             fontFamily: '"JetBrains Mono", "Fira Code", monospace',
             fontLigatures: true,
@@ -449,7 +456,13 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
                 : "All changes saved")
             }
           >
-            {writeError ? "Too large" : activeTab.isDirty ? "Unsaved" : "Saved"}
+            {!canEdit
+              ? "Read-only"
+              : writeError
+                ? "Too large"
+                : activeTab.isDirty
+                  ? "Unsaved"
+                  : "Saved"}
           </span>
         </span>
       </div>

@@ -114,6 +114,10 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
   // Scope broadcasts to this project. Success events previously went to the
   // whole namespace, leaking other users' file paths.
   void socket.join(projectId);
+
+  // Told up front, so the client can present read-only access as read-only
+  // instead of letting each action fail separately.
+  socket.emit("projectAccess", { level: socket.data.accessLevel });
   void touchProject(projectId);
   attach(projectId);
 

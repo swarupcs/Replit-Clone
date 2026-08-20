@@ -6,7 +6,10 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { RunStatus } from "@replit-clone/shared";
-import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
+import {
+  selectCanEdit,
+  useEditorSocketStore,
+} from "../../../store/editorSocketStore.ts";
 import { useRunStore } from "../../../store/runStore.ts";
 
 const STATUS_COPY: Record<RunStatus, { label: string; color: string }> = {
@@ -36,6 +39,7 @@ function formatCountdown(seconds: number): string {
 
 export const RunControl = () => {
   const { editorSocket } = useEditorSocketStore();
+  const canEdit = useEditorSocketStore(selectCanEdit);
   const { status, exitCode, command } = useRunStore((store) => store.state);
   const stats = useRunStore((store) => store.stats);
 
@@ -126,11 +130,13 @@ export const RunControl = () => {
       <Space.Compact>
         <Tooltip
           title={
-            isLive
-              ? "Stop the dev server"
-              : command
-                ? `Run: ${command}`
-                : "Run the project's start command"
+            !canEdit
+              ? "You have read-only access to this project"
+              : isLive
+                ? "Stop the dev server"
+                : command
+                  ? `Run: ${command}`
+                  : "Run the project's start command"
           }
         >
           <Button
@@ -146,7 +152,7 @@ export const RunControl = () => {
                 <CaretRightFilled />
               )
             }
-            disabled={!editorSocket}
+            disabled={!editorSocket || !canEdit}
             onClick={() => {
               editorSocket?.emit(isLive ? "runStop" : "runStart");
             }}
@@ -162,7 +168,7 @@ export const RunControl = () => {
             size="small"
             aria-label="Restart the dev server"
             icon={<ReloadOutlined />}
-            disabled={!editorSocket || status === "idle"}
+            disabled={!editorSocket || !canEdit || status === "idle"}
             onClick={() => editorSocket?.emit("runRestart")}
           />
         </Tooltip>

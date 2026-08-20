@@ -19,6 +19,8 @@ import {
   DownloadOutlined,
   EditOutlined,
   MoreOutlined,
+  ShareAltOutlined,
+  TeamOutlined,
   PlusOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
@@ -33,6 +35,7 @@ import {
   renameProjectApi,
 } from "../apis/projects.ts";
 import { useAuth } from "../hooks/useAuth.ts";
+import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx";
 
 /** Relative time for the card footer -- "3 days ago" reads better than a date
  *  when you're scanning a list of things you made recently. */
@@ -104,6 +107,7 @@ export const Dashboard = () => {
   const [renaming, setRenaming] = useState<Project | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleting, setDeleting] = useState<Project | null>(null);
+  const [sharing, setSharing] = useState<Project | null>(null);
 
   const { data: projects, isLoading } = useQuery({
     queryKey: ["projects"],
@@ -310,7 +314,18 @@ export const Dashboard = () => {
                     gap: 8,
                   }}
                 >
-                  <span className="rc-badge">{project.template}</span>
+                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span className="rc-badge">{project.template}</span>
+                    {project.ownerId !== user?.id && (
+                      <span
+                        className="rc-badge"
+                        title="Shared with you"
+                        style={{ display: "flex", alignItems: "center", gap: 4 }}
+                      >
+                        <TeamOutlined /> Shared
+                      </span>
+                    )}
+                  </span>
 
                   {/* Stop propagation so a menu click doesn't also open the
                       project behind it. */}
@@ -322,15 +337,32 @@ export const Dashboard = () => {
                       trigger={["click"]}
                       menu={{
                         items: [
-                          {
-                            key: "rename",
-                            icon: <EditOutlined />,
-                            label: "Rename",
-                            onClick: () => {
-                              setRenaming(project);
-                              setRenameValue(project.name);
-                            },
-                          },
+                          // A project shared with you is not yours to rename,
+                          // share on, or delete — the menu says so by omission
+                          // rather than by offering something that will fail.
+                          ...(project.ownerId === user?.id
+                            ? [
+                                {
+                                  key: "share",
+                                  icon: <ShareAltOutlined />,
+                                  label: "Share",
+                                  onClick: () => setSharing(project),
+                                },
+                              ]
+                            : []),
+                          ...(project.ownerId === user?.id
+                            ? [
+                                {
+                                  key: "rename",
+                                  icon: <EditOutlined />,
+                                  label: "Rename",
+                                  onClick: () => {
+                                    setRenaming(project);
+                                    setRenameValue(project.name);
+                                  },
+                                },
+                              ]
+                            : []),
                           {
                             key: "duplicate",
                             icon: <CopyOutlined />,
@@ -347,14 +379,18 @@ export const Dashboard = () => {
                               window.location.assign(projectExportUrl(project.id));
                             },
                           },
-                          { type: "divider" },
-                          {
-                            key: "delete",
-                            icon: <DeleteOutlined />,
-                            label: "Delete",
-                            danger: true,
-                            onClick: () => setDeleting(project),
-                          },
+                          ...(project.ownerId === user?.id
+                            ? [
+                                { type: "divider" as const },
+                                {
+                                  key: "delete",
+                                  icon: <DeleteOutlined />,
+                                  label: "Delete",
+                                  danger: true,
+                                  onClick: () => setDeleting(project),
+                                },
+                              ]
+                            : []),
                         ],
                       }}
                     >
@@ -418,6 +454,15 @@ export const Dashboard = () => {
           </div>
         )}
       </main>
+
+      {sharing && (
+        <ShareDialog
+          projectId={sharing.id}
+          projectName={sharing.name}
+          open
+          onClose={() => setSharing(null)}
+        />
+      )}
 
       <Modal
         open={renaming !== null}

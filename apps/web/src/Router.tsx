@@ -5,6 +5,10 @@ import { ErrorBoundary } from "./components/routing/ErrorBoundary.tsx";
 import { Dashboard } from "./pages/Dashboard.tsx";
 import { Login } from "./pages/Login.tsx";
 import { Signup } from "./pages/Signup.tsx";
+import { ForgotPassword } from "./pages/ForgotPassword.tsx";
+import { ResetPassword } from "./pages/ResetPassword.tsx";
+import { VerifyEmail } from "./pages/VerifyEmail.tsx";
+import { JoinProject } from "./pages/JoinProject.tsx";
 import { ProtectedRoute } from "./components/routing/ProtectedRoute.tsx";
 
 /** The playground pulls in Monaco and xterm — together the large majority of
@@ -36,6 +40,13 @@ export const Router = () => {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/verify-email" element={<VerifyEmail />} />
+
+        {/* Deliberately outside ProtectedRoute: the page itself explains that
+            signing in is needed, and carries the link through the detour. */}
+        <Route path="/join" element={<JoinProject />} />
 
         <Route
           path="/"

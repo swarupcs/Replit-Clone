@@ -126,3 +126,76 @@ export const uploadFilesApi = async (
 export const fileDownloadUrl = (projectId: string, relPath: string): string =>
   `${import.meta.env.VITE_BACKEND_URL}/api/v1/projects/${projectId}/files` +
   `?path=${encodeURIComponent(relPath)}`;
+
+export type ProjectRole = "VIEWER" | "EDITOR";
+export type AccessLevel = "none" | "viewer" | "editor" | "owner";
+
+export interface Collaborator {
+  userId: string;
+  email: string;
+  role: ProjectRole;
+}
+
+export interface SharingState {
+  level: AccessLevel;
+  collaborators: Collaborator[];
+  shareToken: string | null;
+}
+
+export const getSharingApi = async (projectId: string): Promise<SharingState> => {
+  const response = await axios.get<ApiSuccess<SharingState>>(
+    `/api/v1/projects/${projectId}/sharing`,
+  );
+  return response.data.data;
+};
+
+export const setCollaboratorApi = async (
+  projectId: string,
+  email: string,
+  role: ProjectRole,
+): Promise<Collaborator> => {
+  const response = await axios.put<ApiSuccess<Collaborator>>(
+    `/api/v1/projects/${projectId}/collaborators`,
+    { email, role },
+  );
+  return response.data.data;
+};
+
+export const removeCollaboratorApi = async (
+  projectId: string,
+  userId: string,
+): Promise<void> => {
+  await axios.delete(`/api/v1/projects/${projectId}/collaborators/${userId}`);
+};
+
+export const createShareLinkApi = async (projectId: string): Promise<string> => {
+  const response = await axios.post<ApiSuccess<{ shareToken: string }>>(
+    `/api/v1/projects/${projectId}/share-link`,
+  );
+  return response.data.data.shareToken;
+};
+
+export const revokeShareLinkApi = async (projectId: string): Promise<void> => {
+  await axios.delete(`/api/v1/projects/${projectId}/share-link`);
+};
+
+export const previewShareLinkApi = async (
+  token: string,
+): Promise<{ name: string; template: string } | null> => {
+  const response = await axios.get<ApiSuccess<{ name: string; template: string } | null>>(
+    `/api/v1/projects/share/preview?token=${encodeURIComponent(token)}`,
+  );
+  return response.data.data;
+};
+
+export const redeemShareLinkApi = async (token: string): Promise<Project> => {
+  const response = await axios.post<CreateProjectResponse>(
+    "/api/v1/projects/share/redeem",
+    { token },
+  );
+  return response.data.data;
+};
+
+/** The URL to hand to someone. */
+export const shareLinkUrl = (token: string): string =>
+  `${window.location.origin}/join?token=${encodeURIComponent(token)}`;

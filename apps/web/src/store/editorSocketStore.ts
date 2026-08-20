@@ -13,6 +13,9 @@ export type EditorSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 interface EditorSocketStore {
   editorSocket: EditorSocket | null;
   lastError: string | null;
+  /** What this connection may do. Unknown until the server says, which is why
+   *  it starts null rather than assuming either answer. */
+  accessLevel: "viewer" | "editor" | "owner" | null;
   setEditorSocket: (socket: EditorSocket | null) => void;
   clearError: () => void;
 }
@@ -20,11 +23,12 @@ interface EditorSocketStore {
 export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
   editorSocket: null,
   lastError: null,
+  accessLevel: null,
   clearError: () => set({ lastError: null }),
 
   setEditorSocket: (incomingSocket) => {
     if (!incomingSocket) {
-      set({ editorSocket: null });
+      set({ editorSocket: null, accessLevel: null });
       return;
     }
 
@@ -64,10 +68,20 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
       void refreshTree();
     });
 
+    incomingSocket.on("projectAccess", ({ level }) => {
+      set({ accessLevel: level });
+    });
+
     incomingSocket.on("error", ({ message }) => {
       set({ lastError: message });
     });
 
-    set({ editorSocket: incomingSocket, lastError: null });
+    set({ editorSocket: incomingSocket, lastError: null, accessLevel: null });
   },
 }));
+
+/** True once the server has confirmed this connection may change the project.
+ *  Null — not yet known — counts as read-only, so nothing is offered before
+ *  it is certain to work. */
+export const selectCanEdit = (state: EditorSocketStore): boolean =>
+  state.accessLevel === "editor" || state.accessLevel === "owner";

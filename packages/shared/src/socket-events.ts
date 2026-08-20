@@ -129,6 +129,9 @@ export interface ServerToClientEvents {
   moveEntrySuccess: (payload: { relPath: string; newRelPath: string }) => void;
   /** The project's files changed on disk; the client should refetch the tree. */
   treeChanged: () => void;
+  /** Sent once on connect. The client uses it to present read-only access as
+   *  read-only rather than letting every action fail one at a time. */
+  projectAccess: (payload: { level: SocketData["accessLevel"] }) => void;
   /** Dev server lifecycle changed. Broadcast to the whole project room so
    *  every open tab agrees on the state. */
   runState: (payload: RunState) => void;
