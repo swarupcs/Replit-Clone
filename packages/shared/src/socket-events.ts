@@ -62,6 +62,25 @@ export interface ContainerStats {
   idleStopInSeconds: number | null;
 }
 
+/** What to look for when searching a project's files. */
+export interface SearchOptions {
+  query: string;
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  /** Treat `query` as a regular expression rather than literal text. */
+  isRegex?: boolean;
+}
+
+/** One line that matched. */
+export interface SearchMatch {
+  relPath: string;
+  /** 1-based, so it can be handed to the editor directly. */
+  line: number;
+  column: number;
+  /** The line's text, trimmed for transport. */
+  preview: string;
+}
+
 /** Events the browser emits to the server. */
 export interface ClientToServerEvents {
   readFile: (payload: PathPayload) => void;
@@ -82,6 +101,8 @@ export interface ClientToServerEvents {
   runSubscribe: () => void;
   /** Ask for one container stats sample. */
   statsRequest: () => void;
+  /** Search the project's file contents. */
+  search: (payload: SearchOptions) => void;
 }
 
 /** Events the server emits to the browser. */
@@ -109,6 +130,13 @@ export interface ServerToClientEvents {
   previewReady: (payload: { port: number }) => void;
   /** Container resource use, in reply to statsRequest. */
   containerStats: (payload: ContainerStats) => void;
+  /** Results for the most recent `search`. `truncated` means a limit stopped
+   *  the scan, so the list is partial rather than complete. */
+  searchResults: (payload: {
+    query: string;
+    matches: SearchMatch[];
+    truncated: boolean;
+  }) => void;
   error: (payload: { code: string; message: string }) => void;
 }
 

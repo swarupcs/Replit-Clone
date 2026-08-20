@@ -12,6 +12,7 @@ import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { useOpenTabsStore, selectActiveTab } from "../../../store/openTabsStore.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
+import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
 
 const WRITE_DEBOUNCE_MS = 800;
 
@@ -58,6 +59,7 @@ export const EditorComponent = () => {
   const activeTab = useOpenTabsStore(selectActiveTab);
   const markDirty = useOpenTabsStore((state) => state.markDirty);
   const { editorSocket } = useEditorSocketStore();
+  const settings = useEditorSettingsStore();
 
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
   const [selectionCount, setSelectionCount] = useState(0);
@@ -125,8 +127,18 @@ export const EditorComponent = () => {
 
     codeEditor.setModel(model);
 
-    const saved = viewStates.current.get(activeTab.relPath);
-    if (saved) codeEditor.restoreViewState(saved);
+    // A search result asked to land on a specific line; that wins over the
+    // remembered scroll position for this file.
+    const reveal = useOpenTabsStore.getState().pendingReveal;
+    if (reveal && reveal.relPath === activeTab.relPath) {
+      useOpenTabsStore.getState().consumeReveal();
+      codeEditor.revealLineInCenter(reveal.line);
+      codeEditor.setPosition({ lineNumber: reveal.line, column: reveal.column });
+    } else {
+      const saved = viewStates.current.get(activeTab.relPath);
+      if (saved) codeEditor.restoreViewState(saved);
+    }
+
     codeEditor.focus();
   }, [activeTab, flushAll]);
 
@@ -187,14 +199,38 @@ export const EditorComponent = () => {
     // Reads the active path at invocation time: Monaco keeps this callback for
     // the editor's whole lifetime, so anything captured now would go stale.
     codeEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      const { activeRelPath } = useOpenTabsStore.getState();
-      if (!activeRelPath) return;
-
-      // Save even when nothing is queued, so Ctrl+S is never a no-op the user
-      // has to guess about.
-      queueWrite(activeRelPath, codeEditor.getValue(), 0);
-      flushWrite(activeRelPath);
+      void saveNow(codeEditor);
     });
+  }
+
+  /** Formats if asked to, then writes immediately.
+   *
+   *  Monaco ships the formatters already; nothing used to invoke them. The
+   *  format runs first and its result is what gets saved, so the file on disk
+   *  matches what the editor shows.
+   */
+  async function saveNow(codeEditor: editor.IStandaloneCodeEditor) {
+    const { activeRelPath } = useOpenTabsStore.getState();
+    if (!activeRelPath) return;
+
+    if (useEditorSettingsStore.getState().formatOnSave) {
+      // Suppressed so the formatter's edits are not mistaken for typing, which
+      // would queue a second write of the same content.
+      suppressChange.current = true;
+      try {
+        await codeEditor.getAction("editor.action.formatDocument")?.run();
+      } catch {
+        // No formatter for this language, or it declined. Save regardless —
+        // refusing to save because formatting failed would be worse.
+      } finally {
+        suppressChange.current = false;
+      }
+    }
+
+    // Saves even when nothing is queued, so Ctrl+S is never a no-op the user
+    // has to guess about.
+    queueWrite(activeRelPath, codeEditor.getValue(), 0);
+    flushWrite(activeRelPath);
   }
 
   /** Schedules a write, replacing only this file's own pending one. */
@@ -298,21 +334,23 @@ export const EditorComponent = () => {
           width="100%"
           theme="dracula"
           options={{
-        fontSize: 14,
-        fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-        fontLigatures: true,
-        lineHeight: 1.6,
-        minimap: { enabled: false },
-        scrollBeyondLastLine: false,
-        automaticLayout: true,
-        tabSize: 2,
-        padding: { top: 16, bottom: 16 },
-        smoothScrolling: true,
-        cursorBlinking: "smooth",
-        cursorSmoothCaretAnimation: "on",
-        renderLineHighlight: "line",
-        roundedSelection: true,
-        scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+            fontSize: settings.fontSize,
+            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+            fontLigatures: true,
+            lineHeight: 1.6,
+            minimap: { enabled: settings.minimap },
+            lineNumbers: settings.lineNumbers ? "on" : "off",
+            wordWrap: settings.wordWrap ? "on" : "off",
+            tabSize: settings.tabSize,
+            scrollBeyondLastLine: false,
+            automaticLayout: true,
+            padding: { top: 16, bottom: 16 },
+            smoothScrolling: true,
+            cursorBlinking: "smooth",
+            cursorSmoothCaretAnimation: "on",
+            renderLineHighlight: "line",
+            roundedSelection: true,
+            scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
             guides: { indentation: true, bracketPairs: true },
           }}
           onChange={handleChange}
@@ -331,7 +369,7 @@ export const EditorComponent = () => {
         </span>
 
         <span className="rc-statusbar-group">
-          <span>Spaces: 2</span>
+          <span>Spaces: {settings.tabSize}</span>
           <span>UTF-8</span>
           <span style={{ textTransform: "capitalize" }}>{language}</span>
           <span

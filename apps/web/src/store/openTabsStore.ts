@@ -16,6 +16,12 @@ export interface OpenTab {
 interface OpenTabsStore {
   tabs: OpenTab[];
   activeRelPath: string | null;
+  /** Where to put the cursor once a file finishes opening.
+   *
+   *  Opening is asynchronous — the contents arrive over the socket — so a
+   *  search result cannot jump to its line at click time. It leaves the
+   *  position here and the editor consumes it on arrival. */
+  pendingReveal: { relPath: string; line: number; column: number } | null;
   openTab: (relPath: string, value: string) => void;
   closeTab: (relPath: string) => void;
   setActive: (relPath: string) => void;
@@ -23,6 +29,8 @@ interface OpenTabsStore {
   /** Applies an external change (rename or delete) coming from the tree. */
   renameTab: (relPath: string, newRelPath: string) => void;
   closeAll: () => void;
+  requestReveal: (relPath: string, line: number, column: number) => void;
+  consumeReveal: () => { relPath: string; line: number; column: number } | null;
 }
 
 function baseName(relPath: string): string {
@@ -32,6 +40,7 @@ function baseName(relPath: string): string {
 export const useOpenTabsStore = create<OpenTabsStore>((set, get) => ({
   tabs: [],
   activeRelPath: null,
+  pendingReveal: null,
 
   openTab: (relPath, value) => {
     const existing = get().tabs.find((tab) => tab.relPath === relPath);
@@ -92,7 +101,16 @@ export const useOpenTabsStore = create<OpenTabsStore>((set, get) => ({
       };
     }),
 
-  closeAll: () => set({ tabs: [], activeRelPath: null }),
+  closeAll: () => set({ tabs: [], activeRelPath: null, pendingReveal: null }),
+
+  requestReveal: (relPath, line, column) =>
+    set({ pendingReveal: { relPath, line, column } }),
+
+  consumeReveal: () => {
+    const pending = get().pendingReveal;
+    if (pending) set({ pendingReveal: null });
+    return pending;
+  },
 }));
 
 /** The currently focused tab, or null. */

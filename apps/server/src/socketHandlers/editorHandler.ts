@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Namespace, Socket } from "socket.io";
 import { MAX_FILE_BYTES } from "@replit-clone/shared";
+import { searchProject } from "../service/searchService.js";
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -321,6 +322,15 @@ export const handleEditorSocketEvents = (
   socket.on("runRestart", () =>
     handle("restart the dev server", async () => {
       await restartRun(projectId);
+    })(),
+  );
+
+  socket.on("search", (options) =>
+    handle("search the project", async () => {
+      // A user-supplied regex that does not compile is their mistake to see,
+      // not a server error — buildPattern throws and `handle` reports it.
+      const { matches, truncated } = await searchProject(projectId, options);
+      socket.emit("searchResults", { query: options.query, matches, truncated });
     })(),
   );
 
