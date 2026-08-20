@@ -1,7 +1,13 @@
+import fsp from "node:fs/promises";
 import Docker from "dockerode";
 import type { Container, ContainerInfo } from "dockerode";
 import { env, previewTargetMode } from "../config/env.js";
-import { projectRoot } from "../utils/projectPaths.js";
+import {
+  claimForSandbox,
+  containerUser,
+  projectRoot,
+  SANDBOX_UID,
+} from "../utils/projectPaths.js";
 import { AppError } from "../utils/errors.js";
 import { getTemplate } from "../templates/registry.js";
 
@@ -109,10 +115,19 @@ export async function ensureContainer(projectId: string): Promise<Container> {
 
   const template = await templateForProject(projectId);
 
+  // Projects scaffolded before ownership was claimed still belong to whoever
+  // the server ran as then. Guarded by a stat so the recursive walk does not
+  // run on every start, and best-effort because a non-root server cannot hand
+  // the tree to another uid — there `containerUser` adapts instead.
+  const root = await fsp.stat(projectRoot(projectId)).catch(() => undefined);
+  if (root && root.uid !== SANDBOX_UID) {
+    await claimForSandbox(projectRoot(projectId)).catch(() => {});
+  }
+
   // In host-loopback mode the dev port is published on 127.0.0.1 with a random
   // host port, because Docker Desktop gives a Windows/macOS host no route to
   // container IPs. It is never bound on 0.0.0.0, so nothing is reachable from
-  // outside this machine � the browser always goes through /preview.
+  // outside this machine — the browser always goes through /preview.
   const publishPort = previewTargetMode === "host-loopback";
   const devPortKey = `${template.devPort}/tcp`;
 
@@ -121,7 +136,11 @@ export async function ensureContainer(projectId: string): Promise<Container> {
     name: containerName(projectId),
     Tty: true,
     OpenStdin: true,
-    User: "sandbox",
+    // Matched to the bind mount's owner, because a bind mount keeps the host's
+    // ownership and the image's own chown is masked by it. The execs that
+    // terminals and the Run button open leave `User` unset so Docker inherits
+    // this, rather than restating a uid that could drift from it.
+    User: await containerUser(projectId),
     WorkingDir: "/home/sandbox/app",
     Env: [
       "HOST=0.0.0.0",

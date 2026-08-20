@@ -65,7 +65,7 @@ export function installTerminalGateway(server: Server): void {
         wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
           // Buffer client input from the instant the socket exists. Starting
           // the container and the exec is asynchronous, but the terminal sends
-          // its initial resize the moment it connects — without this the PTY
+          // its initial resize the moment it connects â€” without this the PTY
           // stayed at 0x0 and every early keystroke was dropped.
           const inbox: string[] = [];
           let sink: ((data: string) => void) | null = null;

@@ -3,7 +3,7 @@ import path from "node:path";
 import type { Project } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
 import { NotFoundError } from "../utils/errors.js";
-import { projectRoot } from "../utils/projectPaths.js";
+import { claimForSandbox, projectRoot } from "../utils/projectPaths.js";
 import {
   DEFAULT_TEMPLATE_ID,
   getTemplate,
@@ -69,6 +69,12 @@ export async function createProjectService(
     await fs.cp(path.join(TEMPLATE_FILES_ROOT, template.filesDir), dir, {
       recursive: true,
     });
+
+    // The container runs as the sandbox user, not as the server. Without this
+    // the bind mount is read-only to it and `npm install` fails with EACCES.
+    // Best-effort: when the server is not root this cannot succeed, and
+    // `containerUser` matches the container to the directory instead.
+    await claimForSandbox(dir).catch(() => {});
   } catch (error) {
     // Never leave a DB row pointing at a directory that was not scaffolded.
     await prisma.project.delete({ where: { id: project.id } }).catch(() => {});

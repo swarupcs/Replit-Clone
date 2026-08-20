@@ -13,13 +13,20 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Unprivileged user owning the workspace. The node image ships a `node` user at
-# uid 1000; we add our own so the name matches what the server execs as.
-RUN useradd --create-home --shell /bin/bash --uid 1001 sandbox \
+# uid 1000; we add our own so the default uid is predictable.
+# The container runs as whichever uid owns the bind-mounted project directory,
+# because a bind mount keeps the HOST's ownership and masks any chown done here.
+# Giving the home to group 0 and mirroring the owner's bits onto the group means
+# ANY uid paired with gid 0 gets a writable HOME -- which is what npm, pip and
+# the shell all need.
+RUN useradd --create-home --shell /bin/bash --uid 1001 --gid 0 sandbox \
     && printf "PS1='\w \$ '\n" >> /home/sandbox/.bashrc \
     && mkdir -p /home/sandbox/app \
-    && chown -R sandbox:sandbox /home/sandbox
+    && chown -R sandbox:0 /home/sandbox \
+    && chmod -R g=u /home/sandbox
 
-USER sandbox
+USER 1001:0
+ENV HOME=/home/sandbox
 WORKDIR /home/sandbox/app
 
 # Dev servers must listen on all interfaces to be reachable from the proxy.

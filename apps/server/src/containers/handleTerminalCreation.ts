@@ -54,7 +54,8 @@ export const handleTerminalCreation = (
       AttachStdout: true,
       AttachStderr: true,
       Tty: true,
-      User: "sandbox",
+      // Inherits the container's user, which is matched to the bind mount's
+      // owner. See containerManager.
       WorkingDir: "/home/sandbox/app",
       Env: [
         "TERM=xterm-256color",

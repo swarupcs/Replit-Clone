@@ -179,7 +179,9 @@ export async function startRun(projectId: string): Promise<void> {
     AttachStdout: true,
     AttachStderr: true,
     Tty: true,
-    User: "sandbox",
+    // `User` deliberately unset: Docker then inherits the container's own user,
+    // which containerManager matched to the bind mount's owner. Naming a uid
+    // here again is how the two drift apart.
     WorkingDir: "/home/sandbox/app",
     Env: [
       "TERM=xterm-256color",
@@ -251,7 +253,6 @@ export async function stopRun(projectId: string): Promise<void> {
       ],
       AttachStdout: false,
       AttachStderr: false,
-      User: "sandbox",
     });
     await killer.start({ hijack: false, stdin: false });
   } catch {
