@@ -8,6 +8,7 @@ import {
   VscLayoutSidebarLeft,
   VscKey,
   VscSearch,
+  VscSourceControl,
   VscSettingsGear,
 } from "react-icons/vsc";
 import {
@@ -22,7 +23,10 @@ import { BottomPanel } from "../components/organisms/BottomPanel/BottomPanel.tsx
 import { TreeStructure } from "../components/organisms/TreeStructure/TreeStructure.tsx";
 import { Browser } from "../components/organisms/Browser/Browser.tsx";
 import { useTreeStructureStore } from "../store/treeStructureStore.ts";
-import { useEditorSocketStore } from "../store/editorSocketStore.ts";
+import {
+  selectCanEdit,
+  useEditorSocketStore,
+} from "../store/editorSocketStore.ts";
 import { useOpenTabsStore, selectActiveTab } from "../store/openTabsStore.ts";
 import { useAuthStore } from "../store/authStore.ts";
 import { useRunStore } from "../store/runStore.ts";
@@ -32,6 +36,7 @@ import { QuickOpen } from "../components/organisms/QuickOpen/QuickOpen.tsx";
 import { EnvVarsDialog } from "../components/organisms/EnvVarsDialog/EnvVarsDialog.tsx";
 import { EditorSettingsDialog } from "../components/organisms/EditorSettingsDialog/EditorSettingsDialog.tsx";
 import { SearchPanel } from "../components/organisms/SearchPanel/SearchPanel.tsx";
+import { SourceControlPanel } from "../components/organisms/SourceControlPanel/SourceControlPanel.tsx";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.ts";
@@ -54,6 +59,8 @@ export const ProjectPlayground = () => {
   const splitOpen = useOpenTabsStore((state) => state.splitOpen);
 
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
+  // A viewer may read history but not stage or commit.
+  const canEdit = useEditorSocketStore(selectCanEdit);
   const { restored, remember } = useWorkspaceSession(projectIdFromUrl, editorSocket);
 
   // Seeded from the remembered arrangement, so a reload comes back to the
@@ -65,7 +72,7 @@ export const ProjectPlayground = () => {
   const [envOpen, setEnvOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** Which sidebar view is showing. */
-  const [sidebarView, setSidebarView] = useState<"files" | "search">("files");
+  const [sidebarView, setSidebarView] = useState<"files" | "search" | "git">("files");
 
   const closeActiveTab = useOpenTabsStore((state) => state.closeTab);
   /** The project whose tabs are currently loaded, so re-running the effect for
@@ -379,6 +386,16 @@ export const ProjectPlayground = () => {
                     <VscSearch size={16} />
                   </button>
                 </Tooltip>
+                <Tooltip title="Source control" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "git"}
+                    aria-label="Source control"
+                    onClick={() => setSidebarView("git")}
+                  >
+                    <VscSourceControl size={16} />
+                  </button>
+                </Tooltip>
               </div>
 
               <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
@@ -402,6 +419,22 @@ export const ProjectPlayground = () => {
                 >
                   <ErrorBoundary label="Search">
                     <SearchPanel />
+                  </ErrorBoundary>
+                </div>
+
+                <div
+                  style={{
+                    height: "100%",
+                    display: sidebarView === "git" ? "block" : "none",
+                  }}
+                >
+                  <ErrorBoundary label="Source control">
+                    {projectIdFromUrl && (
+                      <SourceControlPanel
+                        projectId={projectIdFromUrl}
+                        canWrite={canEdit}
+                      />
+                    )}
                   </ErrorBoundary>
                 </div>
               </div>

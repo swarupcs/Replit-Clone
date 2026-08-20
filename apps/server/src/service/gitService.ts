@@ -1,3 +1,9 @@
+import type {
+  GitChange,
+  GitChangeState,
+  GitCommit,
+  GitStatus,
+} from "@replit-clone/shared";
 import { ensureContainer } from "../containers/containerManager.js";
 import { execCapture } from "../containers/execCapture.js";
 import { BadRequestError } from "../utils/errors.js";
@@ -5,49 +11,16 @@ import { assertValidProjectId } from "../utils/projectPaths.js";
 
 const APP_DIR = "/home/sandbox/app";
 
-export type ChangeState =
-  | "added"
-  | "modified"
-  | "deleted"
-  | "renamed"
-  | "untracked";
-
-export interface GitChange {
-  path: string;
-  /** Set only for a rename, naming where the file came from. */
-  from?: string;
-  /** What the index has, versus HEAD. */
-  staged?: ChangeState;
-  /** What the working tree has, versus the index. */
-  unstaged?: ChangeState;
-}
-
-export interface GitStatus {
-  /** False when the project has no repository yet, in which case nothing else
-   *  here is meaningful. */
-  isRepo: boolean;
-  branch?: string;
-  /** Commits ahead of / behind the upstream, when there is one. */
-  ahead?: number;
-  behind?: number;
-  /** True before the first commit, when HEAD points at an unborn branch. */
-  unborn?: boolean;
-  changes: GitChange[];
-}
-
-export interface GitCommit {
-  hash: string;
-  shortHash: string;
-  author: string;
-  date: string;
-  subject: string;
-}
+/** The shapes below are declared once, in the shared package, so the web app
+ *  and this service cannot drift apart on what a change looks like. */
+export type { GitChange, GitCommit, GitStatus } from "@replit-clone/shared";
+export type ChangeState = GitChangeState;
 
 /** Maps one half of a porcelain status code to a state.
  *
  *  The two columns mean different things -- the first is index-versus-HEAD, the
  *  second is worktree-versus-index -- but the letters are shared. */
-function toState(code: string): ChangeState | undefined {
+function toState(code: string): GitChangeState | undefined {
   switch (code) {
     case "A":
       return "added";
