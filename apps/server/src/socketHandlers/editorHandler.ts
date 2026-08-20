@@ -1,12 +1,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Namespace, Socket } from "socket.io";
+import { MAX_FILE_BYTES } from "@replit-clone/shared";
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
   SocketData,
 } from "@replit-clone/shared";
 import { resolveInProject } from "../utils/projectPaths.js";
+import {
+  assertWithinQuota,
+  recordWrite,
+} from "../service/diskUsageService.js";
 import { AppError } from "../utils/errors.js";
 import {
   getRunHistory,
@@ -29,10 +34,6 @@ export type EditorNamespace = Namespace<
   Record<string, never>,
   SocketData
 >;
-
-/** Largest file the editor will open. Monaco is unusable past this, and it
- *  stops a stray binary or log file from pinning the process. */
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
 async function exists(target: string): Promise<boolean> {
   try {
@@ -154,7 +155,26 @@ export const handleEditorSocketEvents = (
   socket.on("writeFile", ({ relPath, data }) =>
     handle("write the file", async () => {
       const absolute = resolveInProject(projectId, relPath);
+
+      // Reads were already capped; writes were not, so a client could put a
+      // file of any size on the host through a socket the editor opens anyway.
+      const incoming = Buffer.byteLength(data, "utf8");
+      if (incoming > MAX_FILE_BYTES) {
+        socket.emit("error", {
+          code: "FILE_TOO_LARGE",
+          message: "File is too large to save from the editor",
+        });
+        return;
+      }
+
+      // Measured against what this write replaces, so saving a file that has
+      // shrunk is never refused for being over quota.
+      const existing = await fs.stat(absolute).catch(() => undefined);
+      const replacing = existing?.size ?? 0;
+      await assertWithinQuota(projectId, incoming, replacing);
+
       await fs.writeFile(absolute, data, "utf8");
+      recordWrite(projectId, incoming, replacing);
 
       editorNamespace.to(projectId).emit("writeFileSuccess", { relPath });
     })(),

@@ -7,6 +7,14 @@
  *  cannot reach into another project by changing a field.
  */
 
+/** Largest file the editor will open or save.
+ *
+ *  Monaco is unusable past this, and it stops a stray binary or log file from
+ *  pinning the server. Declared here so the client can refuse a write before
+ *  sending it rather than discovering the limit from an error.
+ */
+export const MAX_FILE_BYTES = 2 * 1024 * 1024;
+
 export interface PathPayload {
   relPath: string;
 }

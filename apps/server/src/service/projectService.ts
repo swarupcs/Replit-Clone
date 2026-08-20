@@ -11,6 +11,7 @@ import {
 } from "../templates/registry.js";
 import { removeContainer } from "../containers/containerManager.js";
 import { forgetRun } from "../containers/runner.js";
+import { forgetUsage } from "./diskUsageService.js";
 
 export function projectDir(projectId: string): string {
   return projectRoot(projectId);
@@ -95,6 +96,7 @@ export async function deleteProjectService(
   // Otherwise a recreated project with the same id would inherit stale run
   // state and a log from the deleted one.
   forgetRun(projectId);
+  forgetUsage(projectId);
   await prisma.project.delete({ where: { id: projectId } });
   await fs.rm(projectDir(projectId), { recursive: true, force: true });
 }

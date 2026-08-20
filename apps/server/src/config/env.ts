@@ -31,6 +31,13 @@ const envSchema = z.object({
   CONTAINER_MEMORY_MB: z.coerce.number().int().positive().default(512),
   CONTAINER_CPUS: z.coerce.number().positive().default(0.5),
   CONTAINER_IDLE_MINUTES: z.coerce.number().int().positive().default(20),
+  /** Ceiling on a single project's working tree.
+   *
+   *  Containers get memory, CPU and PID limits; storage had none, and the
+   *  project directory is a bind mount of a real host path — so one socket
+   *  writing in a loop, or one runaway `npm install`, could fill the VM's disk
+   *  and take Postgres and every other project down with it. */
+  PROJECT_DISK_QUOTA_MB: z.coerce.number().int().positive().default(512),
   MAX_CONCURRENT_CONTAINERS: z.coerce.number().int().positive().default(3),
 
   /** How the preview proxy reaches a project's dev server.

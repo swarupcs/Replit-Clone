@@ -6,6 +6,7 @@ import Editor from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { Flex, Typography } from "antd";
+import { MAX_FILE_BYTES } from "@replit-clone/shared";
 import draculaTheme from "../../../theme/dracula.json";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
@@ -39,6 +40,7 @@ export const EditorComponent = () => {
 
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
   const [selectionCount, setSelectionCount] = useState(0);
+  const [writeError, setWriteError] = useState<string | null>(null);
 
   /** Read imperatively so the flush helpers do not have to be rebuilt — and
    *  re-bound into Monaco's command registry — every time the socket changes. */
@@ -165,6 +167,16 @@ export const EditorComponent = () => {
 
   /** Schedules a write, replacing only this file's own pending one. */
   function queueWrite(relPath: string, data: string, delay: number) {
+    // The server refuses these too; catching it here means the user is told
+    // while they can still act on it, rather than after a silent round trip.
+    if (new Blob([data]).size > MAX_FILE_BYTES) {
+      setWriteError(
+        `This file is over the ${String(MAX_FILE_BYTES / 1024 / 1024)} MB editor limit and was not saved.`,
+      );
+      return;
+    }
+    setWriteError(null);
+
     const existing = pendingWrites.current.get(relPath);
     if (existing) clearTimeout(existing.timer);
 
@@ -290,15 +302,16 @@ export const EditorComponent = () => {
           <span>UTF-8</span>
           <span style={{ textTransform: "capitalize" }}>{language}</span>
           <span
-            data-dirty={activeTab.isDirty}
+            data-dirty={activeTab.isDirty || writeError !== null}
             className="rc-statusbar-save"
             title={
-              activeTab.isDirty
+              writeError ??
+              (activeTab.isDirty
                 ? "Unsaved changes — autosaves shortly, or press Ctrl+S"
-                : "All changes saved"
+                : "All changes saved")
             }
           >
-            {activeTab.isDirty ? "Unsaved" : "Saved"}
+            {writeError ? "Too large" : activeTab.isDirty ? "Unsaved" : "Saved"}
           </span>
         </span>
       </div>
