@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Input, Modal } from "antd";
 import type { TreeNodeData } from "@replit-clone/shared";
 import "./FileContextMenu.css";
@@ -26,7 +27,12 @@ export const FileContextMenu = () => {
   const projectId = useTreeStructureStore((state) => state.projectId);
   /** What Delete will act on: the selection when this row is part of one,
    *  otherwise just this row. */
-  const selection = useTreeSelectionStore(selectOrderedSelection);
+  // useShallow is essential, not decoration: selectOrderedSelection builds a
+  // NEW array every call (visibleOrder.filter). zustand v5 compares snapshots
+  // with Object.is, so a fresh array each render reads as a change and loops
+  // forever -- React's "getSnapshot should be cached". useShallow compares the
+  // array's contents instead, so an unchanged selection is seen as unchanged.
+  const selection = useTreeSelectionStore(useShallow(selectOrderedSelection));
   const treeStructure = useTreeStructureStore((state) => state.treeStructure);
 
   /** Which paths are folders, so a delete emits the right event for each.

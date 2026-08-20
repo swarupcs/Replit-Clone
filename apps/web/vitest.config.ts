@@ -1,11 +1,14 @@
 import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
+  // Needed to transform JSX in component tests.
+  plugins: [react()],
   test: {
-    // The units worth covering here — the fuzzy matcher and the tab reducers —
-    // are plain TypeScript, so there is no reason to pay for a DOM.
+    // Most units here are plain TypeScript and need no DOM, so node stays the
+    // default. A component test opts in with `// @vitest-environment jsdom`.
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     // Stores that persist preferences reach for localStorage at import time.
     setupFiles: ["src/test/setup.ts"],
   },
