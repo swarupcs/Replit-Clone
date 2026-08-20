@@ -17,6 +17,10 @@ const envSchema = z.object({
     .min(32, "JWT_REFRESH_SECRET must be >= 32 chars"),
   ACCESS_TOKEN_TTL: z.string().default("15m"),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  /** The preview cookie is sent to a container running untrusted project code,
+   *  so it is short-lived. Every session refresh reissues it, which happens
+   *  well inside this window for anyone actually using the editor. */
+  PREVIEW_TOKEN_TTL_HOURS: z.coerce.number().int().positive().default(12),
 
   WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
 

@@ -9,6 +9,7 @@ import {
 import {
   PREVIEW_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
+  previewCookieMaxAgeMs,
   refreshCookieMaxAgeMs,
   signAccessToken,
   signPreviewToken,
@@ -36,10 +37,12 @@ const refreshCookieOptions: CookieOptions = {
 };
 
 /** Scoped to /preview so it is sent with the preview iframe and its HMR
- *  socket, and with nothing else. */
+ *  socket, and with nothing else. Its lifetime tracks the token's, which is far
+ *  shorter than the refresh token's — see signPreviewToken. */
 const previewCookieOptions: CookieOptions = {
   ...refreshCookieOptions,
   path: "/preview",
+  maxAge: previewCookieMaxAgeMs,
 };
 
 function issueSession(
