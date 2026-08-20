@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Input, Modal } from "antd";
+import type { TreeNodeData } from "@replit-clone/shared";
 import "./FileContextMenu.css";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
@@ -16,6 +17,15 @@ export const FileContextMenu = () => {
   const { x, y, isOpen, node, close } = useFileContextMenuStore();
   const { editorSocket } = useEditorSocketStore();
 
+  /** The node the dialog is acting on.
+   *
+   *  Deliberately a local copy rather than the store's `node`: opening a dialog
+   *  also closes the menu, and `close()` clears that node. Reading it from the
+   *  store meant the render that should have shown the dialog bailed out at the
+   *  null guard instead, so New file, New folder and Rename all did nothing —
+   *  and the stale `pending` then made a dialog appear on the NEXT right-click.
+   */
+  const [target, setTarget] = useState<TreeNodeData | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [name, setName] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
@@ -40,24 +50,29 @@ export const FileContextMenu = () => {
     };
   }, [isOpen, close]);
 
-  if (!node) return null;
-
-  const isFolder = node.type === "directory";
-  /** New entries land inside a folder, or beside a file. */
-  const parentPath = isFolder
-    ? node.relPath
-    : node.relPath.split("/").slice(0, -1).join("/");
-
   function startAction(action: PendingAction) {
+    if (!node) return;
+    setTarget(node);
     setPending(action);
-    setName(action === "rename" ? (node?.name ?? "") : "");
+    setName(action === "rename" ? node.name : "");
     close();
+  }
+
+  function closeDialog() {
+    setPending(null);
+    setTarget(null);
+    setName("");
   }
 
   function confirmAction() {
     const trimmed = name.trim();
-    if (!trimmed || !editorSocket || !node) return;
+    if (!trimmed || !editorSocket || !target) return;
 
+    /** New entries land inside a folder, or beside a file. */
+    const parentPath =
+      target.type === "directory"
+        ? target.relPath
+        : target.relPath.split("/").slice(0, -1).join("/");
     const childPath = parentPath ? `${parentPath}/${trimmed}` : trimmed;
 
     if (pending === "newFile") {
@@ -66,13 +81,12 @@ export const FileContextMenu = () => {
       editorSocket.emit("createFolder", { relPath: childPath });
     } else if (pending === "rename") {
       editorSocket.emit("renameEntry", {
-        relPath: node.relPath,
+        relPath: target.relPath,
         newName: trimmed,
       });
     }
 
-    setPending(null);
-    setName("");
+    closeDialog();
   }
 
   function handleDelete() {
@@ -88,7 +102,7 @@ export const FileContextMenu = () => {
 
   return (
     <>
-      {isOpen && (
+      {isOpen && node && (
         <div ref={menuRef} className="fileContextOptionsWrapper" style={{ left: x, top: y }}>
           <button className="fileContextButton" onClick={() => startAction("newFile")}>
             New file
@@ -110,7 +124,7 @@ export const FileContextMenu = () => {
         title={pending ? ACTION_COPY[pending].title : ""}
         okText={pending ? ACTION_COPY[pending].okText : "OK"}
         onOk={confirmAction}
-        onCancel={() => setPending(null)}
+        onCancel={closeDialog}
         okButtonProps={{ disabled: !name.trim() }}
         destroyOnHidden
       >
