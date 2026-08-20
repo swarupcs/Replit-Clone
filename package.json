@@ -11,6 +11,7 @@
     "build": "pnpm --filter @replit-clone/shared build && pnpm --parallel --filter \"./apps/*\" build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
     "images:build": "docker build -t sandbox-node:latest images/node && docker build -t sandbox-python:latest images/python",
     "db:up": "docker compose up -d"
   },
