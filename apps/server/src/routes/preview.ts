@@ -10,6 +10,7 @@ import { getTemplate } from "../templates/registry.js";
 import { PREVIEW_COOKIE_NAME, verifyPreviewToken } from "../service/tokenService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
 import { UnauthorizedError } from "../utils/errors.js";
+import { env } from "../config/env.js";
 
 /** Resolves the project's dev server address. The port comes from the
  *  template, which is why 5173 is no longer hardcoded in four places. */
@@ -23,12 +24,14 @@ async function expectsPreviewBase(projectId: string): Promise<boolean> {
   return getTemplate(project.template).expectsPreviewBase;
 }
 
+/** Restricts who may frame a preview. `self` covers opening one in its own tab. */
+const frameAncestors = `frame-ancestors 'self' ${env.WEB_ORIGIN}`;
+
 /** Authorises a preview request from the `preview_token` cookie.
  *
  *  The preview is loaded in an iframe and its HMR socket is opened by Vite's
  *  own client, so neither can attach an Authorization header — a cookie scoped
- *  to /preview is the only credential both carry. It is SameSite=Lax, so an
- *  unrelated site cannot frame the preview and have the cookie sent.
+ *  to /preview is the only credential both carry.
  */
 export async function authorisePreview(
   projectId: string,
@@ -51,6 +54,12 @@ export function previewGuard(
     try {
       const projectId = assertValidProjectId(req.params.projectId);
       const cookies = req.cookies as Record<string, string> | undefined;
+
+      // Only the editor may frame a preview. Helmet's CSP is switched off for
+      // this route, and the comment below about SameSite=Lax stopping a
+      // third-party frame does not hold in a split deployment, where the
+      // cookie is deliberately SameSite=None so it can travel to the API host.
+      res.setHeader("Content-Security-Policy", frameAncestors);
 
       await authorisePreview(projectId, cookies?.[PREVIEW_COOKIE_NAME]);
       await ensureContainer(projectId);
@@ -92,6 +101,14 @@ const targets = new WeakMap<Request, string>();
 /** Whether this project's dev server expects to see the /preview/<id> prefix. */
 const keepsPrefix = new WeakMap<Request, boolean>();
 
+/** Removes the viewer's credentials from a request on its way to the sandbox. */
+function stripCredentials(proxyReq: {
+  removeHeader: (name: string) => void;
+}): void {
+  proxyReq.removeHeader("cookie");
+  proxyReq.removeHeader("authorization");
+}
+
 /** Reverse proxy for project previews.
  *
  *  Replaces publishing a random HOST port per container and pointing an iframe
@@ -112,6 +129,19 @@ export function createPreviewProxy(): RequestHandler {
     pathRewrite: (pathname, req) =>
       keepsPrefix.get(req) ? req.originalUrl : pathname,
     on: {
+      // The guard has already authorised the request; the container never needs
+      // the credential itself, and it is running code the platform treats as
+      // untrusted. Forwarding the header verbatim handed every dependency in
+      // the project a working preview cookie on every single request.
+      proxyReq: stripCredentials,
+      proxyReqWs: stripCredentials,
+      // Reasserted here because the proxy copies the dev server's own headers
+      // onto the response, which would otherwise replace ours.
+      proxyRes: (proxyRes, _req, res) => {
+        delete proxyRes.headers["content-security-policy"];
+        delete proxyRes.headers["content-security-policy-report-only"];
+        res.setHeader("Content-Security-Policy", frameAncestors);
+      },
       error: (error, _req, res) => {
         console.error("Preview proxy error:", error.message);
         if ("writeHead" in res && !res.headersSent) {
