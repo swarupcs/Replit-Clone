@@ -479,9 +479,9 @@ export async function readContainerStats(projectId: string): Promise<{
 
   // `stream: false` takes a single sample. Docker computes CPU from the delta
   // against the previous reading, which it includes in the same payload.
-  const stats = (await docker
+  const stats: DockerStats = await docker
     .getContainer(info.Id)
-    .stats({ stream: false })) as unknown as DockerStats;
+    .stats({ stream: false });
 
   return {
     running: true,
