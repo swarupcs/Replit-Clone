@@ -90,6 +90,7 @@ jobs:
         run: |
           docker build -t sandbox-node:latest images/node
           docker build -t sandbox-python:latest images/python
+          docker build -t sandbox-go:latest images/go
 
       # The bind mount is owned by the host, so the sandbox user must be able to
       # write a directory it does not own. Regressing this breaks every

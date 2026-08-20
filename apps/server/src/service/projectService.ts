@@ -113,3 +113,64 @@ export async function touchProject(projectId: string): Promise<void> {
       // A socket for a deleted project is not worth failing the request over.
     });
 }
+
+/** Renames a project. The directory is keyed by id, so only the row changes. */
+export async function renameProjectService(
+  projectId: string,
+  userId: string,
+  name: string,
+): Promise<Project> {
+  await assertProjectAccess(projectId, userId);
+
+  return prisma.project.update({
+    where: { id: projectId },
+    data: { name: name.trim() },
+  });
+}
+
+/** Copies a project's files into a brand new project.
+ *
+ *  Dependencies are deliberately not copied: `node_modules` is the bulk of a
+ *  project's bytes, is reproducible from the manifest, and copying it would
+ *  make a duplicate slower than a fresh install. Environment variables come
+ *  along, because a copy that cannot run is not much of a copy.
+ */
+export async function duplicateProjectService(
+  projectId: string,
+  userId: string,
+  name?: string,
+): Promise<Project> {
+  const source = await assertProjectAccess(projectId, userId);
+
+  const copy = await prisma.project.create({
+    data: {
+      name: name?.trim() || `${source.name} copy`,
+      ownerId: userId,
+      template: source.template,
+      envVars: source.envVars ?? {},
+    },
+  });
+
+  const destination = projectDir(copy.id);
+
+  try {
+    await fs.mkdir(destination, { recursive: true });
+    await fs.cp(projectDir(projectId), destination, {
+      recursive: true,
+      filter: (entrySource) => !EXCLUDED_FROM_COPY.test(entrySource),
+    });
+    await claimForSandbox(destination).catch(() => {});
+  } catch (error) {
+    await prisma.project.delete({ where: { id: copy.id } }).catch(() => {});
+    await fs.rm(destination, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+
+  return copy;
+}
+
+/** Directories a copy or an export has no business carrying. */
+const EXCLUDED_FROM_COPY =
+  /(^|[\\/])(node_modules|\.git|dist|build|\.next|__pycache__|\.venv)([\\/]|$)/;
+
+export { EXCLUDED_FROM_COPY };

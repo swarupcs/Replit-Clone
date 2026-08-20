@@ -12,6 +12,7 @@ import {
 import { AppError } from "../utils/errors.js";
 import { getTemplate } from "../templates/registry.js";
 import { logger } from "../lib/logger.js";
+import { getEnvVars, toDockerEnv } from "../service/projectEnvService.js";
 import { increment, registerGauge } from "../lib/metrics.js";
 
 const docker = new Docker();
@@ -201,6 +202,10 @@ async function startContainer(projectId: string): Promise<Container> {
       "HOST=0.0.0.0",
       // Vite serves under this base so the proxied path resolves correctly.
       `PREVIEW_BASE=/preview/${projectId}/`,
+      // The project's own variables. Last, so they cannot shadow the two above
+      // — the env service already refuses those names, and this is the belt to
+      // that braces.
+      ...toDockerEnv(await getEnvVars(projectId)),
     ],
     ...(publishPort ? { ExposedPorts: exposedPorts } : {}),
     // Idle process; terminals attach with `docker exec`.

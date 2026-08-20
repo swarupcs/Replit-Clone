@@ -61,8 +61,14 @@ model Project {
   owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   /// Last time a socket or terminal attached; drives the idle container reaper.
   lastActiveAt DateTime?
+
+  /// Environment variables injected into this project's container, as a JSON
+  /// object of string values. Stored per project rather than in a file so they
+  /// are not committed, exported, or visible in the file tree.
+  envVars Json @default("{}")
 
   @@index([ownerId])
   @@map("projects")

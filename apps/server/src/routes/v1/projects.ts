@@ -3,10 +3,15 @@ import rateLimit from "express-rate-limit";
 import {
   createProjectController,
   deleteProjectController,
+  duplicateProjectController,
+  exportProjectController,
+  getProjectEnvController,
   getProjectPorts,
   getProjectTree,
   listProjectsController,
   listTemplatesController,
+  renameProjectController,
+  setProjectEnvController,
 } from "../../controllers/projectController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
@@ -34,6 +39,11 @@ router.get("/", asyncHandler(listProjectsController));
 router.post("/", createLimiter, asyncHandler(createProjectController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
 router.get("/:projectId/ports", asyncHandler(getProjectPorts));
+router.patch("/:projectId", asyncHandler(renameProjectController));
+router.post("/:projectId/duplicate", createLimiter, asyncHandler(duplicateProjectController));
+router.get("/:projectId/export", asyncHandler(exportProjectController));
+router.get("/:projectId/env", asyncHandler(getProjectEnvController));
+router.put("/:projectId/env", asyncHandler(setProjectEnvController));
 router.delete("/:projectId", asyncHandler(deleteProjectController));
 
 export default router;

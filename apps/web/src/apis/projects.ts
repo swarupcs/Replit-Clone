@@ -1,4 +1,5 @@
 import type {
+  ApiSuccess,
   ListTemplatesResponse,
   TemplateSummary,
   CreateProjectResponse,
@@ -53,6 +54,53 @@ export const getProjectPorts = async (
 ): Promise<{ devPort: number; ports: number[] }> => {
   const response = await axios.get<ProjectPortsResponse>(
     `/api/v1/projects/${projectId}/ports`,
+  );
+  return response.data.data;
+};
+
+export const renameProjectApi = async (
+  projectId: string,
+  name: string,
+): Promise<Project> => {
+  const response = await axios.patch<CreateProjectResponse>(
+    `/api/v1/projects/${projectId}`,
+    { name },
+  );
+  return response.data.data;
+};
+
+export const duplicateProjectApi = async (
+  projectId: string,
+  name?: string,
+): Promise<Project> => {
+  const response = await axios.post<CreateProjectResponse>(
+    `/api/v1/projects/${projectId}/duplicate`,
+    { name },
+  );
+  return response.data.data;
+};
+
+/** Absolute, because the browser navigates to it rather than fetching it —
+ *  a download has to be a real navigation for the filename to be honoured. */
+export const projectExportUrl = (projectId: string): string =>
+  `${import.meta.env.VITE_BACKEND_URL}/api/v1/projects/${projectId}/export`;
+
+export const getProjectEnvApi = async (
+  projectId: string,
+): Promise<Record<string, string>> => {
+  const response = await axios.get<ApiSuccess<Record<string, string>>>(
+    `/api/v1/projects/${projectId}/env`,
+  );
+  return response.data.data;
+};
+
+export const setProjectEnvApi = async (
+  projectId: string,
+  vars: Record<string, string>,
+): Promise<Record<string, string>> => {
+  const response = await axios.put<ApiSuccess<Record<string, string>>>(
+    `/api/v1/projects/${projectId}/env`,
+    { vars },
   );
   return response.data.data;
 };

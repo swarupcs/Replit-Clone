@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { io } from "socket.io-client";
 import { Alert, Button, Flex, Tooltip, Typography } from "antd";
-import { VscLayoutPanel, VscLayoutSidebarLeft } from "react-icons/vsc";
+import { VscLayoutPanel, VscLayoutSidebarLeft, VscSettingsGear } from "react-icons/vsc";
 import {
   ArrowLeftOutlined,
   EyeInvisibleOutlined,
@@ -22,6 +22,7 @@ import { useRunStore } from "../store/runStore.ts";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
 import { QuickOpen } from "../components/organisms/QuickOpen/QuickOpen.tsx";
+import { EnvVarsDialog } from "../components/organisms/EnvVarsDialog/EnvVarsDialog.tsx";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
@@ -43,6 +44,7 @@ export const ProjectPlayground = () => {
   const [showSidebar, setShowSidebar] = useState(true);
   const [showPanel, setShowPanel] = useState(true);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [envOpen, setEnvOpen] = useState(false);
 
   const closeActiveTab = useOpenTabsStore((state) => state.closeTab);
 
@@ -181,6 +183,15 @@ export const ProjectPlayground = () => {
           <RunControl />
 
           <Flex align="center" gap={2}>
+            <Tooltip title="Environment variables">
+              <button
+                className="rc-icon-button"
+                aria-label="Environment variables"
+                onClick={() => setEnvOpen(true)}
+              >
+                <VscSettingsGear size={15} />
+              </button>
+            </Tooltip>
             <Tooltip title="Toggle file tree (Ctrl+B)">
               <button
                 className="rc-icon-button"
@@ -299,6 +310,14 @@ export const ProjectPlayground = () => {
       </div>
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
+
+      {projectIdFromUrl && (
+        <EnvVarsDialog
+          projectId={projectIdFromUrl}
+          open={envOpen}
+          onClose={() => setEnvOpen(false)}
+        />
+      )}
     </Flex>
   );
 };
