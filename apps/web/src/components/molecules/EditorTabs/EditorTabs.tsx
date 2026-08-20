@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { Modal } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
@@ -10,7 +12,24 @@ import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 export const EditorTabs = () => {
   const { tabs, activeRelPath, setActive, closeTab } = useOpenTabsStore();
 
+  /** A tab whose close is waiting on confirmation, because it still has edits
+   *  that have not reached the server. */
+  const [confirming, setConfirming] = useState<string | null>(null);
+
+  /** Closing a clean tab is free; closing a dirty one throws away work that
+   *  exists nowhere else, so it asks first. */
+  function requestClose(relPath: string) {
+    const tab = tabs.find((entry) => entry.relPath === relPath);
+    if (tab?.isDirty) {
+      setConfirming(relPath);
+      return;
+    }
+    closeTab(relPath);
+  }
+
   if (tabs.length === 0) return null;
+
+  const confirmingName = confirming?.split("/").pop() ?? "";
 
   return (
     <div
@@ -33,7 +52,7 @@ export const EditorTabs = () => {
             onClick={() => setActive(tab.relPath)}
             onAuxClick={(event) => {
               // Middle click closes, as in every editor.
-              if (event.button === 1) closeTab(tab.relPath);
+              if (event.button === 1) requestClose(tab.relPath);
             }}
             title={tab.relPath}
           >
@@ -45,7 +64,7 @@ export const EditorTabs = () => {
               data-dirty={tab.isDirty}
               onClick={(event) => {
                 event.stopPropagation();
-                closeTab(tab.relPath);
+                requestClose(tab.relPath);
               }}
             >
               {tab.isDirty ? (
@@ -65,6 +84,25 @@ export const EditorTabs = () => {
           </div>
         );
       })}
+
+      <Modal
+        open={confirming !== null}
+        title="Discard unsaved changes?"
+        okText="Discard"
+        okButtonProps={{ danger: true }}
+        cancelText="Keep editing"
+        onOk={() => {
+          if (confirming) closeTab(confirming);
+          setConfirming(null);
+        }}
+        onCancel={() => setConfirming(null)}
+        destroyOnHidden
+      >
+        <span style={{ color: "var(--rc-text-muted)" }}>
+          <b>{confirmingName}</b> has edits that have not been saved yet.
+          Closing it now loses them.
+        </span>
+      </Modal>
     </div>
   );
 };

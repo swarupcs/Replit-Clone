@@ -98,3 +98,7 @@ export const useOpenTabsStore = create<OpenTabsStore>((set, get) => ({
 /** The currently focused tab, or null. */
 export const selectActiveTab = (state: OpenTabsStore): OpenTab | null =>
   state.tabs.find((tab) => tab.relPath === state.activeRelPath) ?? null;
+
+/** True while any open file has edits that have not reached the server. */
+export const selectHasUnsavedWork = (state: OpenTabsStore): boolean =>
+  state.tabs.some((tab) => tab.isDirty);

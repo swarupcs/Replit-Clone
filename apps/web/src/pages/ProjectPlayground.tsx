@@ -23,6 +23,7 @@ import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
 import { QuickOpen } from "../components/organisms/QuickOpen/QuickOpen.tsx";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
+import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 export const ProjectPlayground = () => {
@@ -44,6 +45,8 @@ export const ProjectPlayground = () => {
   const [quickOpen, setQuickOpen] = useState(false);
 
   const closeActiveTab = useOpenTabsStore((state) => state.closeTab);
+
+  useUnsavedWorkGuard();
 
   useHotkeys(
     useMemo(

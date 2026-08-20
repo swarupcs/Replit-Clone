@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { selectActiveTab, useOpenTabsStore } from "./openTabsStore.ts";
+import {
+  selectActiveTab,
+  selectHasUnsavedWork,
+  useOpenTabsStore,
+} from "./openTabsStore.ts";
 
 const store = () => useOpenTabsStore.getState();
 
@@ -108,5 +112,43 @@ describe("selectActiveTab", () => {
   it("returns the focused tab", () => {
     openAll("a.ts", "b.ts");
     expect(selectActiveTab(store())?.relPath).toBe("b.ts");
+  });
+});
+
+describe("selectHasUnsavedWork", () => {
+  it("is false with nothing open", () => {
+    expect(selectHasUnsavedWork(store())).toBe(false);
+  });
+
+  it("is false while every tab is saved", () => {
+    openAll("a.ts", "b.ts");
+    expect(selectHasUnsavedWork(store())).toBe(false);
+  });
+
+  it("is true as soon as any tab is dirty", () => {
+    openAll("a.ts", "b.ts");
+    store().markDirty("a.ts", true);
+
+    expect(selectHasUnsavedWork(store())).toBe(true);
+  });
+
+  it("clears once the last dirty tab is saved", () => {
+    openAll("a.ts", "b.ts");
+    store().markDirty("a.ts", true);
+    store().markDirty("b.ts", true);
+
+    store().markDirty("a.ts", false);
+    expect(selectHasUnsavedWork(store())).toBe(true);
+
+    store().markDirty("b.ts", false);
+    expect(selectHasUnsavedWork(store())).toBe(false);
+  });
+
+  it("clears when a dirty tab is closed", () => {
+    openAll("a.ts");
+    store().markDirty("a.ts", true);
+    store().closeTab("a.ts");
+
+    expect(selectHasUnsavedWork(store())).toBe(false);
   });
 });
