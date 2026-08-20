@@ -183,8 +183,8 @@ project's Postgres instance, or any reachable host:port).
   WebSocket support on (default for Traefik) -- socket.io and the terminal
   need it.
 
-Run `prisma migrate deploy` against `DATABASE_URL` before first boot if the
-schema isn't already applied to your existing database.
+The server applies pending migrations on boot, so a fresh `DATABASE_URL`
+needs no manual step — the database just has to exist and be reachable.
 
 ## Split deployment: Vercel (frontend) + Dokploy (backend)
 
