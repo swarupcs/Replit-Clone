@@ -83,7 +83,15 @@ export function useWorkspaceSession(
   useEffect(() => {
     if (!projectId) return;
 
+    // The subscription fires on every change to the tree store, most of which
+    // are refetches that leave the open folders exactly as they were. Writing
+    // regardless meant a new array into the session store -- and a localStorage
+    // write -- on every tree refresh, for a value that had not moved.
+    let previous = useTreeStructureStore.getState().expandedPaths;
+
     return useTreeStructureStore.subscribe((state) => {
+      if (state.expandedPaths === previous) return;
+      previous = state.expandedPaths;
       merge(projectId, { expandedPaths: [...state.expandedPaths] });
     });
   }, [projectId, merge]);
