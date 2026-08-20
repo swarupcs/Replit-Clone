@@ -20,6 +20,24 @@ export interface RenamePayload {
   newName: string;
 }
 
+/** Lifecycle of the project's dev server, as driven by the Run button.
+ *
+ *  - `idle`      nothing has been started
+ *  - `starting`  the start command is running but nothing is listening yet
+ *                (this covers `npm install`, which can take a while)
+ *  - `running`   the dev server is accepting connections on its template port
+ *  - `exited`    the command finished or crashed; see `exitCode`
+ */
+export type RunStatus = "idle" | "starting" | "running" | "exited";
+
+export interface RunState {
+  status: RunStatus;
+  /** Present only for `exited`. */
+  exitCode?: number;
+  /** The command being run, so the UI can show what it is doing. */
+  command?: string;
+}
+
 /** Events the browser emits to the server. */
 export interface ClientToServerEvents {
   readFile: (payload: PathPayload) => void;
@@ -29,6 +47,13 @@ export interface ClientToServerEvents {
   createFolder: (payload: PathPayload) => void;
   deleteFolder: (payload: PathPayload) => void;
   renameEntry: (payload: RenamePayload) => void;
+  /** Start the template's start command inside the project container. */
+  runStart: () => void;
+  /** Kill it. */
+  runStop: () => void;
+  /** Ask for the current state — sent on connect, since the dev server may
+   *  already be running from an earlier session. */
+  runSubscribe: () => void;
 }
 
 /** Events the server emits to the browser. */
@@ -42,6 +67,14 @@ export interface ServerToClientEvents {
   renameEntrySuccess: (payload: { relPath: string; newRelPath: string }) => void;
   /** The project's files changed on disk; the client should refetch the tree. */
   treeChanged: () => void;
+  /** Dev server lifecycle changed. Broadcast to the whole project room so
+   *  every open tab agrees on the state. */
+  runState: (payload: RunState) => void;
+  /** A chunk of the start command's combined stdout/stderr. */
+  runOutput: (payload: { chunk: string }) => void;
+  /** Sent on subscribe so a reconnecting client can rebuild the log pane
+   *  instead of showing an empty one under a "running" badge. */
+  runHistory: (payload: { chunks: string[] }) => void;
   error: (payload: { code: string; message: string }) => void;
 }
 

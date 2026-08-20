@@ -533,6 +533,41 @@ body {
   }
 }
 
+/* Bottom-panel tabs (Terminal / Output). */
+.rc-panel-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border: none;
+  background: transparent;
+  color: var(--rc-text-subtle);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s var(--rc-ease);
+}
+
+.rc-panel-tab:hover {
+  color: var(--rc-text-muted);
+}
+
+.rc-panel-tab[data-active="true"] {
+  color: var(--rc-text);
+}
+
+.rc-panel-tab[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 2px;
+  background: var(--rc-gradient);
+}
+
 /* Section label above the tree / terminal panes. */
 .rc-pane-label {
   display: flex;

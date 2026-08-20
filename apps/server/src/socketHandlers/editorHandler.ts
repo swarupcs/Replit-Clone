@@ -8,6 +8,13 @@ import type {
 } from "@replit-clone/shared";
 import { resolveInProject } from "../utils/projectPaths.js";
 import { AppError } from "../utils/errors.js";
+import {
+  getRunHistory,
+  getRunState,
+  startRun,
+  stopRun,
+  subscribe as subscribeRun,
+} from "../containers/runner.js";
 
 export type EditorSocket = Socket<
   ClientToServerEvents,
@@ -206,4 +213,39 @@ export const handleEditorSocketEvents = (
       announceTreeChange();
     })(),
   );
+
+  // --- Dev server (the Run button) ---------------------------------------
+  //
+  // Run state is per PROJECT, not per socket: two tabs on the same project
+  // must agree about whether the dev server is up, so updates go to the room
+  // and the subscription is torn down with the socket.
+
+  const unsubscribeRun = subscribeRun(projectId, (event) => {
+    if (event.type === "state") {
+      editorNamespace.to(projectId).emit("runState", event.state);
+    } else {
+      editorNamespace.to(projectId).emit("runOutput", { chunk: event.chunk });
+    }
+  });
+
+  socket.on("runSubscribe", () => {
+    // Replays the log so a client that connects to an already-running dev
+    // server does not show an empty pane under a "running" badge.
+    socket.emit("runState", getRunState(projectId));
+    socket.emit("runHistory", { chunks: getRunHistory(projectId) });
+  });
+
+  socket.on("runStart", () =>
+    handle("start the dev server", async () => {
+      await startRun(projectId);
+    })(),
+  );
+
+  socket.on("runStop", () =>
+    handle("stop the dev server", async () => {
+      await stopRun(projectId);
+    })(),
+  );
+
+  socket.on("disconnect", unsubscribeRun);
 };

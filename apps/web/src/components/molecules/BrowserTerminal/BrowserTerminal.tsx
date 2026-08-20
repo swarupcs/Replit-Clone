@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Tooltip } from "antd";
-import { VscClearAll, VscDebugRestart, VscTerminal } from "react-icons/vsc";
+import { VscClearAll, VscDebugRestart } from "react-icons/vsc";
 import "@xterm/xterm/css/xterm.css";
 
 interface BrowserTerminalProps {
@@ -191,13 +191,12 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
         flexDirection: "column",
         height: "100%",
         backgroundColor: "var(--rc-surface-sunken)",
-        borderTop: "1px solid var(--rc-border)",
       }}
     >
       <div className="rc-pane-label" style={{ justifyContent: "space-between" }}>
+        {/* The panel tab already names this pane, so the header carries only
+            state and actions. */}
         <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <VscTerminal size={13} />
-          Terminal
           <span
             title={statusInfo.label}
             style={{

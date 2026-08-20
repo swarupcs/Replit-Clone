@@ -74,12 +74,16 @@ export function previewGuard(
 
 const DEV_SERVER_DOWN_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Preview unavailable</title>
-<style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;
-min-height:100vh;margin:0;background:#282a36;color:#f8f8f2}
-code{background:#44475a;padding:2px 6px;border-radius:4px}</style></head>
+<style>body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;
+place-items:center;min-height:100vh;margin:0;background:#0d0e16;color:#f2f3f7;
+text-align:center;padding:24px}
+h1{font-size:19px;font-weight:600;margin:0 0 8px}
+p{color:#a2a7bd;font-size:14px;margin:0;line-height:1.6}
+kbd{background:#232634;border:1px solid #303445;border-radius:6px;padding:2px 7px;
+font-family:ui-monospace,monospace;font-size:13px}</style></head>
 <body><div><h1>Nothing running yet</h1>
-<p>Start your dev server in the terminal, then reload:</p>
-<p><code>npm install &amp;&amp; npm run dev</code></p></div></body></html>`;
+<p>Press <kbd>Run</kbd> in the toolbar to start the dev server,<br>
+then reload this preview.</p></div></body></html>`;
 
 /** Target resolved by the guard, handed to the proxy for the same request.
  *  A WeakMap keeps it off `req` and lets it be collected with the request. */

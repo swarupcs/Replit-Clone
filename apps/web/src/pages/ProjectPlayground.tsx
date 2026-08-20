@@ -10,13 +10,15 @@ import {
 import { SplitPane } from "../components/layout/SplitPane.tsx";
 import { EditorComponent } from "../components/molecules/EditorComponent/EditorComponent.tsx";
 import { EditorTabs } from "../components/molecules/EditorTabs/EditorTabs.tsx";
-import { BrowserTerminal } from "../components/molecules/BrowserTerminal/BrowserTerminal.tsx";
+import { BottomPanel } from "../components/organisms/BottomPanel/BottomPanel.tsx";
 import { TreeStructure } from "../components/organisms/TreeStructure/TreeStructure.tsx";
 import { Browser } from "../components/organisms/Browser/Browser.tsx";
 import { useTreeStructureStore } from "../store/treeStructureStore.ts";
 import { useEditorSocketStore } from "../store/editorSocketStore.ts";
 import { useOpenTabsStore, selectActiveTab } from "../store/openTabsStore.ts";
 import { useAuthStore } from "../store/authStore.ts";
+import { useRunStore } from "../store/runStore.ts";
+import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 export const ProjectPlayground = () => {
@@ -47,10 +49,23 @@ export const ProjectPlayground = () => {
     );
     setEditorSocket(editorSocketConn);
 
+    // Dev server state lives on the server and survives a page reload, so ask
+    // for it rather than assuming "idle" on every mount.
+    const run = useRunStore.getState();
+    editorSocketConn.on("runState", run.setState);
+    editorSocketConn.on("runOutput", ({ chunk }) => {
+      useRunStore.getState().appendOutput(chunk);
+    });
+    editorSocketConn.on("runHistory", ({ chunks }) => {
+      useRunStore.getState().replaceOutput(chunks);
+    });
+    editorSocketConn.emit("runSubscribe");
+
     return () => {
       editorSocketConn.disconnect();
       setEditorSocket(null);
       closeAllTabs();
+      useRunStore.getState().reset();
     };
   }, [
     projectIdFromUrl,
@@ -101,14 +116,18 @@ export const ProjectPlayground = () => {
           </Typography.Text>
         </Flex>
 
-        <Button
-          size="small"
-          type={showPreview ? "primary" : "default"}
-          icon={showPreview ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-          onClick={() => setShowPreview((value) => !value)}
-        >
-          {showPreview ? "Hide preview" : "Show preview"}
-        </Button>
+        <Flex align="center" gap={12}>
+          <RunControl />
+
+          <Button
+            size="small"
+            type={showPreview ? "primary" : "default"}
+            icon={showPreview ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+            onClick={() => setShowPreview((value) => !value)}
+          >
+            {showPreview ? "Hide preview" : "Show preview"}
+          </Button>
+        </Flex>
       </Flex>
 
       {lastError && (
@@ -165,7 +184,7 @@ export const ProjectPlayground = () => {
                   }
                   second={
                     projectIdFromUrl && accessToken ? (
-                      <BrowserTerminal
+                      <BottomPanel
                         projectId={projectIdFromUrl}
                         accessToken={accessToken}
                       />
