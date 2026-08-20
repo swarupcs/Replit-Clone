@@ -1,6 +1,6 @@
 import type { Namespace } from "socket.io";
 import { verifyAccessToken } from "../service/tokenService.js";
-import { assertProjectAccess } from "../service/projectService.js";
+import { getProjectAccess } from "../service/projectAccessService.js";
 
 /** socket.io handshake auth.
  *
@@ -30,10 +30,18 @@ export function installSocketAuth(namespace: Namespace): void {
           return;
         }
 
-        await assertProjectAccess(projectId, claims.sub);
+        // Viewer is enough to CONNECT — read-only access exists so someone
+        // can look at a project. Which events they may then send is decided
+        // per event by the handler, from the level recorded here.
+        const access = await getProjectAccess(projectId, claims.sub);
+        if (!access || access.level === "none") {
+          next(new Error("NOT_FOUND: project not found"));
+          return;
+        }
 
         socket.data.userId = claims.sub;
         socket.data.projectId = projectId;
+        socket.data.accessLevel = access.level;
         next();
       } catch (error) {
         next(

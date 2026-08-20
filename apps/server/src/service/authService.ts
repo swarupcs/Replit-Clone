@@ -12,6 +12,11 @@ function toPublicUser(user: { id: string; email: string }): PublicUser {
   return { id: user.id, email: user.email };
 }
 
+/** A real argon2id hash of a value nobody knows, so verifying against it costs
+ *  the same as verifying a real one. Its only job is to take time. */
+const DUMMY_HASH =
+  "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHRzb21lc2FsdA$RdescudvJCsgt3ub+b+dWRWJTmaaJObG";
+
 export async function registerUser(
   email: string,
   password: string,
@@ -44,11 +49,10 @@ export async function authenticateUser(
     where: { email: normalizedEmail },
   });
 
-  // Always verify against *something* so a missing account and a wrong
-  // password take comparable time and cannot be distinguished by timing.
-  const hash =
-    user?.passwordHash ??
-    "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHRzb21lc2FsdA$RdescudvJCsgt3ub+b+dWRWJTmaaJObG";
+  // Always verify against *something* so a missing account, an account with no
+  // password, and a wrong password all take comparable time and cannot be told
+  // apart by timing.
+  const hash = user?.passwordHash ?? DUMMY_HASH;
 
   let valid = false;
   try {
@@ -57,7 +61,7 @@ export async function authenticateUser(
     valid = false;
   }
 
-  if (!user || !valid) {
+  if (!user || !user.passwordHash || !valid) {
     increment("auth_failures");
     throw new UnauthorizedError("Incorrect email or password");
   }

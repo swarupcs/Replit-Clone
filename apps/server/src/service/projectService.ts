@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Project } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
-import { NotFoundError } from "../utils/errors.js";
+import { assertProjectAccess as assertAccess } from "./projectAccessService.js";
 import { claimForSandbox, projectRoot } from "../utils/projectPaths.js";
 import {
   DEFAULT_TEMPLATE_ID,
@@ -15,6 +15,7 @@ import {
 } from "../containers/containerManager.js";
 import { forgetRun } from "../containers/runner.js";
 import { forgetUsage } from "./diskUsageService.js";
+import { assertCanCreateProject } from "./userQuotaService.js";
 
 export function projectDir(projectId: string): string {
   return projectRoot(projectId);
@@ -27,24 +28,9 @@ export async function listProjects(ownerId: string): Promise<Project[]> {
   });
 }
 
-/** Loads a project and asserts the caller owns it.
- *
- *  Every route and socket handler that touches project data goes through this.
- *  A project owned by someone else reports 404 rather than 403 so the endpoint
- *  cannot be used to probe which project ids exist.
- */
-export async function assertProjectAccess(
-  projectId: string,
-  userId: string,
-): Promise<Project> {
-  const project = await prisma.project.findUnique({ where: { id: projectId } });
-
-  if (!project || project.ownerId !== userId) {
-    throw new NotFoundError("Project not found");
-  }
-
-  return project;
-}
+/** Re-exported so every existing caller keeps working while the check itself
+ *  became role-aware. See projectAccessService for what the levels mean. */
+export { assertProjectAccess } from "./projectAccessService.js";
 
 export async function createProjectService(
   ownerId: string,
@@ -52,6 +38,9 @@ export async function createProjectService(
   templateId: string = DEFAULT_TEMPLATE_ID,
 ): Promise<Project> {
   const template = getTemplate(templateId);
+
+  // Before the row is written, so a refusal leaves nothing behind.
+  await assertCanCreateProject(ownerId);
 
   const project = await prisma.project.create({
     data: {
@@ -93,7 +82,9 @@ export async function deleteProjectService(
   projectId: string,
   userId: string,
 ): Promise<void> {
-  await assertProjectAccess(projectId, userId);
+  // Owner only: a collaborator losing the project for everyone is not a
+  // mistake worth making recoverable, because it is not recoverable.
+  await assertAccess(projectId, userId, "owner");
 
   await removeContainer(projectId);
   // The cache volume outlives a restart deliberately, but not the project.
@@ -120,7 +111,7 @@ export async function renameProjectService(
   userId: string,
   name: string,
 ): Promise<Project> {
-  await assertProjectAccess(projectId, userId);
+  await assertAccess(projectId, userId, "owner");
 
   return prisma.project.update({
     where: { id: projectId },
@@ -140,7 +131,10 @@ export async function duplicateProjectService(
   userId: string,
   name?: string,
 ): Promise<Project> {
-  const source = await assertProjectAccess(projectId, userId);
+  // A viewer may take a copy — the copy is theirs, and they could have done it
+  // by hand from the file tree anyway. It still counts against their own quota.
+  const source = await assertAccess(projectId, userId, "viewer");
+  await assertCanCreateProject(userId);
 
   const copy = await prisma.project.create({
     data: {

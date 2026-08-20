@@ -17,6 +17,15 @@ import {
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import {
+  createShareLinkController,
+  listSharingController,
+  previewShareLinkController,
+  redeemShareLinkController,
+  removeCollaboratorController,
+  revokeShareLinkController,
+  setCollaboratorController,
+} from "../../controllers/sharingController.js";
+import {
   downloadFileController,
   MAX_UPLOAD_BYTES,
   uploadFilesController,
@@ -63,6 +72,21 @@ router.post(
   asyncHandler(uploadFilesController),
 );
 router.get("/:projectId/files", asyncHandler(downloadFileController));
+
+// --- Sharing -------------------------------------------------------------
+// `share/preview` and `share/redeem` are not scoped to a project id, because
+// the caller has a token rather than an id — that is the whole point of a link.
+router.get("/share/preview", asyncHandler(previewShareLinkController));
+router.post("/share/redeem", asyncHandler(redeemShareLinkController));
+
+router.get("/:projectId/sharing", asyncHandler(listSharingController));
+router.put("/:projectId/collaborators", asyncHandler(setCollaboratorController));
+router.delete(
+  "/:projectId/collaborators/:userId",
+  asyncHandler(removeCollaboratorController),
+);
+router.post("/:projectId/share-link", asyncHandler(createShareLinkController));
+router.delete("/:projectId/share-link", asyncHandler(revokeShareLinkController));
 router.put("/:projectId/env", asyncHandler(setProjectEnvController));
 router.delete("/:projectId", asyncHandler(deleteProjectController));
 

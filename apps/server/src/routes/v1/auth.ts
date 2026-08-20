@@ -5,10 +5,19 @@ import {
   logout,
   me,
   refresh,
+  requestEmailVerification,
+  requestPasswordReset,
+  resetPassword,
   signup,
+  verifyEmail,
 } from "../../controllers/authController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
+import {
+  githubCallback,
+  githubStart,
+  githubStatus,
+} from "../../controllers/oauthController.js";
 
 const router = express.Router();
 
@@ -71,5 +80,25 @@ router.post("/login", addressLimiter, accountLimiter, asyncHandler(login));
 router.post("/refresh", refreshLimiter, asyncHandler(refresh));
 router.post("/logout", asyncHandler(logout));
 router.get("/me", requireAuth, asyncHandler(me));
+
+// Reset requests are rate-limited on the same budget as sign-in: the endpoint
+// sends mail on someone else's behalf, which is worth abusing.
+router.post("/password-reset", addressLimiter, accountLimiter, asyncHandler(requestPasswordReset));
+router.post("/password-reset/confirm", addressLimiter, asyncHandler(resetPassword));
+
+router.post(
+  "/verify-email/request",
+  requireAuth,
+  addressLimiter,
+  asyncHandler(requestEmailVerification),
+);
+router.post("/verify-email", addressLimiter, asyncHandler(verifyEmail));
+
+// --- GitHub sign-in ------------------------------------------------------
+// Off unless a client id and secret are configured; `providers` is what the
+// web app asks so it knows whether to offer the button at all.
+router.get("/providers", asyncHandler(githubStatus));
+router.get("/github", addressLimiter, asyncHandler(githubStart));
+router.get("/github/callback", asyncHandler(githubCallback));
 
 export default router;

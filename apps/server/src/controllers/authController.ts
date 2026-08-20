@@ -21,6 +21,17 @@ import {
 } from "../service/refreshTokenService.js";
 import { getAuthContext } from "../middlewares/requireAuth.js";
 import { UnauthorizedError } from "../utils/errors.js";
+import { z } from "zod";
+import argon2 from "argon2";
+import { prisma } from "../lib/prisma.js";
+import { getMailer, hasRealMailer, webUrl } from "../lib/mailer.js";
+import {
+  consumeUserToken,
+  issueUserToken,
+  UserTokenPurpose,
+} from "../service/userTokenService.js";
+import { revokeAllForUser } from "../service/refreshTokenService.js";
+import { logger } from "../lib/logger.js";
 
 const refreshCookieOptions: CookieOptions = {
   httpOnly: true,
@@ -118,3 +129,119 @@ export async function me(req: Request, res: Response): Promise<void> {
   res.json({ success: true, message: "Current user", data: { user } });
 }
 
+const emailSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Enter a valid email address"),
+});
+
+/** Always reports success.
+ *
+ *  Saying "no account with that email" would turn this endpoint into a way to
+ *  discover who has an account here, which is exactly what an attacker wants
+ *  before trying passwords.
+ */
+export async function requestPasswordReset(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const { email } = emailSchema.parse(req.body ?? {});
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (user?.passwordHash) {
+    const token = await issueUserToken(user.id, UserTokenPurpose.PASSWORD_RESET);
+
+    await getMailer().send({
+      to: user.email,
+      subject: "Reset your password",
+      text:
+        `Open this link to choose a new password:\n\n` +
+        `${webUrl("/reset-password", { token })}\n\n` +
+        `It expires in an hour. If you did not ask for this, ignore it — ` +
+        `nothing has changed.`,
+    });
+  } else if (user) {
+    // An account created through an identity provider has no password to
+    // reset, and telling them to sign in the way they signed up is more useful
+    // than a link that cannot help.
+    await getMailer().send({
+      to: user.email,
+      subject: "Reset your password",
+      text:
+        `This account signs in with GitHub, so it has no password to reset.\n\n` +
+        `Use "Continue with GitHub" at ${env.WEB_ORIGIN}.`,
+    });
+  }
+
+  res.json({
+    success: true,
+    message: "If that address has an account, a reset link is on its way.",
+    // Development has no mailer, so the link goes to the server log; saying so
+    // saves a confused wait for an email that is never coming.
+    data: { delivered: hasRealMailer() },
+  });
+}
+
+const resetSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(8, "Password must be at least 8 characters").max(200),
+});
+
+export async function resetPassword(req: Request, res: Response): Promise<void> {
+  const { token, password } = resetSchema.parse(req.body ?? {});
+
+  const userId = await consumeUserToken(token, UserTokenPurpose.PASSWORD_RESET);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash: await argon2.hash(password, { type: argon2.argon2id }) },
+  });
+
+  // Every existing session ends: whoever prompted the reset may be holding one.
+  await revokeAllForUser(userId);
+  logger.info("password reset", { userId });
+
+  res.json({
+    success: true,
+    message: "Password changed. Sign in with your new password.",
+    data: null,
+  });
+}
+
+/** Sends a fresh verification link to the signed-in user. */
+export async function requestEmailVerification(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const { userId } = getAuthContext(req);
+  const user = await getUserById(userId);
+  if (!user) throw new UnauthorizedError("Account no longer exists");
+
+  const token = await issueUserToken(userId, UserTokenPurpose.EMAIL_VERIFICATION);
+
+  await getMailer().send({
+    to: user.email,
+    subject: "Confirm your email address",
+    text:
+      `Open this link to confirm this address:\n\n` +
+      `${webUrl("/verify-email", { token })}\n\n` +
+      `It expires in a day.`,
+  });
+
+  res.json({
+    success: true,
+    message: "Verification link sent.",
+    data: { delivered: hasRealMailer() },
+  });
+}
+
+export async function verifyEmail(req: Request, res: Response): Promise<void> {
+  const token = z.string().min(1).parse((req.body as { token?: unknown })?.token);
+
+  const userId = await consumeUserToken(token, UserTokenPurpose.EMAIL_VERIFICATION);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { emailVerifiedAt: new Date() },
+  });
+
+  res.json({ success: true, message: "Email confirmed", data: null });
+}

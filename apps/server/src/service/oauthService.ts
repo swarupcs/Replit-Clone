@@ -1,0 +1,153 @@
+import { env } from "../config/env.js";
+import { prisma } from "../lib/prisma.js";
+import { BadRequestError, UnauthorizedError } from "../utils/errors.js";
+import type { PublicUser } from "./authService.js";
+
+/** GitHub sign-in.
+ *
+ *  Optional: without a client id and secret the endpoints report that it is not
+ *  configured rather than failing in some more mysterious way. The audience for
+ *  a browser IDE mostly has a GitHub account, which is why it is the provider
+ *  worth having.
+ */
+
+export function isGithubConfigured(): boolean {
+  return Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+}
+
+function assertConfigured(): { clientId: string; clientSecret: string } {
+  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
+    throw new BadRequestError(
+      "GitHub sign-in is not configured on this server",
+      "OAUTH_NOT_CONFIGURED",
+    );
+  }
+
+  return {
+    clientId: env.GITHUB_CLIENT_ID,
+    clientSecret: env.GITHUB_CLIENT_SECRET,
+  };
+}
+
+/** Where GitHub sends the browser to authorise. */
+export function githubAuthorizeUrl(state: string): string {
+  const { clientId } = assertConfigured();
+
+  const url = new URL("https://github.com/login/oauth/authorize");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("redirect_uri", `${env.API_ORIGIN}/api/v1/auth/github/callback`);
+  // `user:email` because a GitHub account's primary address is often private,
+  // and an account here without an email is not much of an account.
+  url.searchParams.set("scope", "read:user user:email");
+  url.searchParams.set("state", state);
+
+  return url.toString();
+}
+
+interface GithubUser {
+  id: number;
+  login: string;
+  avatar_url?: string;
+  email?: string | null;
+}
+
+interface GithubEmail {
+  email: string;
+  primary: boolean;
+  verified: boolean;
+}
+
+async function exchangeCode(code: string): Promise<string> {
+  const { clientId, clientSecret } = assertConfigured();
+
+  const response = await fetch("https://github.com/login/oauth/access_token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: `${env.API_ORIGIN}/api/v1/auth/github/callback`,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new UnauthorizedError("GitHub rejected the sign-in", "OAUTH_FAILED");
+  }
+
+  const body = (await response.json()) as { access_token?: string; error?: string };
+  if (!body.access_token) {
+    throw new UnauthorizedError("GitHub rejected the sign-in", "OAUTH_FAILED");
+  }
+
+  return body.access_token;
+}
+
+async function fetchGithub<T>(path: string, token: string): Promise<T> {
+  const response = await fetch(`https://api.github.com${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "replit-clone",
+    },
+  });
+
+  if (!response.ok) {
+    throw new UnauthorizedError("Could not read your GitHub profile", "OAUTH_FAILED");
+  }
+
+  return (await response.json()) as T;
+}
+
+/** Signs in, linking to an existing account by email or creating a new one. */
+export async function signInWithGithub(code: string): Promise<PublicUser> {
+  const token = await exchangeCode(code);
+
+  const profile = await fetchGithub<GithubUser>("/user", token);
+  const githubId = String(profile.id);
+
+  const existing = await prisma.user.findUnique({ where: { githubId } });
+  if (existing) {
+    return { id: existing.id, email: existing.email };
+  }
+
+  const email = await resolveEmail(profile, token);
+
+  // Linked by email when an account already exists, rather than creating a
+  // second one: someone who signed up with a password and later uses GitHub
+  // means to reach the same projects, not to start over.
+  const user = await prisma.user.upsert({
+    where: { email },
+    create: {
+      email,
+      githubId,
+      avatarUrl: profile.avatar_url,
+      // GitHub has already confirmed the address; asking the user to confirm
+      // it again would be theatre.
+      emailVerifiedAt: new Date(),
+    },
+    update: { githubId, avatarUrl: profile.avatar_url },
+  });
+
+  return { id: user.id, email: user.email };
+}
+
+async function resolveEmail(profile: GithubUser, token: string): Promise<string> {
+  if (profile.email) return profile.email.toLowerCase();
+
+  const emails = await fetchGithub<GithubEmail[]>("/user/emails", token);
+  // Verified, because an unverified address is not proof of anything; primary,
+  // because that is the one the person actually uses.
+  const chosen =
+    emails.find((entry) => entry.primary && entry.verified) ??
+    emails.find((entry) => entry.verified);
+
+  if (!chosen) {
+    throw new UnauthorizedError(
+      "Your GitHub account has no verified email address",
+      "OAUTH_NO_EMAIL",
+    );
+  }
+
+  return chosen.email.toLowerCase();
+}

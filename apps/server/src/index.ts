@@ -22,6 +22,7 @@ import { touchProject } from "./service/projectService.js";
 import { retainProjectWatcher } from "./service/projectWatcher.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
 import { pruneExpiredRefreshTokens } from "./service/refreshTokenService.js";
+import { pruneUserTokens } from "./service/userTokenService.js";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
 import { requestLogger } from "./middlewares/requestLogger.js";
 import { healthCheck } from "./controllers/healthController.js";
@@ -148,6 +149,9 @@ function startTokenPrune(): void {
   const sweep = (): void => {
     void pruneExpiredRefreshTokens().catch((error: unknown) => {
       logger.error("could not prune refresh tokens", error);
+    });
+    void pruneUserTokens().catch((error: unknown) => {
+      logger.error("could not prune user tokens", error);
     });
   };
 

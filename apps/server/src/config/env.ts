@@ -24,6 +24,14 @@ const envSchema = z.object({
 
   WEB_ORIGIN: z.string().url().default("http://localhost:5273"),
 
+  /** This server's own public origin. Needed because an OAuth redirect_uri has
+   *  to be absolute and has to match what is registered with the provider. */
+  API_ORIGIN: z.string().url().default("http://localhost:3000"),
+
+  /** GitHub sign-in. Both empty means the feature is simply off. */
+  GITHUB_CLIENT_ID: z.string().optional(),
+  GITHUB_CLIENT_SECRET: z.string().optional(),
+
   /** How many reverse proxies sit in front of this server.
    *
    *  Express needs this to work out which entry in X-Forwarded-For is the real
@@ -52,6 +60,15 @@ const envSchema = z.object({
    *  writing in a loop, or one runaway `npm install`, could fill the VM's disk
    *  and take Postgres and every other project down with it. */
   PROJECT_DISK_QUOTA_MB: z.coerce.number().int().positive().default(512),
+
+  /** Per-user limits.
+   *
+   *  Only a global container cap existed, so one account could take every slot
+   *  and fill the disk on its own. These bound what any single user costs the
+   *  deployment, independently of how busy it is overall. */
+  MAX_PROJECTS_PER_USER: z.coerce.number().int().positive().default(20),
+  USER_DISK_QUOTA_MB: z.coerce.number().int().positive().default(2048),
+  MAX_CONTAINERS_PER_USER: z.coerce.number().int().positive().default(2),
   MAX_CONCURRENT_CONTAINERS: z.coerce.number().int().positive().default(3),
 
   /** How the preview proxy reaches a project's dev server.

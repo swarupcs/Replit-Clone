@@ -75,7 +75,9 @@ export function installTerminalGateway(server: Server): void {
 
         // A terminal is a shell inside the project's container, so it needs the
         // same ownership check as any other project operation.
-        const project = await assertProjectAccess(projectId, claims.sub);
+        // A shell can write anything the project can, so read-only access is
+        // not enough for one.
+        const project = await assertProjectAccess(projectId, claims.sub, "editor");
 
         wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
           // Buffer client input from the instant the socket exists. Starting

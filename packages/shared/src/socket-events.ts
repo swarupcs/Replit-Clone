@@ -158,4 +158,7 @@ export interface ServerToClientEvents {
 export interface SocketData {
   userId: string;
   projectId: string;
+  /** What this connection may do. A viewer may read and watch; anything that
+   *  changes the project or runs code needs at least editor. */
+  accessLevel: "viewer" | "editor" | "owner";
 }

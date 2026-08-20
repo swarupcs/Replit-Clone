@@ -50,7 +50,7 @@ export async function uploadFilesController(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
-  await assertProjectAccess(projectId, getAuthContext(req).userId);
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "editor");
 
   const files = (req as unknown as { files?: UploadedFile[] }).files ?? [];
   if (files.length === 0) throw new BadRequestError("No files were uploaded");
@@ -97,7 +97,7 @@ export async function downloadFileController(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
-  await assertProjectAccess(projectId, getAuthContext(req).userId);
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "viewer");
 
   const relPath = req.query["path"];
   if (typeof relPath !== "string" || relPath.length === 0) {

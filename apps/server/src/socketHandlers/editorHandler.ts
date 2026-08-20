@@ -107,7 +107,10 @@ export const handleEditorSocketEvents = (
   socket: EditorSocket,
   editorNamespace: EditorNamespace,
 ): void => {
-  const { projectId } = socket.data;
+  const { projectId, accessLevel } = socket.data;
+
+  /** True when this connection may change the project or run code in it. */
+  const canEdit = accessLevel === "editor" || accessLevel === "owner";
 
   /** Runs a handler with uniform error reporting.
    *
@@ -118,8 +121,20 @@ export const handleEditorSocketEvents = (
   function handle(
     action: string,
     fn: () => Promise<void>,
+    requiresEdit = false,
   ): () => Promise<void> {
     return async () => {
+      // Checked per event rather than at connect: a viewer is allowed to
+      // connect precisely so they can read, so the line has to be drawn
+      // around the events that write or execute.
+      if (requiresEdit && !canEdit) {
+        socket.emit("error", {
+          code: "READ_ONLY",
+          message: `You have read-only access and cannot ${action}`,
+        });
+        return;
+      }
+
       try {
         await fn();
       } catch (error) {
@@ -186,7 +201,7 @@ export const handleEditorSocketEvents = (
       recordWrite(projectId, incoming, replacing);
 
       editorNamespace.to(projectId).emit("writeFileSuccess", { relPath });
-    })(),
+    }, true)(),
   );
 
   socket.on("createFile", ({ relPath }) =>
@@ -208,7 +223,7 @@ export const handleEditorSocketEvents = (
 
       socket.emit("createFileSuccess", { relPath });
       announceTreeChange();
-    })(),
+    }, true)(),
   );
 
   socket.on("deleteFile", ({ relPath }) =>
@@ -217,7 +232,7 @@ export const handleEditorSocketEvents = (
 
       socket.emit("deleteFileSuccess", { relPath });
       announceTreeChange();
-    })(),
+    }, true)(),
   );
 
   socket.on("createFolder", ({ relPath }) =>
@@ -236,7 +251,7 @@ export const handleEditorSocketEvents = (
 
       socket.emit("createFolderSuccess", { relPath });
       announceTreeChange();
-    })(),
+    }, true)(),
   );
 
   socket.on("deleteFolder", ({ relPath }) =>
@@ -257,7 +272,7 @@ export const handleEditorSocketEvents = (
 
       socket.emit("deleteFolderSuccess", { relPath });
       announceTreeChange();
-    })(),
+    }, true)(),
   );
 
   socket.on("renameEntry", ({ relPath, newName }) =>
@@ -290,7 +305,7 @@ export const handleEditorSocketEvents = (
 
       socket.emit("renameEntrySuccess", { relPath, newRelPath });
       announceTreeChange();
-    })(),
+    }, true)(),
   );
 
   socket.on("moveEntry", ({ relPath, destDir }) =>
@@ -327,7 +342,7 @@ export const handleEditorSocketEvents = (
 
       socket.emit("moveEntrySuccess", { relPath, newRelPath });
       announceTreeChange();
-    })(),
+    }, true)(),
   );
 
   // --- Dev server (the Run button) ---------------------------------------
@@ -347,19 +362,19 @@ export const handleEditorSocketEvents = (
   socket.on("runStart", () =>
     handle("start the dev server", async () => {
       await startRun(projectId);
-    })(),
+    }, true)(),
   );
 
   socket.on("runStop", () =>
     handle("stop the dev server", async () => {
       await stopRun(projectId);
-    })(),
+    }, true)(),
   );
 
   socket.on("runRestart", () =>
     handle("restart the dev server", async () => {
       await restartRun(projectId);
-    })(),
+    }, true)(),
   );
 
   socket.on("search", (options) =>

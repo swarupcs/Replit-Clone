@@ -159,6 +159,8 @@ async function startContainer(projectId: string): Promise<Container> {
     );
   }
 
+  await assertUserContainerBudget(projectId);
+
   const template = await templateForProject(projectId);
 
   // Projects scaffolded before ownership was claimed still belong to whoever
@@ -524,4 +526,46 @@ function cpuPercent(stats: DockerStats): number {
 export async function recreateContainer(projectId: string): Promise<Container> {
   await removeContainer(projectId);
   return ensureContainer(projectId);
+}
+
+/** Stops one account taking every container slot on the machine.
+ *
+ *  Only the global cap existed, so a single user opening enough projects
+ *  locked everyone else out — the machine was "at capacity" because of one
+ *  person. Counted against the OWNER, so a project shared with several people
+ *  costs its owner one slot rather than one each.
+ */
+async function assertUserContainerBudget(projectId: string): Promise<void> {
+  const { prisma } = await import("../lib/prisma.js");
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { ownerId: true },
+  });
+  if (!project) return;
+
+  const owned = await prisma.project.findMany({
+    where: { ownerId: project.ownerId },
+    select: { id: true },
+  });
+  const ownedIds = new Set(owned.map((entry) => entry.id));
+
+  const running = await docker
+    .listContainers({ filters: { name: [CONTAINER_PREFIX] } })
+    .catch(() => []);
+
+  const theirs = running.filter((info) => {
+    const name = info.Names.find((entry) => entry.startsWith(`/${CONTAINER_PREFIX}`));
+    return name ? ownedIds.has(name.slice(`/${CONTAINER_PREFIX}`.length)) : false;
+  });
+
+  if (theirs.length >= env.MAX_CONTAINERS_PER_USER) {
+    increment("containers_capacity_rejected");
+    throw new AppError(
+      429,
+      "USER_CONTAINER_LIMIT",
+      `You already have ${String(theirs.length)} projects running. ` +
+        `Close one before starting another.`,
+    );
+  }
 }

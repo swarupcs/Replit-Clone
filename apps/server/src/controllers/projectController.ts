@@ -6,12 +6,12 @@ import {
   deleteProjectService,
   duplicateProjectService,
   EXCLUDED_GLOBS,
-  listProjects,
   projectDir,
   renameProjectService,
   assertProjectAccess,
 } from "../service/projectService.js";
 import { getEnvVars, setEnvVars } from "../service/projectEnvService.js";
+import { listAccessibleProjects } from "../service/projectAccessService.js";
 import { logger } from "../lib/logger.js";
 import { buildFileTree } from "../service/fileTreeService.js";
 import { getAuthContext } from "../middlewares/requireAuth.js";
@@ -51,7 +51,9 @@ export async function listProjectsController(
   req: Request,
   res: Response,
 ): Promise<void> {
-  const projects = await listProjects(getAuthContext(req).userId);
+  // Includes projects shared with this user, not only their own — a project
+  // they can open but cannot see in the list would be unreachable.
+  const projects = await listAccessibleProjects(getAuthContext(req).userId);
 
   res.json({ success: true, message: "Projects", data: projects });
 }
@@ -61,7 +63,7 @@ export async function getProjectTree(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
-  await assertProjectAccess(projectId, getAuthContext(req).userId);
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "viewer");
 
   // Paths in this tree are relative to the project root; the old
   // `directory-tree` output leaked absolute host paths.
@@ -80,7 +82,11 @@ export async function getProjectPorts(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
-  const project = await assertProjectAccess(projectId, getAuthContext(req).userId);
+  const project = await assertProjectAccess(
+    projectId,
+    getAuthContext(req).userId,
+    "viewer",
+  );
   const template = getTemplate(project.template);
 
   res.json({
@@ -175,7 +181,11 @@ export async function exportProjectController(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
-  const project = await assertProjectAccess(projectId, getAuthContext(req).userId);
+  const project = await assertProjectAccess(
+    projectId,
+    getAuthContext(req).userId,
+    "viewer",
+  );
 
   const filename = `${project.name.replace(/[^\w.-]+/g, "-").slice(0, 60) || "project"}.zip`;
 
@@ -212,7 +222,9 @@ export async function getProjectEnvController(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
-  await assertProjectAccess(projectId, getAuthContext(req).userId);
+  // Editor, not viewer: these values are usually secrets, and read-only access
+  // to a project is not the same as being trusted with its credentials.
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "editor");
 
   res.json({
     success: true,

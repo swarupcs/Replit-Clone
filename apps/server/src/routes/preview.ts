@@ -61,7 +61,8 @@ export async function authorisePreview(
   if (!cookieValue) throw new UnauthorizedError("No preview session");
 
   const { sub } = verifyPreviewToken(cookieValue);
-  await assertProjectAccess(assertValidProjectId(projectId), sub);
+  // Watching the preview is exactly what read-only access is for.
+  await assertProjectAccess(assertValidProjectId(projectId), sub, "viewer");
 }
 
 /** Express guard: checks ownership, makes sure the container is running, and
