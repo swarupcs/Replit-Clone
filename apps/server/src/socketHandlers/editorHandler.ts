@@ -43,6 +43,56 @@ async function exists(target: string): Promise<boolean> {
   }
 }
 
+/** Forwards a project's run events into its room, once.
+ *
+ *  Every connection used to take out its own subscription, and each of those
+ *  listeners broadcast to the whole room — so N tabs on one project turned a
+ *  single chunk of output into N listeners each emitting to N clients, and the
+ *  log rendered every line N times. The relay is per project and refcounted:
+ *  the first socket to arrive creates it, the last to leave tears it down.
+ */
+const relays = new Map<string, { release: () => void; sockets: number }>();
+
+function retainRunRelay(
+  projectId: string,
+  editorNamespace: EditorNamespace,
+): () => void {
+  const existing = relays.get(projectId);
+
+  if (existing) {
+    existing.sockets += 1;
+  } else {
+    const unsubscribe = subscribeRun(projectId, (event) => {
+      if (event.type === "state") {
+        editorNamespace.to(projectId).emit("runState", event.state);
+      } else {
+        editorNamespace.to(projectId).emit("runOutput", { chunk: event.chunk });
+      }
+    });
+
+    relays.set(projectId, { release: unsubscribe, sockets: 1 });
+  }
+
+  let released = false;
+
+  // Guarded because socket.io can emit `disconnect` handlers more than once
+  // during a reconnect storm, and a double release would drop the relay while
+  // other tabs still depend on it.
+  return () => {
+    if (released) return;
+    released = true;
+
+    const relay = relays.get(projectId);
+    if (!relay) return;
+
+    relay.sockets -= 1;
+    if (relay.sockets > 0) return;
+
+    relay.release();
+    relays.delete(projectId);
+  };
+}
+
 export const handleEditorSocketEvents = (
   socket: EditorSocket,
   editorNamespace: EditorNamespace,
@@ -217,16 +267,9 @@ export const handleEditorSocketEvents = (
   // --- Dev server (the Run button) ---------------------------------------
   //
   // Run state is per PROJECT, not per socket: two tabs on the same project
-  // must agree about whether the dev server is up, so updates go to the room
-  // and the subscription is torn down with the socket.
+  // must agree about whether the dev server is up, so updates go to the room.
 
-  const unsubscribeRun = subscribeRun(projectId, (event) => {
-    if (event.type === "state") {
-      editorNamespace.to(projectId).emit("runState", event.state);
-    } else {
-      editorNamespace.to(projectId).emit("runOutput", { chunk: event.chunk });
-    }
-  });
+  const releaseRelay = retainRunRelay(projectId, editorNamespace);
 
   socket.on("runSubscribe", () => {
     // Replays the log so a client that connects to an already-running dev
@@ -247,5 +290,5 @@ export const handleEditorSocketEvents = (
     })(),
   );
 
-  socket.on("disconnect", unsubscribeRun);
+  socket.on("disconnect", releaseRelay);
 };
