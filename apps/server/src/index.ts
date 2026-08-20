@@ -12,7 +12,11 @@ import type {
   SocketData,
 } from "@replit-clone/shared";
 import apiRouter from "./routes/index.js";
-import { createPreviewProxy, previewGuard } from "./routes/preview.js";
+import {
+  createPreviewProxy,
+  installPreviewUpgrade,
+  previewGuard,
+} from "./routes/preview.js";
 import { env, isProduction } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";
 import { projectDir, touchProject } from "./service/projectService.js";
@@ -72,7 +76,8 @@ app.get("/ping", (_req, res) => {
 
 // Mounted BEFORE the body parsers: the proxy has to stream the original request
 // body through, and express.json would have already consumed it.
-app.use("/preview/:projectId", previewGuard, createPreviewProxy());
+const previewProxy = createPreviewProxy();
+app.use("/preview/:projectId", previewGuard, previewProxy);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -118,6 +123,10 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
 
 // The terminal was a second Express app on its own port with no npm script.
 installTerminalGateway(server);
+
+// Vite's HMR socket rides the preview path, and Express middleware does not run
+// for upgrades — so this authorises and routes them itself.
+installPreviewUpgrade(server, previewProxy);
 
 async function start(): Promise<void> {
   await ensureNetwork();

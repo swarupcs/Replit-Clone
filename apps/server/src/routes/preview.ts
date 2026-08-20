@@ -1,3 +1,6 @@
+import type { IncomingMessage, Server } from "node:http";
+import type { Socket } from "node:net";
+import type { Duplex } from "node:stream";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import {
@@ -95,11 +98,13 @@ font-family:ui-monospace,monospace;font-size:13px}</style></head>
 then reload this preview.</p></div></body></html>`;
 
 /** Target resolved by the guard, handed to the proxy for the same request.
- *  A WeakMap keeps it off `req` and lets it be collected with the request. */
-const targets = new WeakMap<Request, string>();
+ *  A WeakMap keeps it off `req` and lets it be collected with the request.
+ *  Keyed on IncomingMessage because a WebSocket upgrade never becomes an
+ *  Express Request — see installPreviewUpgrade. */
+const targets = new WeakMap<IncomingMessage, string>();
 
 /** Whether this project's dev server expects to see the /preview/<id> prefix. */
-const keepsPrefix = new WeakMap<Request, boolean>();
+const keepsPrefix = new WeakMap<IncomingMessage, boolean>();
 
 /** Removes the viewer's credentials from a request on its way to the sandbox. */
 function stripCredentials(proxyReq: {
@@ -116,7 +121,7 @@ function stripCredentials(proxyReq: {
  *  viewer's own machine and opened one host port per project. Containers now
  *  publish nothing at all.
  */
-export function createPreviewProxy(): RequestHandler {
+export function createPreviewProxy(): PreviewProxy {
   return createProxyMiddleware<Request, Response>({
     router: (req) => targets.get(req) ?? "http://127.0.0.1:1",
     changeOrigin: true,
@@ -126,8 +131,14 @@ export function createPreviewProxy(): RequestHandler {
     // with base=/preview/<id>/ and expects to SEE that prefix, so for those
     // templates the original path is restored; every other dev server serves
     // from the root and gets the stripped path.
-    pathRewrite: (pathname, req) =>
-      keepsPrefix.get(req) ? req.originalUrl : pathname,
+    //
+    // An upgrade has no originalUrl, because Express never handled it — that
+    // path normalises req.url itself before handing over.
+    pathRewrite: (pathname, req) => {
+      const original: string | undefined = req.originalUrl;
+      if (original === undefined) return pathname;
+      return keepsPrefix.get(req) ? original : pathname;
+    },
     on: {
       // The guard has already authorised the request; the container never needs
       // the credential itself, and it is running code the platform treats as
@@ -159,6 +170,107 @@ export function createPreviewProxy(): RequestHandler {
 export function extractProjectId(urlOrPath: string): string | undefined {
   const match = /\/preview\/([0-9a-f-]{36})/i.exec(urlOrPath);
   return match?.[1];
+}
+
+/** The proxy middleware, which also exposes an upgrade handler. */
+export type PreviewProxy = RequestHandler & {
+  upgrade: (req: Request, socket: Socket, head: Buffer) => void;
+};
+
+/** Reads one cookie out of a raw header.
+ *
+ *  An upgrade never reaches Express, so `cookie-parser` has not run and
+ *  `req.cookies` does not exist.
+ */
+function cookieFromHeader(header: string | undefined, name: string) {
+  if (!header) return undefined;
+
+  for (const part of header.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator === -1) continue;
+    if (part.slice(0, separator).trim() !== name) continue;
+
+    try {
+      return decodeURIComponent(part.slice(separator + 1).trim());
+    } catch {
+      // A malformed value is simply not a usable credential.
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+/** Strips the `/preview/<id>` mount prefix from an upgrade's path.
+ *
+ *  Express does this for ordinary requests but never sees an upgrade, so a dev
+ *  server that serves from the root would be asked for /preview/<id>/... and
+ *  404. Collapses to "/" rather than "" when nothing follows the prefix, since
+ *  a proxied request with no path at all is not a valid one.
+ */
+export function stripPreviewPrefix(
+  pathname: string,
+  search: string,
+  projectId: string,
+): string {
+  const prefix = `/preview/${projectId}`;
+  return `${pathname.slice(prefix.length) || "/"}${search}`;
+}
+
+/** Authorises and routes the preview's WebSocket upgrades.
+ *
+ *  Express middleware does not run for upgrades, so `previewGuard` never saw
+ *  them: the proxy asked for a target that had never been recorded, fell back
+ *  to its dead-end address, and Vite's HMR socket could not connect. The
+ *  upgrade also skipped the ownership check entirely.
+ *
+ *  This owns the upgrade the same way the terminal gateway owns its own, and
+ *  performs the identical checks the HTTP guard does before handing over.
+ */
+export function installPreviewUpgrade(
+  server: Server,
+  proxy: PreviewProxy,
+): void {
+  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+
+    // socket.io and the terminal gateway handle their own upgrades.
+    if (!url.pathname.startsWith("/preview/")) return;
+
+    void (async () => {
+      try {
+        const projectId = assertValidProjectId(
+          extractProjectId(url.pathname) ?? "",
+        );
+
+        await authorisePreview(
+          projectId,
+          cookieFromHeader(req.headers.cookie, PREVIEW_COOKIE_NAME),
+        );
+        await ensureContainer(projectId);
+
+        const target = await resolveTarget(projectId);
+        if (!target) throw new Error("The dev server is not listening");
+
+        const keepPrefix = await expectsPreviewBase(projectId);
+        targets.set(req, target);
+        keepsPrefix.set(req, keepPrefix);
+
+        // Express strips the mount prefix on ordinary requests. Nothing does
+        // for an upgrade, so a dev server that serves from the root would be
+        // asked for /preview/<id>/... and 404.
+        if (!keepPrefix) {
+          req.url = stripPreviewPrefix(url.pathname, url.search, projectId);
+        }
+
+        proxy.upgrade(req as Request, socket as Socket, head);
+      } catch (error) {
+        console.error("Preview upgrade rejected:", error);
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+      }
+    })();
+  });
 }
 
 export { PREVIEW_COOKIE_NAME };
