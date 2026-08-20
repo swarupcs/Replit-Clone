@@ -30,6 +30,15 @@ import {
   MAX_UPLOAD_BYTES,
   uploadFilesController,
 } from "../../controllers/fileTransferController.js";
+import {
+  gitCommitController,
+  gitDiffController,
+  gitInitController,
+  gitLogController,
+  gitStageController,
+  gitStatusController,
+  gitUnstageController,
+} from "../../controllers/gitController.js";
 
 const router = express.Router();
 
@@ -62,6 +71,16 @@ router.get("/", asyncHandler(listProjectsController));
 router.post("/", createLimiter, asyncHandler(createProjectController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
 router.get("/:projectId/ports", asyncHandler(getProjectPorts));
+
+// Source control. Every one of these runs git INSIDE the project's container,
+// so the repository is handled by the sandbox rather than by the host.
+router.get("/:projectId/git/status", asyncHandler(gitStatusController));
+router.get("/:projectId/git/diff", asyncHandler(gitDiffController));
+router.get("/:projectId/git/log", asyncHandler(gitLogController));
+router.post("/:projectId/git/init", asyncHandler(gitInitController));
+router.post("/:projectId/git/stage", asyncHandler(gitStageController));
+router.post("/:projectId/git/unstage", asyncHandler(gitUnstageController));
+router.post("/:projectId/git/commit", asyncHandler(gitCommitController));
 router.patch("/:projectId", asyncHandler(renameProjectController));
 router.post("/:projectId/duplicate", createLimiter, asyncHandler(duplicateProjectController));
 router.get("/:projectId/export", asyncHandler(exportProjectController));
