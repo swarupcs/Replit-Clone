@@ -1,8 +1,9 @@
-import { Button, Tooltip } from "antd";
+import { Button, Space, Tooltip } from "antd";
 import {
   CaretRightFilled,
   LoadingOutlined,
   BorderOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import type { RunStatus } from "@replit-clone/shared";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
@@ -22,9 +23,21 @@ const STATUS_COPY: Record<RunStatus, { label: string; color: string }> = {
  *  to type `npm install && npm run dev` yourself, and forgetting the install
  *  step produced a bare MODULE_NOT_FOUND.
  */
+/** Formats a byte count for a status readout, not for precision. */
+function formatMegabytes(bytes: number): string {
+  return `${Math.round(bytes / 1024 / 1024).toString()} MB`;
+}
+
+/** "in 4 min", "in 45 s" — a countdown only matters at human resolution. */
+function formatCountdown(seconds: number): string {
+  if (seconds >= 120) return `${Math.round(seconds / 60).toString()} min`;
+  return `${seconds.toString()} s`;
+}
+
 export const RunControl = () => {
   const { editorSocket } = useEditorSocketStore();
   const { status, exitCode, command } = useRunStore((store) => store.state);
+  const stats = useRunStore((store) => store.stats);
 
   const isBusy = status === "starting";
   const isLive = status === "running" || status === "starting";
@@ -35,8 +48,59 @@ export const RunControl = () => {
       ? `Exited (${exitCode})`
       : info.label;
 
+  const memoryPercent = stats?.running
+    ? Math.round((stats.memoryBytes / stats.memoryLimitBytes) * 100)
+    : 0;
+
+  // Containers used to just disappear at the idle timeout, which looked like
+  // the preview breaking. Warn while it is close enough to matter.
+  const idleWarning =
+    stats?.idleStopInSeconds !== null &&
+    stats?.idleStopInSeconds !== undefined &&
+    stats.running &&
+    stats.idleStopInSeconds <= 5 * 60
+      ? stats.idleStopInSeconds
+      : null;
+
   return (
     <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      {stats?.running && (
+        <Tooltip
+          title={
+            `Memory ${formatMegabytes(stats.memoryBytes)} of ` +
+            `${formatMegabytes(stats.memoryLimitBytes)} · CPU ${stats.cpuPercent.toString()}%` +
+            (idleWarning !== null
+              ? ` · sleeps in ${formatCountdown(idleWarning)} unless something happens`
+              : "")
+          }
+        >
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 11.5,
+              fontFamily: "var(--rc-mono)",
+              // Amber once memory is close enough that an OOM kill is a real
+              // possibility — that used to arrive with no warning at all.
+              color:
+                memoryPercent >= 85
+                  ? "var(--rc-red)"
+                  : memoryPercent >= 65
+                    ? "var(--rc-yellow)"
+                    : "var(--rc-text-subtle)",
+            }}
+          >
+            {memoryPercent}% mem
+            {idleWarning !== null && (
+              <span style={{ color: "var(--rc-yellow)" }}>
+                · sleeps in {formatCountdown(idleWarning)}
+              </span>
+            )}
+          </span>
+        </Tooltip>
+      )}
+
       <span
         style={{
           display: "flex",
@@ -59,36 +123,50 @@ export const RunControl = () => {
         {statusLabel}
       </span>
 
-      <Tooltip
-        title={
-          isLive
-            ? "Stop the dev server"
-            : command
-              ? `Run: ${command}`
-              : "Run the project's start command"
-        }
-      >
-        <Button
-          size="small"
-          type="primary"
-          danger={isLive}
-          icon={
-            isBusy ? (
-              <LoadingOutlined />
-            ) : isLive ? (
-              <BorderOutlined />
-            ) : (
-              <CaretRightFilled />
-            )
+      <Space.Compact>
+        <Tooltip
+          title={
+            isLive
+              ? "Stop the dev server"
+              : command
+                ? `Run: ${command}`
+                : "Run the project's start command"
           }
-          disabled={!editorSocket}
-          onClick={() => {
-            editorSocket?.emit(isLive ? "runStop" : "runStart");
-          }}
         >
-          {isLive ? "Stop" : "Run"}
-        </Button>
-      </Tooltip>
+          <Button
+            size="small"
+            type="primary"
+            danger={isLive}
+            icon={
+              isBusy ? (
+                <LoadingOutlined />
+              ) : isLive ? (
+                <BorderOutlined />
+              ) : (
+                <CaretRightFilled />
+              )
+            }
+            disabled={!editorSocket}
+            onClick={() => {
+              editorSocket?.emit(isLive ? "runStop" : "runStart");
+            }}
+          >
+            {isLive ? "Stop" : "Run"}
+          </Button>
+        </Tooltip>
+
+        {/* Restarting meant Stop, wait, Run — and pressing Run too early did
+            nothing at all, because the previous run was still shutting down. */}
+        <Tooltip title="Restart the dev server">
+          <Button
+            size="small"
+            aria-label="Restart the dev server"
+            icon={<ReloadOutlined />}
+            disabled={!editorSocket || status === "idle"}
+            onClick={() => editorSocket?.emit("runRestart")}
+          />
+        </Tooltip>
+      </Space.Compact>
     </span>
   );
 };

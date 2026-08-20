@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Input, Segmented, Tooltip } from "antd";
+import { Button, Input, Segmented, Select, Tooltip } from "antd";
 import { ReloadOutlined, ExportOutlined } from "@ant-design/icons";
 import { VscDeviceMobile, VscScreenFull, VscWindow } from "react-icons/vsc";
+import { useQuery } from "@tanstack/react-query";
+import { useRunStore } from "../../../store/runStore.ts";
+import { getProjectPorts } from "../../../apis/projects.ts";
 
 interface BrowserProps {
   projectId: string;
@@ -62,8 +65,11 @@ const SANDBOX = [
 /** The preview is served by the backend's reverse proxy, NOT by a published
  *  container port. Containers expose nothing to the host, and this URL works
  *  from any machine that can reach the backend. */
-function previewUrl(projectId: string): string {
-  return `${PREVIEW_ORIGIN}/preview/${projectId}/`;
+function previewUrl(projectId: string, port?: number): string {
+  const base = `${PREVIEW_ORIGIN}/preview/${projectId}/`;
+  // Omitted for the template's own dev port, so the common case keeps a clean
+  // URL and existing links keep working.
+  return port === undefined ? base : `${base}?port=${String(port)}`;
 }
 
 export const Browser = ({ projectId }: BrowserProps) => {
@@ -72,8 +78,38 @@ export const Browser = ({ projectId }: BrowserProps) => {
   const [device, setDevice] = useState<DeviceValue>("responsive");
   const [loading, setLoading] = useState(true);
 
-  const src = previewUrl(projectId);
+  /** Bumped by the server the moment the dev server answers its port. */
+  const readyNonce = useRunStore((store) => store.readyNonce);
+  const [autoReload, setAutoReload] = useState(true);
+
+  /** Which container port to preview. A project often serves more than one
+   *  thing — a frontend and the API beside it — and only one was reachable. */
+  const [port, setPort] = useState<number | null>(null);
+
+  const { data: portInfo } = useQuery({
+    queryKey: ["projectPorts", projectId],
+    queryFn: () => getProjectPorts(projectId),
+    staleTime: Infinity,
+  });
+
+  const activePort = port ?? portInfo?.devPort ?? null;
+  const src = previewUrl(
+    projectId,
+    activePort !== null && activePort !== portInfo?.devPort ? activePort : undefined,
+  );
   const width = DEVICES.find((d) => d.value === device)?.width ?? null;
+
+  // A different port is a different app; reload rather than showing the old one.
+  useEffect(() => {
+    setCacheBust((value) => value + 1);
+  }, [activePort]);
+
+  // Load the app as soon as it is actually up. The pane used to sit on
+  // whatever it had — usually the "nothing running yet" page — until the user
+  // pressed reload, with nothing telling them when that would work.
+  useEffect(() => {
+    if (readyNonce > 0 && autoReload) setCacheBust((value) => value + 1);
+  }, [readyNonce, autoReload]);
 
   // Each remount starts a fresh load. The iframe is cross-origin, so `load` is
   // the only signal we get -- there is no way to observe a failed navigation.
@@ -140,6 +176,21 @@ export const Browser = ({ projectId }: BrowserProps) => {
           }}
         />
 
+        {portInfo && portInfo.ports.length > 1 && (
+          <Tooltip title="Port to preview">
+            <Select
+              size="small"
+              value={activePort}
+              onChange={setPort}
+              style={{ minWidth: 92, fontFamily: "var(--rc-mono)" }}
+              options={portInfo.ports.map((entry) => ({
+                value: entry,
+                label: `:${String(entry)}`,
+              }))}
+            />
+          </Tooltip>
+        )}
+
         <Segmented
           size="small"
           value={device}
@@ -149,6 +200,29 @@ export const Browser = ({ projectId }: BrowserProps) => {
             label: <Tooltip title={d.title}>{d.label}</Tooltip>,
           }))}
         />
+
+        <Tooltip
+          title={
+            autoReload
+              ? "Reloading automatically when the dev server restarts"
+              : "Not reloading automatically"
+          }
+        >
+          <Button
+            size="small"
+            type="text"
+            aria-label="Toggle automatic reload"
+            aria-pressed={autoReload}
+            onClick={() => setAutoReload((value) => !value)}
+            style={{
+              color: autoReload ? "var(--rc-green)" : "var(--rc-text-subtle)",
+              fontSize: 11,
+              fontFamily: "var(--rc-mono)",
+            }}
+          >
+            AUTO
+          </Button>
+        </Tooltip>
 
         <Tooltip title="Open in a new tab">
           <Button

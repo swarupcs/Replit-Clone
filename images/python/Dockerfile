@@ -17,12 +17,13 @@ RUN apt-get update \
 # the shell all need.
 RUN useradd --create-home --shell /bin/bash --uid 1001 --gid 0 sandbox \
     && printf "PS1='\w \$ '\n" >> /home/sandbox/.bashrc \
-    && mkdir -p /home/sandbox/app \
+    && mkdir -p /home/sandbox/app /home/sandbox/.cache \
     && chown -R sandbox:0 /home/sandbox \
     && chmod -R g=u /home/sandbox
 
 USER 1001:0
-ENV HOME=/home/sandbox
+ENV HOME=/home/sandbox \
+    PIP_CACHE_DIR=/home/sandbox/.cache/pip
 WORKDIR /home/sandbox/app
 
 # pip installs land in the user's home so they persist with the container.

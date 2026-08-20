@@ -19,8 +19,24 @@ import { increment } from "../lib/metrics.js";
 
 /** Resolves the project's dev server address. The port comes from the
  *  template, which is why 5173 is no longer hardcoded in four places. */
-async function resolveTarget(projectId: string): Promise<string | undefined> {
-  return getPreviewTarget(projectId);
+async function resolveTarget(
+  projectId: string,
+  port?: number,
+): Promise<string | undefined> {
+  return getPreviewTarget(projectId, port);
+}
+
+/** Which container port this request wants previewed.
+ *
+ *  A project often serves more than one thing — a frontend and the API beside
+ *  it — and the registry now declares which ports each template may use.
+ *  Anything not on that list is ignored rather than dialled.
+ */
+function requestedPort(raw: unknown): number | undefined {
+  if (typeof raw !== "string") return undefined;
+
+  const port = Number(raw);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
 }
 
 async function expectsPreviewBase(projectId: string): Promise<boolean> {
@@ -69,7 +85,10 @@ export function previewGuard(
       await authorisePreview(projectId, cookies?.[PREVIEW_COOKIE_NAME]);
       await ensureContainer(projectId);
 
-      const target = await resolveTarget(projectId);
+      const target = await resolveTarget(
+        projectId,
+        requestedPort(req.query["port"]),
+      );
       if (!target) {
         // The container is up but nothing is listening yet. An iframe deserves
         // a readable page rather than a JSON error body.
@@ -257,7 +276,10 @@ export function installPreviewUpgrade(
         );
         await ensureContainer(projectId);
 
-        const target = await resolveTarget(projectId);
+        const target = await resolveTarget(
+          projectId,
+          requestedPort(url.searchParams.get("port") ?? undefined),
+        );
         if (!target) throw new Error("The dev server is not listening");
 
         const keepPrefix = await expectsPreviewBase(projectId);

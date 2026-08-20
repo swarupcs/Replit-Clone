@@ -21,7 +21,7 @@ RUN apt-get update \
 # the shell all need.
 RUN useradd --create-home --shell /bin/bash --uid 1001 --gid 0 sandbox \
     && printf "PS1='\w \$ '\n" >> /home/sandbox/.bashrc \
-    && mkdir -p /home/sandbox/app \
+    && mkdir -p /home/sandbox/app /home/sandbox/.cache \
     && chown -R sandbox:0 /home/sandbox \
     && chmod -R g=u /home/sandbox
 
@@ -31,7 +31,10 @@ RUN npm install --global serve@14 \
     && npm cache clean --force
 
 USER 1001:0
-ENV HOME=/home/sandbox
+ENV HOME=/home/sandbox \
+    NPM_CONFIG_CACHE=/home/sandbox/.cache/npm \
+    YARN_CACHE_FOLDER=/home/sandbox/.cache/yarn \
+    PNPM_HOME=/home/sandbox/.cache/pnpm
 WORKDIR /home/sandbox/app
 
 # Dev servers must listen on all interfaces to be reachable from the proxy.

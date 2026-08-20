@@ -46,6 +46,22 @@ export interface RunState {
   command?: string;
 }
 
+/** How a project's container is doing against its budget.
+ *
+ *  Without this an OOM kill looked like the dev server exiting for no reason:
+ *  the limits were enforced but never surfaced, so there was nothing to see. */
+export interface ContainerStats {
+  running: boolean;
+  /** Resident memory, and the ceiling it is measured against. */
+  memoryBytes: number;
+  memoryLimitBytes: number;
+  /** Whole-CPU percentage; 50 means half a core. */
+  cpuPercent: number;
+  /** Seconds until the idle reaper stops this container, or null while
+   *  something is still attached to it. */
+  idleStopInSeconds: number | null;
+}
+
 /** Events the browser emits to the server. */
 export interface ClientToServerEvents {
   readFile: (payload: PathPayload) => void;
@@ -59,9 +75,13 @@ export interface ClientToServerEvents {
   runStart: () => void;
   /** Kill it. */
   runStop: () => void;
+  /** Stop and start again, without the user having to do both. */
+  runRestart: () => void;
   /** Ask for the current state — sent on connect, since the dev server may
    *  already be running from an earlier session. */
   runSubscribe: () => void;
+  /** Ask for one container stats sample. */
+  statsRequest: () => void;
 }
 
 /** Events the server emits to the browser. */
@@ -83,6 +103,12 @@ export interface ServerToClientEvents {
   /** Sent on subscribe so a reconnecting client can rebuild the log pane
    *  instead of showing an empty one under a "running" badge. */
   runHistory: (payload: { chunks: string[] }) => void;
+  /** The dev server is listening and the preview is worth (re)loading. Lets
+   *  the preview pane show the app the moment it comes up, rather than
+   *  leaving the user to guess when to press reload. */
+  previewReady: (payload: { port: number }) => void;
+  /** Container resource use, in reply to statsRequest. */
+  containerStats: (payload: ContainerStats) => void;
   error: (payload: { code: string; message: string }) => void;
 }
 

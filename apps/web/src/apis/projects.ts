@@ -4,6 +4,7 @@ import type {
   CreateProjectResponse,
   ListProjectsResponse,
   Project,
+  ProjectPortsResponse,
   ProjectTreeResponse,
   TreeNodeData,
 } from "@replit-clone/shared";
@@ -43,6 +44,15 @@ export const getProjectTree = async ({
 }): Promise<TreeNodeData | null> => {
   const response = await axios.get<ProjectTreeResponse>(
     `/api/v1/projects/${projectId}/tree`,
+  );
+  return response.data.data;
+};
+
+export const getProjectPorts = async (
+  projectId: string,
+): Promise<{ devPort: number; ports: number[] }> => {
+  const response = await axios.get<ProjectPortsResponse>(
+    `/api/v1/projects/${projectId}/ports`,
   );
   return response.data.data;
 };

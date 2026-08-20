@@ -17,10 +17,15 @@ import { logger } from "../lib/logger.js";
 import {
   getRunHistory,
   getRunState,
+  restartRun,
   startRun,
   stopRun,
   subscribe as subscribeRun,
 } from "../containers/runner.js";
+import {
+  idleStopInSeconds,
+  readContainerStats,
+} from "../containers/containerManager.js";
 
 export type EditorSocket = Socket<
   ClientToServerEvents,
@@ -67,6 +72,8 @@ function retainRunRelay(
     const unsubscribe = subscribeRun(projectId, (event) => {
       if (event.type === "state") {
         editorNamespace.to(projectId).emit("runState", event.state);
+      } else if (event.type === "ready") {
+        editorNamespace.to(projectId).emit("previewReady", { port: event.port });
       } else {
         editorNamespace.to(projectId).emit("runOutput", { chunk: event.chunk });
       }
@@ -308,6 +315,22 @@ export const handleEditorSocketEvents = (
   socket.on("runStop", () =>
     handle("stop the dev server", async () => {
       await stopRun(projectId);
+    })(),
+  );
+
+  socket.on("runRestart", () =>
+    handle("restart the dev server", async () => {
+      await restartRun(projectId);
+    })(),
+  );
+
+  socket.on("statsRequest", () =>
+    handle("read container stats", async () => {
+      const stats = await readContainerStats(projectId);
+      socket.emit("containerStats", {
+        ...stats,
+        idleStopInSeconds: idleStopInSeconds(projectId),
+      });
     })(),
   );
 

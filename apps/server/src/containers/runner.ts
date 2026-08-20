@@ -91,7 +91,11 @@ type Listener = (event: RunEvent) => void;
 
 export type RunEvent =
   | { type: "state"; state: RunState }
-  | { type: "output"; chunk: string };
+  | { type: "output"; chunk: string }
+  // The dev server just started answering, so the preview is worth loading.
+  // Without this the pane sat on whatever it had until the user pressed
+  // reload, with nothing telling them when to.
+  | { type: "ready"; port: number };
 
 /** Subscribers are per project, not per socket, so every tab watching the same
  *  project sees the same log and status. */
@@ -196,6 +200,13 @@ function probeUntilReady(projectId: string): void {
       if (await isListening(projectId)) {
         stopProbing(live);
         setState(projectId, { status: "running", command: live.state.command });
+
+        const template = await templateForProject(projectId).catch(
+          () => undefined,
+        );
+        if (template) {
+          emit(projectId, { type: "ready", port: template.devPort });
+        }
       }
     })();
   }, READY_POLL_MS);
@@ -359,6 +370,34 @@ export async function stopRun(projectId: string): Promise<void> {
 
   setState(projectId, { status: "idle" });
   pushOutput(projectId, "\r\n\x1b[33mStopped.\x1b[0m\r\n");
+}
+
+/** Stops the run and starts it again.
+ *
+ *  Restarting used to mean pressing Stop, waiting, and pressing Run — and
+ *  pressing Run too early silently did nothing, because startRun returns early
+ *  while the previous run is still shutting down.
+ */
+export async function restartRun(projectId: string): Promise<void> {
+  await stopRun(projectId);
+
+  // stopRun signals the group and returns; the processes take a moment to go.
+  // Starting into a port that is not yet free is the failure this avoids.
+  await waitForPortRelease(projectId);
+
+  await startRun(projectId);
+}
+
+/** Waits for the dev port to stop answering, up to a bounded time. */
+async function waitForPortRelease(projectId: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+
+  while (Date.now() < deadline) {
+    if (!(await isListening(projectId))) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  logger.warn("dev port still held after stop; starting anyway", { projectId });
 }
 
 /** Drops all state for a project, e.g. when it is deleted. */

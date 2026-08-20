@@ -3,6 +3,7 @@ import rateLimit from "express-rate-limit";
 import {
   createProjectController,
   deleteProjectController,
+  getProjectPorts,
   getProjectTree,
   listProjectsController,
   listTemplatesController,
@@ -32,6 +33,7 @@ router.get("/templates", asyncHandler(listTemplatesController));
 router.get("/", asyncHandler(listProjectsController));
 router.post("/", createLimiter, asyncHandler(createProjectController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
+router.get("/:projectId/ports", asyncHandler(getProjectPorts));
 router.delete("/:projectId", asyncHandler(deleteProjectController));
 
 export default router;

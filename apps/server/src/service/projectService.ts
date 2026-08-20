@@ -9,7 +9,10 @@ import {
   getTemplate,
   TEMPLATE_FILES_ROOT,
 } from "../templates/registry.js";
-import { removeContainer } from "../containers/containerManager.js";
+import {
+  removeCacheVolume,
+  removeContainer,
+} from "../containers/containerManager.js";
 import { forgetRun } from "../containers/runner.js";
 import { forgetUsage } from "./diskUsageService.js";
 
@@ -93,6 +96,8 @@ export async function deleteProjectService(
   await assertProjectAccess(projectId, userId);
 
   await removeContainer(projectId);
+  // The cache volume outlives a restart deliberately, but not the project.
+  await removeCacheVolume(projectId);
   // Otherwise a recreated project with the same id would inherit stale run
   // state and a log from the deleted one.
   forgetRun(projectId);

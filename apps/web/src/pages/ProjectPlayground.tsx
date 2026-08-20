@@ -105,9 +105,24 @@ export const ProjectPlayground = () => {
     editorSocketConn.on("runHistory", ({ chunks }) => {
       useRunStore.getState().replaceOutput(chunks);
     });
+    editorSocketConn.on("previewReady", () => {
+      useRunStore.getState().markPreviewReady();
+    });
+    editorSocketConn.on("containerStats", (stats) => {
+      useRunStore.getState().setStats(stats);
+    });
     editorSocketConn.emit("runSubscribe");
 
+    // One sample a few seconds apart. Docker computes CPU from the delta since
+    // the previous reading, so the first is always zero; polling is what makes
+    // the number mean anything.
+    const statsTimer = setInterval(() => {
+      editorSocketConn.emit("statsRequest");
+    }, 5000);
+    editorSocketConn.emit("statsRequest");
+
     return () => {
+      clearInterval(statsTimer);
       editorSocketConn.disconnect();
       setEditorSocket(null);
       closeAllTabs();

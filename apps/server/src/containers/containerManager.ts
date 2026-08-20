@@ -1,8 +1,9 @@
 import fsp from "node:fs/promises";
 import Docker from "dockerode";
-import type { Container, ContainerInfo } from "dockerode";
+import type { Container, ContainerInfo, ContainerStats as DockerStats } from "dockerode";
 import { env, previewTargetMode } from "../config/env.js";
 import {
+  assertValidProjectId,
   claimForSandbox,
   containerUser,
   projectRoot,
@@ -20,6 +21,23 @@ const docker = new Docker();
 export const SANDBOX_NETWORK = "replit-clone-sandbox";
 
 const CONTAINER_PREFIX = "rc-project-";
+const CACHE_VOLUME_PREFIX = "rc-cache-";
+
+/** Named volume holding a project's package caches. */
+function cacheVolumeName(projectId: string): string {
+  return `${CACHE_VOLUME_PREFIX}${assertValidProjectId(projectId)}`;
+}
+
+/** Removes a project's cache volume. Only for deletion — a restart must keep
+ *  it, since keeping it is the entire point. */
+export async function removeCacheVolume(projectId: string): Promise<void> {
+  await docker
+    .getVolume(cacheVolumeName(projectId))
+    .remove({ force: true })
+    .catch(() => {
+      // Never created, or already gone.
+    });
+}
 
 function containerName(projectId: string): string {
   return `${CONTAINER_PREFIX}${projectId}`;
@@ -156,7 +174,17 @@ async function startContainer(projectId: string): Promise<Container> {
   // container IPs. It is never bound on 0.0.0.0, so nothing is reachable from
   // outside this machine — the browser always goes through /preview.
   const publishPort = previewTargetMode === "host-loopback";
-  const devPortKey = `${template.devPort}/tcp`;
+  const previewPorts = [template.devPort, ...(template.extraPorts ?? [])];
+
+  const exposedPorts = Object.fromEntries(
+    previewPorts.map((port) => [`${String(port)}/tcp`, {}]),
+  );
+  const portBindings = Object.fromEntries(
+    previewPorts.map((port) => [
+      `${String(port)}/tcp`,
+      [{ HostIp: "127.0.0.1", HostPort: "0" }],
+    ]),
+  );
 
   const container = await docker.createContainer({
     Image: template.image,
@@ -174,18 +202,19 @@ async function startContainer(projectId: string): Promise<Container> {
       // Vite serves under this base so the proxied path resolves correctly.
       `PREVIEW_BASE=/preview/${projectId}/`,
     ],
-    ...(publishPort ? { ExposedPorts: { [devPortKey]: {} } } : {}),
+    ...(publishPort ? { ExposedPorts: exposedPorts } : {}),
     // Idle process; terminals attach with `docker exec`.
     Cmd: ["sleep", "infinity"],
     HostConfig: {
-      ...(publishPort
-        ? {
-            PortBindings: {
-              [devPortKey]: [{ HostIp: "127.0.0.1", HostPort: "0" }],
-            },
-          }
-        : {}),
-      Binds: [`${projectRoot(projectId)}:/home/sandbox/app`],
+      ...(publishPort ? { PortBindings: portBindings } : {}),
+      Binds: [
+        `${projectRoot(projectId)}:/home/sandbox/app`,
+        // Package caches, in a named volume rather than the container's
+        // writable layer. Containers are stopped when idle and removed on a
+        // restart, so without this every cold start re-downloaded the whole of
+        // node_modules — minutes of waiting for a project that had not changed.
+        `${cacheVolumeName(projectId)}:/home/sandbox/.cache`,
+      ],
       Memory: env.CONTAINER_MEMORY_MB * 1024 * 1024,
       // Equal to Memory disables swap, so a container cannot evade its limit
       // by swapping the host to death.
@@ -222,23 +251,37 @@ async function templateForProject(projectId: string) {
  */
 export async function getPreviewTarget(
   projectId: string,
+  port?: number,
 ): Promise<string | undefined> {
   const info = await findContainer(projectId);
   if (!info || info.State !== "running") return undefined;
 
   const inspected = await docker.getContainer(info.Id).inspect();
   const template = await templateForProject(projectId);
-  const devPortKey = `${template.devPort}/tcp`;
+
+  // Any port the template declares, defaulting to its dev port. The registry
+  // used to allow exactly one, so a project serving an API beside its frontend
+  // had no way to preview the other.
+  const wanted = port ?? template.devPort;
+  const allowed = [template.devPort, ...(template.extraPorts ?? [])];
+  if (!allowed.includes(wanted)) return undefined;
+
+  const portKey = `${String(wanted)}/tcp`;
 
   if (previewTargetMode === "host-loopback") {
-    const hostPort =
-      inspected.NetworkSettings?.Ports?.[devPortKey]?.[0]?.HostPort;
+    const hostPort = inspected.NetworkSettings?.Ports?.[portKey]?.[0]?.HostPort;
     return hostPort ? `http://127.0.0.1:${hostPort}` : undefined;
   }
 
   const address =
     inspected.NetworkSettings?.Networks?.[SANDBOX_NETWORK]?.IPAddress;
-  return address ? `http://${address}:${template.devPort}` : undefined;
+  return address ? `http://${address}:${String(wanted)}` : undefined;
+}
+
+/** Ports this project's preview may be pointed at. */
+export async function previewablePorts(projectId: string): Promise<number[]> {
+  const template = await templateForProject(projectId);
+  return [template.devPort, ...(template.extraPorts ?? [])];
 }
 
 export async function stopContainer(projectId: string): Promise<void> {
@@ -394,3 +437,86 @@ async function orphanedDirectories(known: Set<string>): Promise<number> {
 }
 
 registerGauge("containers_attached", () => activeAttachments.size);
+
+/** How long until the idle reaper would stop this project's container.
+ *
+ *  Null while anything is still attached. Containers used to just go away at
+ *  twenty minutes with no warning, which looked like the preview breaking.
+ */
+export function idleStopInSeconds(projectId: string): number | null {
+  if ((activeAttachments.get(projectId) ?? 0) > 0) return null;
+
+  const since = lastActiveAt.get(projectId);
+  if (since === undefined) return null;
+
+  const idleMs = env.CONTAINER_IDLE_MINUTES * 60 * 1000;
+  const remaining = Math.round((since + idleMs - Date.now()) / 1000);
+  return Math.max(0, remaining);
+}
+
+/** One sample of a container's resource use, against the budget it was given.
+ *
+ *  The limits were always enforced and never surfaced, so an OOM kill looked
+ *  like the dev server exiting for no reason at all.
+ */
+export async function readContainerStats(projectId: string): Promise<{
+  running: boolean;
+  memoryBytes: number;
+  memoryLimitBytes: number;
+  cpuPercent: number;
+}> {
+  const limit = env.CONTAINER_MEMORY_MB * 1024 * 1024;
+  const info = await findContainer(projectId);
+
+  if (!info || info.State !== "running") {
+    return {
+      running: false,
+      memoryBytes: 0,
+      memoryLimitBytes: limit,
+      cpuPercent: 0,
+    };
+  }
+
+  // `stream: false` takes a single sample. Docker computes CPU from the delta
+  // against the previous reading, which it includes in the same payload.
+  const stats = (await docker
+    .getContainer(info.Id)
+    .stats({ stream: false })) as unknown as DockerStats;
+
+  return {
+    running: true,
+    memoryBytes: memoryUsage(stats),
+    memoryLimitBytes: stats.memory_stats?.limit ?? limit,
+    cpuPercent: cpuPercent(stats),
+  };
+}
+
+/** Docker reports total memory including the page cache, which makes a
+ *  container that merely read files look near its limit. Subtracting the
+ *  reclaimable part is what `docker stats` itself displays. */
+function memoryUsage(stats: DockerStats): number {
+  const usage = stats.memory_stats?.usage ?? 0;
+  const cache = stats.memory_stats?.stats?.["inactive_file"] ?? 0;
+  return Math.max(0, usage - cache);
+}
+
+function cpuPercent(stats: DockerStats): number {
+  const cpuDelta =
+    (stats.cpu_stats?.cpu_usage?.total_usage ?? 0) -
+    (stats.precpu_stats?.cpu_usage?.total_usage ?? 0);
+  const systemDelta =
+    (stats.cpu_stats?.system_cpu_usage ?? 0) -
+    (stats.precpu_stats?.system_cpu_usage ?? 0);
+
+  if (cpuDelta <= 0 || systemDelta <= 0) return 0;
+
+  const cores = stats.cpu_stats?.online_cpus ?? 1;
+  return Math.round((cpuDelta / systemDelta) * cores * 1000) / 10;
+}
+
+/** Removes the container so the next start is from a clean base image.
+ *  Files survive: they live in the bind mount, not the container. */
+export async function recreateContainer(projectId: string): Promise<Container> {
+  await removeContainer(projectId);
+  return ensureContainer(projectId);
+}

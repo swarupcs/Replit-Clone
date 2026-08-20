@@ -39,9 +39,17 @@ export interface TemplateSummary {
   label: string;
   /** Port the dev server listens on inside the container. */
   devPort: number;
+  /** Every port this template's preview may be pointed at, dev port first. */
+  previewPorts: number[];
   /** Shown in the UI so the user knows what to run. */
   startCommand: string;
 }
+
+/** GET /api/v1/projects/:projectId/ports */
+export type ProjectPortsResponse = ApiSuccess<{
+  devPort: number;
+  ports: number[];
+}>;
 
 /** GET /api/v1/projects/templates */
 export type ListTemplatesResponse = ApiSuccess<TemplateSummary[]>;

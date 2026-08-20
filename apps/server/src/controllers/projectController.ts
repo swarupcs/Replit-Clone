@@ -9,7 +9,11 @@ import {
 import { buildFileTree } from "../service/fileTreeService.js";
 import { getAuthContext } from "../middlewares/requireAuth.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
-import { listTemplates, DEFAULT_TEMPLATE_ID } from "../templates/registry.js";
+import {
+  listTemplates,
+  DEFAULT_TEMPLATE_ID,
+  getTemplate,
+} from "../templates/registry.js";
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
@@ -63,6 +67,25 @@ export async function getProjectTree(
   });
 }
 
+/** Ports this project's preview may be pointed at. */
+export async function getProjectPorts(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const projectId = assertValidProjectId(req.params.projectId);
+  const project = await assertProjectAccess(projectId, getAuthContext(req).userId);
+  const template = getTemplate(project.template);
+
+  res.json({
+    success: true,
+    message: "Preview ports",
+    data: {
+      devPort: template.devPort,
+      ports: [template.devPort, ...(template.extraPorts ?? [])],
+    },
+  });
+}
+
 export async function deleteProjectController(
   req: Request<{ projectId: string }>,
   res: Response,
@@ -81,12 +104,15 @@ export function listTemplatesController(
 ): Promise<void> {
   // `image` and `filesDir` are server-side details; the client only needs
   // enough to render the picker.
-  const data = listTemplates().map(({ id, label, devPort, startCommand }) => ({
-    id,
-    label,
-    devPort,
-    startCommand,
-  }));
+  const data = listTemplates().map(
+    ({ id, label, devPort, extraPorts, startCommand }) => ({
+      id,
+      label,
+      devPort,
+      previewPorts: [devPort, ...(extraPorts ?? [])],
+      startCommand,
+    }),
+  );
 
   res.json({ success: true, message: "Templates", data });
   return Promise.resolve();
