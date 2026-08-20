@@ -49,6 +49,7 @@ export const ProjectPlayground = () => {
   const { setEditorSocket, lastError, clearError } = useEditorSocketStore();
   const activeTab = useOpenTabsStore(selectActiveTab);
   const closeAllTabs = useOpenTabsStore((state) => state.closeAll);
+  const splitOpen = useOpenTabsStore((state) => state.splitOpen);
 
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
   const { restored, remember } = useWorkspaceSession(projectIdFromUrl, editorSocket);
@@ -406,9 +407,27 @@ export const ProjectPlayground = () => {
                     >
                       <EditorTabs />
                       <div style={{ flex: 1, minHeight: 0 }}>
-                        <ErrorBoundary label="The editor">
-                          <EditorComponent />
-                        </ErrorBoundary>
+                        {/* Two panes over one tab list and one write queue, so
+                            the same file open in both stays in step. */}
+                        <SplitPane
+                          direction="horizontal"
+                          defaultSize={restored?.editorSplitWidth ?? 480}
+                          minSize={240}
+                          showSecond={splitOpen}
+                          onResizeEnd={(size) =>
+                            remember({ editorSplitWidth: size })
+                          }
+                          first={
+                            <ErrorBoundary label="The editor">
+                              <EditorComponent pane="primary" />
+                            </ErrorBoundary>
+                          }
+                          second={
+                            <ErrorBoundary label="The second editor pane">
+                              <EditorComponent pane="secondary" />
+                            </ErrorBoundary>
+                          }
+                        />
                       </div>
                     </div>
                   }

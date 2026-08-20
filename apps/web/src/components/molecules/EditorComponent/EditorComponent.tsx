@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 // Must precede the Editor import's first render: points Monaco at our bundle
 // rather than a CDN. See the file for why.
 import "../../../config/monacoSetup.ts";
@@ -11,9 +11,19 @@ import { MAX_FILE_BYTES } from "@replit-clone/shared";
 import draculaTheme from "../../../theme/dracula.json";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
-import { useOpenTabsStore, selectActiveTab } from "../../../store/openTabsStore.ts";
+import {
+  useOpenTabsStore,
+  selectPaneTab,
+  type PaneId,
+} from "../../../store/openTabsStore.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
+import {
+  flushAllWrites,
+  flushWrite,
+  queueWrite,
+  setWriteEmitter,
+} from "../../../lib/pendingWrites.ts";
 
 const WRITE_DEBOUNCE_MS = 800;
 
@@ -29,20 +39,13 @@ function modelUri(monaco: Monaco, relPath: string) {
   return monaco.Uri.from({ scheme: "inmemory", path: `/${relPath}` });
 }
 
-export const EditorComponent = () => {
-  /** Debounced writes still in flight, keyed by path.
-   *
-   *  A plain `let` in the component body was reset on every render, so the
-   *  debounce never cancelled anything; a single shared timer then replaced
-   *  that, which was worse in a different way. Typing in one file and switching
-   *  to another within the debounce window cancelled the first file's pending
-   *  write and never rescheduled it, so those edits were lost silently — the
-   *  tab kept showing its unsaved dot the whole time. One timer per path, and
-   *  a flush whenever the active file changes, is what makes that impossible.
-   */
-  const pendingWrites = useRef(
-    new Map<string, { timer: ReturnType<typeof setTimeout>; data: string }>(),
-  );
+interface EditorComponentProps {
+  /** Which pane this instance is. Both share the tab list and the write queue;
+   *  only the file they display differs. */
+  pane?: PaneId;
+}
+
+export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   /** Per-file scroll position and folded regions, keyed by relPath. */
@@ -57,7 +60,10 @@ export const EditorComponent = () => {
    *  the resulting change event is not mistaken for the user typing. */
   const suppressChange = useRef(false);
 
-  const activeTab = useOpenTabsStore(selectActiveTab);
+  const activeTab = useOpenTabsStore(selectPaneTab(pane));
+  const focusedPane = useOpenTabsStore((state) => state.focusedPane);
+  const focusPane = useOpenTabsStore((state) => state.focusPane);
+  const splitOpen = useOpenTabsStore((state) => state.splitOpen);
   const markDirty = useOpenTabsStore((state) => state.markDirty);
   const { editorSocket } = useEditorSocketStore();
   const settings = useEditorSettingsStore();
@@ -71,28 +77,25 @@ export const EditorComponent = () => {
    *  live text, so there is nothing in React state to compare against. */
   const [diffCurrent, setDiffCurrent] = useState("");
 
-  /** Read imperatively so the flush helpers do not have to be rebuilt — and
-   *  re-bound into Monaco's command registry — every time the socket changes. */
-  const socketRef = useRef(editorSocket);
-  socketRef.current = editorSocket;
+  /** This pane's file, readable from Monaco callbacks that outlive a render. */
+  const paneRelPathRef = useRef<string | null>(null);
+  paneRelPathRef.current = activeTab?.relPath ?? null;
 
-  /** Sends a file's pending write now and drops its timer. */
-  const flushWrite = useCallback((relPath: string) => {
-    const pending = pendingWrites.current.get(relPath);
-    if (!pending) return;
+  // The queue is module-level, so the two panes share one per-path timer.
+  // Two queues for the same file would race each other.
+  useEffect(() => {
+    if (!editorSocket) return;
 
-    clearTimeout(pending.timer);
-    pendingWrites.current.delete(relPath);
-    socketRef.current?.emit("writeFile", { relPath, data: pending.data });
-  }, []);
+    setWriteEmitter((relPath, data) => {
+      editorSocket.emit("writeFile", { relPath, data });
+    });
 
-  const flushAll = useCallback(() => {
-    for (const relPath of [...pendingWrites.current.keys()]) flushWrite(relPath);
-  }, [flushWrite]);
+    return () => setWriteEmitter(null);
+  }, [editorSocket]);
 
   // Last resort. Blur (see handleMount) is what actually catches navigation;
   // by unmount the socket may already be gone.
-  useEffect(() => flushAll, [flushAll]);
+  useEffect(() => flushAllWrites, []);
 
   /** One Monaco model per file, so undo history, cursor position, and scroll
    *  survive switching tabs. A single controlled `value` reset all three on
@@ -100,7 +103,7 @@ export const EditorComponent = () => {
   useEffect(() => {
     // Before anything else: the file being switched away from may still have a
     // debounced write queued, and nothing else would ever send it.
-    flushAll();
+    flushAllWrites();
 
     const monaco = monacoRef.current;
     const codeEditor = editorRef.current;
@@ -148,7 +151,7 @@ export const EditorComponent = () => {
     }
 
     codeEditor.focus();
-  }, [activeTab, flushAll]);
+  }, [activeTab]);
 
   /** Dispose models for files that are no longer open, so a long session does
    *  not accumulate them. */
@@ -193,7 +196,13 @@ export const EditorComponent = () => {
     // them would otherwise wait out the debounce — while unmount cleanup is too
     // late to rely on, since the socket may already have been disconnected.
     codeEditor.onDidBlurEditorText(() => {
-      flushAll();
+      flushAllWrites();
+    });
+
+    // Focus follows the cursor, so opening a file from the tree puts it in the
+    // pane the user was last working in.
+    codeEditor.onDidFocusEditorText(() => {
+      focusPane(pane);
     });
 
     codeEditor.onDidChangeCursorSelection((event) => {
@@ -218,8 +227,8 @@ export const EditorComponent = () => {
    *  matches what the editor shows.
    */
   async function saveNow(codeEditor: editor.IStandaloneCodeEditor) {
-    const { activeRelPath } = useOpenTabsStore.getState();
-    if (!activeRelPath) return;
+    const relPath = paneRelPathRef.current;
+    if (!relPath) return;
 
     if (useEditorSettingsStore.getState().formatOnSave) {
       // Suppressed so the formatter's edits are not mistaken for typing, which
@@ -237,31 +246,25 @@ export const EditorComponent = () => {
 
     // Saves even when nothing is queued, so Ctrl+S is never a no-op the user
     // has to guess about.
-    queueWrite(activeRelPath, codeEditor.getValue(), 0);
-    flushWrite(activeRelPath);
+    queueIfAllowed(relPath, codeEditor.getValue(), 0);
+    flushWrite(relPath);
   }
 
-  /** Schedules a write, replacing only this file's own pending one. */
-  function queueWrite(relPath: string, data: string, delay: number) {
-    // The server refuses these too; catching it here means the user is told
-    // while they can still act on it, rather than after a silent round trip.
+  /** Queues a write unless the buffer is over the editor's limit.
+   *
+   *  The server refuses those too; catching it here means the user is told
+   *  while they can still act on it, rather than after a silent round trip.
+   */
+  function queueIfAllowed(relPath: string, data: string, delay: number) {
     if (new Blob([data]).size > MAX_FILE_BYTES) {
       setWriteError(
         `This file is over the ${String(MAX_FILE_BYTES / 1024 / 1024)} MB editor limit and was not saved.`,
       );
       return;
     }
+
     setWriteError(null);
-
-    const existing = pendingWrites.current.get(relPath);
-    if (existing) clearTimeout(existing.timer);
-
-    const timer = setTimeout(() => {
-      pendingWrites.current.delete(relPath);
-      socketRef.current?.emit("writeFile", { relPath, data });
-    }, delay);
-
-    pendingWrites.current.set(relPath, { timer, data });
+    queueWrite(relPath, data, delay);
   }
 
   function handleChange(value: string | undefined) {
@@ -270,7 +273,7 @@ export const EditorComponent = () => {
 
     const { relPath } = activeTab;
     markDirty(relPath, true);
-    queueWrite(relPath, value, WRITE_DEBOUNCE_MS);
+    queueIfAllowed(relPath, value, WRITE_DEBOUNCE_MS);
   }
 
   if (!activeTab) {
@@ -315,6 +318,11 @@ export const EditorComponent = () => {
         flexDirection: "column",
         height: "100%",
         backgroundColor: "var(--rc-editor-bg)",
+        // Only marked when there is a second pane to tell it apart from.
+        boxShadow:
+          splitOpen && focusedPane === pane
+            ? "inset 0 2px 0 0 var(--rc-accent)"
+            : undefined,
       }}
     >
       {/* Breadcrumb: the active file's path, so a deeply nested file is

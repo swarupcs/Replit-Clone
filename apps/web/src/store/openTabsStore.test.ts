@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   selectActiveTab,
   selectHasUnsavedWork,
+  selectPaneTab,
   useOpenTabsStore,
 } from "./openTabsStore.ts";
 
@@ -16,7 +17,13 @@ function openPaths(): string[] {
 }
 
 beforeEach(() => {
-  useOpenTabsStore.setState({ tabs: [], activeRelPath: null });
+  useOpenTabsStore.setState({
+    tabs: [],
+    activeRelPath: null,
+    secondaryRelPath: null,
+    splitOpen: false,
+    focusedPane: "primary",
+  });
 });
 
 describe("openTab", () => {
@@ -150,5 +157,99 @@ describe("selectHasUnsavedWork", () => {
     store().closeTab("a.ts");
 
     expect(selectHasUnsavedWork(store())).toBe(false);
+  });
+});
+
+describe("split panes", () => {
+  it("starts with a single pane", () => {
+    expect(store().splitOpen).toBe(false);
+    expect(store().secondaryRelPath).toBeNull();
+    expect(store().focusedPane).toBe("primary");
+  });
+
+  it("opens a file to the side and focuses it there", () => {
+    openAll("a.ts");
+    store().openToSide("b.ts");
+
+    expect(store().splitOpen).toBe(true);
+    expect(store().secondaryRelPath).toBe("b.ts");
+    expect(store().focusedPane).toBe("secondary");
+    // The primary keeps what it had.
+    expect(store().activeRelPath).toBe("a.ts");
+  });
+
+  it("seeds an empty primary rather than leaving a blank pane beside it", () => {
+    store().openToSide("b.ts");
+    expect(store().activeRelPath).toBe("b.ts");
+  });
+
+  it("opens new files into the focused pane", () => {
+    openAll("a.ts");
+    store().openToSide("b.ts");
+    openAll("c.ts");
+
+    expect(store().secondaryRelPath).toBe("c.ts");
+    expect(store().activeRelPath).toBe("a.ts");
+  });
+
+  it("opens into the primary again once focus returns", () => {
+    openAll("a.ts");
+    store().openToSide("b.ts");
+    store().focusPane("primary");
+    openAll("c.ts");
+
+    expect(store().activeRelPath).toBe("c.ts");
+    expect(store().secondaryRelPath).toBe("b.ts");
+  });
+
+  it("clears both panes when the file they share is closed", () => {
+    // A pane left pointing at a closed tab renders nothing at all.
+    openAll("a.ts");
+    store().openToSide("a.ts");
+    store().closeTab("a.ts");
+
+    expect(store().activeRelPath).toBeNull();
+    expect(store().secondaryRelPath).toBeNull();
+  });
+
+  it("only clears the pane that was showing the closed file", () => {
+    openAll("a.ts", "b.ts");
+    store().focusPane("primary");
+    store().setActive("a.ts");
+    store().openToSide("b.ts");
+
+    store().closeTab("b.ts");
+
+    expect(store().activeRelPath).toBe("a.ts");
+    expect(store().secondaryRelPath).toBe("a.ts");
+  });
+
+  it("follows a rename in whichever pane shows the file", () => {
+    openAll("a.ts");
+    store().openToSide("a.ts");
+    store().renameTab("a.ts", "renamed.ts");
+
+    expect(store().activeRelPath).toBe("renamed.ts");
+    expect(store().secondaryRelPath).toBe("renamed.ts");
+  });
+
+  it("returns to a single pane on close", () => {
+    openAll("a.ts");
+    store().openToSide("b.ts");
+    store().closeSplit();
+
+    expect(store().splitOpen).toBe(false);
+    expect(store().secondaryRelPath).toBeNull();
+    expect(store().focusedPane).toBe("primary");
+  });
+
+  it("resolves each pane's tab independently", () => {
+    openAll("a.ts", "b.ts");
+    store().focusPane("primary");
+    store().setActive("a.ts");
+    store().openToSide("b.ts");
+
+    expect(selectPaneTab("primary")(store())?.relPath).toBe("a.ts");
+    expect(selectPaneTab("secondary")(store())?.relPath).toBe("b.ts");
   });
 });

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Modal } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
+import { VscSplitHorizontal } from "react-icons/vsc";
+import { Tooltip } from "antd";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 
@@ -10,7 +12,10 @@ import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
  *  editor could only ever hold one file.
  */
 export const EditorTabs = () => {
-  const { tabs, activeRelPath, setActive, closeTab } = useOpenTabsStore();
+  const { tabs, activeRelPath, secondaryRelPath, splitOpen, setActive, closeTab } =
+    useOpenTabsStore();
+  const openToSide = useOpenTabsStore((state) => state.openToSide);
+  const closeSplit = useOpenTabsStore((state) => state.closeSplit);
 
   /** A tab whose close is waiting on confirmation, because it still has edits
    *  that have not reached the server. */
@@ -42,7 +47,10 @@ export const EditorTabs = () => {
       }}
     >
       {tabs.map((tab) => {
-        const isActive = tab.relPath === activeRelPath;
+        // A tab reads as current when either pane is showing it.
+        const isActive =
+          tab.relPath === activeRelPath ||
+          (splitOpen && tab.relPath === secondaryRelPath);
 
         return (
           <div
@@ -54,6 +62,7 @@ export const EditorTabs = () => {
               // Middle click closes, as in every editor.
               if (event.button === 1) requestClose(tab.relPath);
             }}
+            onDoubleClick={() => openToSide(tab.relPath)}
             title={tab.relPath}
           >
             <FileIcon extension={tab.extension} />
@@ -84,6 +93,26 @@ export const EditorTabs = () => {
           </div>
         );
       })}
+
+      <span style={{ flex: 1 }} />
+
+      {/* Monaco handles two editors over one model, so a file can be open in
+          both panes and stay in step. Double-clicking a tab does the same. */}
+      <Tooltip title={splitOpen ? "Close the second pane" : "Split the editor"}>
+        <button
+          className="rc-icon-button"
+          style={{ margin: "0 6px", flex: "none" }}
+          data-on={splitOpen}
+          aria-label={splitOpen ? "Close the second pane" : "Split the editor"}
+          onClick={() => {
+            if (splitOpen) closeSplit();
+            else if (activeRelPath) openToSide(activeRelPath);
+          }}
+          disabled={!activeRelPath && !splitOpen}
+        >
+          <VscSplitHorizontal size={14} />
+        </button>
+      </Tooltip>
 
       <Modal
         open={confirming !== null}

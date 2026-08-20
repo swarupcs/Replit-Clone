@@ -16,6 +16,8 @@ export interface WorkspaceSession {
   sidebarWidth?: number;
   panelHeight?: number;
   previewWidth?: number;
+  /** Width of the first editor pane when the editor is split. */
+  editorSplitWidth?: number;
   showSidebar?: boolean;
   showPanel?: boolean;
   showPreview?: boolean;

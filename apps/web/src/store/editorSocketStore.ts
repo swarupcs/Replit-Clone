@@ -6,6 +6,7 @@ import type {
 } from "@replit-clone/shared";
 import { useOpenTabsStore } from "./openTabsStore.ts";
 import { useTreeStructureStore } from "./treeStructureStore.ts";
+import { discardWrite } from "../lib/pendingWrites.ts";
 
 export type EditorSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -50,6 +51,9 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
     });
 
     incomingSocket.on("deleteFileSuccess", ({ relPath }) => {
+      // Dropped rather than flushed: a queued write for a file that has just
+      // been deleted would recreate it moments later.
+      discardWrite(relPath);
       useOpenTabsStore.getState().closeTab(relPath);
     });
 
