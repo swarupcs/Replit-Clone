@@ -112,11 +112,11 @@ export const SplitPane = ({
             event.preventDefault();
             setDragging(true);
           }}
+          className="rc-divider"
+          data-dragging={dragging}
           style={{
             flex: `0 0 ${DIVIDER}px`,
             cursor: isHorizontal ? "col-resize" : "row-resize",
-            backgroundColor: dragging ? "var(--rc-text-subtle)" : "var(--rc-border)",
-            transition: dragging ? undefined : "background-color 120ms",
           }}
         />
       )}

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Flex, Spin, Typography } from "antd";
+import { Flex, Spin } from "antd";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
 import { TreeNode } from "../../molecules/TreeNode/TreeNode.tsx";
 import { FileContextMenu } from "../../molecules/ContextMenu/FileContextMenu.tsx";
@@ -13,18 +13,7 @@ export const TreeStructure = () => {
 
   return (
     <>
-      <Typography.Text
-        style={{
-          display: "block",
-          padding: "10px 12px 6px",
-          fontSize: 11,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: "var(--rc-text-subtle)",
-        }}
-      >
-        Files
-      </Typography.Text>
+      <div className="rc-pane-label">Files</div>
 
       {treeStructure ? (
         <TreeNode node={treeStructure} />

@@ -1,26 +1,59 @@
-/* Dracula palette as tokens.
+/* Design tokens.
  *
- * These colours were previously inline hex literals repeated across six
- * components, so changing the theme meant editing every file. */
+ * These were previously inline hex literals repeated across six components, so
+ * changing the theme meant editing every file.
+ *
+ * The chrome (dashboard, auth, panels, topbars) is a deep near-black with a
+ * violet tint; the editor pane keeps the lighter Dracula ground so the surface
+ * you're actually reading sits *above* the chrome rather than blending into
+ * it. Antd components pick these up via the ConfigProvider theme in
+ * `config/theme.ts` -- change a value here and it propagates everywhere. */
 :root {
-  --rc-bg: #282a36;
-  --rc-surface: #282a36;
-  --rc-surface-sunken: #21222c;
-  --rc-surface-raised: #22212b;
-  --rc-border: #44475a;
-  --rc-selection: #44475a;
+  /* Ground planes, darkest to lightest. */
+  --rc-bg: #08090f;
+  --rc-surface: #0d0e16;
+  --rc-surface-sunken: #0a0b12;
+  --rc-surface-raised: #14161f;
+  --rc-surface-overlay: #191b26;
 
-  --rc-text: #f8f8f2;
-  --rc-text-muted: #c8cad4;
-  --rc-text-subtle: #6272a4;
+  /* The editor and terminal keep the Dracula ground they're themed for. */
+  --rc-editor-bg: #282a36;
 
-  --rc-accent: #bd93f9;
-  --rc-green: #50fa7c;
-  --rc-yellow: #f1fa8c;
-  --rc-red: #ff5555;
-  --rc-cyan: #8be9fd;
+  --rc-border: #232634;
+  --rc-border-strong: #303445;
+  --rc-selection: #2a2e42;
 
-  --rc-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --rc-text: #f2f3f7;
+  --rc-text-muted: #a2a7bd;
+  --rc-text-subtle: #6b7192;
+
+  /* Brand accent. The gradient is the single "premium" flourish -- used for
+   * the wordmark, primary buttons, and focus glows, nowhere else. */
+  --rc-accent: #a78bfa;
+  --rc-accent-strong: #8b5cf6;
+  --rc-accent-soft: rgba(167, 139, 250, 0.14);
+  --rc-gradient: linear-gradient(135deg, #a78bfa 0%, #60a5fa 50%, #22d3ee 100%);
+
+  --rc-green: #4ade80;
+  --rc-yellow: #fbbf24;
+  --rc-red: #f87171;
+  --rc-cyan: #22d3ee;
+
+  /* Elevation. Dark UIs need shadow *and* a light top edge to read as raised. */
+  --rc-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --rc-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --rc-shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --rc-glow: 0 0 0 1px rgba(167, 139, 250, 0.35), 0 8px 32px rgba(139, 92, 246, 0.22);
+
+  --rc-radius-sm: 6px;
+  --rc-radius: 10px;
+  --rc-radius-lg: 16px;
+
+  --rc-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --rc-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+
+  --rc-ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 * {
@@ -38,13 +71,15 @@ body,
 body {
   background-color: var(--rc-bg);
   color: var(--rc-text);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--rc-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Thin dark scrollbars so panes do not get bright native bars. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--rc-border) transparent;
+  scrollbar-color: var(--rc-border-strong) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -53,10 +88,291 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: var(--rc-border);
+  background-color: var(--rc-border-strong);
   border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #3d4257;
+  background-clip: content-box;
 }
 
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* --- Shared primitives ---------------------------------------------------
+ * Used by the auth and dashboard pages. Kept here rather than in styled
+ * components so the whole visual language lives next to the tokens. */
+
+/* Ambient gradient wash for full-page backdrops. Two large, very soft radial
+ * blooms -- enough to keep a flat dark page from looking dead, subtle enough
+ * not to compete with content. */
+.rc-aurora {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--rc-bg);
+}
+
+.rc-aurora::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(
+      60rem 40rem at 15% -10%,
+      rgba(139, 92, 246, 0.16),
+      transparent 60%
+    ),
+    radial-gradient(
+      50rem 35rem at 100% 0%,
+      rgba(34, 211, 238, 0.1),
+      transparent 55%
+    );
+  pointer-events: none;
+}
+
+/* Hairline grid, barely visible -- reads as "engineered" without noise. */
+.rc-aurora::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(60rem 40rem at 50% 0%, #000, transparent 75%);
+  pointer-events: none;
+}
+
+.rc-gradient-text {
+  background: var(--rc-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Glassy raised panel. */
+.rc-panel {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.035),
+    rgba(255, 255, 255, 0.012)
+  );
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-radius-lg);
+  box-shadow: var(--rc-shadow-lg);
+  backdrop-filter: blur(12px);
+}
+
+/* Project card: lifts and warms its border on hover. */
+.rc-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-radius);
+  background: var(--rc-surface-raised);
+  cursor: pointer;
+  transition:
+    transform 0.25s var(--rc-ease),
+    border-color 0.25s var(--rc-ease),
+    box-shadow 0.25s var(--rc-ease);
+}
+
+.rc-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--rc-border-strong);
+  box-shadow: var(--rc-shadow-md);
+}
+
+/* Gradient hairline that fades in along the card's top edge on hover. */
+.rc-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  border-radius: var(--rc-radius) var(--rc-radius) 0 0;
+  background: var(--rc-gradient);
+  opacity: 0;
+  transition: opacity 0.25s var(--rc-ease);
+}
+
+.rc-card:hover::before {
+  opacity: 0.9;
+}
+
+/* Small pill for template names, language tags, counts. */
+.rc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--rc-border-strong);
+  background: var(--rc-accent-soft);
+  color: var(--rc-accent);
+  font-family: var(--rc-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Square gradient app mark. */
+.rc-logo {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--rc-radius-sm);
+  background: var(--rc-gradient);
+  color: #0b0b12;
+  font-weight: 800;
+  font-size: 17px;
+  box-shadow: var(--rc-glow);
+  flex: none;
+}
+
+/* --- Editor chrome ------------------------------------------------------- */
+
+/* Tab strip. The active tab is marked by a gradient top edge and by sharing
+ * the editor's ground colour, so it reads as connected to the pane below. */
+.rc-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  border-right: 1px solid var(--rc-border);
+  color: var(--rc-text-subtle);
+  background-color: var(--rc-surface-sunken);
+  transition:
+    color 0.15s var(--rc-ease),
+    background-color 0.15s var(--rc-ease);
+}
+
+.rc-tab:hover {
+  color: var(--rc-text-muted);
+  background-color: var(--rc-surface-raised);
+}
+
+.rc-tab[data-active="true"] {
+  color: var(--rc-text);
+  background-color: var(--rc-editor-bg);
+}
+
+.rc-tab[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--rc-gradient);
+}
+
+/* Close affordance: invisible until the tab is hovered, so the strip stays
+ * quiet, but always visible on the active tab. */
+.rc-tab-close {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  opacity: 0;
+  transition:
+    opacity 0.15s var(--rc-ease),
+    background-color 0.15s var(--rc-ease);
+}
+
+.rc-tab:hover .rc-tab-close,
+.rc-tab[data-active="true"] .rc-tab-close,
+.rc-tab-close[data-dirty="true"] {
+  opacity: 1;
+}
+
+.rc-tab-close:hover {
+  background-color: var(--rc-selection);
+}
+
+/* File-tree row. The active file gets a gradient spine on its left edge. */
+.rc-tree-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  margin: 1px 6px;
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+  border-radius: var(--rc-radius-sm);
+  color: var(--rc-text-muted);
+  transition:
+    background-color 0.12s var(--rc-ease),
+    color 0.12s var(--rc-ease);
+}
+
+.rc-tree-row:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+  color: var(--rc-text);
+}
+
+.rc-tree-row[data-active="true"] {
+  background-color: var(--rc-selection);
+  color: var(--rc-text);
+}
+
+.rc-tree-row[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--rc-gradient);
+}
+
+/* Section label above the tree / terminal panes. */
+.rc-pane-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rc-text-subtle);
+}
+
+/* Resizable pane divider: gradient-lit while dragging. */
+.rc-divider {
+  background-color: var(--rc-border);
+  transition: background 0.15s var(--rc-ease);
+}
+
+.rc-divider:hover {
+  background-color: var(--rc-border-strong);
+}
+
+.rc-divider[data-dragging="true"] {
+  background: var(--rc-gradient);
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

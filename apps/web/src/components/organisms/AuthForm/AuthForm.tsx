@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Alert, Button, Card, Form, Input, Typography } from "antd";
+import { Alert, Button, Form, Input, Typography } from "antd";
 import { Link } from "react-router-dom";
 import { credentialsSchema } from "@replit-clone/shared";
 import type { Credentials } from "@replit-clone/shared";
 
 interface AuthFormProps {
   title: string;
+  subtitle: string;
   submitLabel: string;
   footer: { prompt: string; linkText: string; to: string };
   onSubmit: (credentials: Credentials) => Promise<void>;
@@ -24,8 +25,26 @@ function errorMessage(error: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
+/** Three short lines of value proposition, shown beside the form on wide
+ *  screens. Kept static -- this is chrome, not content. */
+const HIGHLIGHTS = [
+  {
+    title: "Real containers",
+    body: "Every project runs isolated, with its own shell and resource budget.",
+  },
+  {
+    title: "Instant preview",
+    body: "Your dev server is proxied straight back into the editor, HMR included.",
+  },
+  {
+    title: "Batteries included",
+    body: "React, Next.js, Express, Python — in JavaScript or TypeScript.",
+  },
+];
+
 export const AuthForm = ({
   title,
+  subtitle,
   submitLabel,
   footer,
   onSubmit,
@@ -49,57 +68,173 @@ export const AuthForm = ({
 
   return (
     <div
+      className="rc-aurora"
       style={{
         minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "var(--rc-surface)",
+        display: "grid",
+        placeItems: "center",
+        padding: 24,
       }}
     >
-      <Card style={{ width: 380 }}>
-        <Typography.Title level={3} style={{ marginTop: 0 }}>
-          {title}
-        </Typography.Title>
-
-        {error && (
-          <Alert
-            type="error"
-            message={error}
-            showIcon
-            style={{ marginBottom: 16 }}
-          />
-        )}
-
-        <Form layout="vertical" onFinish={handleFinish} requiredMark={false}>
-          <Form.Item
-            label="Email"
-            name="email"
-            rules={[{ required: true, message: "Email is required" }]}
+      <div
+        style={{
+          display: "grid",
+          // Collapses to a single column below ~900px, dropping the pitch panel.
+          gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+          gap: 48,
+          alignItems: "center",
+          width: "100%",
+          maxWidth: 940,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              marginBottom: 28,
+            }}
           >
-            <Input type="email" autoComplete="email" placeholder="you@example.com" />
-          </Form.Item>
+            <span className="rc-logo">&lt;/&gt;</span>
+            <span style={{ fontSize: 19, fontWeight: 700, letterSpacing: -0.2 }}>
+              Playground
+            </span>
+          </div>
 
-          <Form.Item
-            label="Password"
-            name="password"
-            rules={[{ required: true, message: "Password is required" }]}
+          <h1
+            style={{
+              fontSize: 40,
+              lineHeight: 1.12,
+              fontWeight: 800,
+              letterSpacing: -1.2,
+              marginBottom: 14,
+            }}
           >
-            <Input.Password
-              autoComplete="current-password"
-              placeholder="At least 8 characters"
+            Code anything,
+            <br />
+            <span className="rc-gradient-text">right in the browser.</span>
+          </h1>
+
+          <p
+            style={{
+              color: "var(--rc-text-muted)",
+              fontSize: 15,
+              lineHeight: 1.6,
+              maxWidth: 420,
+              marginBottom: 32,
+            }}
+          >
+            Spin up a full dev environment in seconds — editor, terminal, and a
+            live preview, all backed by a real container.
+          </p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {HIGHLIGHTS.map((item) => (
+              <div key={item.title} style={{ display: "flex", gap: 12 }}>
+                <span
+                  aria-hidden
+                  style={{
+                    marginTop: 7,
+                    width: 6,
+                    height: 6,
+                    borderRadius: 999,
+                    background: "var(--rc-gradient)",
+                    flex: "none",
+                  }}
+                />
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>
+                    {item.title}
+                  </div>
+                  <div
+                    style={{
+                      color: "var(--rc-text-subtle)",
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {item.body}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rc-panel" style={{ padding: 32, minWidth: 0 }}>
+          <Typography.Title level={3} style={{ marginTop: 0, marginBottom: 4 }}>
+            {title}
+          </Typography.Title>
+          <Typography.Paragraph
+            style={{ color: "var(--rc-text-subtle)", marginBottom: 24 }}
+          >
+            {subtitle}
+          </Typography.Paragraph>
+
+          {error && (
+            <Alert
+              type="error"
+              message={error}
+              showIcon
+              style={{ marginBottom: 20 }}
             />
-          </Form.Item>
+          )}
 
-          <Button type="primary" htmlType="submit" block loading={submitting}>
-            {submitLabel}
-          </Button>
-        </Form>
+          <Form
+            layout="vertical"
+            onFinish={handleFinish}
+            requiredMark={false}
+            size="large"
+          >
+            <Form.Item
+              label="Email"
+              name="email"
+              rules={[{ required: true, message: "Email is required" }]}
+            >
+              <Input
+                type="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+              />
+            </Form.Item>
 
-        <Typography.Paragraph style={{ marginTop: 16, marginBottom: 0 }}>
-          {footer.prompt} <Link to={footer.to}>{footer.linkText}</Link>
-        </Typography.Paragraph>
-      </Card>
+            <Form.Item
+              label="Password"
+              name="password"
+              rules={[{ required: true, message: "Password is required" }]}
+              style={{ marginBottom: 24 }}
+            >
+              <Input.Password
+                autoComplete="current-password"
+                placeholder="At least 8 characters"
+              />
+            </Form.Item>
+
+            <Button
+              type="primary"
+              htmlType="submit"
+              block
+              size="large"
+              loading={submitting}
+            >
+              {submitLabel}
+            </Button>
+          </Form>
+
+          <Typography.Paragraph
+            style={{
+              marginTop: 20,
+              marginBottom: 0,
+              textAlign: "center",
+              color: "var(--rc-text-subtle)",
+              fontSize: 13,
+            }}
+          >
+            {footer.prompt} <Link to={footer.to}>{footer.linkText}</Link>
+          </Typography.Paragraph>
+        </div>
+      </div>
     </div>
   );
 };

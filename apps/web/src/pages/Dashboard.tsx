@@ -3,15 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
-  Card,
   Empty,
-  Flex,
   Input,
-  List,
   Modal,
   Popconfirm,
   Segmented,
   Spin,
+  Tooltip,
   Typography,
   message,
 } from "antd";
@@ -23,6 +21,26 @@ import {
   listTemplatesApi,
 } from "../apis/projects.ts";
 import { useAuth } from "../hooks/useAuth.ts";
+
+/** Relative time for the card footer -- "3 days ago" reads better than a date
+ *  when you're scanning a list of things you made recently. */
+function relativeTime(iso: string): string {
+  const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["year", 31536000],
+    ["month", 2592000],
+    ["day", 86400],
+    ["hour", 3600],
+    ["minute", 60],
+  ];
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  for (const [unit, secondsPerUnit] of units) {
+    if (seconds >= secondsPerUnit) {
+      return formatter.format(-Math.floor(seconds / secondsPerUnit), unit);
+    }
+  }
+  return "just now";
+}
 
 export const Dashboard = () => {
   const navigate = useNavigate();
@@ -68,77 +86,180 @@ export const Dashboard = () => {
   }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        backgroundColor: "var(--rc-surface)",
-        padding: 32,
-      }}
-    >
+    <div className="rc-aurora" style={{ minHeight: "100vh" }}>
       {contextHolder}
 
-      <Flex justify="space-between" align="center" style={{ marginBottom: 24 }}>
-        <Typography.Title level={3} style={{ color: "var(--rc-text)", margin: 0 }}>
-          Your projects
-        </Typography.Title>
-        <Flex gap={12} align="center">
-          <Typography.Text style={{ color: "var(--rc-text-muted)" }}>
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+          padding: "16px 32px",
+          borderBottom: "1px solid var(--rc-border)",
+          background: "rgba(10, 11, 18, 0.6)",
+          backdropFilter: "blur(12px)",
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span className="rc-logo">&lt;/&gt;</span>
+          <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: -0.2 }}>
+            Playground
+          </span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <Typography.Text
+            style={{ color: "var(--rc-text-subtle)", fontSize: 13 }}
+          >
             {user?.email}
           </Typography.Text>
           <Button onClick={() => void logout()}>Sign out</Button>
-        </Flex>
-      </Flex>
+        </div>
+      </header>
 
-      <Card>
-        <Flex justify="end" style={{ marginBottom: 16 }}>
+      <main style={{ maxWidth: 1180, margin: "0 auto", padding: "40px 32px 64px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "space-between",
+            gap: 16,
+            flexWrap: "wrap",
+            marginBottom: 28,
+          }}
+        >
+          <div>
+            <h1
+              style={{
+                fontSize: 30,
+                fontWeight: 700,
+                letterSpacing: -0.8,
+                marginBottom: 6,
+              }}
+            >
+              Your projects
+            </h1>
+            <p style={{ color: "var(--rc-text-subtle)", fontSize: 14 }}>
+              {projects?.length
+                ? `${projects.length} playground${projects.length === 1 ? "" : "s"}`
+                : "Nothing here yet — create your first playground."}
+            </p>
+          </div>
+
           <Button
             type="primary"
+            size="large"
             icon={<PlusOutlined />}
             onClick={() => setIsCreating(true)}
           >
             New playground
           </Button>
-        </Flex>
+        </div>
 
         {isLoading ? (
-          <Flex justify="center" style={{ padding: 32 }}>
-            <Spin />
-          </Flex>
+          <div style={{ display: "grid", placeItems: "center", padding: 80 }}>
+            <Spin size="large" />
+          </div>
         ) : projects && projects.length > 0 ? (
-          <List
-            dataSource={projects}
-            renderItem={(project) => (
-              <List.Item
-                actions={[
-                  <Popconfirm
-                    key="delete"
-                    title="Delete this project?"
-                    description="The files are removed from disk permanently."
-                    okText="Delete"
-                    okButtonProps={{ danger: true }}
-                    onConfirm={() => deleteMutation.mutate(project.id)}
-                  >
-                    <Button danger type="text" icon={<DeleteOutlined />} />
-                  </Popconfirm>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={
-                    <a onClick={() => navigate(`/project/${project.id}`)}>
-                      {project.name}
-                    </a>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: 18,
+            }}
+          >
+            {projects.map((project) => (
+              <div
+                key={project.id}
+                className="rc-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate(`/project/${project.id}`)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    navigate(`/project/${project.id}`);
                   }
-                  description={`${project.template} · created ${new Date(
-                    project.createdAt,
-                  ).toLocaleDateString()}`}
-                />
-              </List.Item>
-            )}
-          />
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: 8,
+                  }}
+                >
+                  <span className="rc-badge">{project.template}</span>
+
+                  {/* Stop propagation so the confirm popup doesn't also open
+                      the project behind it. */}
+                  <div
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <Popconfirm
+                      title="Delete this project?"
+                      description="The files are removed from disk permanently."
+                      okText="Delete"
+                      okButtonProps={{ danger: true }}
+                      onConfirm={() => deleteMutation.mutate(project.id)}
+                    >
+                      <Tooltip title="Delete">
+                        <Button
+                          danger
+                          type="text"
+                          size="small"
+                          icon={<DeleteOutlined />}
+                        />
+                      </Tooltip>
+                    </Popconfirm>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 600,
+                    letterSpacing: -0.2,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {project.name}
+                </div>
+
+                <div style={{ color: "var(--rc-text-subtle)", fontSize: 12.5 }}>
+                  Created {relativeTime(project.createdAt)}
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
-          <Empty description="No projects yet" />
+          <div className="rc-panel" style={{ padding: "64px 24px" }}>
+            <Empty
+              description={
+                <span style={{ color: "var(--rc-text-subtle)" }}>
+                  No projects yet
+                </span>
+              }
+            >
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setIsCreating(true)}
+              >
+                Create one
+              </Button>
+            </Empty>
+          </div>
         )}
-      </Card>
+      </main>
 
       <Modal
         open={isCreating}
@@ -149,9 +270,17 @@ export const Dashboard = () => {
         onCancel={() => setIsCreating(false)}
         destroyOnHidden
       >
-        <Flex vertical gap={16} style={{ marginTop: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+            marginTop: 20,
+          }}
+        >
           <Input
             autoFocus
+            size="large"
             placeholder="Project name (optional)"
             value={name}
             onChange={(event) => setName(event.target.value)}
@@ -159,6 +288,7 @@ export const Dashboard = () => {
 
           {templates && (
             <Segmented
+              vertical
               block
               value={selectedTemplate}
               onChange={(value) => setTemplate(String(value))}
@@ -167,12 +297,15 @@ export const Dashboard = () => {
           )}
 
           {activeTemplate && (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            <Typography.Text
+              type="secondary"
+              style={{ fontSize: 12, lineHeight: 1.6 }}
+            >
               Run it with <code>{activeTemplate.startCommand}</code>, then open
               the preview.
             </Typography.Text>
           )}
-        </Flex>
+        </div>
       </Modal>
     </div>
   );

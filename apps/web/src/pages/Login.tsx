@@ -8,7 +8,8 @@ export const Login = () => {
 
   return (
     <AuthForm
-      title="Sign in"
+      title="Welcome back"
+      subtitle="Sign in to get back to your projects."
       submitLabel="Sign in"
       footer={{ prompt: "No account?", linkText: "Create one", to: "/signup" }}
       onSubmit={async (credentials) => {

@@ -28,43 +28,24 @@ export const EditorTabs = () => {
         return (
           <div
             key={tab.relPath}
+            className="rc-tab"
+            data-active={isActive}
             onClick={() => setActive(tab.relPath)}
             onAuxClick={(event) => {
               // Middle click closes, as in every editor.
               if (event.button === 1) closeTab(tab.relPath);
             }}
             title={tab.relPath}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "6px 10px",
-              fontSize: 12,
-              whiteSpace: "nowrap",
-              cursor: "pointer",
-              color: isActive ? "var(--rc-text)" : "var(--rc-text-muted)",
-              backgroundColor: isActive
-                ? "var(--rc-surface)"
-                : "var(--rc-surface-sunken)",
-              borderRight: "1px solid var(--rc-border)",
-              borderTop: `2px solid ${isActive ? "var(--rc-accent)" : "transparent"}`,
-            }}
           >
             <FileIcon extension={tab.extension} />
             <span>{tab.name}</span>
 
             <span
+              className="rc-tab-close"
+              data-dirty={tab.isDirty}
               onClick={(event) => {
                 event.stopPropagation();
                 closeTab(tab.relPath);
-              }}
-              style={{
-                display: "inline-flex",
-                width: 14,
-                height: 14,
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: 3,
               }}
             >
               {tab.isDirty ? (

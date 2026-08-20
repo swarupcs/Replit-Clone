@@ -9,6 +9,7 @@ export const Signup = () => {
   return (
     <AuthForm
       title="Create your account"
+      subtitle="Free to start. No credit card, no setup."
       submitLabel="Create account"
       footer={{ prompt: "Already registered?", linkText: "Sign in", to: "/login" }}
       onSubmit={async (credentials) => {

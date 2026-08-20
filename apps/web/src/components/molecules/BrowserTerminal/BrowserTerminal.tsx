@@ -41,17 +41,31 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
       // xterm paints to its own surface and cannot read CSS custom
       // properties, so these mirror the --rc-* tokens in index.css.
       theme: {
-        background: "#282a36",
-        foreground: "#f8f8f2",
-        cursor: "#f8f8f2",
-        cursorAccent: "#282a36",
-        red: "#ff5555",
-        green: "#50fa7c",
-        yellow: "#f1fa8c",
-        cyan: "#8be9fd",
+        background: "#0a0b12",
+        foreground: "#e6e8f0",
+        cursor: "#a78bfa",
+        cursorAccent: "#0a0b12",
+        selectionBackground: "#2a2e42",
+        black: "#0a0b12",
+        red: "#f87171",
+        green: "#4ade80",
+        yellow: "#fbbf24",
+        blue: "#60a5fa",
+        magenta: "#a78bfa",
+        cyan: "#22d3ee",
+        white: "#e6e8f0",
+        brightBlack: "#6b7192",
+        brightRed: "#fca5a5",
+        brightGreen: "#86efac",
+        brightYellow: "#fcd34d",
+        brightBlue: "#93c5fd",
+        brightMagenta: "#c4b5fd",
+        brightCyan: "#67e8f9",
+        brightWhite: "#ffffff",
       },
       fontSize: 13,
-      fontFamily: "Fira Code, monospace",
+      fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+      lineHeight: 1.35,
       convertEol: true,
     });
 
@@ -71,7 +85,7 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
     function syncSize() {
       // Every guard here matters: fit() and focus() both touch the renderer,
       // which throws "Cannot read properties of undefined (reading
-      // 'dimensions')" once the Terminal has been disposed — and React 19's
+      // 'dimensions')" once the Terminal has been disposed ï¿½ and React 19's
       // StrictMode disposes one on every mount.
       if (disposed) return;
       if (!container || container.clientWidth === 0 || container.clientHeight === 0) {
@@ -136,7 +150,13 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
   return (
     <div
       ref={containerRef}
-      style={{ width: "100%", height: "100%", padding: 4, backgroundColor: "var(--rc-surface)" }}
+      style={{
+        width: "100%",
+        height: "100%",
+        padding: "8px 10px",
+        backgroundColor: "var(--rc-surface-sunken)",
+        borderTop: "1px solid var(--rc-border)",
+      }}
       id="terminal-container"
     />
   );

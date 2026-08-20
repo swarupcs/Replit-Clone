@@ -34,25 +34,13 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
     openContextMenu(event.clientX, event.clientY, node);
   }
 
-  const rowStyle = {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    padding: "4px 8px",
-    paddingLeft: `${8 + depth * 14}px`,
-    cursor: "pointer",
-    fontSize: "13px",
-    color: isActive ? "var(--rc-text)" : "var(--rc-text-muted)",
-    backgroundColor: isActive ? "var(--rc-selection)" : "transparent",
-    userSelect: "none",
-    borderRadius: "4px",
-  } as const;
-
   return (
     <div>
       {node.relPath !== "" && (
         <div
-          style={rowStyle}
+          className="rc-tree-row"
+          data-active={isActive}
+          style={{ paddingLeft: `${8 + depth * 14}px` }}
           onContextMenu={handleContextMenu}
           onClick={() => {
             if (isFolder) {

@@ -27,9 +27,18 @@ export const Browser = ({ projectId }: BrowserProps) => {
 
   return (
     <Flex vertical style={{ height: "100%", backgroundColor: "var(--rc-surface-raised)" }}>
-      <Flex gap={6} style={{ padding: 6 }}>
+      <Flex
+        gap={6}
+        align="center"
+        style={{
+          padding: 8,
+          borderBottom: "1px solid var(--rc-border)",
+          background: "var(--rc-surface-sunken)",
+        }}
+      >
         <Button
           size="small"
+          type="text"
           icon={<ReloadOutlined />}
           onClick={handleRefresh}
           title="Reload preview"
@@ -38,15 +47,29 @@ export const Browser = ({ projectId }: BrowserProps) => {
           size="small"
           value={src}
           readOnly
+          prefix={
+            // Green dot: the preview is proxied over the backend, so if this
+            // pane rendered at all the tunnel is up.
+            <span
+              aria-hidden
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 999,
+                background: "var(--rc-green)",
+                marginRight: 2,
+              }}
+            />
+          }
           style={{
-            color: "var(--rc-text)",
+            color: "var(--rc-text-muted)",
             fontFamily: "var(--rc-mono)",
-            fontSize: 12,
-            backgroundColor: "var(--rc-surface)",
+            fontSize: 11.5,
           }}
         />
         <Button
           size="small"
+          type="text"
           icon={<ExportOutlined />}
           onClick={() => window.open(src, "_blank", "noopener")}
           title="Open in a new tab"

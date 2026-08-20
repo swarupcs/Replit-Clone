@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { io } from "socket.io-client";
 import { Alert, Button, Flex, Typography } from "antd";
-import { ArrowLeftOutlined } from "@ant-design/icons";
+import {
+  ArrowLeftOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
+} from "@ant-design/icons";
 import { SplitPane } from "../components/layout/SplitPane.tsx";
 import { EditorComponent } from "../components/molecules/EditorComponent/EditorComponent.tsx";
 import { EditorTabs } from "../components/molecules/EditorTabs/EditorTabs.tsx";
@@ -62,12 +66,13 @@ export const ProjectPlayground = () => {
         align="center"
         justify="space-between"
         style={{
-          padding: "6px 12px",
+          padding: "8px 14px",
           backgroundColor: "var(--rc-surface-raised)",
           borderBottom: "1px solid var(--rc-border)",
+          gap: 12,
         }}
       >
-        <Flex align="center" gap={10}>
+        <Flex align="center" gap={10} style={{ minWidth: 0 }}>
           <Button
             size="small"
             type="text"
@@ -75,12 +80,33 @@ export const ProjectPlayground = () => {
             style={{ color: "var(--rc-text-muted)" }}
             onClick={() => navigate("/")}
           />
-          <Typography.Text style={{ color: "var(--rc-text-muted)", fontSize: 13 }}>
+          <span
+            aria-hidden
+            style={{
+              width: 1,
+              height: 18,
+              background: "var(--rc-border)",
+              flex: "none",
+            }}
+          />
+          <Typography.Text
+            ellipsis
+            style={{
+              color: "var(--rc-text-muted)",
+              fontSize: 12.5,
+              fontFamily: "var(--rc-mono)",
+            }}
+          >
             {activeTab?.relPath ?? "No file open"}
           </Typography.Text>
         </Flex>
 
-        <Button size="small" onClick={() => setShowPreview((value) => !value)}>
+        <Button
+          size="small"
+          type={showPreview ? "primary" : "default"}
+          icon={showPreview ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+          onClick={() => setShowPreview((value) => !value)}
+        >
           {showPreview ? "Hide preview" : "Show preview"}
         </Button>
       </Flex>

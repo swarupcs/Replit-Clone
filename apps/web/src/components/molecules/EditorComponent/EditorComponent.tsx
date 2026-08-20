@@ -118,12 +118,30 @@ export const EditorComponent = () => {
   if (!activeTab) {
     return (
       <Flex
+        vertical
         align="center"
         justify="center"
-        style={{ height: "100%", backgroundColor: "var(--rc-surface)" }}
+        gap={10}
+        style={{ height: "100%", backgroundColor: "var(--rc-editor-bg)" }}
       >
-        <Typography.Text style={{ color: "var(--rc-text-subtle)" }}>
+        <span className="rc-logo" style={{ opacity: 0.55 }}>
+          &lt;/&gt;
+        </span>
+        <Typography.Text style={{ color: "var(--rc-text-muted)", fontSize: 14 }}>
           Select a file to start editing
+        </Typography.Text>
+        <Typography.Text style={{ color: "var(--rc-text-subtle)", fontSize: 12 }}>
+          Changes save automatically — or press{" "}
+          <kbd
+            style={{
+              fontFamily: "var(--rc-mono)",
+              background: "var(--rc-selection)",
+              padding: "1px 5px",
+              borderRadius: 4,
+            }}
+          >
+            Ctrl+S
+          </kbd>
         </Typography.Text>
       </Flex>
     );
@@ -136,11 +154,21 @@ export const EditorComponent = () => {
       theme="dracula"
       options={{
         fontSize: 14,
-        fontFamily: "Fira Code, monospace",
+        fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+        fontLigatures: true,
+        lineHeight: 1.6,
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
         automaticLayout: true,
         tabSize: 2,
+        padding: { top: 16, bottom: 16 },
+        smoothScrolling: true,
+        cursorBlinking: "smooth",
+        cursorSmoothCaretAnimation: "on",
+        renderLineHighlight: "line",
+        roundedSelection: true,
+        scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+        guides: { indentation: true, bracketPairs: true },
       }}
       onChange={handleChange}
       onMount={handleMount}
