@@ -1,6 +1,6 @@
 import type { CookieOptions, Request, Response } from "express";
 import { credentialsSchema } from "@replit-clone/shared";
-import { isProduction } from "../config/env.js";
+import { env, isProduction } from "../config/env.js";
 import {
   authenticateUser,
   getUserById,
@@ -20,10 +20,17 @@ import { UnauthorizedError } from "../utils/errors.js";
 
 const refreshCookieOptions: CookieOptions = {
   httpOnly: true,
-  sameSite: "lax",
-  // Only set Secure in production: over plain HTTP on a LAN a Secure cookie is
-  // silently dropped by the browser.
-  secure: isProduction,
+  // COOKIE_SAME_SITE defaults to "lax" for a same-site deployment (frontend
+  // and API on the same domain). A split deployment -- e.g. the web app on
+  // Vercel and the API on a separate host -- MUST set this to "none", or the
+  // browser drops the cookie on every cross-site request and login appears to
+  // just not work.
+  sameSite: env.COOKIE_SAME_SITE,
+  // Secure defaults to true in production and false otherwise, but is
+  // explicitly overridable: "none" REQUIRES Secure, while a plain-HTTP LAN
+  // deployment in production mode needs it forced to false, or the browser
+  // silently discards the cookie.
+  secure: env.COOKIE_SECURE ?? isProduction,
   maxAge: refreshCookieMaxAgeMs,
   path: "/api/v1/auth",
 };

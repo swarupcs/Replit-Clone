@@ -133,6 +133,56 @@ On 2 GB, budget roughly: Postgres ~200 MB, server ~150 MB, nginx ~10 MB, leaving
 about three concurrent 512 MB projects. `MAX_CONCURRENT_CONTAINERS` returns a
 clear "at capacity" error rather than letting Docker OOM-kill something.
 
+## Split deployment: Vercel (frontend) + Dokploy (backend)
+
+Vercel can only host the static frontend -- it has no Docker socket, which the
+backend needs to run project containers. The backend has to live somewhere
+with real Docker access: a VM running Dokploy is a good fit, since it gives you
+a "Docker Compose" application type, a reverse proxy (Traefik) with automatic
+TLS, and a UI for env vars, without hand-rolling nginx and certbot yourself.
+
+Frontend and backend end up on **different domains**, which is the one thing
+that changes behaviourally from the single-VM plan above: cookies are
+same-site there, cross-site here. See `COOKIE_SAME_SITE` below -- getting this
+wrong doesn't error, login just silently stops working.
+
+**1. Backend on Dokploy**
+
+- Create the sandbox network and projects directory on the VM once:
+  ```bash
+  docker network create replit-clone-sandbox
+  mkdir -p /data/projects
+  ```
+- In Dokploy, create a "Docker Compose" application pointing at
+  `docker-compose.dokploy.yml` in this repo.
+- Set the required env vars in Dokploy's UI: `POSTGRES_PASSWORD`,
+  `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, and `WEB_ORIGIN` (your Vercel URL,
+  set in step 2 -- circular, so come back and set this after step 2 if you
+  don't have the URL yet).
+- Assign the `server` service a domain in Dokploy (e.g. `api.yourdomain.com`)
+  with WebSocket support on -- Traefik proxies WebSocket upgrades by default,
+  which both socket.io and the terminal need.
+- `COOKIE_SAME_SITE=none` and `COOKIE_SECURE=true` are already set in
+  `docker-compose.dokploy.yml`; both require HTTPS, which Dokploy's Traefik
+  provides via Let's Encrypt.
+
+**2. Frontend on Vercel**
+
+- Import the repo. Root Directory: `apps/web`. Enable "Include files outside
+  of the Root Directory" -- the build needs `packages/shared` from the
+  workspace, and `apps/web/vercel.json` already sets the install/build
+  commands to run from the monorepo root.
+- Set the project env var `VITE_BACKEND_URL` to your Dokploy API URL (e.g.
+  `https://api.yourdomain.com`). This is **baked into the JS bundle at build
+  time** -- changing it later means redeploying, not just restarting.
+- Vercel gives you HTTPS and the domain automatically.
+
+**3. Close the loop**
+
+- Go back to Dokploy and set `WEB_ORIGIN` to the actual Vercel URL (or your
+  custom domain, if you attached one).
+- Redeploy the backend so the new CORS origin takes effect.
+
 ## Templates
 
 `react-vite`, `node-express`, `static-html`, `python-flask`. Each declares its

@@ -31,11 +31,11 @@ const envSchema = z.object({
 
   /** How the preview proxy reaches a project's dev server.
    *
-   *  "container-ip"  — dial the container's address on the sandbox network.
+   *  "container-ip"  -- dial the container's address on the sandbox network.
    *                    Requires the SERVER ITSELF to be on that network, i.e.
    *                    running under docker compose. This is the deployment
    *                    mode: nothing is published to the host at all.
-   *  "host-loopback" — publish the dev port on 127.0.0.1 and dial that.
+   *  "host-loopback" -- publish the dev port on 127.0.0.1 and dial that.
    *                    Needed when the server runs directly on a Windows or
    *                    macOS host, where Docker Desktop gives the host no route
    *                    to container IPs. Still never binds 0.0.0.0.
@@ -48,6 +48,21 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
+
+  /** Cookie policy for the refresh/preview cookies.
+   *
+   *  Same-origin or same-site deployments (frontend and API sharing a domain,
+   *  e.g. the docker-compose.prod.yml VM setup) want "lax" -- it works over
+   *  plain HTTP too. A split deployment where the frontend and API are on
+   *  DIFFERENT domains (e.g. Vercel + a separate API host) MUST use "none",
+   *  which browsers only honour together with Secure, i.e. HTTPS on both
+   *  sides. Getting this wrong doesn't error -- it just makes login silently
+   *  fail because the browser drops the cookie. */
+  COOKIE_SAME_SITE: z.enum(["lax", "none"]).default("lax"),
+  COOKIE_SECURE: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === "true")),
 });
 
 const parsed = envSchema.safeParse(process.env);
