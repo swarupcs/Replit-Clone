@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+// Must precede the Editor import's first render: points Monaco at our bundle
+// rather than a CDN. See the file for why.
+import "../../../config/monacoSetup.ts";
 import Editor from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";

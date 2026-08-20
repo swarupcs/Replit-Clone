@@ -396,6 +396,12 @@ body {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
+/* Toggle-style icon button that stays lit while its pane is visible. */
+.rc-icon-button[data-on="true"] {
+  color: var(--rc-accent);
+  background-color: var(--rc-accent-soft);
+}
+
 .rc-icon-button[data-spinning="true"] svg {
   animation: rc-spin 0.6s linear infinite;
 }
@@ -531,6 +537,23 @@ body {
   50% {
     opacity: 0.35;
   }
+}
+
+/* Quick-open (Ctrl+P) result row. */
+.rc-quickopen-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: var(--rc-radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--rc-text-muted);
+}
+
+.rc-quickopen-row[data-highlighted="true"] {
+  background-color: var(--rc-selection);
+  color: var(--rc-text);
 }
 
 /* Bottom-panel tabs (Terminal / Output). */

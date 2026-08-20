@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { io } from "socket.io-client";
-import { Alert, Button, Flex, Typography } from "antd";
+import { Alert, Button, Flex, Tooltip, Typography } from "antd";
+import { VscLayoutPanel, VscLayoutSidebarLeft } from "react-icons/vsc";
 import {
   ArrowLeftOutlined,
   EyeInvisibleOutlined,
@@ -20,6 +21,8 @@ import { useAuthStore } from "../store/authStore.ts";
 import { useRunStore } from "../store/runStore.ts";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
+import { QuickOpen } from "../components/organisms/QuickOpen/QuickOpen.tsx";
+import { useHotkeys } from "../hooks/useHotkeys.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 export const ProjectPlayground = () => {
@@ -33,6 +36,38 @@ export const ProjectPlayground = () => {
   const closeAllTabs = useOpenTabsStore((state) => state.closeAll);
 
   const [showPreview, setShowPreview] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [showPanel, setShowPanel] = useState(true);
+  const [quickOpen, setQuickOpen] = useState(false);
+
+  const closeActiveTab = useOpenTabsStore((state) => state.closeTab);
+
+  useHotkeys(
+    useMemo(
+      () => [
+        { key: "p", mod: true, handler: () => setQuickOpen(true) },
+        { key: "b", mod: true, handler: () => setShowSidebar((value) => !value) },
+        { key: "`", mod: true, handler: () => setShowPanel((value) => !value) },
+        {
+          key: "j",
+          mod: true,
+          handler: () => setShowPreview((value) => !value),
+        },
+        {
+          // Ctrl+W is the browser's own close-tab and cannot be reclaimed, so
+          // closing an editor tab uses the Alt variant.
+          key: "w",
+          mod: true,
+          alt: true,
+          handler: () => {
+            const active = useOpenTabsStore.getState().activeRelPath;
+            if (active) closeActiveTab(active);
+          },
+        },
+      ],
+      [closeActiveTab],
+    ),
+  );
 
   useEffect(() => {
     if (!projectIdFromUrl || !accessToken) return;
@@ -120,14 +155,42 @@ export const ProjectPlayground = () => {
         <Flex align="center" gap={12}>
           <RunControl />
 
-          <Button
-            size="small"
-            type={showPreview ? "primary" : "default"}
-            icon={showPreview ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-            onClick={() => setShowPreview((value) => !value)}
-          >
-            {showPreview ? "Hide preview" : "Show preview"}
-          </Button>
+          <Flex align="center" gap={2}>
+            <Tooltip title="Toggle file tree (Ctrl+B)">
+              <button
+                className="rc-icon-button"
+                data-on={showSidebar}
+                aria-label="Toggle file tree"
+                onClick={() => setShowSidebar((value) => !value)}
+              >
+                <VscLayoutSidebarLeft size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip title="Toggle panel (Ctrl+`)">
+              <button
+                className="rc-icon-button"
+                data-on={showPanel}
+                aria-label="Toggle panel"
+                onClick={() => setShowPanel((value) => !value)}
+              >
+                <VscLayoutPanel size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip title="Toggle preview (Ctrl+J)">
+              <button
+                className="rc-icon-button"
+                data-on={showPreview}
+                aria-label="Toggle preview"
+                onClick={() => setShowPreview((value) => !value)}
+              >
+                {showPreview ? (
+                  <EyeInvisibleOutlined />
+                ) : (
+                  <EyeOutlined />
+                )}
+              </button>
+            </Tooltip>
+          </Flex>
         </Flex>
       </Flex>
 
@@ -147,6 +210,7 @@ export const ProjectPlayground = () => {
           defaultSize={260}
           minSize={180}
           maxSize={520}
+          showFirst={showSidebar}
           first={
             <div
               style={{
@@ -171,6 +235,7 @@ export const ProjectPlayground = () => {
                   direction="vertical"
                   defaultSize={420}
                   minSize={120}
+                  showSecond={showPanel}
                   first={
                     <div
                       style={{
@@ -210,6 +275,8 @@ export const ProjectPlayground = () => {
           }
         />
       </div>
+
+      <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
     </Flex>
   );
 };

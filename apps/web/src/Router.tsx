@@ -1,10 +1,30 @@
+import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Flex, Spin } from "antd";
 import { ErrorBoundary } from "./components/routing/ErrorBoundary.tsx";
 import { Dashboard } from "./pages/Dashboard.tsx";
 import { Login } from "./pages/Login.tsx";
 import { Signup } from "./pages/Signup.tsx";
-import { ProjectPlayground } from "./pages/ProjectPlayground.tsx";
 import { ProtectedRoute } from "./components/routing/ProtectedRoute.tsx";
+
+/** The playground pulls in Monaco and xterm — together the large majority of
+ *  the bundle. Loading it lazily means the auth and dashboard routes no longer
+ *  download an editor the visitor may never open. */
+const ProjectPlayground = lazy(() =>
+  import("./pages/ProjectPlayground.tsx").then((module) => ({
+    default: module.ProjectPlayground,
+  })),
+);
+
+const RouteFallback = () => (
+  <Flex
+    align="center"
+    justify="center"
+    style={{ minHeight: "100vh", backgroundColor: "var(--rc-surface)" }}
+  >
+    <Spin size="large" />
+  </Flex>
+);
 
 export const Router = () => {
   const location = useLocation();
@@ -29,7 +49,9 @@ export const Router = () => {
           path="/project/:projectId"
           element={
             <ProtectedRoute>
-              <ProjectPlayground />
+              <Suspense fallback={<RouteFallback />}>
+                <ProjectPlayground />
+              </Suspense>
             </ProtectedRoute>
           }
         />
