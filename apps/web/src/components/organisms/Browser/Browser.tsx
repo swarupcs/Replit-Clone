@@ -16,11 +16,54 @@ const DEVICES = [
 
 type DeviceValue = (typeof DEVICES)[number]["value"];
 
+/** Origin serving project previews.
+ *
+ *  Defaults to the API's own, which is the simplest deployment and the least
+ *  safe one: a project's code — including any dependency it installs — then
+ *  runs on the same origin as the API, where it can POST to
+ *  /api/v1/auth/refresh with the session cookie and mint itself a working
+ *  access token. Neither CORS nor SameSite applies to a same-origin request.
+ *
+ *  Pointing this at a separate host closes that off at the origin boundary,
+ *  and is what lets the iframe below afford `allow-same-origin`.
+ */
+const PREVIEW_ORIGIN =
+  import.meta.env.VITE_PREVIEW_ORIGIN ?? import.meta.env.VITE_BACKEND_URL;
+
+/** True when previews cannot reach the API as a same-origin caller. */
+function isIsolatedFromApi(): boolean {
+  try {
+    return (
+      new URL(PREVIEW_ORIGIN).origin !==
+      new URL(import.meta.env.VITE_BACKEND_URL).origin
+    );
+  } catch {
+    // An unparseable override is not evidence of isolation.
+    return false;
+  }
+}
+
+/** Capabilities granted to the framed project.
+ *
+ *  Without `allow-same-origin` the document gets an opaque origin, so it cannot
+ *  read the session cookie or make credentialed calls to the API however the
+ *  URLs line up. The cost is that the project's own app loses localStorage,
+ *  cookies and IndexedDB — so a deployment that isolates previews on their own
+ *  host gets those back, having removed the reason to withhold them.
+ */
+const SANDBOX = [
+  "allow-scripts",
+  "allow-forms",
+  "allow-popups",
+  "allow-modals",
+  ...(isIsolatedFromApi() ? ["allow-same-origin"] : []),
+].join(" ");
+
 /** The preview is served by the backend's reverse proxy, NOT by a published
  *  container port. Containers expose nothing to the host, and this URL works
  *  from any machine that can reach the backend. */
 function previewUrl(projectId: string): string {
-  return `${import.meta.env.VITE_BACKEND_URL}/preview/${projectId}/`;
+  return `${PREVIEW_ORIGIN}/preview/${projectId}/`;
 }
 
 export const Browser = ({ projectId }: BrowserProps) => {
@@ -141,6 +184,7 @@ export const Browser = ({ projectId }: BrowserProps) => {
             ref={iframeRef}
             src={src}
             title="Project preview"
+            sandbox={SANDBOX}
             onLoad={() => setLoading(false)}
             style={{
               width: "100%",

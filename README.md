@@ -103,6 +103,18 @@ resolves it through a single choke point that rejects traversal, absolute paths,
 Windows and drive-relative forms, and NUL bytes. Host paths never reach a
 client — the file tree is built with relative paths only.
 
+**Previews run untrusted code**, so the editor treats them as hostile. The
+proxy strips the viewer's cookies before the request reaches the container,
+preview cookies are typed and short-lived so one cannot be replayed as an
+access token, and preview responses carry a `frame-ancestors` policy.
+
+By default previews are served from the API's own origin. That is the simplest
+deployment and the weakest one — same-origin code can reach `/api/v1/auth`
+with the session cookie — so the iframe withholds `allow-same-origin`, and
+project apps lose `localStorage`, cookies and IndexedDB as a result. Set
+`VITE_PREVIEW_ORIGIN` to a separate host to move the isolation to the origin
+boundary instead; the iframe then grants those APIs back.
+
 The server mounts the Docker socket, which is equivalent to host root. That is
 only acceptable because authentication and path confinement sit in front of it.
 **Do not expose this to the internet.**
