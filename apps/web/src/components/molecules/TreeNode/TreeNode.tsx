@@ -1,5 +1,5 @@
-import type { MouseEvent } from "react";
-import { IoIosArrowDown, IoIosArrowForward } from "react-icons/io";
+import type { CSSProperties, MouseEvent } from "react";
+import { IoIosArrowForward } from "react-icons/io";
 import { FaFolder, FaFolderOpen } from "react-icons/fa";
 import type { TreeNodeData } from "@replit-clone/shared";
 import { fileExtension } from "@replit-clone/shared";
@@ -54,21 +54,23 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
         >
           {isFolder ? (
             <>
+              {/* One chevron that rotates, rather than two swapped glyphs --
+                  the rotation makes expand/collapse legible as a transition. */}
+              <IoIosArrowForward
+                size={11}
+                className="rc-tree-chevron"
+                data-expanded={isExpanded}
+              />
               {isExpanded ? (
-                <IoIosArrowDown size={12} />
+                <FaFolderOpen color="#7c88b8" size={14} style={{ flex: "none" }} />
               ) : (
-                <IoIosArrowForward size={12} />
-              )}
-              {isExpanded ? (
-                <FaFolderOpen color="var(--rc-yellow)" size={14} />
-              ) : (
-                <FaFolder color="var(--rc-yellow)" size={14} />
+                <FaFolder color="#7c88b8" size={14} style={{ flex: "none" }} />
               )}
             </>
           ) : (
             <>
-              <span style={{ width: 12 }} />
-              <FileIcon extension={fileExtension(node.name)} />
+              <span style={{ width: 11, flex: "none" }} />
+              <FileIcon extension={fileExtension(node.name)} name={node.name} />
             </>
           )}
           <span
@@ -83,12 +85,23 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
         </div>
       )}
 
-      {isFolder &&
-        isExpanded &&
-        node.children?.map((child) => (
-          // Keyed by relPath: names alone collide across refetches.
-          <TreeNode key={child.relPath} node={child} depth={depth + 1} />
-        ))}
+      {isFolder && isExpanded && node.children && node.children.length > 0 && (
+        // Indent guide: a hairline at this level's depth, so a deeply nested
+        // file can be traced back to its folder.
+        <div
+          className={depth >= 0 && node.relPath !== "" ? "rc-tree-branch" : undefined}
+          style={
+            node.relPath !== ""
+              ? ({ "--rc-guide-x": `${14 + depth * 14}px` } as CSSProperties)
+              : undefined
+          }
+        >
+          {node.children.map((child) => (
+            // Keyed by relPath: names alone collide across refetches.
+            <TreeNode key={child.relPath} node={child} depth={depth + 1} />
+          ))}
+        </div>
+      )}
     </div>
   );
 };

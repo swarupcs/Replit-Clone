@@ -1,12 +1,22 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { Tooltip } from "antd";
+import { VscClearAll, VscDebugRestart, VscTerminal } from "react-icons/vsc";
 import "@xterm/xterm/css/xterm.css";
 
 interface BrowserTerminalProps {
   projectId: string;
   accessToken: string;
 }
+
+type ConnectionState = "connecting" | "open" | "closed";
+
+const STATUS_COPY: Record<ConnectionState, { label: string; color: string }> = {
+  connecting: { label: "Connecting", color: "var(--rc-yellow)" },
+  open: { label: "Connected", color: "var(--rc-green)" },
+  closed: { label: "Disconnected", color: "var(--rc-red)" },
+};
 
 /** Terminal WebSocket endpoint.
  *
@@ -31,10 +41,18 @@ function terminalWsUrl(projectId: string): string {
  */
 export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+
+  const [status, setStatus] = useState<ConnectionState>("connecting");
+  /** Bumping this tears the effect down and builds a fresh socket + terminal,
+   *  which is what "reconnect" means here. */
+  const [reconnectNonce, setReconnectNonce] = useState(0);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !accessToken) return;
+
+    setStatus("connecting");
 
     const term = new Terminal({
       cursorBlink: true,
@@ -67,11 +85,16 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
       fontFamily: '"JetBrains Mono", "Fira Code", monospace',
       lineHeight: 1.35,
       convertEol: true,
+      scrollback: 5000,
+      // Padding lives on the wrapper, not the canvas, so the cursor never sits
+      // flush against the edge.
+      allowProposedApi: true,
     });
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(container);
+    termRef.current = term;
 
     // The browser WebSocket API cannot set an Authorization header, and a token
     // in the query string lands in access logs, so it rides the subprotocol.
@@ -85,7 +108,7 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
     function syncSize() {
       // Every guard here matters: fit() and focus() both touch the renderer,
       // which throws "Cannot read properties of undefined (reading
-      // 'dimensions')" once the Terminal has been disposed � and React 19's
+      // 'dimensions')" once the Terminal has been disposed -- and React 19's
       // StrictMode disposes one on every mount.
       if (disposed) return;
       if (!container || container.clientWidth === 0 || container.clientHeight === 0) {
@@ -115,6 +138,7 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
 
     socket.addEventListener("open", () => {
       if (disposed) return;
+      setStatus("open");
       syncSize();
       term.focus();
       // The shell prints its prompt the moment the exec starts, which can land
@@ -133,6 +157,7 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
 
     socket.addEventListener("close", (event) => {
       if (disposed) return;
+      setStatus("closed");
       term.write(
         `\r\n\x1b[31mTerminal disconnected${event.reason ? `: ${event.reason}` : ""}.\x1b[0m\r\n`,
       );
@@ -144,20 +169,75 @@ export const BrowserTerminal = ({ projectId, accessToken }: BrowserTerminalProps
       keyInput.dispose();
       socket.close();
       term.dispose();
+      termRef.current = null;
     };
-  }, [projectId, accessToken]);
+  }, [projectId, accessToken, reconnectNonce]);
+
+  const handleClear = useCallback(() => {
+    termRef.current?.clear();
+    termRef.current?.focus();
+  }, []);
+
+  const handleReconnect = useCallback(() => {
+    setReconnectNonce((value) => value + 1);
+  }, []);
+
+  const statusInfo = STATUS_COPY[status];
 
   return (
     <div
-      ref={containerRef}
       style={{
-        width: "100%",
+        display: "flex",
+        flexDirection: "column",
         height: "100%",
-        padding: "8px 10px",
         backgroundColor: "var(--rc-surface-sunken)",
         borderTop: "1px solid var(--rc-border)",
       }}
-      id="terminal-container"
-    />
+    >
+      <div className="rc-pane-label" style={{ justifyContent: "space-between" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <VscTerminal size={13} />
+          Terminal
+          <span
+            title={statusInfo.label}
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: 999,
+              background: statusInfo.color,
+              // A steady dot once connected; pulsing while it is still trying.
+              animation:
+                status === "connecting" ? "rc-pulse 1.2s ease-in-out infinite" : undefined,
+            }}
+          />
+          <span style={{ fontWeight: 400, letterSpacing: 0, textTransform: "none" }}>
+            {statusInfo.label}
+          </span>
+        </span>
+
+        <span style={{ display: "flex", gap: 2 }}>
+          <Tooltip title="Clear">
+            <button className="rc-icon-button" onClick={handleClear} aria-label="Clear">
+              <VscClearAll size={14} />
+            </button>
+          </Tooltip>
+          <Tooltip title="Reconnect">
+            <button
+              className="rc-icon-button"
+              onClick={handleReconnect}
+              aria-label="Reconnect"
+            >
+              <VscDebugRestart size={14} />
+            </button>
+          </Tooltip>
+        </span>
+      </div>
+
+      <div
+        ref={containerRef}
+        style={{ flex: 1, minHeight: 0, padding: "4px 10px 8px" }}
+        id="terminal-container"
+      />
+    </div>
   );
 };

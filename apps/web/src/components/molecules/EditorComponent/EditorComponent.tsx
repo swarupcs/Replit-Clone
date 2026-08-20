@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { Flex, Typography } from "antd";
 import draculaTheme from "../../../theme/dracula.json";
+import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { useOpenTabsStore, selectActiveTab } from "../../../store/openTabsStore.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
@@ -22,6 +23,9 @@ export const EditorComponent = () => {
   const activeTab = useOpenTabsStore(selectActiveTab);
   const markDirty = useOpenTabsStore((state) => state.markDirty);
   const { editorSocket } = useEditorSocketStore();
+
+  const [cursor, setCursor] = useState({ line: 1, column: 1 });
+  const [selectionCount, setSelectionCount] = useState(0);
 
   useEffect(() => {
     return () => {
@@ -87,6 +91,22 @@ export const EditorComponent = () => {
     monaco.editor.defineTheme("dracula", draculaTheme as editor.IStandaloneThemeData);
     monaco.editor.setTheme("dracula");
 
+    // Feeds the status bar. Monaco owns the cursor, so this is the only way to
+    // observe it; the listener is disposed with the editor.
+    codeEditor.onDidChangeCursorPosition((event) => {
+      setCursor({
+        line: event.position.lineNumber,
+        column: event.position.column,
+      });
+    });
+
+    codeEditor.onDidChangeCursorSelection((event) => {
+      const model = codeEditor.getModel();
+      setSelectionCount(
+        model ? model.getValueLengthInRange(event.selection) : 0,
+      );
+    });
+
     // Ctrl/Cmd+S flushes immediately instead of waiting out the debounce.
     codeEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       flushWrite(codeEditor.getValue());
@@ -147,12 +167,43 @@ export const EditorComponent = () => {
     );
   }
 
+  const segments = activeTab.relPath.split("/");
+  const language = extensionToFileType(activeTab.extension);
+
   return (
-    <Editor
-      height="100%"
-      width="100%"
-      theme="dracula"
-      options={{
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        backgroundColor: "var(--rc-editor-bg)",
+      }}
+    >
+      {/* Breadcrumb: the active file's path, so a deeply nested file is
+          identifiable without hunting for it in the tree. */}
+      <div className="rc-breadcrumb">
+        {segments.map((segment, index) => {
+          const isLast = index === segments.length - 1;
+          return (
+            <span key={index} style={{ display: "contents" }}>
+              {index > 0 && <span className="rc-breadcrumb-sep">›</span>}
+              <span data-current={isLast}>
+                {isLast && (
+                  <FileIcon extension={activeTab.extension} name={activeTab.name} />
+                )}
+                {segment}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Editor
+          height="100%"
+          width="100%"
+          theme="dracula"
+          options={{
         fontSize: 14,
         fontFamily: '"JetBrains Mono", "Fira Code", monospace',
         fontLigatures: true,
@@ -168,10 +219,40 @@ export const EditorComponent = () => {
         renderLineHighlight: "line",
         roundedSelection: true,
         scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
-        guides: { indentation: true, bracketPairs: true },
-      }}
-      onChange={handleChange}
-      onMount={handleMount}
-    />
+            guides: { indentation: true, bracketPairs: true },
+          }}
+          onChange={handleChange}
+          onMount={handleMount}
+        />
+      </div>
+
+      {/* Status bar. Mirrors what an editor is expected to report: where the
+          cursor is, what the file is, and whether it still has unsaved edits. */}
+      <div className="rc-statusbar">
+        <span className="rc-statusbar-group">
+          <span title="Line and column">
+            Ln {cursor.line}, Col {cursor.column}
+          </span>
+          {selectionCount > 0 && <span>({selectionCount} selected)</span>}
+        </span>
+
+        <span className="rc-statusbar-group">
+          <span>Spaces: 2</span>
+          <span>UTF-8</span>
+          <span style={{ textTransform: "capitalize" }}>{language}</span>
+          <span
+            data-dirty={activeTab.isDirty}
+            className="rc-statusbar-save"
+            title={
+              activeTab.isDirty
+                ? "Unsaved changes — autosaves shortly, or press Ctrl+S"
+                : "All changes saved"
+            }
+          >
+            {activeTab.isDirty ? "Unsaved" : "Saved"}
+          </span>
+        </span>
+      </div>
+    </div>
   );
 };
