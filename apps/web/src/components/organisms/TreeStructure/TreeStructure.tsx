@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import { Input, Spin, Tooltip } from "antd";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Input, Spin, Tooltip, message } from "antd";
 import {
+  VscCloudUpload,
   VscCollapseAll,
   VscNewFile,
   VscNewFolder,
@@ -12,6 +13,7 @@ import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { TreeNode } from "../../molecules/TreeNode/TreeNode.tsx";
 import { FileContextMenu } from "../../molecules/ContextMenu/FileContextMenu.tsx";
 import { NewEntryPrompt } from "../../molecules/ContextMenu/NewEntryPrompt.tsx";
+import { uploadFilesApi } from "../../../apis/projects.ts";
 
 /** Prunes the tree to nodes whose path matches `query`, keeping the folders
  *  that lead to a match so the result still reads as a tree rather than a flat
@@ -50,6 +52,34 @@ export const TreeStructure = () => {
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [creating, setCreating] = useState<"file" | "folder" | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [messageApi, contextHolder] = message.useMessage();
+
+  /** A hidden input, because a styled button cannot open a file picker on its
+   *  own. */
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleUpload(files: FileList | null) {
+    if (!files || files.length === 0 || !projectId) return;
+
+    setUploading(true);
+    try {
+      const paths = await uploadFilesApi(projectId, [...files]);
+      await refreshTree();
+      void messageApi.success(
+        `Uploaded ${String(paths.length)} file${paths.length === 1 ? "" : "s"}`,
+      );
+    } catch (error) {
+      const detail = (
+        error as { response?: { data?: { message?: string } } }
+      ).response?.data?.message;
+      void messageApi.error(detail ?? "Could not upload those files.");
+    } finally {
+      setUploading(false);
+      // Cleared so choosing the same file twice in a row still fires a change.
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
 
   useEffect(() => {
     if (projectId && !treeStructure) void refreshTree();
@@ -90,6 +120,16 @@ export const TreeStructure = () => {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {contextHolder}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(event) => void handleUpload(event.target.files)}
+      />
+
       <div className="rc-pane-label" style={{ justifyContent: "space-between" }}>
         <span>Explorer</span>
 
@@ -110,6 +150,16 @@ export const TreeStructure = () => {
               aria-label="New folder"
             >
               <VscNewFolder size={14} />
+            </button>
+          </Tooltip>
+          <Tooltip title="Upload files">
+            <button
+              className="rc-icon-button"
+              data-spinning={uploading}
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Upload files"
+            >
+              <VscCloudUpload size={14} />
             </button>
           </Tooltip>
           <Tooltip title="Refresh">

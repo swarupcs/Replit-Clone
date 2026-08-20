@@ -650,3 +650,10 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* A row being dragged over, so the drop target is unmistakable. */
+.rc-tree-row[data-dropping="true"] {
+  background: var(--rc-selection);
+  outline: 1px solid var(--rc-accent);
+  outline-offset: -1px;
+}

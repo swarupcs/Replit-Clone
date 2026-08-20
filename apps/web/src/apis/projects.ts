@@ -104,3 +104,25 @@ export const setProjectEnvApi = async (
   );
   return response.data.data;
 };
+
+export const uploadFilesApi = async (
+  projectId: string,
+  files: File[],
+  destDir = "",
+): Promise<string[]> => {
+  const form = new FormData();
+  form.append("destDir", destDir);
+  for (const file of files) form.append("files", file);
+
+  const response = await axios.post<ApiSuccess<{ paths: string[] }>>(
+    `/api/v1/projects/${projectId}/files`,
+    form,
+  );
+  return response.data.data.paths;
+};
+
+/** Absolute, because the browser navigates to it — a download has to be a real
+ *  navigation for the filename to be honoured. */
+export const fileDownloadUrl = (projectId: string, relPath: string): string =>
+  `${import.meta.env.VITE_BACKEND_URL}/api/v1/projects/${projectId}/files` +
+  `?path=${encodeURIComponent(relPath)}`;

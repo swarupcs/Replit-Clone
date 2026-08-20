@@ -293,6 +293,43 @@ export const handleEditorSocketEvents = (
     })(),
   );
 
+  socket.on("moveEntry", ({ relPath, destDir }) =>
+    handle("move", async () => {
+      // Both ends go through resolveInProject, so neither the source nor the
+      // destination can point outside the project however they are spelled.
+      const absolute = resolveInProject(projectId, relPath);
+      const name = path.posix.basename(relPath);
+
+      const newRelPath = destDir ? `${destDir}/${name}` : name;
+      const newAbsolute = resolveInProject(projectId, newRelPath);
+
+      if (absolute === newAbsolute) return;
+
+      // Moving a folder into itself would detach the subtree entirely.
+      if (newAbsolute.startsWith(absolute + path.sep)) {
+        socket.emit("error", {
+          code: "INVALID_MOVE",
+          message: "A folder cannot be moved inside itself",
+        });
+        return;
+      }
+
+      if (await exists(newAbsolute)) {
+        socket.emit("error", {
+          code: "ALREADY_EXISTS",
+          message: `"${name}" already exists there`,
+        });
+        return;
+      }
+
+      await fs.mkdir(path.dirname(newAbsolute), { recursive: true });
+      await fs.rename(absolute, newAbsolute);
+
+      socket.emit("moveEntrySuccess", { relPath, newRelPath });
+      announceTreeChange();
+    })(),
+  );
+
   // --- Dev server (the Run button) ---------------------------------------
   //
   // Run state is per PROJECT, not per socket: two tabs on the same project

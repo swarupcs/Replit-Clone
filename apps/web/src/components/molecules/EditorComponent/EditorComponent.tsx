@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // Must precede the Editor import's first render: points Monaco at our bundle
 // rather than a CDN. See the file for why.
 import "../../../config/monacoSetup.ts";
-import Editor from "@monaco-editor/react";
+import Editor, { DiffEditor } from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
-import { Flex, Typography } from "antd";
+import { Flex, Tooltip, Typography } from "antd";
+import { VscDiff } from "react-icons/vsc";
 import { MAX_FILE_BYTES } from "@replit-clone/shared";
 import draculaTheme from "../../../theme/dracula.json";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
@@ -64,6 +65,11 @@ export const EditorComponent = () => {
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
   const [selectionCount, setSelectionCount] = useState(0);
   const [writeError, setWriteError] = useState<string | null>(null);
+  /** Showing the unsaved changes rather than the editor. */
+  const [showDiff, setShowDiff] = useState(false);
+  /** The buffer as it stands, captured when the diff opens. Monaco owns the
+   *  live text, so there is nothing in React state to compare against. */
+  const [diffCurrent, setDiffCurrent] = useState("");
 
   /** Read imperatively so the flush helpers do not have to be rebuilt — and
    *  re-bound into Monaco's command registry — every time the socket changes. */
@@ -123,6 +129,8 @@ export const EditorComponent = () => {
       suppressChange.current = false;
     }
 
+    // The diff described the file being left, so it does not survive a switch.
+    setShowDiff(false);
     openedPath.current = activeTab.relPath;
 
     codeEditor.setModel(model);
@@ -326,9 +334,60 @@ export const EditorComponent = () => {
             </span>
           );
         })}
+
+        {/* Compares the buffer against what is on disk. Monaco ships the diff
+            editor; nothing surfaced it, so there was no way to see what a save
+            would actually change. */}
+        <Tooltip
+          title={
+            activeTab.isDirty
+              ? showDiff
+                ? "Back to the editor"
+                : "Show unsaved changes"
+              : "No unsaved changes to compare"
+          }
+        >
+          <button
+            className="rc-icon-button"
+            style={{ marginLeft: "auto", marginRight: 8 }}
+            data-on={showDiff}
+            disabled={!activeTab.isDirty && !showDiff}
+            aria-label="Show unsaved changes"
+            aria-pressed={showDiff}
+            onClick={() => {
+              if (!showDiff) setDiffCurrent(editorRef.current?.getValue() ?? "");
+              setShowDiff((value) => !value);
+            }}
+          >
+            <VscDiff size={14} />
+          </button>
+        </Tooltip>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0 }}>
+      <div style={{ flex: 1, minHeight: 0, display: showDiff ? "block" : "none" }}>
+        <DiffEditor
+          height="100%"
+          width="100%"
+          theme="dracula"
+          language={language}
+          // Left is the file as saved; right is what is in the buffer now.
+          original={activeTab.value}
+          modified={diffCurrent}
+          options={{
+            readOnly: true,
+            renderSideBySide: true,
+            fontSize: settings.fontSize,
+            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false,
+            automaticLayout: true,
+          }}
+        />
+      </div>
+
+      {/* Hidden rather than unmounted while diffing, so the models, undo
+          history and scroll position all survive the round trip. */}
+      <div style={{ flex: 1, minHeight: 0, display: showDiff ? "none" : "block" }}>
         <Editor
           height="100%"
           width="100%"

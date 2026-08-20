@@ -42,6 +42,13 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
       useOpenTabsStore.getState().renameTab(relPath, newRelPath);
     });
 
+    // A move is a rename with a different parent as far as an open tab is
+    // concerned; leaving it on the old path would make the next save recreate
+    // the file where it used to be.
+    incomingSocket.on("moveEntrySuccess", ({ relPath, newRelPath }) => {
+      useOpenTabsStore.getState().renameTab(relPath, newRelPath);
+    });
+
     incomingSocket.on("deleteFileSuccess", ({ relPath }) => {
       useOpenTabsStore.getState().closeTab(relPath);
     });

@@ -28,6 +28,17 @@ export interface RenamePayload {
   newName: string;
 }
 
+/** Moving an entry to a different folder.
+ *
+ *  Separate from renameEntry, which takes a bare NAME precisely so it cannot
+ *  express a path. This one has to, so both ends go through the project's path
+ *  confinement rather than being trusted. */
+export interface MovePayload {
+  relPath: string;
+  /** Destination directory, relative to the project root. "" is the root. */
+  destDir: string;
+}
+
 /** Lifecycle of the project's dev server, as driven by the Run button.
  *
  *  - `idle`      nothing has been started
@@ -90,6 +101,7 @@ export interface ClientToServerEvents {
   createFolder: (payload: PathPayload) => void;
   deleteFolder: (payload: PathPayload) => void;
   renameEntry: (payload: RenamePayload) => void;
+  moveEntry: (payload: MovePayload) => void;
   /** Start the template's start command inside the project container. */
   runStart: () => void;
   /** Kill it. */
@@ -114,6 +126,7 @@ export interface ServerToClientEvents {
   createFolderSuccess: (payload: { relPath: string }) => void;
   deleteFolderSuccess: (payload: { relPath: string }) => void;
   renameEntrySuccess: (payload: { relPath: string; newRelPath: string }) => void;
+  moveEntrySuccess: (payload: { relPath: string; newRelPath: string }) => void;
   /** The project's files changed on disk; the client should refetch the tree. */
   treeChanged: () => void;
   /** Dev server lifecycle changed. Broadcast to the whole project room so

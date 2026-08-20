@@ -3,6 +3,8 @@ import { Input, Modal } from "antd";
 import type { TreeNodeData } from "@replit-clone/shared";
 import "./FileContextMenu.css";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
+import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
+import { fileDownloadUrl } from "../../../apis/projects.ts";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 
 type PendingAction = "newFile" | "newFolder" | "rename" | "delete";
@@ -17,6 +19,7 @@ const ACTION_COPY: Record<PendingAction, { title: string; okText: string }> = {
 export const FileContextMenu = () => {
   const { x, y, isOpen, node, close } = useFileContextMenuStore();
   const { editorSocket } = useEditorSocketStore();
+  const projectId = useTreeStructureStore((state) => state.projectId);
 
   /** The node the dialog is acting on.
    *
@@ -124,6 +127,19 @@ export const FileContextMenu = () => {
           <button className="fileContextButton" onClick={() => startAction("rename")}>
             Rename
           </button>
+          {node.type === "file" && projectId && (
+            <button
+              className="fileContextButton"
+              onClick={() => {
+                // A real navigation, so the browser honours the filename the
+                // server sends in Content-Disposition.
+                window.location.assign(fileDownloadUrl(projectId, node.relPath));
+                close();
+              }}
+            >
+              Download
+            </button>
+          )}
           <button
             className="fileContextButton fileContextButtonDanger"
             onClick={() => startAction("delete")}

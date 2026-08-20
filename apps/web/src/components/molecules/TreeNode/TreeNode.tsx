@@ -1,4 +1,5 @@
-import type { CSSProperties, MouseEvent } from "react";
+import { useState } from "react";
+import type { CSSProperties, DragEvent, MouseEvent } from "react";
 import { IoIosArrowForward } from "react-icons/io";
 import { FaFolder, FaFolderOpen } from "react-icons/fa";
 import type { TreeNodeData } from "@replit-clone/shared";
@@ -19,6 +20,8 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
   const { expandedPaths, toggleExpanded } = useTreeStructureStore();
   const activeRelPath = useOpenTabsStore((state) => state.activeRelPath);
   const { open: openContextMenu } = useFileContextMenuStore();
+  /** Highlighted while something is being dragged over this row. */
+  const [dropping, setDropping] = useState(false);
 
   if (!node) return null;
 
@@ -34,13 +37,53 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
     openContextMenu(event.clientX, event.clientY, node);
   }
 
+  /** The folder this row represents as a drop target: itself when it is a
+   *  folder, otherwise the folder it sits in. */
+  function dropTarget(): string {
+    if (!node) return "";
+    return isFolder ? node.relPath : node.relPath.split("/").slice(0, -1).join("/");
+  }
+
+  function handleDrop(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    setDropping(false);
+
+    const source = event.dataTransfer.getData("text/rc-path");
+    if (!source || !node) return;
+
+    const destDir = dropTarget();
+
+    // Dropping something back where it already is, or a folder onto itself.
+    const currentDir = source.split("/").slice(0, -1).join("/");
+    if (source === node.relPath || currentDir === destDir) return;
+
+    editorSocket?.emit("moveEntry", { relPath: source, destDir });
+  }
+
   return (
     <div>
       {node.relPath !== "" && (
         <div
           className="rc-tree-row"
           data-active={isActive}
+          data-dropping={dropping}
           style={{ paddingLeft: `${8 + depth * 14}px` }}
+          draggable
+          onDragStart={(event) => {
+            // A custom type, so a drag from elsewhere in the page cannot be
+            // mistaken for one of ours.
+            event.dataTransfer.setData("text/rc-path", node.relPath);
+            event.dataTransfer.effectAllowed = "move";
+          }}
+          onDragOver={(event) => {
+            if (!event.dataTransfer.types.includes("text/rc-path")) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            setDropping(true);
+          }}
+          onDragLeave={() => setDropping(false)}
+          onDrop={handleDrop}
           onContextMenu={handleContextMenu}
           onClick={() => {
             if (isFolder) {
