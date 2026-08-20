@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 // Must precede the Editor import's first render: points Monaco at our bundle
 // rather than a CDN. See the file for why.
 import "../../../config/monacoSetup.ts";
@@ -15,9 +15,19 @@ import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
 const WRITE_DEBOUNCE_MS = 800;
 
 export const EditorComponent = () => {
-  // A plain `let` in the component body was reset on every render, so the
-  // debounce never actually cancelled a pending write.
-  const writeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Debounced writes still in flight, keyed by path.
+   *
+   *  A plain `let` in the component body was reset on every render, so the
+   *  debounce never cancelled anything; a single shared timer then replaced
+   *  that, which was worse in a different way. Typing in one file and switching
+   *  to another within the debounce window cancelled the first file's pending
+   *  write and never rescheduled it, so those edits were lost silently — the
+   *  tab kept showing its unsaved dot the whole time. One timer per path, and
+   *  a flush whenever the active file changes, is what makes that impossible.
+   */
+  const pendingWrites = useRef(
+    new Map<string, { timer: ReturnType<typeof setTimeout>; data: string }>(),
+  );
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   /** Per-file scroll position and folded regions. */
@@ -30,16 +40,37 @@ export const EditorComponent = () => {
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
   const [selectionCount, setSelectionCount] = useState(0);
 
-  useEffect(() => {
-    return () => {
-      if (writeTimerRef.current !== null) clearTimeout(writeTimerRef.current);
-    };
+  /** Read imperatively so the flush helpers do not have to be rebuilt — and
+   *  re-bound into Monaco's command registry — every time the socket changes. */
+  const socketRef = useRef(editorSocket);
+  socketRef.current = editorSocket;
+
+  /** Sends a file's pending write now and drops its timer. */
+  const flushWrite = useCallback((relPath: string) => {
+    const pending = pendingWrites.current.get(relPath);
+    if (!pending) return;
+
+    clearTimeout(pending.timer);
+    pendingWrites.current.delete(relPath);
+    socketRef.current?.emit("writeFile", { relPath, data: pending.data });
   }, []);
+
+  const flushAll = useCallback(() => {
+    for (const relPath of [...pendingWrites.current.keys()]) flushWrite(relPath);
+  }, [flushWrite]);
+
+  // Last resort. Blur (see handleMount) is what actually catches navigation;
+  // by unmount the socket may already be gone.
+  useEffect(() => flushAll, [flushAll]);
 
   /** One Monaco model per file, so undo history, cursor position, and scroll
    *  survive switching tabs. A single controlled `value` reset all three on
    *  every file change. */
   useEffect(() => {
+    // Before anything else: the file being switched away from may still have a
+    // debounced write queued, and nothing else would ever send it.
+    flushAll();
+
     const monaco = monacoRef.current;
     const codeEditor = editorRef.current;
     if (!monaco || !codeEditor || !activeTab) return;
@@ -66,7 +97,7 @@ export const EditorComponent = () => {
     const saved = viewStates.current.get(activeTab.relPath);
     if (saved) codeEditor.restoreViewState(saved);
     codeEditor.focus();
-  }, [activeTab]);
+  }, [activeTab, flushAll]);
 
   /** Dispose models for files that are no longer open, so a long session does
    *  not accumulate them. */
@@ -103,6 +134,14 @@ export const EditorComponent = () => {
       });
     });
 
+    // Autosave on focus loss, the way editors with autosave behave. Clicking
+    // the file tree, the terminal, or Back all leave the editor, and none of
+    // them would otherwise wait out the debounce — while unmount cleanup is too
+    // late to rely on, since the socket may already have been disconnected.
+    codeEditor.onDidBlurEditorText(() => {
+      flushAll();
+    });
+
     codeEditor.onDidChangeCursorSelection((event) => {
       const model = codeEditor.getModel();
       setSelectionCount(
@@ -111,31 +150,38 @@ export const EditorComponent = () => {
     });
 
     // Ctrl/Cmd+S flushes immediately instead of waiting out the debounce.
+    // Reads the active path at invocation time: Monaco keeps this callback for
+    // the editor's whole lifetime, so anything captured now would go stale.
     codeEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      flushWrite(codeEditor.getValue());
+      const { activeRelPath } = useOpenTabsStore.getState();
+      if (!activeRelPath) return;
+
+      // Save even when nothing is queued, so Ctrl+S is never a no-op the user
+      // has to guess about.
+      queueWrite(activeRelPath, codeEditor.getValue(), 0);
+      flushWrite(activeRelPath);
     });
   }
 
-  function flushWrite(value: string) {
-    const tab = useOpenTabsStore.getState().tabs.find(
-      (t) => t.relPath === useOpenTabsStore.getState().activeRelPath,
-    );
-    if (!tab || !editorSocket) return;
+  /** Schedules a write, replacing only this file's own pending one. */
+  function queueWrite(relPath: string, data: string, delay: number) {
+    const existing = pendingWrites.current.get(relPath);
+    if (existing) clearTimeout(existing.timer);
 
-    if (writeTimerRef.current !== null) clearTimeout(writeTimerRef.current);
-    editorSocket.emit("writeFile", { relPath: tab.relPath, data: value });
+    const timer = setTimeout(() => {
+      pendingWrites.current.delete(relPath);
+      socketRef.current?.emit("writeFile", { relPath, data });
+    }, delay);
+
+    pendingWrites.current.set(relPath, { timer, data });
   }
 
   function handleChange(value: string | undefined) {
-    if (writeTimerRef.current !== null) clearTimeout(writeTimerRef.current);
-    if (value === undefined || !editorSocket || !activeTab) return;
+    if (value === undefined || !activeTab) return;
 
     const { relPath } = activeTab;
     markDirty(relPath, true);
-
-    writeTimerRef.current = setTimeout(() => {
-      editorSocket.emit("writeFile", { relPath, data: value });
-    }, WRITE_DEBOUNCE_MS);
+    queueWrite(relPath, value, WRITE_DEBOUNCE_MS);
   }
 
   if (!activeTab) {
