@@ -3,6 +3,7 @@ import path from "node:path";
 import { env } from "../config/env.js";
 import { AppError } from "../utils/errors.js";
 import { projectRoot } from "../utils/projectPaths.js";
+import { increment } from "../lib/metrics.js";
 
 /** Per-project storage accounting.
  *
@@ -102,7 +103,10 @@ export async function assertWithinQuota(
   const used = await usedBytes(projectId);
   const projected = used - replacingBytes + incomingBytes;
 
-  if (projected > QUOTA_BYTES) throw new QuotaExceededError(used);
+  if (projected > QUOTA_BYTES) {
+    increment("quota_rejections");
+    throw new QuotaExceededError(used);
+  }
 }
 
 /** Records a write against the cached total, so a burst of them is bounded

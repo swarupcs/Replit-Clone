@@ -5,6 +5,8 @@ import type { RunState } from "@replit-clone/shared";
 import { ensureContainer, getPreviewTarget } from "./containerManager.js";
 import { getTemplate } from "../templates/registry.js";
 import { prisma } from "../lib/prisma.js";
+import { logger } from "../lib/logger.js";
+import { increment } from "../lib/metrics.js";
 
 /** How much output to retain per project so a client that connects late (or
  *  reconnects) can rebuild the log pane. Bounded so a chatty dev server cannot
@@ -226,6 +228,8 @@ export async function startRun(projectId: string): Promise<void> {
   current.history = [];
   current.pgid = undefined;
   current.pgidBuffer = undefined;
+  increment("runs_started");
+  logger.info("run started", { projectId, command: template.startCommand });
   setState(projectId, { status: "starting", command: template.startCommand });
   pushOutput(projectId, `$ ${template.startCommand}\r\n`);
 
@@ -279,9 +283,16 @@ export async function startRun(projectId: string): Promise<void> {
       stopProbing(live);
 
       const info = await exec.inspect().catch(() => undefined);
+      const exitCode = info?.ExitCode ?? undefined;
+
+      if (exitCode !== undefined && exitCode !== 0) {
+        increment("runs_failed");
+        logger.warn("run exited non-zero", { projectId, exitCode });
+      }
+
       setState(projectId, {
         status: "exited",
-        exitCode: info?.ExitCode ?? undefined,
+        exitCode,
         command: template.startCommand,
       });
       live.stream = undefined;

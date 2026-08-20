@@ -17,16 +17,21 @@ import {
 } from "./routes/preview.js";
 import { env, isProduction } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";
+import { logger } from "./lib/logger.js";
 import { touchProject } from "./service/projectService.js";
 import { retainProjectWatcher } from "./service/projectWatcher.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
 import { pruneExpiredRefreshTokens } from "./service/refreshTokenService.js";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
+import { requestLogger } from "./middlewares/requestLogger.js";
+import { healthCheck } from "./controllers/healthController.js";
+import { asyncHandler } from "./middlewares/errorHandler.js";
 import { installTerminalGateway } from "./terminal/terminalGateway.js";
 import {
   attach,
   detach,
   ensureNetwork,
+  reconcileOnBoot,
   startIdleReaper,
   stopAllContainers,
 } from "./containers/containerManager.js";
@@ -75,9 +80,16 @@ app.use(
 app.use(cors({ origin: env.WEB_ORIGIN, credentials: true }));
 app.use(cookieParser());
 
+// Before the routes, so everything below inherits a request id.
+app.use(requestLogger);
+
+// Liveness only, and deliberately trivial: kept because things may already
+// point at it. /health is the one that checks Postgres and Docker.
 app.get("/ping", (_req, res) => {
   res.json({ message: "pong" });
 });
+
+app.get("/health", asyncHandler(healthCheck));
 
 // Mounted BEFORE the body parsers: the proxy has to stream the original request
 // body through, and express.json would have already consumed it.
@@ -135,7 +147,7 @@ installPreviewUpgrade(server, previewProxy);
 function startTokenPrune(): void {
   const sweep = (): void => {
     void pruneExpiredRefreshTokens().catch((error: unknown) => {
-      console.error("Could not prune refresh tokens:", error);
+      logger.error("could not prune refresh tokens", error);
     });
   };
 
@@ -145,6 +157,15 @@ function startTokenPrune(): void {
 
 async function start(): Promise<void> {
   await ensureNetwork();
+
+  // A crash or a `docker kill` leaves containers whose project is gone, and
+  // directories with no row. Neither used to be cleaned up, ever.
+  const reconciled = await reconcileOnBoot().catch((error: unknown) => {
+    logger.error("boot reconcile failed", error);
+    return undefined;
+  });
+  if (reconciled) logger.info("reconciled state", { ...reconciled });
+
   startIdleReaper();
   startTokenPrune();
 
@@ -154,14 +175,14 @@ async function start(): Promise<void> {
 
   server.on("error", (error: NodeJS.ErrnoException) => {
     if (error.code !== "EADDRINUSE" || attemptsLeft-- <= 0) {
-      console.error(error);
+      logger.error("server listen failed", error);
       process.exit(1);
     }
     setTimeout(() => server.listen(env.PORT), 300);
   });
 
   server.listen(env.PORT, () => {
-    console.log(`Server is running on port ${env.PORT}`);
+    logger.info("server listening", { port: env.PORT });
   });
 }
 
@@ -177,7 +198,7 @@ async function start(): Promise<void> {
  *  Node exiting by default, which is the behaviour we want here.
  */
 function die(reason: string, error: unknown): never {
-  console.error(`${reason}:`, error);
+  logger.error(reason, error);
   process.exit(1);
 }
 
@@ -187,7 +208,7 @@ async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
 
-  console.log(`\n${signal} received, shutting down`);
+  logger.info("shutting down", { signal });
 
   // Awaited so in-flight requests and sockets are given a chance to finish;
   // these used to be fired and forgotten a line before process.exit.

@@ -14,6 +14,8 @@ import { PREVIEW_COOKIE_NAME, verifyPreviewToken } from "../service/tokenService
 import { assertValidProjectId } from "../utils/projectPaths.js";
 import { UnauthorizedError } from "../utils/errors.js";
 import { env } from "../config/env.js";
+import { logger } from "../lib/logger.js";
+import { increment } from "../lib/metrics.js";
 
 /** Resolves the project's dev server address. The port comes from the
  *  template, which is why 5173 is no longer hardcoded in four places. */
@@ -159,7 +161,8 @@ export function createPreviewProxy(): PreviewProxy {
         res.setHeader("Content-Security-Policy", frameAncestors);
       },
       error: (error, _req, res) => {
-        console.error("Preview proxy error:", error.message);
+        increment("preview_errors");
+        logger.warn("preview proxy error", { reason: error.message });
         if ("writeHead" in res && !res.headersSent) {
           res.writeHead(502, { "Content-Type": "text/html; charset=utf-8" });
           res.end(
@@ -270,7 +273,10 @@ export function installPreviewUpgrade(
 
         proxy.upgrade(req as Request, socket as Socket, head);
       } catch (error) {
-        console.error("Preview upgrade rejected:", error);
+        increment("preview_upgrades_rejected");
+        logger.warn("preview upgrade rejected", {
+          reason: error instanceof Error ? error.message : String(error),
+        });
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
       }

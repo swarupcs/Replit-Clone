@@ -2,6 +2,7 @@ import type { Container, Exec } from "dockerode";
 import type { Duplex } from "node:stream";
 import type { WebSocket } from "ws";
 import { getTemplate } from "../templates/registry.js";
+import { logger } from "../lib/logger.js";
 
 /** Docker ignores a resize sent before the exec's process has claimed its TTY,
  *  and gives no error when it does. The requested size is re-sent at each of
@@ -65,7 +66,7 @@ export const handleTerminalCreation = (
     },
     (err: Error | null, exec?: Exec) => {
       if (err || !exec) {
-        console.error("Error while creating exec:", err);
+        logger.error("could not create terminal exec", err);
         ws.close(1011, "Could not open a shell");
         return;
       }
@@ -74,7 +75,7 @@ export const handleTerminalCreation = (
 
       startedExec.start({ hijack: true, stdin: true }, (startErr, stream) => {
         if (startErr || !stream) {
-          console.error("Error while starting exec:", startErr);
+          logger.error("could not start terminal exec", startErr);
           ws.close(1011, "Could not start a shell");
           return;
         }

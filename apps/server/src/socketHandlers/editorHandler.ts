@@ -13,6 +13,7 @@ import {
   recordWrite,
 } from "../service/diskUsageService.js";
 import { AppError } from "../utils/errors.js";
+import { logger } from "../lib/logger.js";
 import {
   getRunHistory,
   getRunState,
@@ -118,7 +119,7 @@ export const handleEditorSocketEvents = (
           socket.emit("error", { code: error.code, message: error.message });
           return;
         }
-        console.error(`editor:${action} failed for ${projectId}:`, error);
+        logger.error("editor operation failed", error, { action, projectId });
         socket.emit("error", {
           code: "OPERATION_FAILED",
           message: `Could not ${action}`,

@@ -10,6 +10,8 @@ import {
 } from "../utils/projectPaths.js";
 import { AppError } from "../utils/errors.js";
 import { getTemplate } from "../templates/registry.js";
+import { logger } from "../lib/logger.js";
+import { increment, registerGauge } from "../lib/metrics.js";
 
 const docker = new Docker();
 
@@ -130,6 +132,7 @@ async function startContainer(projectId: string): Promise<Container> {
   }
 
   if ((await runningCount()) >= env.MAX_CONCURRENT_CONTAINERS) {
+    increment("containers_capacity_rejected");
     throw new AppError(
       503,
       "CAPACITY",
@@ -199,6 +202,8 @@ async function startContainer(projectId: string): Promise<Container> {
 
   await container.start();
   lastActiveAt.set(projectId, Date.now());
+  increment("containers_started");
+  logger.info("container started", { projectId, image: template.image });
 
   return container;
 }
@@ -280,11 +285,12 @@ export function startIdleReaper(): void {
           const idleSince = lastActiveAt.get(name) ?? info.Created * 1000;
           if (Date.now() - idleSince < idleMs) continue;
 
-          console.log(`Reaping idle container for project ${name}`);
+          logger.info("reaping idle container", { projectId: name });
+          increment("containers_reaped");
           await docker.getContainer(info.Id).stop({ t: 5 }).catch(() => {});
         }
       } catch (error) {
-        console.error("Idle reaper failed:", error);
+        logger.error("idle reaper failed", error);
       }
     })();
   }, 60_000);
@@ -307,3 +313,84 @@ export async function stopAllContainers(): Promise<void> {
 
   if (reaperTimer) clearInterval(reaperTimer);
 }
+
+/** Confirms the Docker daemon is reachable. Used by the health endpoint. */
+export async function checkDocker(): Promise<void> {
+  await docker.ping();
+}
+
+/** Number of sandbox containers currently running. */
+export async function runningContainerCount(): Promise<number> {
+  return runningCount();
+}
+
+/** Reconciles Docker and the database against each other at boot.
+ *
+ *  A crash or a `docker kill` leaves state neither side cleans up: containers
+ *  whose project row is gone stay resident forever, and project directories
+ *  with no row sit on disk taking space nobody can see or reclaim. Both used to
+ *  survive indefinitely.
+ *
+ *  Only ever removes things that are unambiguously orphaned — a container or
+ *  directory whose project does not exist. Anything still referenced is left
+ *  alone, so this can never eat a live project.
+ */
+export async function reconcileOnBoot(): Promise<{
+  containersRemoved: number;
+  directoriesFound: number;
+}> {
+  const { prisma } = await import("../lib/prisma.js");
+  const projects = await prisma.project.findMany({ select: { id: true } });
+  const known = new Set(projects.map((project) => project.id));
+
+  let containersRemoved = 0;
+
+  const containers = await docker
+    .listContainers({ all: true, filters: { name: [CONTAINER_PREFIX] } })
+    .catch(() => []);
+
+  for (const info of containers) {
+    const name = info.Names.find((entry) =>
+      entry.startsWith(`/${CONTAINER_PREFIX}`),
+    );
+    if (!name) continue;
+
+    const projectId = name.slice(`/${CONTAINER_PREFIX}`.length);
+    if (known.has(projectId)) continue;
+
+    logger.info("removing orphaned container", { projectId });
+    await docker.getContainer(info.Id).remove({ force: true }).catch(() => {});
+    containersRemoved += 1;
+  }
+
+  // Directories are reported, not deleted. A row missing at boot is far more
+  // likely to mean the database is not the one this server used last than that
+  // the user's files are garbage, and deleting them would be unrecoverable.
+  const directoriesFound = await orphanedDirectories(known);
+
+  return { containersRemoved, directoriesFound };
+}
+
+async function orphanedDirectories(known: Set<string>): Promise<number> {
+  const { PROJECTS_ROOT } = await import("../config/env.js");
+
+  const entries = await fsp
+    .readdir(PROJECTS_ROOT, { withFileTypes: true })
+    .catch(() => []);
+
+  const orphans = entries
+    .filter((entry) => entry.isDirectory() && !known.has(entry.name))
+    .map((entry) => entry.name);
+
+  if (orphans.length > 0) {
+    logger.warn("project directories with no database row", {
+      count: orphans.length,
+      // Enough to act on without printing hundreds of ids.
+      examples: orphans.slice(0, 5),
+    });
+  }
+
+  return orphans.length;
+}
+
+registerGauge("containers_attached", () => activeAttachments.size);

@@ -1,6 +1,7 @@
 import argon2 from "argon2";
 import { prisma } from "../lib/prisma.js";
 import { ConflictError, UnauthorizedError } from "../utils/errors.js";
+import { increment } from "../lib/metrics.js";
 
 export interface PublicUser {
   id: string;
@@ -57,6 +58,7 @@ export async function authenticateUser(
   }
 
   if (!user || !valid) {
+    increment("auth_failures");
     throw new UnauthorizedError("Incorrect email or password");
   }
 
