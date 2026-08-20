@@ -83,7 +83,7 @@ export const EditorComponent = () => {
     }
 
     const uri = monaco.Uri.parse(`inmemory:///${activeTab.relPath}`);
-    const language = extensionToFileType(activeTab.extension);
+    const language = extensionToFileType(activeTab.extension, activeTab.name);
 
     let model = monaco.editor.getModel(uri);
     if (!model) {
@@ -229,7 +229,7 @@ export const EditorComponent = () => {
   }
 
   const segments = activeTab.relPath.split("/");
-  const language = extensionToFileType(activeTab.extension);
+  const language = extensionToFileType(activeTab.extension, activeTab.name);
 
   return (
     <div
