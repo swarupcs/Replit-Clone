@@ -169,8 +169,31 @@ export async function duplicateProjectService(
   return copy;
 }
 
-/** Directories a copy or an export has no business carrying. */
-const EXCLUDED_FROM_COPY =
-  /(^|[\\/])(node_modules|\.git|dist|build|\.next|__pycache__|\.venv)([\\/]|$)/;
+/** Directories a copy or an export has no business carrying.
+ *
+ *  Dependencies and build output are reproducible from the manifest and are
+ *  most of a project's bytes, so carrying them would make a duplicate slower
+ *  than a fresh install and an export far larger than it needs to be.
+ */
+export const EXCLUDED_DIRECTORIES = [
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  ".next",
+  "__pycache__",
+  ".venv",
+] as const;
 
-export { EXCLUDED_FROM_COPY };
+/** For `fs.cp`, which filters absolute paths. */
+const EXCLUDED_FROM_COPY = new RegExp(
+  `(^|[\\\\/])(${EXCLUDED_DIRECTORIES.map((name) =>
+    name.replace(/\./g, "\\."),
+  ).join("|")})([\\\\/]|$)`,
+);
+
+/** For archiver's glob, which takes patterns. Derived from the same list so
+ *  the two cannot drift apart. */
+export const EXCLUDED_GLOBS = EXCLUDED_DIRECTORIES.map(
+  (name) => `**/${name}/**`,
+);

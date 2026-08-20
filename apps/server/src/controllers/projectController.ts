@@ -5,7 +5,7 @@ import {
   createProjectService,
   deleteProjectService,
   duplicateProjectService,
-  EXCLUDED_FROM_COPY,
+  EXCLUDED_GLOBS,
   listProjects,
   projectDir,
   renameProjectService,
@@ -201,8 +201,7 @@ export async function exportProjectController(
   archive.glob("**/*", {
     cwd: projectDir(projectId),
     dot: true,
-    ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**",
-             "**/.next/**", "**/__pycache__/**", "**/.venv/**"],
+    ignore: [...EXCLUDED_GLOBS],
   });
 
   await archive.finalize();
