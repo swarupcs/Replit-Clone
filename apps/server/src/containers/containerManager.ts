@@ -83,13 +83,37 @@ async function runningCount(): Promise<number> {
   return containers.length;
 }
 
+/** In-flight `ensureContainer` calls, so concurrent callers share one attempt.
+ *
+ *  Opening a project fires this from the editor socket, from each terminal and
+ *  from the preview guard, often within the same tick. Without this they could
+ *  all miss the "already exists" check and race into createContainer, where
+ *  every loser failed on the duplicate name — and they could likewise all clear
+ *  the MAX_CONCURRENT_CONTAINERS check and overshoot the budget together.
+ */
+const starting = new Map<string, Promise<Container>>();
+
+export async function ensureContainer(projectId: string): Promise<Container> {
+  const inFlight = starting.get(projectId);
+  if (inFlight) return inFlight;
+
+  const attempt = startContainer(projectId).finally(() => {
+    starting.delete(projectId);
+  });
+
+  starting.set(projectId, attempt);
+  return attempt;
+}
+
 /** Starts (or reuses) the container for a project.
  *
  *  Unlike the original, this reuses a stopped container instead of destroying
  *  and recreating it, and applies hard resource limits — without them a single
  *  `npm install` or a fork bomb could take the whole VM down.
+ *
+ *  Always reached through `ensureContainer`, which serialises concurrent calls.
  */
-export async function ensureContainer(projectId: string): Promise<Container> {
+async function startContainer(projectId: string): Promise<Container> {
   const existing = await findContainer(projectId);
 
   if (existing) {

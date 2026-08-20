@@ -4,8 +4,6 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { createServer } from "node:http";
 import { Server } from "socket.io";
-import chokidar from "chokidar";
-import type { FSWatcher } from "chokidar";
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -19,7 +17,8 @@ import {
 } from "./routes/preview.js";
 import { env, isProduction } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";
-import { projectDir, touchProject } from "./service/projectService.js";
+import { touchProject } from "./service/projectService.js";
+import { retainProjectWatcher } from "./service/projectWatcher.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
 import { pruneExpiredRefreshTokens } from "./service/refreshTokenService.js";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
@@ -105,25 +104,18 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
   void touchProject(projectId);
   attach(projectId);
 
-  const watcher: FSWatcher = chokidar.watch(projectDir(projectId), {
-    ignored: (target: string) => target.includes("node_modules"),
-    persistent: true,
-    awaitWriteFinish: { stabilityThreshold: 500 },
-    ignoreInitial: true,
-  });
-
-  // The watcher used to only console.log, so the client's tree never refreshed
-  // when a command in the terminal created files.
-  watcher.on("all", () => {
+  // One watcher per project, shared by every tab. It used to be created per
+  // connection, so two tabs meant two recursive watchers over the same tree and
+  // two refetch broadcasts per change.
+  const releaseWatcher = retainProjectWatcher(projectId, () => {
     editorNamespace.to(projectId).emit("treeChanged");
   });
 
   handleEditorSocketEvents(socket, editorNamespace);
 
-  // The watcher previously outlived the socket, leaking one per connection.
   socket.on("disconnect", () => {
     detach(projectId);
-    void watcher.close();
+    releaseWatcher();
   });
 });
 
