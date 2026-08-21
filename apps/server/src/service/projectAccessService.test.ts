@@ -1,4 +1,5 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { dbScope } from "../test/dbScope.js";
 
 /** Access control decides who can read and write other people's work, so it is
  *  exercised against real rows rather than a stub. Set TEST_DATABASE_URL to a
@@ -6,6 +7,8 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
 describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
+  const scope = dbScope("project-access");
+
   let prisma: typeof import("../lib/prisma.js").prisma;
   let service: typeof import("./projectAccessService.js");
 
@@ -21,19 +24,16 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
   });
 
   beforeEach(async () => {
-    await prisma.projectCollaborator.deleteMany({});
-    await prisma.project.deleteMany({});
-    await prisma.user.deleteMany({});
-
-    const stamp = Date.now();
+    // Scoped, never truncated: these files run in parallel and truncating
+    // shared tables deletes rows another suite has just inserted.
     const owner = await prisma.user.create({
-      data: { email: `owner-${String(stamp)}@x.com`, passwordHash: "x" },
+      data: { email: scope.email("owner"), passwordHash: "x" },
     });
     const mate = await prisma.user.create({
-      data: { email: `mate-${String(stamp)}@x.com`, passwordHash: "x" },
+      data: { email: scope.email("mate"), passwordHash: "x" },
     });
     const stranger = await prisma.user.create({
-      data: { email: `stranger-${String(stamp)}@x.com`, passwordHash: "x" },
+      data: { email: scope.email("stranger"), passwordHash: "x" },
     });
     const project = await prisma.project.create({
       data: { name: "P", ownerId: owner.id, template: "react-vite" },
@@ -43,6 +43,10 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
     mateId = mate.id;
     strangerId = stranger.id;
     projectId = project.id;
+  });
+
+  afterEach(async () => {
+    await scope.cleanup(prisma);
   });
 
   const level = async (userId: string) =>

@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { dbScope } from "../test/dbScope.js";
 
 /** Needs real rows: the whole point is that the answer can change under a
  *  connection that is already open. */
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
 describe.skipIf(!TEST_DATABASE_URL)("accessWatch", () => {
+  const scope = dbScope("access-watch");
+
   let prisma: typeof import("../lib/prisma.js").prisma;
   let watch: typeof import("./accessWatch.js");
   let ownerId: string;
@@ -18,15 +21,11 @@ describe.skipIf(!TEST_DATABASE_URL)("accessWatch", () => {
     watch = await import("./accessWatch.js");
     watch.resetAccessWatch();
 
-    await prisma.projectCollaborator.deleteMany({});
-    await prisma.project.deleteMany({});
-    await prisma.user.deleteMany({});
-
     const owner = await prisma.user.create({
-      data: { email: `owner-${String(Date.now())}@example.com`, passwordHash: "x" },
+      data: { email: scope.email("owner"), passwordHash: "x" },
     });
     const collaborator = await prisma.user.create({
-      data: { email: `mate-${String(Date.now())}@example.com`, passwordHash: "x" },
+      data: { email: scope.email("mate"), passwordHash: "x" },
     });
     ownerId = owner.id;
     collaboratorId = collaborator.id;
@@ -41,8 +40,11 @@ describe.skipIf(!TEST_DATABASE_URL)("accessWatch", () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     watch.resetAccessWatch();
+    // Only this suite's rows. Truncating shared tables deletes what another
+    // suite running in parallel has just inserted.
+    await scope.cleanup(prisma);
   });
 
   it("says nothing while access is unchanged", async () => {

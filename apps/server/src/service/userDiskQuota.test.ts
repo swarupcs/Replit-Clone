@@ -1,10 +1,13 @@
 import fs from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { dbScope } from "../test/dbScope.js";
 
 /** Real rows: the quota is resolved through the project's owner. */
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
 describe.skipIf(!TEST_DATABASE_URL)("assertUserDiskQuota", () => {
+  const scope = dbScope("user-disk-quota");
+
   let prisma: typeof import("../lib/prisma.js").prisma;
   let quota: typeof import("./userQuotaService.js");
   let disk: typeof import("./diskUsageService.js");
@@ -21,12 +24,8 @@ describe.skipIf(!TEST_DATABASE_URL)("assertUserDiskQuota", () => {
     disk = await import("./diskUsageService.js");
     ({ projectRoot } = await import("../utils/projectPaths.js"));
 
-    await prisma.projectCollaborator.deleteMany({});
-    await prisma.project.deleteMany({});
-    await prisma.user.deleteMany({});
-
     const owner = await prisma.user.create({
-      data: { email: `owner-${String(Date.now())}@example.com`, passwordHash: "x" },
+      data: { email: scope.email("owner"), passwordHash: "x" },
     });
     ownerId = owner.id;
 
@@ -42,6 +41,7 @@ describe.skipIf(!TEST_DATABASE_URL)("assertUserDiskQuota", () => {
   afterEach(async () => {
     await fs.rm(projectRoot(projectId), { recursive: true, force: true });
     disk.forgetUsage(projectId);
+    await scope.cleanup(prisma);
   });
 
   it("allows a write that fits", async () => {

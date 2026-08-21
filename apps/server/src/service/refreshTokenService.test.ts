@@ -1,4 +1,5 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { dbScope } from "../test/dbScope.js";
 
 /** These exercise real rows, so they need a database.
  *
@@ -9,6 +10,8 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
 describe.skipIf(!TEST_DATABASE_URL)("refreshTokenService", () => {
+  const scope = dbScope("refresh-tokens");
+
   let prisma: typeof import("../lib/prisma.js").prisma;
   let service: typeof import("./refreshTokenService.js");
   let signRefreshToken: typeof import("./tokenService.js").signRefreshToken;
@@ -23,13 +26,15 @@ describe.skipIf(!TEST_DATABASE_URL)("refreshTokenService", () => {
   });
 
   beforeEach(async () => {
-    await prisma.refreshToken.deleteMany({});
-    await prisma.user.deleteMany({});
-
     const user = await prisma.user.create({
-      data: { email: `${Date.now()}@example.com`, passwordHash: "x" },
+      data: { email: scope.email(), passwordHash: "x" },
     });
     userId = user.id;
+  });
+
+  afterEach(async () => {
+    // Only this suite's rows; refresh tokens cascade from the user.
+    await scope.cleanup(prisma);
   });
 
   it("mints a distinct token every time", () => {
@@ -60,7 +65,7 @@ describe.skipIf(!TEST_DATABASE_URL)("refreshTokenService", () => {
     expect(second.userId).toBe(userId);
     expect(second.token).not.toBe(first.token);
 
-    const rows = await prisma.refreshToken.findMany();
+    const rows = await prisma.refreshToken.findMany({ where: { userId } });
     expect(new Set(rows.map((row) => row.familyId)).size).toBe(1);
   });
 
@@ -123,7 +128,7 @@ describe.skipIf(!TEST_DATABASE_URL)("refreshTokenService", () => {
 
   it("never stores the token itself", async () => {
     const issued = await service.issueRefreshToken(userId);
-    const rows = await prisma.refreshToken.findMany();
+    const rows = await prisma.refreshToken.findMany({ where: { userId } });
 
     for (const row of rows) {
       expect(row.tokenHash).not.toBe(issued.token);
@@ -143,10 +148,10 @@ describe.skipIf(!TEST_DATABASE_URL)("refreshTokenService", () => {
 
   it("leaves live rows alone when pruning", async () => {
     await service.issueRefreshToken(userId);
-    const before = await prisma.refreshToken.count();
+    const before = await prisma.refreshToken.count({ where: { userId } });
 
     expect(await service.pruneExpiredRefreshTokens()).toBe(0);
-    expect(await prisma.refreshToken.count()).toBe(before);
+    expect(await prisma.refreshToken.count({ where: { userId } })).toBe(before);
   });
 
   it("clears rows that are long past expiry", async () => {
