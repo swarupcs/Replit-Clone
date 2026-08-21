@@ -21,7 +21,7 @@ import { logger } from "./lib/logger.js";
 import { touchProject } from "./service/projectService.js";
 import { retainProjectWatcher } from "./service/projectWatcher.js";
 import { reportExternalChanges } from "./service/collabWatch.js";
-import { setDocSaveListener } from "./service/collabService.js";
+import { flushAllDocs, setDocSaveListener } from "./service/collabService.js";
 import { startAccessWatch, watchAccess } from "./service/accessWatch.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
 import { pruneExpiredRefreshTokens } from "./service/refreshTokenService.js";
@@ -313,6 +313,14 @@ async function shutdown(signal: string): Promise<void> {
   // Awaited so in-flight requests and sockets are given a chance to finish;
   // these used to be fired and forgotten a line before process.exit.
   await io.close();
+
+  // Before the process goes. Closing the sockets above runs each disconnect
+  // handler, but the flush inside those is not awaited by anything — so a
+  // deploy used to drop whatever had been typed since the last debounce, with
+  // no client-side copy to recover it from.
+  await flushAllDocs().catch((error: unknown) => {
+    logger.error("could not flush documents on shutdown", error);
+  });
   await new Promise<void>((resolve) => {
     server.close(() => {
       resolve();

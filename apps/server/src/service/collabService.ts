@@ -336,6 +336,33 @@ export async function flushAndDropDoc(
   dropDoc(projectId, relPath);
 }
 
+/** Writes out every document that has unsaved changes.
+ *
+ *  For shutdown. `io.close()` fires each socket's disconnect handler, whose
+ *  `leaveDoc` is not awaited by anything, and the process exited a couple of
+ *  lines later — so every deploy dropped up to the debounce window of
+ *  collaborative typing. The server owns saving these files, so there is no
+ *  client-side copy to fall back on.
+ */
+export async function flushAllDocs(): Promise<void> {
+  const pending = [...docs.keys()].map((id) => {
+    const [projectId, relPath] = id.split(KEY_SEPARATOR);
+    return { projectId, relPath };
+  });
+
+  // In parallel and individually guarded: one project's failure must not stop
+  // the rest from reaching disk during the little time a shutdown has.
+  await Promise.all(
+    pending.map(({ projectId, relPath }) =>
+      projectId !== undefined && relPath !== undefined
+        ? flushDoc(projectId, relPath).catch((error: unknown) => {
+            logger.error("could not flush on shutdown", error, { projectId, relPath });
+          })
+        : Promise.resolve(),
+    ),
+  );
+}
+
 /** Drops every document for a project, e.g. when it is deleted. */
 export function forgetProject(projectId: string): void {
   for (const [id, live] of docs) {
