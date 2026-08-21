@@ -9,7 +9,7 @@ const diskUsageService = vi.hoisted(() => ({
   assertWithinQuota: vi.fn(),
   recordWrite: vi.fn(),
 }));
-const claimForSandbox = vi.hoisted(() => vi.fn());
+const claimOneForSandbox = vi.hoisted(() => vi.fn());
 
 vi.mock("../service/projectService.js", () => projectService);
 vi.mock("../service/diskUsageService.js", () => diskUsageService);
@@ -17,7 +17,7 @@ vi.mock("../service/diskUsageService.js", () => diskUsageService);
 // suite exists to exercise, so it stays real.
 vi.mock("../utils/projectPaths.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../utils/projectPaths.js")>()),
-  claimForSandbox,
+  claimOneForSandbox,
 }));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -63,7 +63,7 @@ beforeEach(async () => {
   projectService.assertProjectAccess.mockResolvedValue({ id: TEST_PROJECT });
   diskUsageService.assertWithinQuota.mockResolvedValue(undefined);
   // The controller calls `.catch()` on the result, so this has to be a promise.
-  claimForSandbox.mockResolvedValue(undefined);
+  claimOneForSandbox.mockResolvedValue(undefined);
 
   await fs.rm(ROOT, { recursive: true, force: true });
   await fs.mkdir(ROOT, { recursive: true });
@@ -234,18 +234,23 @@ describe("uploadFilesController", () => {
   });
 
   /** New files must belong to the container's user like everything else in the
-   *  tree, or the project cannot modify what it was just given. */
-  it("hands the new files to the sandbox user", async () => {
+   *  tree, or the project cannot modify what it was just given.
+   *
+   *  The uploaded FILE, not its directory: claiming the destination walked
+   *  every path beneath it, so an upload to the project root re-chowned
+   *  node_modules on every single upload. */
+  it("hands the new file itself to the sandbox user", async () => {
     await request(app)
       .post(`/p/${TEST_PROJECT}/files`)
       .set(auth())
       .attach("files", Buffer.from("x"), "a.txt");
 
-    expect(claimForSandbox).toHaveBeenCalledWith(ROOT);
+    expect(claimOneForSandbox).toHaveBeenCalledWith(path.join(ROOT, "a.txt"));
+    expect(claimOneForSandbox).not.toHaveBeenCalledWith(ROOT);
   });
 
   it("still succeeds when the chown fails, since the write did not", async () => {
-    claimForSandbox.mockRejectedValue(new Error("EPERM"));
+    claimOneForSandbox.mockRejectedValue(new Error("EPERM"));
 
     const response = await request(app)
       .post(`/p/${TEST_PROJECT}/files`)

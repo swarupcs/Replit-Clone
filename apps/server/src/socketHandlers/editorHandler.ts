@@ -6,6 +6,9 @@ import { searchProject } from "../service/searchService.js";
 import {
   applyDocUpdate,
   docsForSocket,
+  dropDoc,
+  dropDocsUnder,
+  flushAndDropDoc,
   isLive,
   joinDoc,
   leaveDoc,
@@ -20,6 +23,7 @@ import {
   assertWithinQuota,
   recordWrite,
 } from "../service/diskUsageService.js";
+import { assertUserDiskQuota } from "../service/userQuotaService.js";
 import { AppError } from "../utils/errors.js";
 import { logger } from "../lib/logger.js";
 import {
@@ -111,14 +115,63 @@ function retainRunRelay(
   };
 }
 
+/** Room holding everyone with one file open.
+ *
+ *  Exported because the save announcement is raised by the flush timer in
+ *  collabService, which has no socket of its own to derive it from — and two
+ *  spellings of the same room is a bug that only shows up as "nothing
+ *  happened".
+ */
+/** Largest awareness payload worth relaying. A cursor and a selection are a
+ *  few hundred bytes; anything beyond this is not one. */
+const MAX_AWARENESS_BYTES = 64 * 1024;
+
+/** A simple per-socket budget for the events that do real work.
+ *
+ *  HTTP routes are rate limited and socket events were not, so `search`,
+ *  `readFile` and `statsRequest` — each of which costs file IO or a Docker
+ *  round trip — could be sent in a loop for free.
+ */
+class EventBudget {
+  private count = 0;
+  private windowStartedAt = Date.now();
+
+  constructor(
+    private readonly limit: number,
+    private readonly windowMs: number,
+  ) {}
+
+  /** True when this call is within budget. */
+  take(): boolean {
+    const now = Date.now();
+
+    if (now - this.windowStartedAt >= this.windowMs) {
+      this.windowStartedAt = now;
+      this.count = 0;
+    }
+
+    this.count += 1;
+    return this.count <= this.limit;
+  }
+}
+
+export function docRoomName(projectId: string, relPath: string): string {
+  return `${projectId}:doc:${relPath}`;
+}
+
 export const handleEditorSocketEvents = (
   socket: EditorSocket,
   editorNamespace: EditorNamespace,
 ): void => {
-  const { projectId, accessLevel } = socket.data;
+  const { projectId } = socket.data;
 
-  /** True when this connection may change the project or run code in it. */
-  const canEdit = accessLevel === "editor" || accessLevel === "owner";
+  /** True when this connection may change the project or run code in it.
+   *
+   *  Read at call time rather than captured once: access is rechecked while a
+   *  connection is open, and a level captured at connect would keep letting
+   *  someone write long after they were demoted to viewer. */
+  const canEdit = (): boolean =>
+    socket.data.accessLevel === "editor" || socket.data.accessLevel === "owner";
 
   /** Runs a handler with uniform error reporting.
    *
@@ -135,7 +188,7 @@ export const handleEditorSocketEvents = (
       // Checked per event rather than at connect: a viewer is allowed to
       // connect precisely so they can read, so the line has to be drawn
       // around the events that write or execute.
-      if (requiresEdit && !canEdit) {
+      if (requiresEdit && !canEdit()) {
         socket.emit("error", {
           code: "READ_ONLY",
           message: `You have read-only access and cannot ${action}`,
@@ -166,8 +219,27 @@ export const handleEditorSocketEvents = (
     editorNamespace.to(projectId).emit("treeChanged");
   }
 
+  // Each scans the tree or dials Docker, so each gets a budget. Generous for a
+  // person typing in a search box; not generous for a loop.
+  const searchBudget = new EventBudget(30, 60_000);
+  const statsBudget = new EventBudget(120, 60_000);
+  const readBudget = new EventBudget(600, 60_000);
+
+  function overBudget(action: string): boolean {
+    socket.emit("error", {
+      code: "TOO_MANY_REQUESTS",
+      message: `Too many requests to ${action}. Slow down and try again.`,
+    });
+    return true;
+  }
+
   socket.on("readFile", ({ relPath }) =>
     handle("read the file", async () => {
+      if (!readBudget.take()) {
+        overBudget("open files");
+        return;
+      }
+
       const absolute = resolveInProject(projectId, relPath);
 
       const stats = await fs.stat(absolute);
@@ -209,11 +281,19 @@ export const handleEditorSocketEvents = (
       const existing = await fs.stat(absolute).catch(() => undefined);
       const replacing = existing?.size ?? 0;
       await assertWithinQuota(projectId, incoming, replacing);
+      // The owner's overall budget, not just this project's. Checked only when
+      // a project was created, so it bound nothing that actually used disk.
+      await assertUserDiskQuota(projectId, incoming, replacing);
 
       await fs.writeFile(absolute, data, "utf8");
       recordWrite(projectId, incoming, replacing);
 
-      editorNamespace.to(projectId).emit("writeFileSuccess", { relPath });
+      // To the writer, not the room. This clears a tab's unsaved marker, and
+      // one person saving used to clear it for everybody with the file open —
+      // telling a second editor with genuinely unsaved work that it was safe,
+      // and disarming the warning when they closed the tab. A file edited
+      // together is a different case, and says so with `docSaved`.
+      socket.emit("writeFileSuccess", { relPath });
     }, true)(),
   );
 
@@ -241,9 +321,17 @@ export const handleEditorSocketEvents = (
 
   socket.on("deleteFile", ({ relPath }) =>
     handle("delete the file", async () => {
+      // Before the unlink, so a flush already on the clock cannot fire in
+      // between and put the file back. Discarded rather than written out:
+      // saving a file somebody just asked to delete is not a save.
+      dropDoc(projectId, relPath);
+
       await fs.unlink(resolveInProject(projectId, relPath));
 
-      socket.emit("deleteFileSuccess", { relPath });
+      // To the room. Everyone else has to drop the tab and, more to the
+      // point, the write they may have queued for it — which would otherwise
+      // put the file back moments after it was deleted.
+      editorNamespace.to(projectId).emit("deleteFileSuccess", { relPath });
       announceTreeChange();
     }, true)(),
   );
@@ -280,10 +368,14 @@ export const handleEditorSocketEvents = (
         return;
       }
 
+      // Every file inside it is going too, so no document under it may write
+      // itself back afterwards.
+      dropDocsUnder(projectId, relPath);
+
       // `fs.rmdir` with `recursive` is deprecated and a no-op on newer Node.
       await fs.rm(absolute, { recursive: true, force: true });
 
-      socket.emit("deleteFolderSuccess", { relPath });
+      editorNamespace.to(projectId).emit("deleteFolderSuccess", { relPath });
       announceTreeChange();
     }, true)(),
   );
@@ -314,9 +406,19 @@ export const handleEditorSocketEvents = (
         return;
       }
 
+      // Flushed before the move so edits from the last second travel with the
+      // file, then dropped so the document cannot write itself back to a name
+      // the file no longer has. Editors rejoin under the new path when their
+      // tab moves.
+      await flushAndDropDoc(projectId, relPath);
+
       await fs.rename(absolute, newAbsolute);
 
-      socket.emit("renameEntrySuccess", { relPath, newRelPath });
+      // To the room: a tab left on the old path saves the file back under a
+      // name it no longer has.
+      editorNamespace
+        .to(projectId)
+        .emit("renameEntrySuccess", { relPath, newRelPath });
       announceTreeChange();
     }, true)(),
   );
@@ -350,10 +452,17 @@ export const handleEditorSocketEvents = (
         return;
       }
 
+      // Same as a rename as far as the document is concerned: flush so nothing
+      // in flight is lost, then drop so it cannot recreate the old path.
+      await flushAndDropDoc(projectId, relPath);
+      dropDocsUnder(projectId, relPath);
+
       await fs.mkdir(path.dirname(newAbsolute), { recursive: true });
       await fs.rename(absolute, newAbsolute);
 
-      socket.emit("moveEntrySuccess", { relPath, newRelPath });
+      editorNamespace
+        .to(projectId)
+        .emit("moveEntrySuccess", { relPath, newRelPath });
       announceTreeChange();
     }, true)(),
   );
@@ -364,7 +473,7 @@ export const handleEditorSocketEvents = (
   // file open rather than everyone in the project.
 
   function docRoom(relPath: string): string {
-    return `${projectId}:doc:${relPath}`;
+    return docRoomName(projectId, relPath);
   }
 
   function announcePeers(relPath: string): void {
@@ -411,6 +520,14 @@ export const handleEditorSocketEvents = (
   socket.on("docAwareness", ({ relPath, update }) => {
     // Cursors are ephemeral and never touch disk, so a viewer may broadcast
     // theirs — seeing where someone is reading is the point.
+    //
+    // But this was the one handler outside `handle`, relaying whatever arrived
+    // for whatever path was named, at whatever size. A sender who does not
+    // have the file open has no cursor in it to report, and an awareness
+    // payload is a few hundred bytes at most.
+    if (!socket.rooms.has(docRoom(relPath))) return;
+    if (update.byteLength > MAX_AWARENESS_BYTES) return;
+
     socket.to(docRoom(relPath)).emit("docAwareness", { relPath, update });
   });
 
@@ -458,6 +575,11 @@ export const handleEditorSocketEvents = (
 
   socket.on("search", (options) =>
     handle("search the project", async () => {
+      if (!searchBudget.take()) {
+        overBudget("search");
+        return;
+      }
+
       // A user-supplied regex that does not compile is their mistake to see,
       // not a server error — buildPattern throws and `handle` reports it.
       const { matches, truncated } = await searchProject(projectId, options);
@@ -467,6 +589,8 @@ export const handleEditorSocketEvents = (
 
   socket.on("statsRequest", () =>
     handle("read container stats", async () => {
+      if (!statsBudget.take()) return;
+
       const stats = await readContainerStats(projectId);
       socket.emit("containerStats", {
         ...stats,

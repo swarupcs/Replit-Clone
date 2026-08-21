@@ -6,8 +6,13 @@ import { BadRequestError } from "../utils/errors.js";
  *
  *  Stored on the project row rather than in a dotfile in the working tree, so
  *  they are not committed by the user's own git, not included in an export, and
- *  not readable through the file tree. The container receives them at start;
- *  changing them takes effect on the next start, which is what Restart is for.
+ *  not readable through the file tree.
+ *
+ *  Docker fixes a container's environment when it is CREATED, and a stopped
+ *  container is reused rather than rebuilt — so for a while these took effect
+ *  only on a project that had never been opened. Containers now carry a label
+ *  recording which set they were built with, and one holding a stale set is
+ *  rebuilt on its next start. Restart is the shortest way to reach that.
  */
 
 /** POSIX-ish: a name the shell can actually export. */

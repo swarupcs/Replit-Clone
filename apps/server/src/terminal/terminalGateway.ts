@@ -13,6 +13,7 @@ import { assertProjectAccess, touchProject } from "../service/projectService.js"
 import { verifyAccessToken } from "../service/tokenService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
 import { logger } from "../lib/logger.js";
+import { watchAccess } from "../service/accessWatch.js";
 import { increment } from "../lib/metrics.js";
 import { AppError } from "../utils/errors.js";
 
@@ -53,6 +54,16 @@ function tokenFromRequest(req: IncomingMessage): string | undefined {
  *  own copy of the middleware and no npm script to start it. One process, one
  *  port, one place where auth is enforced.
  */
+/** Distinguishes one terminal from another in the access watch. A WebSocket
+ *  has no id of its own, and two shells on one project must be watched — and
+ *  released — separately. */
+let terminalCounter = 0;
+
+function nextTerminalId(): number {
+  terminalCounter += 1;
+  return terminalCounter;
+}
+
 export function installTerminalGateway(server: Server): void {
   // `noServer` so we own the upgrade and can reject before allocating a socket.
   const wss = new WebSocketServer({ noServer: true });
@@ -98,6 +109,28 @@ export function installTerminalGateway(server: Server): void {
             sink = handler;
             for (const buffered of inbox.splice(0)) handler(buffered);
           };
+
+          // A shell is the most privileged thing on offer here, and its
+          // authorisation was checked once at the upgrade and never again.
+          // Someone removed from a project kept a working shell inside its
+          // container until they closed the tab.
+          const releaseAccessWatch = watchAccess(`terminal:${String(nextTerminalId())}`, {
+            userId: claims.sub,
+            projectId,
+            level: "editor",
+            onRevoked: () => {
+              ws.close(4403, "Your access to this project was removed");
+            },
+            // A demotion to viewer is the same thing for a terminal: read-only
+            // access does not include a shell that can write the whole tree.
+            onChanged: (level) => {
+              if (level === "viewer") {
+                ws.close(4403, "You no longer have write access to this project");
+              }
+            },
+          });
+
+          ws.on("close", releaseAccessWatch);
 
           void startTerminal(ws, projectId, project.template, attachInput);
         });

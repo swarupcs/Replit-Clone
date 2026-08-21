@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { projectRoot } from "../utils/projectPaths.js";
-import { searchProject } from "./searchService.js";
+import { searchProject, SearchTimeoutError } from "./searchService.js";
 
 const PROJECT = "5d8f2a10-6c3b-4e9d-9f11-2a3b4c5d6e7f";
 const root = projectRoot(PROJECT);
@@ -106,5 +106,25 @@ describe("searchProject", () => {
 
     // Lines 1 and 3 both mention it; a shared regex lastIndex used to skip one.
     expect(inMain.map((match) => match.line)).toEqual([1, 3]);
+  });
+
+  it("stops a pattern that would never finish, instead of hanging the server", async () => {
+    // Catastrophic backtracking: this does not complete in any useful time on
+    // a line of this length, and nothing can interrupt a match in progress.
+    // Run on the main thread it took the whole process down with it.
+    await fs.writeFile(`${root}/src/bait.txt`, `${"a".repeat(60)}!\n`);
+
+    await expect(search("(a+)+$", { isRegex: true })).rejects.toBeInstanceOf(
+      SearchTimeoutError,
+    );
+
+    await fs.rm(`${root}/src/bait.txt`, { force: true });
+  }, 20_000);
+
+  it("still answers normally after a search was abandoned", async () => {
+    // The worker is per search, so one that had to be terminated leaves
+    // nothing behind for the next.
+    const { matches } = await search("greeting");
+    expect(matches.length).toBeGreaterThan(0);
   });
 });

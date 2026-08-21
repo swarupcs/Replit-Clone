@@ -21,6 +21,8 @@ import { logger } from "./lib/logger.js";
 import { touchProject } from "./service/projectService.js";
 import { retainProjectWatcher } from "./service/projectWatcher.js";
 import { reportExternalChanges } from "./service/collabWatch.js";
+import { flushAllDocs, setDocSaveListener } from "./service/collabService.js";
+import { startAccessWatch, watchAccess } from "./service/accessWatch.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
 import { pruneExpiredRefreshTokens } from "./service/refreshTokenService.js";
 import { pruneUserTokens } from "./service/userTokenService.js";
@@ -38,6 +40,7 @@ import {
   stopAllContainers,
 } from "./containers/containerManager.js";
 import {
+  docRoomName,
   handleEditorSocketEvents,
   type EditorSocket,
 } from "./socketHandlers/editorHandler.js";
@@ -109,6 +112,14 @@ app.use(errorHandler);
 const editorNamespace = io.of("/editor");
 installSocketAuth(editorNamespace);
 
+// While a file is shared the server writes it, so the client never sends
+// `writeFile` and never sees `writeFileSuccess` — which is the only thing that
+// clears a tab's unsaved marker. Without this every open file stayed dirty
+// forever, long after it had reached disk.
+setDocSaveListener((projectId, relPath) => {
+  editorNamespace.to(docRoomName(projectId, relPath)).emit("docSaved", { relPath });
+});
+
 editorNamespace.on("connection", (socket: EditorSocket) => {
   const { projectId } = socket.data;
 
@@ -137,9 +148,31 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
 
   handleEditorSocketEvents(socket, editorNamespace);
 
+  // Access was checked once, at the handshake, and never again — so removing
+  // a collaborator left their open editor exactly as privileged as before,
+  // for as long as they kept the page open.
+  const releaseAccessWatch = watchAccess(socket.id, {
+    userId: socket.data.userId,
+    projectId,
+    level: socket.data.accessLevel,
+    onRevoked: () => {
+      socket.emit("error", {
+        code: "ACCESS_REVOKED",
+        message: "Your access to this project was removed",
+      });
+      socket.disconnect(true);
+    },
+    onChanged: (level) => {
+      // Written back because the per-event edit check reads it from here.
+      socket.data.accessLevel = level;
+      socket.emit("projectAccess", { level });
+    },
+  });
+
   socket.on("disconnect", () => {
     detach(projectId);
     releaseWatcher();
+    releaseAccessWatch();
   });
 });
 
@@ -149,6 +182,32 @@ installTerminalGateway(server);
 // Vite's HMR socket rides the preview path, and Express middleware does not run
 // for upgrades — so this authorises and routes them itself.
 installPreviewUpgrade(server, previewProxy);
+
+// Last, after every handler that owns a path has had its turn.
+//
+// Node destroys an upgrade nobody is listening for, but only while there are
+// NO listeners at all. Three are registered above, and each returns silently
+// for a path it does not own — so an upgrade to anything else was accepted and
+// then abandoned, held open until the OS timed it out. Someone has to close
+// them, and it may as well be the one that knows nobody else did.
+server.on("upgrade", (req, socket) => {
+  const path = new URL(req.url ?? "/", "http://localhost").pathname;
+
+  if (
+    path.startsWith("/preview/") ||
+    path.startsWith("/terminal") ||
+    path.startsWith("/socket.io")
+  ) {
+    return;
+  }
+
+  // `destroyed` guards the case where a handler above already dealt with it
+  // and simply did not match our prefixes.
+  if (socket.destroyed) return;
+
+  socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+  socket.destroy();
+});
 
 /** Clears refresh tokens that can no longer authorise anything.
  *
@@ -233,6 +292,7 @@ async function start(): Promise<void> {
 
   startIdleReaper();
   startTokenPrune();
+  startAccessWatch();
 
   // A `tsx watch` restart can race the previous process releasing the port on
   // Windows, which otherwise kills the dev server outright.
@@ -279,6 +339,14 @@ async function shutdown(signal: string): Promise<void> {
   // Awaited so in-flight requests and sockets are given a chance to finish;
   // these used to be fired and forgotten a line before process.exit.
   await io.close();
+
+  // Before the process goes. Closing the sockets above runs each disconnect
+  // handler, but the flush inside those is not awaited by anything — so a
+  // deploy used to drop whatever had been typed since the last debounce, with
+  // no client-side copy to recover it from.
+  await flushAllDocs().catch((error: unknown) => {
+    logger.error("could not flush documents on shutdown", error);
+  });
   await new Promise<void>((resolve) => {
     server.close(() => {
       resolve();

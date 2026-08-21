@@ -1,10 +1,13 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { dbScope } from "../test/dbScope.js";
 
 /** One-time tokens gate password reset, so they are exercised against real
  *  rows. Set TEST_DATABASE_URL to a throwaway Postgres; CI always does. */
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
 describe.skipIf(!TEST_DATABASE_URL)("user tokens", () => {
+  const scope = dbScope("user-tokens");
+
   let prisma: typeof import("../lib/prisma.js").prisma;
   let service: typeof import("./userTokenService.js");
   let userId: string;
@@ -16,13 +19,14 @@ describe.skipIf(!TEST_DATABASE_URL)("user tokens", () => {
   });
 
   beforeEach(async () => {
-    await prisma.userToken.deleteMany({});
-    await prisma.user.deleteMany({});
-
     const user = await prisma.user.create({
-      data: { email: `u-${String(Date.now())}@x.com`, passwordHash: "x" },
+      data: { email: scope.email(), passwordHash: "x" },
     });
     userId = user.id;
+  });
+
+  afterEach(async () => {
+    await scope.cleanup(prisma);
   });
 
   const reset = () => service.UserTokenPurpose.PASSWORD_RESET;
@@ -35,7 +39,7 @@ describe.skipIf(!TEST_DATABASE_URL)("user tokens", () => {
 
   it("stores only a hash, never the token itself", async () => {
     const token = await service.issueUserToken(userId, reset());
-    const rows = await prisma.userToken.findMany();
+    const rows = await prisma.userToken.findMany({ where: { userId } });
 
     for (const row of rows) {
       expect(row.tokenHash).not.toBe(token);

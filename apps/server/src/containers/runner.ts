@@ -233,8 +233,25 @@ export async function startRun(projectId: string): Promise<void> {
     return;
   }
 
-  const container = await ensureContainer(projectId);
-  const template = await templateForProject(projectId);
+  // Claimed BEFORE the first await. The check above and the `setState` below
+  // used to sit either side of two of them, so two Run clicks in the same tick
+  // both passed the guard and both started a dev server — the second failing
+  // to bind the port, and its output arriving from a process the run state had
+  // no record of.
+  current.state = { status: "starting", command: "" };
+
+  let container;
+  let template;
+
+  try {
+    container = await ensureContainer(projectId);
+    template = await templateForProject(projectId);
+  } catch (error) {
+    // The claim has to be given back, or the project can never be run again
+    // without a restart.
+    setState(projectId, { status: "idle" });
+    throw error;
+  }
 
   current.history = [];
   current.pgid = undefined;
@@ -286,7 +303,14 @@ export async function startRun(projectId: string): Promise<void> {
     if (visible) pushOutput(projectId, visible);
   });
 
+  // `end` and `close` both fire on a natural exit, and this used to run for
+  // each — emitting the same exited state twice.
+  let finished = false;
+
   const finish = (): void => {
+    if (finished) return;
+    finished = true;
+
     void (async () => {
       const live = sessions.get(projectId);
       if (!live || live.state.status === "idle") return;
@@ -339,6 +363,21 @@ export async function stopRun(projectId: string): Promise<void> {
 
   const { pgid } = current;
 
+  if (!pgid) {
+    // The marker never arrived, so there is no process group to signal. The
+    // old code ran `true` here, reported "Stopped." and set the state to idle
+    // — while the dev server carried on holding the port, which then made the
+    // next Run look broken for no visible reason.
+    stopProbing(current);
+    logger.warn("cannot stop the run: no process group was captured", { projectId });
+    pushOutput(
+      projectId,
+      "\r\n\x1b[31mCould not stop the dev server: its process group was never " +
+        "reported. Restart the project container to clear it.\x1b[0m\r\n",
+    );
+    return;
+  }
+
   try {
     const container = await ensureContainer(projectId);
 
@@ -349,15 +388,16 @@ export async function stopRun(projectId: string): Promise<void> {
       Cmd: [
         "/bin/bash",
         "-lc",
-        pgid
-          ? `kill -TERM -${pgid} 2>/dev/null || true; ` +
-            `sleep 1; kill -KILL -${pgid} 2>/dev/null || true`
-          : "true",
+        `kill -TERM -${pgid} 2>/dev/null || true; ` +
+          `sleep 1; kill -KILL -${pgid} 2>/dev/null || true`,
       ],
       AttachStdout: false,
       AttachStderr: false,
     });
-    await killer.start({ hijack: false, stdin: false });
+    // Destroyed rather than dropped: dockerode returns a stream whatever the
+    // attach flags say, and each stop used to leave one behind.
+    const killStream = await killer.start({ hijack: false, stdin: false });
+    killStream.destroy();
   } catch {
     // Container already gone: nothing to stop.
   }
