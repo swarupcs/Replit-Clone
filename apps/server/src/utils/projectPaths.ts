@@ -103,6 +103,17 @@ export async function claimForSandbox(target: string): Promise<void> {
   }
 }
 
+/** Gives ONE path to the sandbox uid, without descending anywhere.
+ *
+ *  For a file that has just been written. `claimForSandbox` walks the whole
+ *  tree, so calling it on an upload's destination re-chowned everything under
+ *  it — uploading to the project root meant tens of thousands of `lchown`
+ *  calls across `node_modules`, on every single upload.
+ */
+export async function claimOneForSandbox(target: string): Promise<void> {
+  await fs.lchown(target, SANDBOX_UID, SANDBOX_GID);
+}
+
 /** The `user:group` a project's container must run as.
  *
  *  Matching the bind mount's owner is what makes it writable. Never uid 0: the

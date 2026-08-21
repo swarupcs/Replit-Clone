@@ -146,6 +146,26 @@ async function runningCount(): Promise<number> {
  */
 const starting = new Map<string, Promise<Container>>();
 
+/** Serialises the capacity checks across DIFFERENT projects too.
+ *
+ *  `starting` is keyed by project, which is what stops two callers racing over
+ *  the same one. But the global cap and the per-user budget are counts of
+ *  every container on the machine, read inside that per-project section — so
+ *  several different projects starting at once all read the same figure, all
+ *  passed, and the limit was quietly exceeded by however many arrived
+ *  together. This makes the count-and-create step one at a time.
+ */
+let capacityGate: Promise<unknown> = Promise.resolve();
+
+function withCapacityGate<T>(work: () => Promise<T>): Promise<T> {
+  const next = capacityGate.then(work, work);
+
+  // The chain must not break on a rejection, or every later start inherits it.
+  capacityGate = next.catch(() => undefined);
+
+  return next;
+}
+
 export async function ensureContainer(projectId: string): Promise<Container> {
   const inFlight = starting.get(projectId);
   if (inFlight) return inFlight;
@@ -195,17 +215,6 @@ async function startContainer(projectId: string): Promise<Container> {
     await docker.getContainer(existing.Id).remove({ force: true }).catch(() => {});
   }
 
-  if ((await runningCount()) >= env.MAX_CONCURRENT_CONTAINERS) {
-    increment("containers_capacity_rejected");
-    throw new AppError(
-      503,
-      "CAPACITY",
-      "The server is at capacity. Close another project and try again.",
-    );
-  }
-
-  await assertUserContainerBudget(projectId);
-
   const template = await templateForProject(projectId);
 
   // Projects scaffolded before ownership was claimed still belong to whoever
@@ -234,53 +243,68 @@ async function startContainer(projectId: string): Promise<Container> {
     ]),
   );
 
-  const container = await docker.createContainer({
-    Image: template.image,
-    name: containerName(projectId),
-    Tty: true,
-    OpenStdin: true,
-    // Matched to the bind mount's owner, because a bind mount keeps the host's
-    // ownership and the image's own chown is masked by it. The execs that
-    // terminals and the Run button open leave `User` unset so Docker inherits
-    // this, rather than restating a uid that could drift from it.
-    User: await containerUser(projectId),
-    WorkingDir: "/home/sandbox/app",
-    Env: [
-      "HOST=0.0.0.0",
-      // Vite serves under this base so the proxied path resolves correctly.
-      `PREVIEW_BASE=/preview/${projectId}/`,
-      // The project's own variables. Last, so they cannot shadow the two above
-      // — the env service already refuses those names, and this is the belt to
-      // that braces.
-      ...toDockerEnv(envVars),
-    ],
-    // What the reuse check above compares against.
-    Labels: { [ENV_SIGNATURE_LABEL]: signature },
-    ...(publishPort ? { ExposedPorts: exposedPorts } : {}),
-    // Idle process; terminals attach with `docker exec`.
-    Cmd: ["sleep", "infinity"],
-    HostConfig: {
-      ...(publishPort ? { PortBindings: portBindings } : {}),
-      Binds: [
-        `${projectRoot(projectId)}:/home/sandbox/app`,
-        // Package caches, in a named volume rather than the container's
-        // writable layer. Containers are stopped when idle and removed on a
-        // restart, so without this every cold start re-downloaded the whole of
-        // node_modules — minutes of waiting for a project that had not changed.
-        `${cacheVolumeName(projectId)}:/home/sandbox/.cache`,
+  const container = await withCapacityGate(async () => {
+    // Counted and created without interruption, so two projects starting
+    // together cannot both read the same figure and both pass.
+    if ((await runningCount()) >= env.MAX_CONCURRENT_CONTAINERS) {
+      increment("containers_capacity_rejected");
+      throw new AppError(
+        503,
+        "CAPACITY",
+        "The server is at capacity. Close another project and try again.",
+      );
+    }
+
+    await assertUserContainerBudget(projectId);
+
+    return docker.createContainer({
+      Image: template.image,
+      name: containerName(projectId),
+      Tty: true,
+      OpenStdin: true,
+      // Matched to the bind mount's owner, because a bind mount keeps the host's
+      // ownership and the image's own chown is masked by it. The execs that
+      // terminals and the Run button open leave `User` unset so Docker inherits
+      // this, rather than restating a uid that could drift from it.
+      User: await containerUser(projectId),
+      WorkingDir: "/home/sandbox/app",
+      Env: [
+        "HOST=0.0.0.0",
+        // Vite serves under this base so the proxied path resolves correctly.
+        `PREVIEW_BASE=/preview/${projectId}/`,
+        // The project's own variables. Last, so they cannot shadow the two above
+        // — the env service already refuses those names, and this is the belt to
+        // that braces.
+        ...toDockerEnv(envVars),
       ],
-      Memory: env.CONTAINER_MEMORY_MB * 1024 * 1024,
-      // Equal to Memory disables swap, so a container cannot evade its limit
-      // by swapping the host to death.
-      MemorySwap: env.CONTAINER_MEMORY_MB * 1024 * 1024,
-      NanoCpus: Math.round(env.CONTAINER_CPUS * 1e9),
-      // Caps a fork bomb.
-      PidsLimit: 256,
-      CapDrop: ["ALL"],
-      SecurityOpt: ["no-new-privileges"],
-      NetworkMode: SANDBOX_NETWORK,
-      RestartPolicy: { Name: "no" },
-    },
+      // What the reuse check above compares against.
+      Labels: { [ENV_SIGNATURE_LABEL]: signature },
+      ...(publishPort ? { ExposedPorts: exposedPorts } : {}),
+      // Idle process; terminals attach with `docker exec`.
+      Cmd: ["sleep", "infinity"],
+      HostConfig: {
+        ...(publishPort ? { PortBindings: portBindings } : {}),
+        Binds: [
+          `${projectRoot(projectId)}:/home/sandbox/app`,
+          // Package caches, in a named volume rather than the container's
+          // writable layer. Containers are stopped when idle and removed on a
+          // restart, so without this every cold start re-downloaded the whole of
+          // node_modules — minutes of waiting for a project that had not changed.
+          `${cacheVolumeName(projectId)}:/home/sandbox/.cache`,
+        ],
+        Memory: env.CONTAINER_MEMORY_MB * 1024 * 1024,
+        // Equal to Memory disables swap, so a container cannot evade its limit
+        // by swapping the host to death.
+        MemorySwap: env.CONTAINER_MEMORY_MB * 1024 * 1024,
+        NanoCpus: Math.round(env.CONTAINER_CPUS * 1e9),
+        // Caps a fork bomb.
+        PidsLimit: 256,
+        CapDrop: ["ALL"],
+        SecurityOpt: ["no-new-privileges"],
+        NetworkMode: SANDBOX_NETWORK,
+        RestartPolicy: { Name: "no" },
+      },
+    });
   });
 
   await container.start();

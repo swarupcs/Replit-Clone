@@ -23,6 +23,7 @@ import {
   assertWithinQuota,
   recordWrite,
 } from "../service/diskUsageService.js";
+import { assertUserDiskQuota } from "../service/userQuotaService.js";
 import { AppError } from "../utils/errors.js";
 import { logger } from "../lib/logger.js";
 import {
@@ -227,6 +228,9 @@ export const handleEditorSocketEvents = (
       const existing = await fs.stat(absolute).catch(() => undefined);
       const replacing = existing?.size ?? 0;
       await assertWithinQuota(projectId, incoming, replacing);
+      // The owner's overall budget, not just this project's. Checked only when
+      // a project was created, so it bound nothing that actually used disk.
+      await assertUserDiskQuota(projectId, incoming, replacing);
 
       await fs.writeFile(absolute, data, "utf8");
       recordWrite(projectId, incoming, replacing);

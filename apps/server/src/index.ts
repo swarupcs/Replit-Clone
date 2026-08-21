@@ -183,6 +183,32 @@ installTerminalGateway(server);
 // for upgrades — so this authorises and routes them itself.
 installPreviewUpgrade(server, previewProxy);
 
+// Last, after every handler that owns a path has had its turn.
+//
+// Node destroys an upgrade nobody is listening for, but only while there are
+// NO listeners at all. Three are registered above, and each returns silently
+// for a path it does not own — so an upgrade to anything else was accepted and
+// then abandoned, held open until the OS timed it out. Someone has to close
+// them, and it may as well be the one that knows nobody else did.
+server.on("upgrade", (req, socket) => {
+  const path = new URL(req.url ?? "/", "http://localhost").pathname;
+
+  if (
+    path.startsWith("/preview/") ||
+    path.startsWith("/terminal") ||
+    path.startsWith("/socket.io")
+  ) {
+    return;
+  }
+
+  // `destroyed` guards the case where a handler above already dealt with it
+  // and simply did not match our prefixes.
+  if (socket.destroyed) return;
+
+  socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+  socket.destroy();
+});
+
 /** Clears refresh tokens that can no longer authorise anything.
  *
  *  Rotation writes a row per refresh, so without this the table grows for the

@@ -8,7 +8,8 @@ import {
   assertWithinQuota,
   recordWrite,
 } from "../service/diskUsageService.js";
-import { claimForSandbox } from "../utils/projectPaths.js";
+import { assertUserDiskQuota } from "../service/userQuotaService.js";
+import { claimOneForSandbox } from "../utils/projectPaths.js";
 import { assertValidProjectId, resolveInProject } from "../utils/projectPaths.js";
 import { BadRequestError } from "../utils/errors.js";
 import { logger } from "../lib/logger.js";
@@ -70,17 +71,29 @@ export async function uploadFilesController(
 
     const existing = await fs.stat(absolute).catch(() => undefined);
     await assertWithinQuota(projectId, file.size, existing?.size ?? 0);
+    await assertUserDiskQuota(projectId, file.size, existing?.size ?? 0);
 
     await fs.mkdir(destAbsolute, { recursive: true });
     await fs.writeFile(absolute, file.buffer);
     recordWrite(projectId, file.size, existing?.size ?? 0);
 
+    // The uploaded file belongs to the container's user like everything else
+    // in the tree, or the project cannot modify what it was just given.
+    //
+    // Just this file. Claiming the whole destination directory walked every
+    // path under it, so an upload to the project root re-chowned node_modules
+    // each time — and swallowing the failure left the new file unwritable by
+    // the container with nothing said about it.
+    await claimOneForSandbox(absolute).catch((error: unknown) => {
+      logger.warn("could not hand an uploaded file to the sandbox user", {
+        projectId,
+        relPath,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    });
+
     written.push(relPath);
   }
-
-  // New files belong to the container's user like everything else in the tree,
-  // or the project could not modify what it was just given.
-  await claimForSandbox(destAbsolute).catch(() => {});
 
   logger.info("files uploaded", { projectId, count: written.length });
 

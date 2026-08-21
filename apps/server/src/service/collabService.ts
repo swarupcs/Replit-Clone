@@ -4,6 +4,7 @@ import { MAX_FILE_BYTES } from "@replit-clone/shared";
 import { logger } from "../lib/logger.js";
 import { resolveInProject } from "../utils/projectPaths.js";
 import { assertWithinQuota, recordWrite } from "./diskUsageService.js";
+import { assertUserDiskQuota } from "./userQuotaService.js";
 
 /** Shared editing, one CRDT document per open file.
  *
@@ -194,6 +195,7 @@ export async function flushDoc(projectId: string, relPath: string): Promise<void
   try {
     const existing = await fs.stat(absolute).catch(() => undefined);
     await assertWithinQuota(projectId, incoming, existing?.size ?? 0);
+    await assertUserDiskQuota(projectId, incoming, existing?.size ?? 0);
 
     await fs.writeFile(absolute, contents, "utf8");
     recordWrite(projectId, incoming, existing?.size ?? 0);
