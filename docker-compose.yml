@@ -14,8 +14,8 @@ services:
       # Hyper-V/WSL reserved range (netsh interface ipv4 show
       # excludedportrange protocol=tcp), and Docker cannot publish into one.
       # The container then runs healthy while the host port never binds, so
-      # every connection is refused. 6543 sits outside those ranges.
-      - "${POSTGRES_PORT:-6543}:5432"
+      # every connection is refused. 15432 sits outside those ranges.
+      - "${POSTGRES_PORT:-15432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
