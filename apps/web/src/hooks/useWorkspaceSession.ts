@@ -54,16 +54,26 @@ export function useWorkspaceSession(
 
     reopenedRef.current = projectId;
 
-    useTreeStructureStore.getState().setExpandedPaths(session.expandedPaths);
+    // Restoring an arrangement is a convenience; opening the project is not.
+    // This runs in an effect belonging to ProjectPlayground, which sits ABOVE
+    // every panel-level error boundary, so anything thrown here used to take
+    // the whole page down to "Something broke" — one unreadable value in
+    // localStorage and the IDE would not open at all. Failing quietly costs
+    // the user their tab layout and nothing else.
+    try {
+      useTreeStructureStore.getState().setExpandedPaths(session.expandedPaths);
 
-    // The active file last, so it ends up focused after the others have opened.
-    const ordered = [
-      ...session.openPaths.filter((path) => path !== session.activeRelPath),
-      ...(session.activeRelPath ? [session.activeRelPath] : []),
-    ];
+      // The active file last, so it ends up focused after the others.
+      const ordered = [
+        ...session.openPaths.filter((path) => path !== session.activeRelPath),
+        ...(session.activeRelPath ? [session.activeRelPath] : []),
+      ];
 
-    for (const relPath of ordered) {
-      socket.emit("readFile", { relPath });
+      for (const relPath of ordered) {
+        socket.emit("readFile", { relPath });
+      }
+    } catch (error) {
+      console.warn("could not restore the workspace session", error);
     }
   }, [projectId, socket]);
 
