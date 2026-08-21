@@ -152,8 +152,17 @@ export function createPreviewProxy(): PreviewProxy {
   return createProxyMiddleware<Request, Response>({
     router: (req) => targets.get(req) ?? "http://127.0.0.1:1",
     changeOrigin: true,
-    // Vite's HMR socket rides this same path.
-    ws: true,
+    // Vite's HMR socket rides this same path, but it is proxied EXPLICITLY by
+    // installPreviewUpgrade (which authorises first, then calls proxy.upgrade).
+    //
+    // `ws: true` must stay OFF here. It makes http-proxy-middleware auto-attach
+    // its own `server.on('upgrade')` handler on the first HTTP request -- and
+    // that handler has no pathFilter, so it proxies EVERY upgrade, including
+    // /terminal, to the router's fallback target (127.0.0.1:1), destroying the
+    // socket. That is why the terminal worked only until the preview panel made
+    // its first request, then died with a 1006 for the rest of the session.
+    // With it off, only our path-scoped handler touches upgrades.
+    ws: false,
     // Express already strips the mount prefix from req.url. Vite is configured
     // with base=/preview/<id>/ and expects to SEE that prefix, so for those
     // templates the original path is restored; every other dev server serves
