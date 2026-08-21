@@ -226,7 +226,12 @@ export const handleEditorSocketEvents = (
       await fs.writeFile(absolute, data, "utf8");
       recordWrite(projectId, incoming, replacing);
 
-      editorNamespace.to(projectId).emit("writeFileSuccess", { relPath });
+      // To the writer, not the room. This clears a tab's unsaved marker, and
+      // one person saving used to clear it for everybody with the file open —
+      // telling a second editor with genuinely unsaved work that it was safe,
+      // and disarming the warning when they closed the tab. A file edited
+      // together is a different case, and says so with `docSaved`.
+      socket.emit("writeFileSuccess", { relPath });
     }, true)(),
   );
 
@@ -261,7 +266,10 @@ export const handleEditorSocketEvents = (
 
       await fs.unlink(resolveInProject(projectId, relPath));
 
-      socket.emit("deleteFileSuccess", { relPath });
+      // To the room. Everyone else has to drop the tab and, more to the
+      // point, the write they may have queued for it — which would otherwise
+      // put the file back moments after it was deleted.
+      editorNamespace.to(projectId).emit("deleteFileSuccess", { relPath });
       announceTreeChange();
     }, true)(),
   );
@@ -305,7 +313,7 @@ export const handleEditorSocketEvents = (
       // `fs.rmdir` with `recursive` is deprecated and a no-op on newer Node.
       await fs.rm(absolute, { recursive: true, force: true });
 
-      socket.emit("deleteFolderSuccess", { relPath });
+      editorNamespace.to(projectId).emit("deleteFolderSuccess", { relPath });
       announceTreeChange();
     }, true)(),
   );
@@ -344,7 +352,11 @@ export const handleEditorSocketEvents = (
 
       await fs.rename(absolute, newAbsolute);
 
-      socket.emit("renameEntrySuccess", { relPath, newRelPath });
+      // To the room: a tab left on the old path saves the file back under a
+      // name it no longer has.
+      editorNamespace
+        .to(projectId)
+        .emit("renameEntrySuccess", { relPath, newRelPath });
       announceTreeChange();
     }, true)(),
   );
@@ -386,7 +398,9 @@ export const handleEditorSocketEvents = (
       await fs.mkdir(path.dirname(newAbsolute), { recursive: true });
       await fs.rename(absolute, newAbsolute);
 
-      socket.emit("moveEntrySuccess", { relPath, newRelPath });
+      editorNamespace
+        .to(projectId)
+        .emit("moveEntrySuccess", { relPath, newRelPath });
       announceTreeChange();
     }, true)(),
   );

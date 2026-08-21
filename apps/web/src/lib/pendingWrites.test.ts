@@ -5,6 +5,7 @@ import {
   flushWrite,
   pendingPaths,
   queueWrite,
+  renameWrite,
   resetPendingWrites,
   setWriteEmitter,
 } from "./pendingWrites.ts";
@@ -132,5 +133,41 @@ describe("without an emitter", () => {
 
     expect(() => vi.advanceTimersByTime(800)).not.toThrow();
     expect(pendingPaths()).toEqual([]);
+  });
+});
+
+describe("a file that is renamed mid-write", () => {
+  it("sends the queued text under the new name", () => {
+    queueWrite("old.ts", "typed", 800);
+    renameWrite("old.ts", "new.ts");
+    vi.advanceTimersByTime(800);
+
+    // Under the old name this recreates the file the rename just moved; and
+    // dropping it instead would lose whatever was typed last.
+    expect(written).toEqual([["new.ts", "typed"]]);
+  });
+
+  it("leaves the old name with nothing queued", () => {
+    queueWrite("old.ts", "typed", 800);
+    renameWrite("old.ts", "new.ts");
+
+    expect(pendingPaths()).toEqual(["new.ts"]);
+  });
+
+  it("does nothing for a file that had no write queued", () => {
+    queueWrite("other.ts", "kept", 800);
+    renameWrite("old.ts", "new.ts");
+    vi.advanceTimersByTime(800);
+
+    expect(written).toEqual([["other.ts", "kept"]]);
+  });
+
+  it("does not disturb another file's pending write", () => {
+    queueWrite("old.ts", "moved", 800);
+    queueWrite("other.ts", "stays", 800);
+    renameWrite("old.ts", "new.ts");
+    vi.advanceTimersByTime(800);
+
+    expect(written.sort()).toEqual([["new.ts", "moved"], ["other.ts", "stays"]]);
   });
 });

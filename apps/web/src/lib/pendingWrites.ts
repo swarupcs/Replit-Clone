@@ -67,6 +67,25 @@ export function discardWrite(relPath: string): void {
   pending.delete(relPath);
 }
 
+/** Moves a pending write to a path's new name.
+ *
+ *  A file can be renamed while a write for it is still on the clock. Left
+ *  alone, that write lands under the OLD name and recreates the file the
+ *  rename just moved. Dropping it instead would throw away whatever was typed
+ *  in the last second, so it is re-keyed rather than discarded.
+ */
+export function renameWrite(from: string, to: string): void {
+  const queued = pending.get(from);
+  if (!queued) return;
+
+  clearTimeout(queued.timer);
+  pending.delete(from);
+
+  // Re-queued with no delay left to serve: the debounce existed to batch
+  // keystrokes, and the rename has already interrupted that.
+  queueWrite(to, queued.data, 0);
+}
+
 /** Paths with a write still in flight. */
 export function pendingPaths(): string[] {
   return [...pending.keys()];

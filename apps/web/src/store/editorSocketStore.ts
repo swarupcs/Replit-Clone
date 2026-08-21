@@ -6,7 +6,7 @@ import type {
 } from "@replit-clone/shared";
 import { useOpenTabsStore } from "./openTabsStore.ts";
 import { useTreeStructureStore } from "./treeStructureStore.ts";
-import { discardWrite } from "../lib/pendingWrites.ts";
+import { discardWrite, renameWrite } from "../lib/pendingWrites.ts";
 
 export type EditorSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -56,6 +56,9 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
     });
 
     incomingSocket.on("renameEntrySuccess", ({ relPath, newRelPath }) => {
+      // The queued write moves with the tab. Left on the old key it would land
+      // under a name the file no longer has, recreating it there.
+      renameWrite(relPath, newRelPath);
       useOpenTabsStore.getState().renameTab(relPath, newRelPath);
     });
 
@@ -63,6 +66,7 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
     // concerned; leaving it on the old path would make the next save recreate
     // the file where it used to be.
     incomingSocket.on("moveEntrySuccess", ({ relPath, newRelPath }) => {
+      renameWrite(relPath, newRelPath);
       useOpenTabsStore.getState().renameTab(relPath, newRelPath);
     });
 
@@ -71,6 +75,21 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
       // been deleted would recreate it moments later.
       discardWrite(relPath);
       useOpenTabsStore.getState().closeTab(relPath);
+    });
+
+    // A folder takes every file under it. Without this those tabs stayed open
+    // over files that no longer exist, and their queued writes put them back —
+    // the same defect as a single delete, one level up.
+    incomingSocket.on("deleteFolderSuccess", ({ relPath }) => {
+      const prefix = `${relPath}/`;
+      const tabs = useOpenTabsStore.getState().tabs;
+
+      for (const tab of tabs) {
+        if (!tab.relPath.startsWith(prefix)) continue;
+
+        discardWrite(tab.relPath);
+        useOpenTabsStore.getState().closeTab(tab.relPath);
+      }
     });
 
     // Emitted by the server's chokidar watcher and after any mutation. The
