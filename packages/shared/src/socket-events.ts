@@ -1,3 +1,5 @@
+import type { AiActivity, AiAskPayload, AiStopReason } from "./ai.js";
+
 /** Typed socket.io contract for the `/editor` namespace.
  *
  *  Every path is a POSIX path RELATIVE to the project root. The server resolves
@@ -130,6 +132,17 @@ export interface ClientToServerEvents {
   docUpdate: (payload: { relPath: string; update: ArrayBuffer }) => void;
   /** Cursor and selection, for everyone else's benefit. Not persisted. */
   docAwareness: (payload: { relPath: string; update: ArrayBuffer }) => void;
+
+  // --- Assistant ---------------------------------------------------------
+  //
+  // Rides this socket rather than a REST endpoint of its own: the reply is a
+  // token stream, and this connection is already authenticated and pinned to
+  // one project. `runOutput` streams the same way for the same reason.
+
+  /** Ask a question. The reply arrives as `aiDelta`, then `aiDone`. */
+  aiAsk: (payload: AiAskPayload) => void;
+  /** Stop the reply in progress. Whatever has streamed already is kept. */
+  aiCancel: () => void;
 }
 
 /** Events the server emits to the browser. */
@@ -183,6 +196,15 @@ export interface ServerToClientEvents {
     matches: SearchMatch[];
     truncated: boolean;
   }) => void;
+  /** A piece of the assistant's answer. */
+  aiDelta: (payload: { text: string }) => void;
+  /** The assistant used a tool. Display only — see the note in ai.ts. */
+  aiActivity: (payload: AiActivity) => void;
+  /** The reply is finished, one way or another. */
+  aiDone: (payload: { stopReason: AiStopReason }) => void;
+  /** The reply failed. Separate from `error` because this belongs in the
+   *  conversation, not in the editor's error banner. */
+  aiError: (payload: { code: string; message: string }) => void;
   error: (payload: { code: string; message: string }) => void;
 }
 

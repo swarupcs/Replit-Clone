@@ -34,6 +34,7 @@ import {
   idleStopInSeconds,
   readContainerStats,
 } from "../containers/containerManager.js";
+import { installAiHandler } from "./aiHandler.js";
 
 export type EditorSocket = Socket<
   ClientToServerEvents,
@@ -473,6 +474,10 @@ export const handleEditorSocketEvents = (
       });
     })(),
   );
+
+  // Owns its own in-flight state and its own error channel, so it registers
+  // its handlers rather than borrowing `handle`.
+  installAiHandler(socket);
 
   socket.on("disconnect", releaseRelay);
 };

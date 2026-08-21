@@ -37,6 +37,7 @@ import {
   subscribeCollab,
 } from "../../../lib/collab.ts";
 import { useAuthStore } from "../../../store/authStore.ts";
+import { registerPaneEditor } from "../../../lib/editorContext.ts";
 
 const WRITE_DEBOUNCE_MS = 800;
 
@@ -219,6 +220,34 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
       if (!open.has(path)) viewStates.current.delete(path);
     }
   }, [openPaths]);
+
+  /** Lets the assistant read what this pane is showing, at the moment it asks.
+   *
+   *  Pull rather than push: mirroring the buffer and selection into a store on
+   *  every keystroke would re-render half the app to serve one panel that is
+   *  usually closed. */
+  useEffect(
+    () =>
+      registerPaneEditor(pane, () => {
+        const codeEditor = editorRef.current;
+        const model = codeEditor?.getModel();
+        if (!codeEditor || !model) return undefined;
+
+        const selection = codeEditor.getSelection();
+
+        return {
+          // Models are keyed by an inmemory URI whose path is the relPath with
+          // a leading slash — see modelUri.
+          relPath: model.uri.path.replace(/^\//, ""),
+          contents: model.getValue(),
+          selection:
+            selection && !selection.isEmpty()
+              ? model.getValueInRange(selection)
+              : undefined,
+        };
+      }),
+    [pane],
+  );
 
   function handleMount(codeEditor: editor.IStandaloneCodeEditor, monaco: Monaco) {
     editorRef.current = codeEditor;

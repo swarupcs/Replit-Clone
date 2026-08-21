@@ -10,6 +10,7 @@ import {
   VscSearch,
   VscSourceControl,
   VscSettingsGear,
+  VscSparkle,
 } from "react-icons/vsc";
 import {
   ArrowLeftOutlined,
@@ -37,6 +38,8 @@ import { EnvVarsDialog } from "../components/organisms/EnvVarsDialog/EnvVarsDial
 import { EditorSettingsDialog } from "../components/organisms/EditorSettingsDialog/EditorSettingsDialog.tsx";
 import { SearchPanel } from "../components/organisms/SearchPanel/SearchPanel.tsx";
 import { SourceControlPanel } from "../components/organisms/SourceControlPanel/SourceControlPanel.tsx";
+import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
+import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.ts";
@@ -72,7 +75,13 @@ export const ProjectPlayground = () => {
   const [envOpen, setEnvOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** Which sidebar view is showing. */
-  const [sidebarView, setSidebarView] = useState<"files" | "search" | "git">("files");
+  const [sidebarView, setSidebarView] = useState<"files" | "search" | "git" | "ai">(
+    "files",
+  );
+
+  /** Null until the status call answers, so the rail does not flash a button
+   *  that a deployment without a key would then take away. */
+  const [aiModel, setAiModel] = useState<string | null>(null);
 
   const closeActiveTab = useOpenTabsStore((state) => state.closeTab);
   /** The project whose tabs are currently loaded, so re-running the effect for
@@ -80,6 +89,26 @@ export const ProjectPlayground = () => {
   const openedProjectRef = useRef<string | undefined>(undefined);
 
   useUnsavedWorkGuard();
+
+  // Asked once per session. A deployment with no API key configured gets no
+  // assistant button at all, rather than one that fails on the first question.
+  useEffect(() => {
+    if (!hasSession) return;
+    let cancelled = false;
+
+    void getAiStatusApi()
+      .then((status) => {
+        if (!cancelled && status.configured) setAiModel(status.model);
+      })
+      .catch(() => {
+        // An older server has no such route. Not having an assistant is a
+        // perfectly good outcome and not worth telling the user about.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasSession]);
 
   // Each toggle records its new state, so the arrangement survives a reload.
   const toggleSidebar = useCallback(() => {
@@ -396,6 +425,18 @@ export const ProjectPlayground = () => {
                     <VscSourceControl size={16} />
                   </button>
                 </Tooltip>
+                {aiModel && (
+                  <Tooltip title="Assistant" placement="right">
+                    <button
+                      className="rc-icon-button"
+                      data-on={sidebarView === "ai"}
+                      aria-label="Assistant"
+                      onClick={() => setSidebarView("ai")}
+                    >
+                      <VscSparkle size={16} />
+                    </button>
+                  </Tooltip>
+                )}
               </div>
 
               <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
@@ -434,6 +475,21 @@ export const ProjectPlayground = () => {
                         projectId={projectIdFromUrl}
                         canWrite={canEdit}
                       />
+                    )}
+                  </ErrorBoundary>
+                </div>
+
+                {/* Kept mounted alongside the others so a glance at the file
+                    tree does not throw away the conversation. */}
+                <div
+                  style={{
+                    height: "100%",
+                    display: sidebarView === "ai" ? "block" : "none",
+                  }}
+                >
+                  <ErrorBoundary label="The assistant">
+                    {projectIdFromUrl && aiModel && (
+                      <AiPanel projectId={projectIdFromUrl} model={aiModel} />
                     )}
                   </ErrorBoundary>
                 </div>

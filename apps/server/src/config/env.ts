@@ -32,6 +32,19 @@ const envSchema = z.object({
   GITHUB_CLIENT_ID: z.string().optional(),
   GITHUB_CLIENT_SECRET: z.string().optional(),
 
+  /** The AI assistant. No key means the feature is simply off, exactly like
+   *  GitHub sign-in above: the panel is not offered rather than being offered
+   *  and then failing. */
+  ANTHROPIC_API_KEY: z.string().optional(),
+  AI_MODEL: z.string().default("claude-sonnet-5"),
+  AI_MAX_TOKENS: z.coerce.number().int().positive().default(4096),
+  /** Per user, per hour.
+   *
+   *  Unlike every other limit here this one guards a bill rather than the VM,
+   *  and it is deliberately per USER: a shared deployment where one person can
+   *  spend the whole budget is not a shared deployment. */
+  AI_REQUESTS_PER_HOUR: z.coerce.number().int().positive().default(60),
+
   /** How many reverse proxies sit in front of this server.
    *
    *  Express needs this to work out which entry in X-Forwarded-For is the real

@@ -16,7 +16,10 @@ export type CounterName =
   | "preview_upgrades_rejected"
   | "terminal_sessions"
   | "quota_rejections"
-  | "auth_failures";
+  | "auth_failures"
+  | "ai_requests"
+  | "ai_tool_calls"
+  | "ai_errors";
 
 const counters = new Map<CounterName, number>();
 

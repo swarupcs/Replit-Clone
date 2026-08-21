@@ -3,6 +3,7 @@ import { pingCheck } from "../../controllers/pingController.js";
 import { metricsReport } from "../../controllers/healthController.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
+import { aiStatusController } from "../../controllers/aiController.js";
 import authRouter from "./auth.js";
 import projectRouter from "./projects.js";
 
@@ -15,6 +16,10 @@ router.get("/ping", asyncHandler(pingCheck));
 // Behind auth: counters describe how busy the deployment is and what is
 // failing, which is not for anyone who can reach the port.
 router.get("/metrics", requireAuth, asyncHandler(metricsReport));
+// Behind auth: it names the model this deployment pays for, which is nobody's
+// business but a signed-in user's.
+router.get("/ai/status", requireAuth, asyncHandler(aiStatusController));
+
 router.use("/auth", authRouter);
 router.use("/projects", projectRouter);
 

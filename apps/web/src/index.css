@@ -663,3 +663,41 @@ body {
 .rc-tree-row[data-selected="true"] {
   background: var(--rc-selection);
 }
+
+/* --- Assistant ---------------------------------------------------------- */
+
+/* The "working" indicator: a dot that breathes rather than a spinner, which
+   at this size reads as noise. */
+.rc-pulse-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--rc-accent, #a78bfa);
+  animation: rc-pulse 1.2s ease-in-out infinite;
+  flex: none;
+}
+
+.rc-chat-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  padding: 7px 9px;
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: inherit;
+  color: var(--rc-text);
+  background: var(--rc-surface-raised);
+  border: 1px solid var(--rc-border);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.15s var(--rc-ease);
+}
+
+.rc-chat-input::placeholder {
+  color: var(--rc-text-subtle);
+}
+
+.rc-chat-input:focus {
+  border-color: var(--rc-border-strong);
+}
