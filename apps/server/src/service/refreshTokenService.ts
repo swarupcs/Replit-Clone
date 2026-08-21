@@ -61,6 +61,22 @@ async function persist(
  *  Rejects anything whose signature fails, that was never issued, that has
  *  already been used, or that has expired.
  */
+/** How long after a token is spent a second presentation is still treated as
+ *  the same session rather than a theft.
+ *
+ *  Two browser tabs whose access tokens expire together each present the same
+ *  cookie, seconds apart — as does one tab whose refresh response was lost on
+ *  the way back. Without this both are indistinguishable from a replay, so
+ *  the family is revoked and the user is signed out of everything for doing
+ *  nothing but leaving a second tab open. That is frequent enough that the
+ *  honest end of it is deployments turning rotation off altogether.
+ *
+ *  The cost is stated plainly: a stolen token used inside this window is
+ *  accepted. It is deliberately a few seconds, and detection outside it is
+ *  unchanged — the family still goes.
+ */
+const REUSE_GRACE_MS = 10_000;
+
 export async function rotateRefreshToken(
   presented: string,
 ): Promise<{ userId: string; token: string }> {
@@ -81,25 +97,65 @@ export async function rotateRefreshToken(
     throw new UnauthorizedError("Session is no longer valid");
   }
 
-  if (record.revokedAt) {
-    // Replay. The legitimate holder and whoever else has the value cannot be
-    // told apart, so end every session descended from this sign-in.
-    await revokeFamily(record.familyId);
-    throw new UnauthorizedError("Session was reused and has been revoked");
-  }
-
   if (record.expiresAt.getTime() <= Date.now()) {
     throw new UnauthorizedError("Session has expired");
   }
 
-  // Marked revoked, not deleted: a replay has to remain detectable.
-  await prisma.refreshToken.update({
-    where: { id: record.id },
+  // Claiming the row IS the check, rather than a separate read followed by a
+  // write. Reading `revokedAt` and then updating let two concurrent refreshes
+  // both see it null, both proceed, and both mint a live successor — so a
+  // replay went undetected exactly when it mattered. Only one caller can move
+  // this from null.
+  const claimed = await prisma.refreshToken.updateMany({
+    where: { id: record.id, revokedAt: null },
     data: { revokedAt: new Date() },
   });
 
+  if (claimed.count === 0) {
+    await assertWithinReuseGrace(record.id, record.familyId);
+  }
+
   const { token } = await persist(record.userId, record.familyId);
   return { userId: record.userId, token };
+}
+
+/** Decides whether a token that was already spent is a retry or a theft.
+ *
+ *  Two things have to hold for it to count as a retry, and the second is not
+ *  optional. Time alone cannot tell a straggling second tab from someone who
+ *  has just signed out: both spend the row, and both stamp `revokedAt` with
+ *  the current time. Signing out has to end the session at once — that is the
+ *  whole point of the record — so grace additionally requires the FAMILY to
+ *  still hold a live token, meaning the session it belongs to is genuinely
+ *  still running.
+ *
+ *  Rotation leaves a live successor behind; signing out, revoking a family and
+ *  ending every session for a user all leave none. That is the discriminator.
+ *
+ *  Re-read rather than trusting the row we started with: another request may
+ *  have spent it between that read and the claim, which is the whole race this
+ *  exists for.
+ */
+async function assertWithinReuseGrace(
+  id: string,
+  familyId: string,
+): Promise<void> {
+  const current = await prisma.refreshToken.findUnique({ where: { id } });
+  const spentAt = current?.revokedAt?.getTime();
+  const recent = spentAt !== undefined && Date.now() - spentAt <= REUSE_GRACE_MS;
+
+  if (recent) {
+    const stillRunning = await prisma.refreshToken.count({
+      where: { familyId, revokedAt: null, expiresAt: { gt: new Date() } },
+    });
+
+    if (stillRunning > 0) return;
+  }
+
+  // A replay. The legitimate holder and whoever else has the value cannot be
+  // told apart, so end every session descended from this sign-in.
+  await revokeFamily(familyId);
+  throw new UnauthorizedError("Session was reused and has been revoked");
 }
 
 /** Ends the session a token belongs to. Used by sign-out. */
