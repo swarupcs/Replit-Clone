@@ -47,6 +47,14 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
       useOpenTabsStore.getState().markDirty(relPath, false);
     });
 
+    // The same thing for a file being edited together, where the SERVER does
+    // the writing. Without it nothing ever cleared the marker on a shared
+    // file — and since every file an editor opens is shared, that meant every
+    // tab, permanently.
+    incomingSocket.on("docSaved", ({ relPath }) => {
+      useOpenTabsStore.getState().markDirty(relPath, false);
+    });
+
     incomingSocket.on("renameEntrySuccess", ({ relPath, newRelPath }) => {
       useOpenTabsStore.getState().renameTab(relPath, newRelPath);
     });

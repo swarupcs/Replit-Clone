@@ -13,6 +13,7 @@ import {
   joinDoc,
   leaveDoc,
   resetCollabState,
+  setDocSaveListener,
 } from "./collabService.js";
 
 const PROJECT = "2b4c6d8e-1a3f-4b5c-8d9e-0f1a2b3c4d5e";
@@ -50,6 +51,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  setDocSaveListener(null);
   resetCollabState();
   await fs.rm(root, { recursive: true, force: true });
 });
@@ -233,5 +235,54 @@ describe("cleanup", () => {
     forgetProject(PROJECT);
 
     expect(isLive(PROJECT, FILE)).toBe(false);
+  });
+});
+
+describe("announcing a save", () => {
+  /** The editor clears a tab's unsaved marker on being told the file reached
+   *  disk. A shared file is written by the SERVER, so `writeFile` — and with
+   *  it `writeFileSuccess` — never happens for one. Nothing else can clear the
+   *  marker, so without this every open file stays dirty forever. */
+  it("tells the room after the document reaches disk", async () => {
+    const saved: { projectId: string; relPath: string }[] = [];
+    setDocSaveListener((projectId, relPath) => {
+      saved.push({ projectId, relPath });
+    });
+
+    const { state } = await joinDoc(PROJECT, FILE, "s1");
+    const a = client("s1", state);
+    applyDocUpdate(PROJECT, FILE, a.edit((text) => text.insert(0, "typed ")), "s1");
+
+    await flushDoc(PROJECT, FILE);
+
+    expect(saved).toEqual([{ projectId: PROJECT, relPath: FILE }]);
+    expect(await read()).toBe("typed hello");
+  });
+
+  it("says nothing when the flush wrote nothing", async () => {
+    const saved: string[] = [];
+    setDocSaveListener((_projectId, relPath) => saved.push(relPath));
+
+    await joinDoc(PROJECT, FILE, "s1");
+    // Nobody typed, so the contents already match what is on disk.
+    await flushDoc(PROJECT, FILE);
+
+    expect(saved).toEqual([]);
+  });
+
+  it("says nothing when the write failed", async () => {
+    const saved: string[] = [];
+    setDocSaveListener((_projectId, relPath) => saved.push(relPath));
+
+    const { state } = await joinDoc(PROJECT, FILE, "s1");
+    const a = client("s1", state);
+    applyDocUpdate(PROJECT, FILE, a.edit((text) => text.insert(0, "typed ")), "s1");
+
+    // The directory goes; the write can no longer land. Reporting a save here
+    // would clear the marker on work that is not anywhere.
+    await fs.rm(root, { recursive: true, force: true });
+    await flushDoc(PROJECT, FILE);
+
+    expect(saved).toEqual([]);
   });
 });

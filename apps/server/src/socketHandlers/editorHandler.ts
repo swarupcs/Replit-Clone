@@ -110,6 +110,17 @@ function retainRunRelay(
   };
 }
 
+/** Room holding everyone with one file open.
+ *
+ *  Exported because the save announcement is raised by the flush timer in
+ *  collabService, which has no socket of its own to derive it from — and two
+ *  spellings of the same room is a bug that only shows up as "nothing
+ *  happened".
+ */
+export function docRoomName(projectId: string, relPath: string): string {
+  return `${projectId}:doc:${relPath}`;
+}
+
 export const handleEditorSocketEvents = (
   socket: EditorSocket,
   editorNamespace: EditorNamespace,
@@ -363,7 +374,7 @@ export const handleEditorSocketEvents = (
   // file open rather than everyone in the project.
 
   function docRoom(relPath: string): string {
-    return `${projectId}:doc:${relPath}`;
+    return docRoomName(projectId, relPath);
   }
 
   function announcePeers(relPath: string): void {

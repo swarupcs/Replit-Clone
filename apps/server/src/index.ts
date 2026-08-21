@@ -21,6 +21,7 @@ import { logger } from "./lib/logger.js";
 import { touchProject } from "./service/projectService.js";
 import { retainProjectWatcher } from "./service/projectWatcher.js";
 import { reportExternalChanges } from "./service/collabWatch.js";
+import { setDocSaveListener } from "./service/collabService.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
 import { pruneExpiredRefreshTokens } from "./service/refreshTokenService.js";
 import { pruneUserTokens } from "./service/userTokenService.js";
@@ -38,6 +39,7 @@ import {
   stopAllContainers,
 } from "./containers/containerManager.js";
 import {
+  docRoomName,
   handleEditorSocketEvents,
   type EditorSocket,
 } from "./socketHandlers/editorHandler.js";
@@ -108,6 +110,14 @@ app.use(errorHandler);
 
 const editorNamespace = io.of("/editor");
 installSocketAuth(editorNamespace);
+
+// While a file is shared the server writes it, so the client never sends
+// `writeFile` and never sees `writeFileSuccess` — which is the only thing that
+// clears a tab's unsaved marker. Without this every open file stayed dirty
+// forever, long after it had reached disk.
+setDocSaveListener((projectId, relPath) => {
+  editorNamespace.to(docRoomName(projectId, relPath)).emit("docSaved", { relPath });
+});
 
 editorNamespace.on("connection", (socket: EditorSocket) => {
   const { projectId } = socket.data;
