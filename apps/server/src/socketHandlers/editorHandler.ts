@@ -6,6 +6,9 @@ import { searchProject } from "../service/searchService.js";
 import {
   applyDocUpdate,
   docsForSocket,
+  dropDoc,
+  dropDocsUnder,
+  flushAndDropDoc,
   isLive,
   joinDoc,
   leaveDoc,
@@ -251,6 +254,11 @@ export const handleEditorSocketEvents = (
 
   socket.on("deleteFile", ({ relPath }) =>
     handle("delete the file", async () => {
+      // Before the unlink, so a flush already on the clock cannot fire in
+      // between and put the file back. Discarded rather than written out:
+      // saving a file somebody just asked to delete is not a save.
+      dropDoc(projectId, relPath);
+
       await fs.unlink(resolveInProject(projectId, relPath));
 
       socket.emit("deleteFileSuccess", { relPath });
@@ -290,6 +298,10 @@ export const handleEditorSocketEvents = (
         return;
       }
 
+      // Every file inside it is going too, so no document under it may write
+      // itself back afterwards.
+      dropDocsUnder(projectId, relPath);
+
       // `fs.rmdir` with `recursive` is deprecated and a no-op on newer Node.
       await fs.rm(absolute, { recursive: true, force: true });
 
@@ -323,6 +335,12 @@ export const handleEditorSocketEvents = (
         });
         return;
       }
+
+      // Flushed before the move so edits from the last second travel with the
+      // file, then dropped so the document cannot write itself back to a name
+      // the file no longer has. Editors rejoin under the new path when their
+      // tab moves.
+      await flushAndDropDoc(projectId, relPath);
 
       await fs.rename(absolute, newAbsolute);
 
@@ -359,6 +377,11 @@ export const handleEditorSocketEvents = (
         });
         return;
       }
+
+      // Same as a rename as far as the document is concerned: flush so nothing
+      // in flight is lost, then drop so it cannot recreate the old path.
+      await flushAndDropDoc(projectId, relPath);
+      dropDocsUnder(projectId, relPath);
 
       await fs.mkdir(path.dirname(newAbsolute), { recursive: true });
       await fs.rename(absolute, newAbsolute);
