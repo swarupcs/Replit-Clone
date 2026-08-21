@@ -128,10 +128,15 @@ export const handleEditorSocketEvents = (
   socket: EditorSocket,
   editorNamespace: EditorNamespace,
 ): void => {
-  const { projectId, accessLevel } = socket.data;
+  const { projectId } = socket.data;
 
-  /** True when this connection may change the project or run code in it. */
-  const canEdit = accessLevel === "editor" || accessLevel === "owner";
+  /** True when this connection may change the project or run code in it.
+   *
+   *  Read at call time rather than captured once: access is rechecked while a
+   *  connection is open, and a level captured at connect would keep letting
+   *  someone write long after they were demoted to viewer. */
+  const canEdit = (): boolean =>
+    socket.data.accessLevel === "editor" || socket.data.accessLevel === "owner";
 
   /** Runs a handler with uniform error reporting.
    *
@@ -148,7 +153,7 @@ export const handleEditorSocketEvents = (
       // Checked per event rather than at connect: a viewer is allowed to
       // connect precisely so they can read, so the line has to be drawn
       // around the events that write or execute.
-      if (requiresEdit && !canEdit) {
+      if (requiresEdit && !canEdit()) {
         socket.emit("error", {
           code: "READ_ONLY",
           message: `You have read-only access and cannot ${action}`,

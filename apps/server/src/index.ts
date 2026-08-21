@@ -22,6 +22,7 @@ import { touchProject } from "./service/projectService.js";
 import { retainProjectWatcher } from "./service/projectWatcher.js";
 import { reportExternalChanges } from "./service/collabWatch.js";
 import { setDocSaveListener } from "./service/collabService.js";
+import { startAccessWatch, watchAccess } from "./service/accessWatch.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
 import { pruneExpiredRefreshTokens } from "./service/refreshTokenService.js";
 import { pruneUserTokens } from "./service/userTokenService.js";
@@ -147,9 +148,31 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
 
   handleEditorSocketEvents(socket, editorNamespace);
 
+  // Access was checked once, at the handshake, and never again — so removing
+  // a collaborator left their open editor exactly as privileged as before,
+  // for as long as they kept the page open.
+  const releaseAccessWatch = watchAccess(socket.id, {
+    userId: socket.data.userId,
+    projectId,
+    level: socket.data.accessLevel,
+    onRevoked: () => {
+      socket.emit("error", {
+        code: "ACCESS_REVOKED",
+        message: "Your access to this project was removed",
+      });
+      socket.disconnect(true);
+    },
+    onChanged: (level) => {
+      // Written back because the per-event edit check reads it from here.
+      socket.data.accessLevel = level;
+      socket.emit("projectAccess", { level });
+    },
+  });
+
   socket.on("disconnect", () => {
     detach(projectId);
     releaseWatcher();
+    releaseAccessWatch();
   });
 });
 
@@ -243,6 +266,7 @@ async function start(): Promise<void> {
 
   startIdleReaper();
   startTokenPrune();
+  startAccessWatch();
 
   // A `tsx watch` restart can race the previous process releasing the port on
   // Windows, which otherwise kills the dev server outright.
