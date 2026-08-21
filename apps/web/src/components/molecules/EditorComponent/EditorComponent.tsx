@@ -38,6 +38,7 @@ import {
 } from "../../../lib/collab.ts";
 import { useAuthStore } from "../../../store/authStore.ts";
 import { registerPaneEditor } from "../../../lib/editorContext.ts";
+import { disposeUnwantedModels, trackModel } from "../../../lib/editorModels.ts";
 
 const WRITE_DEBOUNCE_MS = 800;
 
@@ -73,6 +74,20 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   /** Set while the editor's contents are being replaced programmatically, so
    *  the resulting change event is not mistaken for the user typing. */
   const suppressChange = useRef(false);
+  /** Bumped each time Monaco hands us an editor.
+   *
+   *  State, not a ref, because the effects below need to RUN again once the
+   *  editor exists. Monaco loads asynchronously, so on the very first file the
+   *  attach effect fired while `editorRef` was still null and gave up — and
+   *  nothing re-ran it when the editor finally arrived, so the first file
+   *  opened in a session showed an empty buffer until a second file was
+   *  clicked. A ref would have been read at the same wrong moment.
+   *
+   *  A counter rather than a flag: closing every tab unmounts the editor, and
+   *  the next file mounts a fresh one. A flag would already be true and change
+   *  nothing, leaving that editor just as empty as the first one was.
+   */
+  const [mountTick, setMountTick] = useState(0);
 
   const activeTab = useOpenTabsStore(selectPaneTab(pane));
   const focusedPane = useOpenTabsStore((state) => state.focusedPane);
@@ -153,6 +168,11 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
       suppressChange.current = false;
     }
 
+    // Claimed as ours on every open, not only on creation: the second pane to
+    // show a file finds the model rather than creating it, and it still has to
+    // be a model somebody is willing to dispose.
+    trackModel(model);
+
     // The diff described the file being left, so it does not survive a switch.
     setShowDiff(false);
     openedPath.current = activeTab.relPath;
@@ -172,7 +192,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     }
 
     codeEditor.focus();
-  }, [activeTab]);
+  }, [activeTab, mountTick]);
 
   /** Shared editing for whichever file this pane is showing.
    *
@@ -199,27 +219,31 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     return () => {
       releaseDoc(editorSocket, relPath);
     };
-  }, [activeTab?.relPath, editorSocket, canEdit, user?.email, user?.id]);
+    // `mounted` for the same reason as the attach effect above: on the first
+    // file, Monaco has not produced an editor yet and this would bind nothing.
+  }, [activeTab?.relPath, editorSocket, canEdit, user?.email, user?.id, mountTick]);
 
   /** Dispose models for files that are no longer open, so a long session does
-   *  not accumulate them. */
+   *  not accumulate them.
+   *
+   *  Only models this editor created are candidates. Sweeping
+   *  `monaco.editor.getModels()` — the page-wide registry — also disposed the
+   *  diff editor's two generated models, and the wrapper then destructured a
+   *  null `getModel()` on the next language change and took the pane down. */
   const openPaths = useOpenTabsStore((state) => state.tabs.map((t) => t.relPath).join("\u0000"));
   useEffect(() => {
     const monaco = monacoRef.current;
     if (!monaco) return;
 
     const open = new Set(openPaths.split("\u0000").filter(Boolean));
-    const wanted = new Set([...open].map((path) => modelUri(monaco, path).toString()));
-
-    for (const model of monaco.editor.getModels()) {
-      if (wanted.has(model.uri.toString())) continue;
-      model.dispose();
-    }
+    disposeUnwantedModels(
+      [...open].map((path) => modelUri(monaco, path).toString()),
+    );
 
     for (const path of viewStates.current.keys()) {
       if (!open.has(path)) viewStates.current.delete(path);
     }
-  }, [openPaths]);
+  }, [openPaths, mountTick]);
 
   /** Lets the assistant read what this pane is showing, at the moment it asks.
    *
@@ -294,6 +318,9 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     codeEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       void saveNow(codeEditor);
     });
+
+    // Last, so the effects this releases see fully configured refs.
+    setMountTick((tick) => tick + 1);
   }
 
   /** Formats if asked to, then writes immediately.
