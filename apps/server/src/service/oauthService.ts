@@ -132,15 +132,32 @@ export async function signInWithGithub(code: string): Promise<PublicUser> {
   return { id: user.id, email: user.email };
 }
 
+/** Picks the address to link this account by.
+ *
+ *  Accounts are matched to existing ones BY EMAIL, so which address is chosen
+ *  decides which account a GitHub sign-in joins. Every path to it therefore has
+ *  to be one GitHub has confirmed the person controls.
+ *
+ *  The profile's public email used to be taken as-is, skipping the check the
+ *  fallback below performs — a weaker rule on the path that actually decided
+ *  the outcome. It is now looked up in the verified list like any other.
+ */
 async function resolveEmail(profile: GithubUser, token: string): Promise<string> {
-  if (profile.email) return profile.email.toLowerCase();
-
   const emails = await fetchGithub<GithubEmail[]>("/user/emails", token);
-  // Verified, because an unverified address is not proof of anything; primary,
-  // because that is the one the person actually uses.
+  const verified = emails.filter((entry) => entry.verified);
+
+  const profileEmail = profile.email?.toLowerCase();
+  const confirmedProfileEmail = profileEmail
+    ? verified.find((entry) => entry.email.toLowerCase() === profileEmail)
+    : undefined;
+
+  // Their public address when GitHub confirms it, then their primary, then any
+  // confirmed one — primary because that is the address the person actually
+  // uses.
   const chosen =
-    emails.find((entry) => entry.primary && entry.verified) ??
-    emails.find((entry) => entry.verified);
+    confirmedProfileEmail ??
+    verified.find((entry) => entry.primary) ??
+    verified[0];
 
   if (!chosen) {
     throw new UnauthorizedError(

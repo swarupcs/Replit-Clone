@@ -7,7 +7,6 @@ dotenv.config();
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
-  TERMINAL_PORT: z.coerce.number().int().positive().default(4000),
 
   DATABASE_URL: z.string().min(1),
 

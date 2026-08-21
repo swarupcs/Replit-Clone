@@ -121,6 +121,39 @@ function retainRunRelay(
  *  spellings of the same room is a bug that only shows up as "nothing
  *  happened".
  */
+/** Largest awareness payload worth relaying. A cursor and a selection are a
+ *  few hundred bytes; anything beyond this is not one. */
+const MAX_AWARENESS_BYTES = 64 * 1024;
+
+/** A simple per-socket budget for the events that do real work.
+ *
+ *  HTTP routes are rate limited and socket events were not, so `search`,
+ *  `readFile` and `statsRequest` — each of which costs file IO or a Docker
+ *  round trip — could be sent in a loop for free.
+ */
+class EventBudget {
+  private count = 0;
+  private windowStartedAt = Date.now();
+
+  constructor(
+    private readonly limit: number,
+    private readonly windowMs: number,
+  ) {}
+
+  /** True when this call is within budget. */
+  take(): boolean {
+    const now = Date.now();
+
+    if (now - this.windowStartedAt >= this.windowMs) {
+      this.windowStartedAt = now;
+      this.count = 0;
+    }
+
+    this.count += 1;
+    return this.count <= this.limit;
+  }
+}
+
 export function docRoomName(projectId: string, relPath: string): string {
   return `${projectId}:doc:${relPath}`;
 }
@@ -185,8 +218,27 @@ export const handleEditorSocketEvents = (
     editorNamespace.to(projectId).emit("treeChanged");
   }
 
+  // Each scans the tree or dials Docker, so each gets a budget. Generous for a
+  // person typing in a search box; not generous for a loop.
+  const searchBudget = new EventBudget(30, 60_000);
+  const statsBudget = new EventBudget(120, 60_000);
+  const readBudget = new EventBudget(600, 60_000);
+
+  function overBudget(action: string): boolean {
+    socket.emit("error", {
+      code: "TOO_MANY_REQUESTS",
+      message: `Too many requests to ${action}. Slow down and try again.`,
+    });
+    return true;
+  }
+
   socket.on("readFile", ({ relPath }) =>
     handle("read the file", async () => {
+      if (!readBudget.take()) {
+        overBudget("open files");
+        return;
+      }
+
       const absolute = resolveInProject(projectId, relPath);
 
       const stats = await fs.stat(absolute);
@@ -467,6 +519,14 @@ export const handleEditorSocketEvents = (
   socket.on("docAwareness", ({ relPath, update }) => {
     // Cursors are ephemeral and never touch disk, so a viewer may broadcast
     // theirs — seeing where someone is reading is the point.
+    //
+    // But this was the one handler outside `handle`, relaying whatever arrived
+    // for whatever path was named, at whatever size. A sender who does not
+    // have the file open has no cursor in it to report, and an awareness
+    // payload is a few hundred bytes at most.
+    if (!socket.rooms.has(docRoom(relPath))) return;
+    if (update.byteLength > MAX_AWARENESS_BYTES) return;
+
     socket.to(docRoom(relPath)).emit("docAwareness", { relPath, update });
   });
 
@@ -514,6 +574,11 @@ export const handleEditorSocketEvents = (
 
   socket.on("search", (options) =>
     handle("search the project", async () => {
+      if (!searchBudget.take()) {
+        overBudget("search");
+        return;
+      }
+
       // A user-supplied regex that does not compile is their mistake to see,
       // not a server error — buildPattern throws and `handle` reports it.
       const { matches, truncated } = await searchProject(projectId, options);
@@ -523,6 +588,8 @@ export const handleEditorSocketEvents = (
 
   socket.on("statsRequest", () =>
     handle("read container stats", async () => {
+      if (!statsBudget.take()) return;
+
       const stats = await readContainerStats(projectId);
       socket.emit("containerStats", {
         ...stats,

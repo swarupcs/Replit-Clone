@@ -129,6 +129,16 @@ async function findContainer(
   return containers.find((info) => info.Names.includes(`/${name}`));
 }
 
+/** The project id behind a sandbox container's names.
+ *
+ *  Docker gives a container a list of names and the prefix match is a
+ *  substring one, so this looks for the name that actually starts with our
+ *  prefix and takes what follows it. */
+function projectIdFromNames(names: string[]): string | undefined {
+  const name = names.find((entry) => entry.startsWith(`/${CONTAINER_PREFIX}`));
+  return name?.slice(`/${CONTAINER_PREFIX}`.length);
+}
+
 async function runningCount(): Promise<number> {
   const containers = await docker.listContainers({
     filters: { name: [CONTAINER_PREFIX] },
@@ -398,7 +408,12 @@ export function startIdleReaper(): void {
         });
 
         for (const info of containers) {
-          const name = info.Names[0]?.replace(`/${CONTAINER_PREFIX}`, "");
+          // Parsed the way reconcileOnBoot does. `Names[0].replace(prefix, "")`
+          // was unanchored and looked at only the first of several possible
+          // names, so it could yield the wrong id — and a wrong id means
+          // checking a different project's attachment count before stopping
+          // this one.
+          const name = projectIdFromNames(info.Names);
           if (!name) continue;
 
           if ((activeAttachments.get(name) ?? 0) > 0) continue;
@@ -471,12 +486,9 @@ export async function reconcileOnBoot(): Promise<{
     .catch(() => []);
 
   for (const info of containers) {
-    const name = info.Names.find((entry) =>
-      entry.startsWith(`/${CONTAINER_PREFIX}`),
-    );
-    if (!name) continue;
+    const projectId = projectIdFromNames(info.Names);
+    if (!projectId) continue;
 
-    const projectId = name.slice(`/${CONTAINER_PREFIX}`.length);
     if (known.has(projectId)) continue;
 
     logger.info("removing orphaned container", { projectId });
@@ -619,8 +631,8 @@ async function assertUserContainerBudget(projectId: string): Promise<void> {
     .catch(() => []);
 
   const theirs = running.filter((info) => {
-    const name = info.Names.find((entry) => entry.startsWith(`/${CONTAINER_PREFIX}`));
-    return name ? ownedIds.has(name.slice(`/${CONTAINER_PREFIX}`.length)) : false;
+    const projectId = projectIdFromNames(info.Names);
+    return projectId !== undefined && ownedIds.has(projectId);
   });
 
   if (theirs.length >= env.MAX_CONTAINERS_PER_USER) {

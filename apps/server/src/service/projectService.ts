@@ -155,9 +155,10 @@ export async function duplicateProjectService(
 
   try {
     await fs.mkdir(destination, { recursive: true });
-    await fs.cp(projectDir(projectId), destination, {
+    const sourceRoot = projectDir(projectId);
+    await fs.cp(sourceRoot, destination, {
       recursive: true,
-      filter: (entrySource) => !EXCLUDED_FROM_COPY.test(entrySource),
+      filter: (entrySource) => !excludedFromCopy(sourceRoot, entrySource),
     });
     await claimForSandbox(destination).catch(() => {});
   } catch (error) {
@@ -185,12 +186,28 @@ export const EXCLUDED_DIRECTORIES = [
   ".venv",
 ] as const;
 
-/** For `fs.cp`, which filters absolute paths. */
-const EXCLUDED_FROM_COPY = new RegExp(
+/** Matches a path segment naming one of the excluded directories. */
+const EXCLUDED_SEGMENT = new RegExp(
   `(^|[\\\\/])(${EXCLUDED_DIRECTORIES.map((name) =>
     name.replace(/\./g, "\\."),
   ).join("|")})([\\\\/]|$)`,
 );
+
+/** Whether `fs.cp` should skip this entry.
+ *
+ *  Tested against the path INSIDE the project, not the absolute one `fs.cp`
+ *  hands over. Matching the whole path meant the prefix counted too, so a
+ *  PROJECTS_DIR containing a segment named `dist`, `build` or `.git` filtered
+ *  the copy's own root and produced an empty project with no error at all.
+ */
+function excludedFromCopy(sourceRoot: string, entrySource: string): boolean {
+  const relative = path.relative(sourceRoot, entrySource);
+
+  // The root itself is never excluded; excluding it copies nothing.
+  if (relative === "") return false;
+
+  return EXCLUDED_SEGMENT.test(relative);
+}
 
 /** For archiver's glob, which takes patterns. Derived from the same list so
  *  the two cannot drift apart. */
