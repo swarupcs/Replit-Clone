@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Tooltip } from "antd";
 import { useAuthStore } from "../../../store/authStore.ts";
+import { refreshAccessToken } from "../../../config/axiosConfig.ts";
 import { VscClearAll, VscDebugRestart } from "react-icons/vsc";
 import "@xterm/xterm/css/xterm.css";
 
@@ -55,6 +56,13 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
   /** Bumping this tears the effect down and builds a fresh socket + terminal,
    *  which is what "reconnect" means here. */
   const [reconnectNonce, setReconnectNonce] = useState(0);
+
+  /** Backoff state for automatic reconnection, kept in refs so it survives the
+   *  effect re-running (which is how a reconnect happens). A dropped socket --
+   *  the server restarting, a network blip, a rotated-out token -- used to
+   *  leave the terminal dead until the user clicked reconnect by hand. */
+  const retriesRef = useRef(0);
+  const reconnectTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -116,6 +124,10 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
     // The browser WebSocket API cannot set an Authorization header, and a token
     // in the query string lands in access logs, so it rides the subprotocol.
     let disposed = false;
+    // Whether this socket ever reached OPEN. A close before it did points at a
+    // rejected handshake (usually a stale token) rather than a dropped
+    // connection, and the two want different recovery.
+    let opened = false;
 
     const socket = new WebSocket(terminalWsUrl(projectId), ["auth", accessToken]);
     socket.binaryType = "arraybuffer";
@@ -155,6 +167,10 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
 
     socket.addEventListener("open", () => {
       if (disposed) return;
+      // A healthy connection clears the backoff, so the next unexpected drop
+      // starts retrying promptly instead of at the tail of an old backoff.
+      opened = true;
+      retriesRef.current = 0;
       setStatus("open");
       syncSize();
       term.focus();
@@ -175,13 +191,52 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
     socket.addEventListener("close", (event) => {
       if (disposed) return;
       setStatus("closed");
+
+      const MAX_RETRIES = 6;
+      if (retriesRef.current >= MAX_RETRIES) {
+        term.write(
+          `\r\n\x1b[31mTerminal disconnected${event.reason ? `: ${event.reason}` : ""}. Click reconnect to try again.\x1b[0m\r\n`,
+        );
+        return;
+      }
+
+      const attempt = retriesRef.current;
+      retriesRef.current += 1;
+      // 0.5s, 1s, 2s, 4s, 8s, capped at 10s.
+      const delay = Math.min(500 * 2 ** attempt, 10_000);
       term.write(
-        `\r\n\x1b[31mTerminal disconnected${event.reason ? `: ${event.reason}` : ""}.\x1b[0m\r\n`,
+        `\r\n\x1b[33mTerminal disconnected${event.reason ? `: ${event.reason}` : ""}. Reconnecting…\x1b[0m\r\n`,
       );
+
+      reconnectTimerRef.current = window.setTimeout(() => {
+        void (async () => {
+          if (disposed) return;
+          // A close before OPEN is almost always a rejected handshake -- the
+          // stored access token was missing or expired. REST refreshes itself
+          // on a 401, but a WebSocket cannot, so do it here before retrying,
+          // otherwise every attempt presents the same dead token. Routed
+          // through the shared, de-duplicated refresher so this never races a
+          // REST refresh: refresh tokens are single-use and a reused one
+          // revokes the whole session. Best-effort -- if refresh fails the
+          // retry still runs and simply closes again.
+          if (!opened) {
+            try {
+              await refreshAccessToken();
+            } catch {
+              // No live session to refresh; the retry will surface that.
+            }
+          }
+          if (!disposed) setReconnectNonce((value) => value + 1);
+        })();
+      }, delay);
     });
 
     return () => {
       disposed = true;
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       resizeObserver.disconnect();
       keyInput.dispose();
       socket.close();
@@ -196,6 +251,9 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
   }, []);
 
   const handleReconnect = useCallback(() => {
+    // A manual reconnect is a fresh start: clear the backoff so it does not
+    // inherit a long delay from a prior run of failures.
+    retriesRef.current = 0;
     setReconnectNonce((value) => value + 1);
   }, []);
 

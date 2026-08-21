@@ -1,5 +1,11 @@
 import type {
   ApiSuccess,
+  GitCommit,
+  GitCommitResponse,
+  GitDiffResponse,
+  GitLogResponse,
+  GitStatus,
+  GitStatusResponse,
   ListTemplatesResponse,
   TemplateSummary,
   CreateProjectResponse,
@@ -199,3 +205,77 @@ export const redeemShareLinkApi = async (token: string): Promise<Project> => {
 /** The URL to hand to someone. */
 export const shareLinkUrl = (token: string): string =>
   `${window.location.origin}/join?token=${encodeURIComponent(token)}`;
+
+/* ---------------------------------------------------------------- source control */
+
+export const getGitStatusApi = async (
+  projectId: string,
+): Promise<GitStatus> => {
+  const response = await axios.get<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/status`,
+  );
+  return response.data.data;
+};
+
+export const gitInitApi = async (projectId: string): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/init`,
+  );
+  return response.data.data;
+};
+
+export const getGitDiffApi = async (
+  projectId: string,
+  path: string,
+  staged: boolean,
+): Promise<string> => {
+  const response = await axios.get<GitDiffResponse>(
+    `/api/v1/projects/${projectId}/git/diff`,
+    { params: { path, staged: staged ? "true" : "false" } },
+  );
+  return response.data.data.patch;
+};
+
+export const gitStageApi = async (
+  projectId: string,
+  paths: string[],
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/stage`,
+    { paths },
+  );
+  return response.data.data;
+};
+
+export const gitUnstageApi = async (
+  projectId: string,
+  paths: string[],
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/unstage`,
+    { paths },
+  );
+  return response.data.data;
+};
+
+export const gitCommitApi = async (
+  projectId: string,
+  message: string,
+): Promise<{ status: GitStatus; commits: GitCommit[] }> => {
+  const response = await axios.post<GitCommitResponse>(
+    `/api/v1/projects/${projectId}/git/commit`,
+    { message },
+  );
+  return response.data.data;
+};
+
+export const getGitLogApi = async (
+  projectId: string,
+  limit = 20,
+): Promise<GitCommit[]> => {
+  const response = await axios.get<GitLogResponse>(
+    `/api/v1/projects/${projectId}/git/log`,
+    { params: { limit } },
+  );
+  return response.data.data;
+};

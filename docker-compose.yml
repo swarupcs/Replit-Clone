@@ -10,11 +10,18 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replit}
       POSTGRES_DB: ${POSTGRES_DB:-replit_clone}
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      # 5433 is deliberately avoided: on Windows it falls inside a
+      # Hyper-V/WSL reserved range (netsh interface ipv4 show
+      # excludedportrange protocol=tcp), and Docker cannot publish into one.
+      # The container then runs healthy while the host port never binds, so
+      # every connection is refused. 15432 sits outside those ranges.
+      - "${POSTGRES_PORT:-15432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-replit}"]
+      # -d matters: without it pg_isready connects to a database named
+      # after the user, which does not exist, and the log fills with FATALs.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-replit} -d ${POSTGRES_DB:-replit_clone}"]
       interval: 5s
       timeout: 5s
       retries: 10

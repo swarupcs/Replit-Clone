@@ -67,7 +67,7 @@ function folderPaths(node: TreeNodeData, into: string[] = []): string[] {
 }
 
 export const TreeStructure = () => {
-  const { treeStructure, refreshTree, projectId, collapseAll, revealPath } =
+  const { treeStructure, refreshTree, projectId, collapseAll, revealPaths } =
     useTreeStructureStore();
   const { editorSocket } = useEditorSocketStore();
 
@@ -126,10 +126,15 @@ export const TreeStructure = () => {
 
   // Filtering is useless against collapsed folders, so reveal every path that
   // survived the filter.
+  //
+  // In ONE update. This used to loop over `revealPath`, which is a store write
+  // -- and so a render -- per folder. React stops at 50 nested updates, so
+  // filtering a project with that many folders crashed the tree rather than
+  // filtering it.
   useEffect(() => {
     if (!trimmedQuery || !visibleTree) return;
-    folderPaths(visibleTree).forEach(revealPath);
-  }, [trimmedQuery, visibleTree, revealPath]);
+    revealPaths(folderPaths(visibleTree));
+  }, [trimmedQuery, visibleTree, revealPaths]);
 
   async function handleRefresh() {
     setRefreshing(true);

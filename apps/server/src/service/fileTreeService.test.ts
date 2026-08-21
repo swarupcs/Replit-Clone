@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { TreeNodeData } from "@replit-clone/shared";
 import { projectRoot } from "../utils/projectPaths.js";
 import { buildFileTree } from "./fileTreeService.js";
+import { canSymlink } from "../test/capabilities.js";
 
 const PROJECT = "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d";
 const root = projectRoot(PROJECT);
@@ -34,7 +35,11 @@ beforeAll(async () => {
 
   // A link pointing out of the project: it may be listed, but must never be
   // walked into, or the tree would expose the host's filesystem.
-  await fs.symlink("/etc", `${root}/escape`);
+  //
+  // Guarded because creating one needs privileges Windows withholds. Without
+  // the guard this threw in beforeAll and took every test in the file with it
+  // -- including the ones that have nothing to do with links.
+  if (canSymlink) await fs.symlink("/etc", `${root}/escape`);
 });
 
 afterAll(async () => {
@@ -69,11 +74,16 @@ describe("buildFileTree", () => {
     }
   });
 
-  it("does not descend a symlink that leaves the project", async () => {
-    const found = paths(await buildFileTree(PROJECT));
+  it.skipIf(!canSymlink)(
+    "does not descend a symlink that leaves the project",
+    async () => {
+      const found = paths(await buildFileTree(PROJECT));
 
-    expect(found.some((relPath) => relPath.startsWith("escape/"))).toBe(false);
-  });
+      expect(found.some((relPath) => relPath.startsWith("escape/"))).toBe(
+        false,
+      );
+    },
+  );
 
   it("puts directories first, then sorts case-insensitively", async () => {
     const tree = await buildFileTree(PROJECT);

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { hasBash } from "../test/capabilities.js";
 import { describe, expect, it } from "vitest";
 import {
   PGID_MARKER,
@@ -19,7 +20,9 @@ function roundTrip(value: string): string {
   });
 }
 
-describe("shellQuote", () => {
+// These exec a real bash and compare what it actually received, which is the
+// only way to know the quoting holds. Without a POSIX shell they cannot run.
+describe.skipIf(!hasBash)("shellQuote", () => {
   it.each([
     ["a plain command", "npm run dev"],
     ["shell operators", "npm install && npm run dev"],

@@ -17,6 +17,12 @@ interface TreeStructureStore {
    *  revealed (used by the filter, which must show matches inside collapsed
    *  folders). */
   revealPath: (relPath: string) => void;
+  /** Reveals many paths in ONE update.
+   *
+   *  Callers used to loop over `revealPath`, which is one store write — and so
+   *  one render — per folder. React caps nested updates at 50, so a project
+   *  with that many folders crashed the tree instead of filtering it. */
+  revealPaths: (relPaths: string[]) => void;
   /** Restores a remembered set of open folders. */
   setExpandedPaths: (paths: string[]) => void;
 }
@@ -49,19 +55,51 @@ export const useTreeStructureStore = create<TreeStructureStore>((set, get) => ({
       return { expandedPaths: next };
     }),
 
-  collapseAll: () => set({ expandedPaths: new Set<string>() }),
+  collapseAll: () =>
+    set((state) =>
+      // Already empty: returning a fresh Set would still change identity, and
+      // everything downstream keys off that.
+      state.expandedPaths.size === 0
+        ? state
+        : { expandedPaths: new Set<string>() },
+    ),
 
-  setExpandedPaths: (paths) => set({ expandedPaths: new Set(paths) }),
+  setExpandedPaths: (paths) =>
+    set((state) =>
+      sameMembers(state.expandedPaths, paths)
+        ? state
+        : { expandedPaths: new Set(paths) },
+    ),
 
-  revealPath: (relPath) =>
+  revealPath: (relPath) => get().revealPaths([relPath]),
+
+  revealPaths: (relPaths) =>
     set((state) => {
       const next = new Set(state.expandedPaths);
-      const segments = relPath.split("/");
-      // Every ancestor, not just the immediate parent: "a/b/c.ts" needs both
-      // "a" and "a/b" open for the row to be reachable.
-      for (let i = 1; i < segments.length; i += 1) {
-        next.add(segments.slice(0, i).join("/"));
+      let added = false;
+
+      for (const relPath of relPaths) {
+        const segments = relPath.split("/");
+        // Every ancestor, not just the immediate parent: "a/b/c.ts" needs both
+        // "a" and "a/b" open for the row to be reachable.
+        for (let i = 1; i < segments.length; i += 1) {
+          const ancestor = segments.slice(0, i).join("/");
+          if (!next.has(ancestor)) {
+            next.add(ancestor);
+            added = true;
+          }
+        }
       }
-      return { expandedPaths: next };
+
+      // Nothing new to open. Returning the state unchanged keeps the Set's
+      // identity, which is what stops a caller that reveals on every render
+      // from re-rendering the tree forever.
+      return added ? { expandedPaths: next } : state;
     }),
 }));
+
+/** Whether a Set already holds exactly these members. */
+function sameMembers(current: Set<string>, paths: string[]): boolean {
+  if (current.size !== paths.length) return false;
+  return paths.every((path) => current.has(path));
+}

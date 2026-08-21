@@ -32,10 +32,15 @@ export default defineConfig({
     // once it runs on the VM.
     host: true,
     // Pinned and strict: the server's CORS allowlist and the OAuth-style
-    // cookie path both key off this exact origin, so silently sliding to
-    // 5174 when the port is busy would break auth in confusing ways.
-    // 5173 is deliberately avoided � that is the port project containers use.
-    port: 5273,
+    // cookie path both key off this exact origin, so silently sliding to the
+    // next free port would break auth in confusing ways.
+    //
+    // 5173 is deliberately avoided -- that is the port project containers use.
+    // 5273 was also avoided: on Windows it falls inside a Hyper-V/WSL reserved
+    // range (netsh interface ipv4 show excludedportrange protocol=tcp), which
+    // makes binding fail with EACCES rather than EADDRINUSE. 4273 sits outside
+    // every range Hyper-V hands out by default.
+    port: 4273,
     strictPort: true,
   },
 });

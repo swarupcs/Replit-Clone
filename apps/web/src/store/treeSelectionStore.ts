@@ -32,7 +32,15 @@ export const useTreeSelectionStore = create<TreeSelectionStore>((set, get) => ({
   anchor: null,
   visibleOrder: [],
 
-  setVisibleOrder: (paths) => set({ visibleOrder: paths }),
+  setVisibleOrder: (paths) =>
+    set((state) =>
+      // The tree recomputes this array on every render; storing an identical
+      // one would still change its identity and wake every subscriber.
+      state.visibleOrder.length === paths.length &&
+      state.visibleOrder.every((path, index) => path === paths[index])
+        ? state
+        : { visibleOrder: paths },
+    ),
 
   click: (relPath, { meta, shift }) =>
     set((state) => {

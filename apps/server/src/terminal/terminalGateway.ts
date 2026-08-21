@@ -14,6 +14,7 @@ import { verifyAccessToken } from "../service/tokenService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
 import { logger } from "../lib/logger.js";
 import { increment } from "../lib/metrics.js";
+import { AppError } from "../utils/errors.js";
 
 /** Decodes a client frame to text.
  *
@@ -129,6 +130,14 @@ async function startTerminal(
   } catch (error) {
     logger.error("could not start terminal", error, { projectId });
     detach(projectId);
-    ws.close(1011, "Could not start the project container");
+    // Relay the real reason when it is safe to show (an AppError, e.g. the
+    // at-capacity 503), so the terminal can tell the user to close a project
+    // instead of showing a bare "Disconnected". WebSocket close reasons are
+    // capped at 123 UTF-8 bytes, so keep it short.
+    const reason =
+      error instanceof AppError
+        ? error.message
+        : "Could not start the project container";
+    ws.close(1011, reason.slice(0, 120));
   }
 }
