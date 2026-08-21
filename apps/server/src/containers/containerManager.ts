@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
 import Docker from "dockerode";
 import type { Container, ContainerInfo, ContainerStats as DockerStats } from "dockerode";
@@ -38,6 +39,37 @@ export async function removeCacheVolume(projectId: string): Promise<void> {
     .catch(() => {
       // Never created, or already gone.
     });
+}
+
+/** Label recording which environment a container was built with.
+ *
+ *  Variables are handed to Docker at CREATE time and are fixed for the
+ *  container's life. Since a stopped container is reused rather than rebuilt,
+ *  saving new variables reached a running project only if it happened to have
+ *  no container yet — which for anyone actually working was never. The value
+ *  saved, the dev server restarted, and nothing changed.
+ */
+const ENV_SIGNATURE_LABEL = "rc.env-signature";
+
+/** A stable fingerprint of a project's variables.
+ *
+ *  Sorted, so the same set written in a different order is not mistaken for a
+ *  change and does not cost the user an unasked-for rebuild.
+ *
+ *  Serialised as JSON rather than joined with a separator, because a value may
+ *  contain anything — a newline in a private key, an `=` in a connection
+ *  string. Joining made `{A: "1\nB=2"}` hash identically to `{A: "1", B: "2"}`,
+ *  which is this defect all over again: a real change that does not look like
+ *  one, so the container is never rebuilt.
+ */
+export function envSignature(vars: Record<string, string>): string {
+  const stable = JSON.stringify(
+    Object.keys(vars)
+      .sort()
+      .map((name) => [name, vars[name] ?? ""]),
+  );
+
+  return createHash("sha256").update(stable).digest("hex").slice(0, 32);
 }
 
 function containerName(projectId: string): string {
@@ -135,19 +167,32 @@ export async function ensureContainer(projectId: string): Promise<Container> {
  *  Always reached through `ensureContainer`, which serialises concurrent calls.
  */
 async function startContainer(projectId: string): Promise<Container> {
+  const envVars = await getEnvVars(projectId);
+  const signature = envSignature(envVars);
+
   const existing = await findContainer(projectId);
 
   if (existing) {
-    const container = docker.getContainer(existing.Id);
+    // Checked before the state, because a RUNNING container is exactly the one
+    // that would otherwise keep serving the old environment forever.
+    if (existing.Labels?.[ENV_SIGNATURE_LABEL] === signature) {
+      const container = docker.getContainer(existing.Id);
 
-    if (existing.State === "running") {
+      if (existing.State === "running") {
+        lastActiveAt.set(projectId, Date.now());
+        return container;
+      }
+
+      await container.start();
       lastActiveAt.set(projectId, Date.now());
       return container;
     }
 
-    await container.start();
-    lastActiveAt.set(projectId, Date.now());
-    return container;
+    // The variables changed. A container cannot be given new ones, so the only
+    // way for them to take effect is to build it again. Files live in the bind
+    // mount and package caches in a named volume, so neither is lost.
+    logger.info("rebuilding container for changed environment", { projectId });
+    await docker.getContainer(existing.Id).remove({ force: true }).catch(() => {});
   }
 
   if ((await runningCount()) >= env.MAX_CONCURRENT_CONTAINERS) {
@@ -207,8 +252,10 @@ async function startContainer(projectId: string): Promise<Container> {
       // The project's own variables. Last, so they cannot shadow the two above
       // — the env service already refuses those names, and this is the belt to
       // that braces.
-      ...toDockerEnv(await getEnvVars(projectId)),
+      ...toDockerEnv(envVars),
     ],
+    // What the reuse check above compares against.
+    Labels: { [ENV_SIGNATURE_LABEL]: signature },
     ...(publishPort ? { ExposedPorts: exposedPorts } : {}),
     // Idle process; terminals attach with `docker exec`.
     Cmd: ["sleep", "infinity"],
@@ -519,13 +566,6 @@ function cpuPercent(stats: DockerStats): number {
 
   const cores = stats.cpu_stats?.online_cpus ?? 1;
   return Math.round((cpuDelta / systemDelta) * cores * 1000) / 10;
-}
-
-/** Removes the container so the next start is from a clean base image.
- *  Files survive: they live in the bind mount, not the container. */
-export async function recreateContainer(projectId: string): Promise<Container> {
-  await removeContainer(projectId);
-  return ensureContainer(projectId);
 }
 
 /** Stops one account taking every container slot on the machine.
