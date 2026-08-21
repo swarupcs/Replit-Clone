@@ -156,6 +156,18 @@ export interface ServerToClientEvents {
   docAwareness: (payload: { relPath: string; update: ArrayBuffer }) => void;
   /** How many people are editing this file, this client included. */
   docPeers: (payload: { relPath: string; count: number }) => void;
+  /** The server wrote this shared document to disk.
+   *
+   *  While a file is edited together the server owns saving it, so the client
+   *  never sends `writeFile` for it and never sees `writeFileSuccess`. Without
+   *  this there was nothing at all to clear the tab's unsaved marker: every
+   *  open file stayed dirty forever, every close asked for confirmation, and
+   *  every reload raised the browser's unsaved-changes prompt — for work that
+   *  had been on disk for some time.
+   *
+   *  Sent to everyone with the file open, because a shared document is one
+   *  merged buffer: when it is saved it is saved for all of them. */
+  docSaved: (payload: { relPath: string }) => void;
   /** The file changed on disk outside the editor while it was open.
    *
    *  Reported rather than merged: an external writer produces whole new

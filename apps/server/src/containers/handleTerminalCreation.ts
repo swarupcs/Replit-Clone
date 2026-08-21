@@ -130,6 +130,20 @@ export const handleTerminalCreation = (
   );
 };
 
+/** How much unsent terminal output to hold for a client before pausing the
+ *  process producing it.
+ *
+ *  Generous enough that an ordinary burst — an install, a stack trace, a test
+ *  run — never stalls, and small enough that it cannot become a way to spend
+ *  the server's memory.
+ */
+const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
+
+/** Above this, output is dropped rather than buffered, and the terminal is
+ *  told once. Reached only by a process writing far faster than any human is
+ *  reading, where the bytes in flight have no value anyway. */
+const DROP_THRESHOLD_BYTES = 16 * 1024 * 1024;
+
 /** Forwards the exec's output to the client.
  *
  *  The exec is created with `Tty: true`, and Docker only frames a stream when
@@ -138,9 +152,58 @@ export const handleTerminalCreation = (
  *  as a length prefix and then blocked forever waiting for a payload that size,
  *  so the terminal never rendered anything. `runner.ts` already documents the
  *  raw behaviour for its own exec; the two now agree.
+ *
+ *  Backpressure is the other half. `ws.send` queues whatever it cannot write
+ *  yet, and this used to send unconditionally — so a process writing faster
+ *  than the client drains (`yes`, a build loop, a verbose install over a slow
+ *  link) grew that queue in the SERVER's memory until the process died. The
+ *  container's own memory limit does not apply on this side of the socket.
  */
-function forwardOutput(stream: Duplex, ws: WebSocket): void {
+export function forwardOutput(stream: Duplex, ws: WebSocket): void {
+  let warnedAboutDropping = false;
+
   stream.on("data", (chunk: Buffer) => {
-    if (ws.readyState === ws.OPEN) ws.send(chunk);
+    if (ws.readyState !== ws.OPEN) return;
+
+    const buffered = ws.bufferedAmount;
+
+    if (buffered > DROP_THRESHOLD_BYTES) {
+      // Pausing alone is not enough at this rate: the producer is inside the
+      // container and a paused stream only stops us reading, while Docker
+      // keeps buffering. Say so once, then discard until it drains.
+      if (!warnedAboutDropping) {
+        warnedAboutDropping = true;
+        ws.send("\r\n\x1b[33m[output is coming faster than it can be shown — some was dropped]\x1b[0m\r\n");
+      }
+      return;
+    }
+
+    warnedAboutDropping = false;
+    ws.send(chunk);
+
+    // Stop reading from Docker while the client catches up; the exec's own
+    // writes then block, which is the pressure reaching the process itself.
+    if (buffered > MAX_BUFFERED_BYTES && !stream.isPaused()) {
+      stream.pause();
+      waitForDrain(stream, ws);
+    }
   });
+}
+
+/** Resumes the exec stream once the client has caught up. */
+function waitForDrain(stream: Duplex, ws: WebSocket): void {
+  const timer = setInterval(() => {
+    if (ws.readyState !== ws.OPEN) {
+      clearInterval(timer);
+      return;
+    }
+
+    if (ws.bufferedAmount > MAX_BUFFERED_BYTES) return;
+
+    clearInterval(timer);
+    stream.resume();
+  }, 50);
+
+  // Never a reason to hold the process open on its own.
+  timer.unref();
 }

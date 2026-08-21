@@ -13,6 +13,11 @@ import {
   joinDoc,
   leaveDoc,
   resetCollabState,
+  setDocSaveListener,
+  dropDoc,
+  dropDocsUnder,
+  flushAndDropDoc,
+  liveDocPaths,
 } from "./collabService.js";
 
 const PROJECT = "2b4c6d8e-1a3f-4b5c-8d9e-0f1a2b3c4d5e";
@@ -50,6 +55,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  setDocSaveListener(null);
   resetCollabState();
   await fs.rm(root, { recursive: true, force: true });
 });
@@ -233,5 +239,155 @@ describe("cleanup", () => {
     forgetProject(PROJECT);
 
     expect(isLive(PROJECT, FILE)).toBe(false);
+  });
+});
+
+describe("announcing a save", () => {
+  /** The editor clears a tab's unsaved marker on being told the file reached
+   *  disk. A shared file is written by the SERVER, so `writeFile` — and with
+   *  it `writeFileSuccess` — never happens for one. Nothing else can clear the
+   *  marker, so without this every open file stays dirty forever. */
+  it("tells the room after the document reaches disk", async () => {
+    const saved: { projectId: string; relPath: string }[] = [];
+    setDocSaveListener((projectId, relPath) => {
+      saved.push({ projectId, relPath });
+    });
+
+    const { state } = await joinDoc(PROJECT, FILE, "s1");
+    const a = client("s1", state);
+    applyDocUpdate(PROJECT, FILE, a.edit((text) => text.insert(0, "typed ")), "s1");
+
+    await flushDoc(PROJECT, FILE);
+
+    expect(saved).toEqual([{ projectId: PROJECT, relPath: FILE }]);
+    expect(await read()).toBe("typed hello");
+  });
+
+  it("says nothing when the flush wrote nothing", async () => {
+    const saved: string[] = [];
+    setDocSaveListener((_projectId, relPath) => saved.push(relPath));
+
+    await joinDoc(PROJECT, FILE, "s1");
+    // Nobody typed, so the contents already match what is on disk.
+    await flushDoc(PROJECT, FILE);
+
+    expect(saved).toEqual([]);
+  });
+
+  it("says nothing when the write failed", async () => {
+    const saved: string[] = [];
+    setDocSaveListener((_projectId, relPath) => saved.push(relPath));
+
+    const { state } = await joinDoc(PROJECT, FILE, "s1");
+    const a = client("s1", state);
+    applyDocUpdate(PROJECT, FILE, a.edit((text) => text.insert(0, "typed ")), "s1");
+
+    // The directory goes; the write can no longer land. Reporting a save here
+    // would clear the marker on work that is not anywhere.
+    await fs.rm(root, { recursive: true, force: true });
+    await flushDoc(PROJECT, FILE);
+
+    expect(saved).toEqual([]);
+  });
+});
+
+describe("a file that goes away under a live document", () => {
+  /** Reproduces the original defect: the document is not tied to the file's
+   *  existence, and `flushDoc` wrote unconditionally. Deleting a file somebody
+   *  had open brought it straight back holding whatever they had typed. */
+  it("does not recreate a deleted file, even mid-flush", async () => {
+    const { state } = await joinDoc(PROJECT, FILE, "s1");
+    const a = client("s1", state);
+    applyDocUpdate(PROJECT, FILE, a.edit((text) => text.insert(0, "typed ")), "s1");
+
+    // Deleted behind the service's back — the race the guard exists for.
+    await fs.unlink(`${root}/${FILE}`);
+    await flushDoc(PROJECT, FILE);
+
+    await expect(read()).rejects.toThrow();
+    // And the document is gone with it, rather than lingering to try again.
+    expect(isLive(PROJECT, FILE)).toBe(false);
+  });
+
+  it("drops the document without writing it", async () => {
+    const { state } = await joinDoc(PROJECT, FILE, "s1");
+    const a = client("s1", state);
+    applyDocUpdate(PROJECT, FILE, a.edit((text) => text.insert(0, "typed ")), "s1");
+
+    dropDoc(PROJECT, FILE);
+    await flushDoc(PROJECT, FILE);
+
+    expect(isLive(PROJECT, FILE)).toBe(false);
+    // Untouched: the edit was discarded along with the document.
+    expect(await read()).toBe("hello");
+  });
+
+  it("drops every document inside a folder being removed", async () => {
+    await fs.mkdir(`${root}/src`, { recursive: true });
+    await fs.writeFile(`${root}/src/a.ts`, "a");
+    await fs.writeFile(`${root}/src/b.ts`, "b");
+
+    await joinDoc(PROJECT, "src/a.ts", "s1");
+    await joinDoc(PROJECT, "src/b.ts", "s1");
+    await joinDoc(PROJECT, FILE, "s1");
+
+    dropDocsUnder(PROJECT, "src");
+
+    expect(isLive(PROJECT, "src/a.ts")).toBe(false);
+    expect(isLive(PROJECT, "src/b.ts")).toBe(false);
+    // A sibling outside the folder is none of its business.
+    expect(isLive(PROJECT, FILE)).toBe(true);
+  });
+
+  it("carries in-flight edits into a rename, then lets go", async () => {
+    const { state } = await joinDoc(PROJECT, FILE, "s1");
+    const a = client("s1", state);
+    applyDocUpdate(PROJECT, FILE, a.edit((text) => text.insert(0, "typed ")), "s1");
+
+    // What renameEntry does: flush so nothing typed in the last second is
+    // lost, drop so the document cannot write the old name back afterwards.
+    await flushAndDropDoc(PROJECT, FILE);
+    await fs.rename(`${root}/${FILE}`, `${root}/renamed.txt`);
+
+    expect(isLive(PROJECT, FILE)).toBe(false);
+    expect(await fs.readFile(`${root}/renamed.txt`, "utf8")).toBe("typed hello");
+    // The old name stays gone.
+    await expect(read()).rejects.toThrow();
+  });
+});
+
+describe("listing what is open", () => {
+  /** `liveDocPaths` built its prefix with a space while the keys were joined
+   *  with a NUL, so it matched nothing and always came back empty. Everything
+   *  downstream of it — reporting a file changed by a terminal command, and
+   *  dropping documents under a deleted folder — silently did nothing. */
+  it("finds the documents this project has open", async () => {
+    await fs.mkdir(`${root}/src`, { recursive: true });
+    await fs.writeFile(`${root}/src/a.ts`, "a");
+
+    await joinDoc(PROJECT, FILE, "s1");
+    await joinDoc(PROJECT, "src/a.ts", "s1");
+
+    expect(liveDocPaths(PROJECT).sort()).toEqual(["notes.txt", "src/a.ts"]);
+  });
+
+  it("keeps one project's documents out of another's", async () => {
+    const other = "9f8e7d6c-5b4a-4392-8180-7f6e5d4c3b2a";
+    const otherRoot = projectRoot(other);
+    await fs.mkdir(otherRoot, { recursive: true });
+    await fs.writeFile(`${otherRoot}/${FILE}`, "theirs");
+
+    await joinDoc(PROJECT, FILE, "s1");
+    await joinDoc(other, FILE, "s2");
+
+    expect(liveDocPaths(PROJECT)).toEqual([FILE]);
+    expect(liveDocPaths(other)).toEqual([FILE]);
+
+    forgetProject(other);
+    expect(liveDocPaths(other)).toEqual([]);
+    // The identically-named file in the other project is untouched.
+    expect(liveDocPaths(PROJECT)).toEqual([FILE]);
+
+    await fs.rm(otherRoot, { recursive: true, force: true });
   });
 });

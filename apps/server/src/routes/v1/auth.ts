@@ -45,25 +45,44 @@ const addressLimiter = rateLimit({
  *  An address limit alone does not protect an individual account: an attacker
  *  spread across many addresses gets 20 guesses from each of them. This caps
  *  what any one account can be subjected to no matter where it comes from.
+ *
+ *  Two details keep it from becoming a way to lock somebody OUT of their own
+ *  account, which is what it was before:
+ *
+ *  - Only FAILED attempts count. `skipSuccessfulRequests` means the real owner
+ *    signing in correctly never spends budget, so an attacker cannot fill it
+ *    and leave them stranded on the right password.
+ *  - Sign-in and password reset get separate budgets. They shared one
+ *    instance, so burning the sign-in allowance also blocked the one route
+ *    that could have recovered the account.
  */
-const accountLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
-  standardHeaders: false,
-  legacyHeaders: false,
-  message: RATE_LIMITED,
-  keyGenerator: (req) => {
-    const body = req.body as { email?: unknown } | undefined;
-    const email = typeof body?.email === "string" ? body.email : "";
-    return `account:${email.trim().toLowerCase()}`;
-  },
-  // A request with no email is not an attempt against any account; leave it to
-  // the address limiter.
-  skip: (req) => {
-    const body = req.body as { email?: unknown } | undefined;
-    return typeof body?.email !== "string";
-  },
-});
+function accountLimiter() {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: false,
+    legacyHeaders: false,
+    message: RATE_LIMITED,
+    // The owner getting it right costs nothing, so an attacker's failures
+    // cannot deny them their own account.
+    skipSuccessfulRequests: true,
+    keyGenerator: (req) => {
+      const body = req.body as { email?: unknown } | undefined;
+      const email = typeof body?.email === "string" ? body.email : "";
+      return `account:${email.trim().toLowerCase()}`;
+    },
+    // A request with no email is not an attempt against any account; leave it
+    // to the address limiter.
+    skip: (req) => {
+      const body = req.body as { email?: unknown } | undefined;
+      return typeof body?.email !== "string";
+    },
+  });
+}
+
+/** Separate instances, so exhausting one does not close the other. */
+const loginAccountLimiter = accountLimiter();
+const resetAccountLimiter = accountLimiter();
 
 /** Refresh is unauthenticated and hits the database, so it gets a budget too —
  *  a generous one, since an active editor refreshes on its own schedule. */
@@ -76,14 +95,19 @@ const refreshLimiter = rateLimit({
 });
 
 router.post("/signup", addressLimiter, asyncHandler(signup));
-router.post("/login", addressLimiter, accountLimiter, asyncHandler(login));
+router.post("/login", addressLimiter, loginAccountLimiter, asyncHandler(login));
 router.post("/refresh", refreshLimiter, asyncHandler(refresh));
 router.post("/logout", asyncHandler(logout));
 router.get("/me", requireAuth, asyncHandler(me));
 
 // Reset requests are rate-limited on the same budget as sign-in: the endpoint
 // sends mail on someone else's behalf, which is worth abusing.
-router.post("/password-reset", addressLimiter, accountLimiter, asyncHandler(requestPasswordReset));
+router.post(
+  "/password-reset",
+  addressLimiter,
+  resetAccountLimiter,
+  asyncHandler(requestPasswordReset),
+);
 router.post("/password-reset/confirm", addressLimiter, asyncHandler(resetPassword));
 
 router.post(

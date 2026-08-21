@@ -187,6 +187,10 @@ export function createPreviewProxy(): PreviewProxy {
       proxyRes: (proxyRes, _req, res) => {
         delete proxyRes.headers["content-security-policy"];
         delete proxyRes.headers["content-security-policy-report-only"];
+        // The older header too. Browsers that still honour it would let a dev
+        // server sending DENY blank the preview pane, and the project's own
+        // framing policy is not the one that governs here — ours is.
+        delete proxyRes.headers["x-frame-options"];
         res.setHeader("Content-Security-Policy", frameAncestors);
       },
       error: (error, _req, res) => {

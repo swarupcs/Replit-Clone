@@ -245,9 +245,10 @@ export async function setProjectEnvController(
 
   res.json({
     success: true,
-    // Said plainly, because the alternative is a user wondering why their new
-    // variable is not visible to a process that started before it existed.
-    message: "Saved. Restart the dev server for these to take effect.",
+    // Accurate now: a container records the environment it was built with, so
+    // the next start rebuilds it rather than reusing one holding the old set.
+    // Restart is the shortest path to that.
+    message: "Saved. Restart the dev server to pick them up.",
     data: saved,
   });
 }

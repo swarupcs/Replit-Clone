@@ -1,0 +1,49 @@
+import { describe, expect, it } from "vitest";
+import { envSignature } from "./containerManager.js";
+
+/** What the signature has to guarantee.
+ *
+ *  A container's environment is fixed when Docker creates it, so the only way
+ *  new variables reach a project is to notice the set has changed and build the
+ *  container again. This label is that comparison. Getting it wrong in one
+ *  direction rebuilds a container on every start; in the other it goes back to
+ *  the original defect, where saved variables silently never applied.
+ */
+describe("envSignature", () => {
+  it("is the same for the same variables", () => {
+    expect(envSignature({ API_URL: "https://x", TOKEN: "abc" })).toBe(
+      envSignature({ API_URL: "https://x", TOKEN: "abc" }),
+    );
+  });
+
+  it("ignores the order they were written in", () => {
+    // Object key order follows insertion, and editing one variable in the UI
+    // can reorder the whole record. Rebuilding the container for that would be
+    // a restart the user did not ask for.
+    expect(envSignature({ A: "1", B: "2" })).toBe(envSignature({ B: "2", A: "1" }));
+  });
+
+  it("changes when a value changes", () => {
+    expect(envSignature({ TOKEN: "abc" })).not.toBe(envSignature({ TOKEN: "xyz" }));
+  });
+
+  it("changes when a variable is added or removed", () => {
+    const one = envSignature({ A: "1" });
+
+    expect(one).not.toBe(envSignature({ A: "1", B: "2" }));
+    expect(one).not.toBe(envSignature({}));
+  });
+
+  it("tells apart a rename that keeps the value", () => {
+    expect(envSignature({ A: "1" })).not.toBe(envSignature({ B: "1" }));
+  });
+
+  it("does not confuse a value containing the separator with two variables", () => {
+    // "A=1\nB=2" as a single value must not look like A=1 plus B=2.
+    expect(envSignature({ A: "1\nB=2" })).not.toBe(envSignature({ A: "1", B: "2" }));
+  });
+
+  it("fits in a Docker label", () => {
+    expect(envSignature({ A: "1" })).toMatch(/^[0-9a-f]{32}$/);
+  });
+});

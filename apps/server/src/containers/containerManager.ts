@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
 import Docker from "dockerode";
 import type { Container, ContainerInfo, ContainerStats as DockerStats } from "dockerode";
@@ -38,6 +39,37 @@ export async function removeCacheVolume(projectId: string): Promise<void> {
     .catch(() => {
       // Never created, or already gone.
     });
+}
+
+/** Label recording which environment a container was built with.
+ *
+ *  Variables are handed to Docker at CREATE time and are fixed for the
+ *  container's life. Since a stopped container is reused rather than rebuilt,
+ *  saving new variables reached a running project only if it happened to have
+ *  no container yet — which for anyone actually working was never. The value
+ *  saved, the dev server restarted, and nothing changed.
+ */
+const ENV_SIGNATURE_LABEL = "rc.env-signature";
+
+/** A stable fingerprint of a project's variables.
+ *
+ *  Sorted, so the same set written in a different order is not mistaken for a
+ *  change and does not cost the user an unasked-for rebuild.
+ *
+ *  Serialised as JSON rather than joined with a separator, because a value may
+ *  contain anything — a newline in a private key, an `=` in a connection
+ *  string. Joining made `{A: "1\nB=2"}` hash identically to `{A: "1", B: "2"}`,
+ *  which is this defect all over again: a real change that does not look like
+ *  one, so the container is never rebuilt.
+ */
+export function envSignature(vars: Record<string, string>): string {
+  const stable = JSON.stringify(
+    Object.keys(vars)
+      .sort()
+      .map((name) => [name, vars[name] ?? ""]),
+  );
+
+  return createHash("sha256").update(stable).digest("hex").slice(0, 32);
 }
 
 function containerName(projectId: string): string {
@@ -97,6 +129,16 @@ async function findContainer(
   return containers.find((info) => info.Names.includes(`/${name}`));
 }
 
+/** The project id behind a sandbox container's names.
+ *
+ *  Docker gives a container a list of names and the prefix match is a
+ *  substring one, so this looks for the name that actually starts with our
+ *  prefix and takes what follows it. */
+function projectIdFromNames(names: string[]): string | undefined {
+  const name = names.find((entry) => entry.startsWith(`/${CONTAINER_PREFIX}`));
+  return name?.slice(`/${CONTAINER_PREFIX}`.length);
+}
+
 async function runningCount(): Promise<number> {
   const containers = await docker.listContainers({
     filters: { name: [CONTAINER_PREFIX] },
@@ -113,6 +155,26 @@ async function runningCount(): Promise<number> {
  *  the MAX_CONCURRENT_CONTAINERS check and overshoot the budget together.
  */
 const starting = new Map<string, Promise<Container>>();
+
+/** Serialises the capacity checks across DIFFERENT projects too.
+ *
+ *  `starting` is keyed by project, which is what stops two callers racing over
+ *  the same one. But the global cap and the per-user budget are counts of
+ *  every container on the machine, read inside that per-project section — so
+ *  several different projects starting at once all read the same figure, all
+ *  passed, and the limit was quietly exceeded by however many arrived
+ *  together. This makes the count-and-create step one at a time.
+ */
+let capacityGate: Promise<unknown> = Promise.resolve();
+
+function withCapacityGate<T>(work: () => Promise<T>): Promise<T> {
+  const next = capacityGate.then(work, work);
+
+  // The chain must not break on a rejection, or every later start inherits it.
+  capacityGate = next.catch(() => undefined);
+
+  return next;
+}
 
 export async function ensureContainer(projectId: string): Promise<Container> {
   const inFlight = starting.get(projectId);
@@ -135,31 +197,33 @@ export async function ensureContainer(projectId: string): Promise<Container> {
  *  Always reached through `ensureContainer`, which serialises concurrent calls.
  */
 async function startContainer(projectId: string): Promise<Container> {
+  const envVars = await getEnvVars(projectId);
+  const signature = envSignature(envVars);
+
   const existing = await findContainer(projectId);
 
   if (existing) {
-    const container = docker.getContainer(existing.Id);
+    // Checked before the state, because a RUNNING container is exactly the one
+    // that would otherwise keep serving the old environment forever.
+    if (existing.Labels?.[ENV_SIGNATURE_LABEL] === signature) {
+      const container = docker.getContainer(existing.Id);
 
-    if (existing.State === "running") {
+      if (existing.State === "running") {
+        lastActiveAt.set(projectId, Date.now());
+        return container;
+      }
+
+      await container.start();
       lastActiveAt.set(projectId, Date.now());
       return container;
     }
 
-    await container.start();
-    lastActiveAt.set(projectId, Date.now());
-    return container;
+    // The variables changed. A container cannot be given new ones, so the only
+    // way for them to take effect is to build it again. Files live in the bind
+    // mount and package caches in a named volume, so neither is lost.
+    logger.info("rebuilding container for changed environment", { projectId });
+    await docker.getContainer(existing.Id).remove({ force: true }).catch(() => {});
   }
-
-  if ((await runningCount()) >= env.MAX_CONCURRENT_CONTAINERS) {
-    increment("containers_capacity_rejected");
-    throw new AppError(
-      503,
-      "CAPACITY",
-      "The server is at capacity. Close another project and try again.",
-    );
-  }
-
-  await assertUserContainerBudget(projectId);
 
   const template = await templateForProject(projectId);
 
@@ -189,51 +253,68 @@ async function startContainer(projectId: string): Promise<Container> {
     ]),
   );
 
-  const container = await docker.createContainer({
-    Image: template.image,
-    name: containerName(projectId),
-    Tty: true,
-    OpenStdin: true,
-    // Matched to the bind mount's owner, because a bind mount keeps the host's
-    // ownership and the image's own chown is masked by it. The execs that
-    // terminals and the Run button open leave `User` unset so Docker inherits
-    // this, rather than restating a uid that could drift from it.
-    User: await containerUser(projectId),
-    WorkingDir: "/home/sandbox/app",
-    Env: [
-      "HOST=0.0.0.0",
-      // Vite serves under this base so the proxied path resolves correctly.
-      `PREVIEW_BASE=/preview/${projectId}/`,
-      // The project's own variables. Last, so they cannot shadow the two above
-      // — the env service already refuses those names, and this is the belt to
-      // that braces.
-      ...toDockerEnv(await getEnvVars(projectId)),
-    ],
-    ...(publishPort ? { ExposedPorts: exposedPorts } : {}),
-    // Idle process; terminals attach with `docker exec`.
-    Cmd: ["sleep", "infinity"],
-    HostConfig: {
-      ...(publishPort ? { PortBindings: portBindings } : {}),
-      Binds: [
-        `${projectRoot(projectId)}:/home/sandbox/app`,
-        // Package caches, in a named volume rather than the container's
-        // writable layer. Containers are stopped when idle and removed on a
-        // restart, so without this every cold start re-downloaded the whole of
-        // node_modules — minutes of waiting for a project that had not changed.
-        `${cacheVolumeName(projectId)}:/home/sandbox/.cache`,
+  const container = await withCapacityGate(async () => {
+    // Counted and created without interruption, so two projects starting
+    // together cannot both read the same figure and both pass.
+    if ((await runningCount()) >= env.MAX_CONCURRENT_CONTAINERS) {
+      increment("containers_capacity_rejected");
+      throw new AppError(
+        503,
+        "CAPACITY",
+        "The server is at capacity. Close another project and try again.",
+      );
+    }
+
+    await assertUserContainerBudget(projectId);
+
+    return docker.createContainer({
+      Image: template.image,
+      name: containerName(projectId),
+      Tty: true,
+      OpenStdin: true,
+      // Matched to the bind mount's owner, because a bind mount keeps the host's
+      // ownership and the image's own chown is masked by it. The execs that
+      // terminals and the Run button open leave `User` unset so Docker inherits
+      // this, rather than restating a uid that could drift from it.
+      User: await containerUser(projectId),
+      WorkingDir: "/home/sandbox/app",
+      Env: [
+        "HOST=0.0.0.0",
+        // Vite serves under this base so the proxied path resolves correctly.
+        `PREVIEW_BASE=/preview/${projectId}/`,
+        // The project's own variables. Last, so they cannot shadow the two above
+        // — the env service already refuses those names, and this is the belt to
+        // that braces.
+        ...toDockerEnv(envVars),
       ],
-      Memory: env.CONTAINER_MEMORY_MB * 1024 * 1024,
-      // Equal to Memory disables swap, so a container cannot evade its limit
-      // by swapping the host to death.
-      MemorySwap: env.CONTAINER_MEMORY_MB * 1024 * 1024,
-      NanoCpus: Math.round(env.CONTAINER_CPUS * 1e9),
-      // Caps a fork bomb.
-      PidsLimit: 256,
-      CapDrop: ["ALL"],
-      SecurityOpt: ["no-new-privileges"],
-      NetworkMode: SANDBOX_NETWORK,
-      RestartPolicy: { Name: "no" },
-    },
+      // What the reuse check above compares against.
+      Labels: { [ENV_SIGNATURE_LABEL]: signature },
+      ...(publishPort ? { ExposedPorts: exposedPorts } : {}),
+      // Idle process; terminals attach with `docker exec`.
+      Cmd: ["sleep", "infinity"],
+      HostConfig: {
+        ...(publishPort ? { PortBindings: portBindings } : {}),
+        Binds: [
+          `${projectRoot(projectId)}:/home/sandbox/app`,
+          // Package caches, in a named volume rather than the container's
+          // writable layer. Containers are stopped when idle and removed on a
+          // restart, so without this every cold start re-downloaded the whole of
+          // node_modules — minutes of waiting for a project that had not changed.
+          `${cacheVolumeName(projectId)}:/home/sandbox/.cache`,
+        ],
+        Memory: env.CONTAINER_MEMORY_MB * 1024 * 1024,
+        // Equal to Memory disables swap, so a container cannot evade its limit
+        // by swapping the host to death.
+        MemorySwap: env.CONTAINER_MEMORY_MB * 1024 * 1024,
+        NanoCpus: Math.round(env.CONTAINER_CPUS * 1e9),
+        // Caps a fork bomb.
+        PidsLimit: 256,
+        CapDrop: ["ALL"],
+        SecurityOpt: ["no-new-privileges"],
+        NetworkMode: SANDBOX_NETWORK,
+        RestartPolicy: { Name: "no" },
+      },
+    });
   });
 
   await container.start();
@@ -327,7 +408,12 @@ export function startIdleReaper(): void {
         });
 
         for (const info of containers) {
-          const name = info.Names[0]?.replace(`/${CONTAINER_PREFIX}`, "");
+          // Parsed the way reconcileOnBoot does. `Names[0].replace(prefix, "")`
+          // was unanchored and looked at only the first of several possible
+          // names, so it could yield the wrong id — and a wrong id means
+          // checking a different project's attachment count before stopping
+          // this one.
+          const name = projectIdFromNames(info.Names);
           if (!name) continue;
 
           if ((activeAttachments.get(name) ?? 0) > 0) continue;
@@ -400,12 +486,9 @@ export async function reconcileOnBoot(): Promise<{
     .catch(() => []);
 
   for (const info of containers) {
-    const name = info.Names.find((entry) =>
-      entry.startsWith(`/${CONTAINER_PREFIX}`),
-    );
-    if (!name) continue;
+    const projectId = projectIdFromNames(info.Names);
+    if (!projectId) continue;
 
-    const projectId = name.slice(`/${CONTAINER_PREFIX}`.length);
     if (known.has(projectId)) continue;
 
     logger.info("removing orphaned container", { projectId });
@@ -521,13 +604,6 @@ function cpuPercent(stats: DockerStats): number {
   return Math.round((cpuDelta / systemDelta) * cores * 1000) / 10;
 }
 
-/** Removes the container so the next start is from a clean base image.
- *  Files survive: they live in the bind mount, not the container. */
-export async function recreateContainer(projectId: string): Promise<Container> {
-  await removeContainer(projectId);
-  return ensureContainer(projectId);
-}
-
 /** Stops one account taking every container slot on the machine.
  *
  *  Only the global cap existed, so a single user opening enough projects
@@ -555,8 +631,8 @@ async function assertUserContainerBudget(projectId: string): Promise<void> {
     .catch(() => []);
 
   const theirs = running.filter((info) => {
-    const name = info.Names.find((entry) => entry.startsWith(`/${CONTAINER_PREFIX}`));
-    return name ? ownedIds.has(name.slice(`/${CONTAINER_PREFIX}`.length)) : false;
+    const projectId = projectIdFromNames(info.Names);
+    return projectId !== undefined && ownedIds.has(projectId);
   });
 
   if (theirs.length >= env.MAX_CONTAINERS_PER_USER) {
