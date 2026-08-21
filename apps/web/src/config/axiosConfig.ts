@@ -20,10 +20,17 @@ axiosInstance.interceptors.request.use((config) => {
 type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean };
 
 /** Shared across concurrent 401s so a burst of requests triggers ONE refresh
- *  rather than a stampede that invalidates itself. */
+ *  rather than a stampede that invalidates itself.
+ *
+ *  Exported so every refresh in the app -- the boot restore, the socket
+ *  reconnects -- funnels through this one in-flight promise. Refresh tokens
+ *  rotate on every use and a reused one revokes the whole family, so two
+ *  refreshes racing (say a terminal reconnect and a REST 401 at once) would
+ *  present the same token twice and log the user out. One shared promise makes
+ *  that impossible. */
 let refreshInFlight: Promise<string> | null = null;
 
-async function refreshAccessToken(): Promise<string> {
+export async function refreshAccessToken(): Promise<string> {
   refreshInFlight ??= axios
     .post<AuthResponse>(
       `${import.meta.env.VITE_BACKEND_URL}/api/v1/auth/refresh`,

@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Tooltip } from "antd";
 import { useAuthStore } from "../../../store/authStore.ts";
-import { refreshApi } from "../../../apis/auth.ts";
+import { refreshAccessToken } from "../../../config/axiosConfig.ts";
 import { VscClearAll, VscDebugRestart } from "react-icons/vsc";
 import "@xterm/xterm/css/xterm.css";
 
@@ -214,12 +214,14 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
           // A close before OPEN is almost always a rejected handshake -- the
           // stored access token was missing or expired. REST refreshes itself
           // on a 401, but a WebSocket cannot, so do it here before retrying,
-          // otherwise every attempt presents the same dead token. Best-effort:
-          // if refresh fails the retry still runs and simply closes again.
+          // otherwise every attempt presents the same dead token. Routed
+          // through the shared, de-duplicated refresher so this never races a
+          // REST refresh: refresh tokens are single-use and a reused one
+          // revokes the whole session. Best-effort -- if refresh fails the
+          // retry still runs and simply closes again.
           if (!opened) {
             try {
-              const { data } = await refreshApi();
-              useAuthStore.getState().setSession(data.user, data.accessToken);
+              await refreshAccessToken();
             } catch {
               // No live session to refresh; the retry will surface that.
             }

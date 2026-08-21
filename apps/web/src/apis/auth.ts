@@ -11,10 +11,10 @@ export const loginApi = async (body: Credentials): Promise<AuthResponse> => {
   return response.data;
 };
 
-export const refreshApi = async (): Promise<AuthResponse> => {
-  const response = await axios.post<AuthResponse>("/api/v1/auth/refresh");
-  return response.data;
-};
+// Refresh is deliberately NOT exposed here. It must go through
+// refreshAccessToken() in axiosConfig, whose shared in-flight promise stops
+// concurrent refreshes from replaying the single-use refresh token and
+// revoking the whole session.
 
 export const logoutApi = async (): Promise<void> => {
   await axios.post("/api/v1/auth/logout");
