@@ -31,6 +31,7 @@ import {
 import { useOpenTabsStore, selectActiveTab } from "../store/openTabsStore.ts";
 import { useAuthStore } from "../store/authStore.ts";
 import { useRunStore } from "../store/runStore.ts";
+import { useWorkspaceStore } from "../store/workspaceStore.ts";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
 import { QuickOpen } from "../components/organisms/QuickOpen/QuickOpen.tsx";
@@ -131,6 +132,35 @@ export const ProjectPlayground = () => {
       return !value;
     });
   }, [remember]);
+
+  /** Show the preview the moment the dev server answers.
+   *
+   *  The server now starts the project on open, so the last step of "open a
+   *  project and see it running" is revealing the pane it runs in. `readyNonce`
+   *  is bumped by `previewReady`, which the server sends only once the dev port
+   *  is actually accepting connections — so this opens onto a live app rather
+   *  than onto the "nothing running yet" placeholder.
+   *
+   *  A user who has hidden the preview for this project keeps it hidden. That
+   *  is read live from the session rather than from `restored`, for two
+   *  reasons: hiding the pane during this session has to stick too, and this
+   *  route is reused when navigating straight from one project to another, so
+   *  anything captured at mount would belong to the previous project.
+   *
+   *  Revealing deliberately does not call `remember`: the pane opening by
+   *  itself is not the user choosing to have it open, and recording it would
+   *  make this a one-time event for the life of the browser profile.
+   */
+  const readyNonce = useRunStore((store) => store.readyNonce);
+  useEffect(() => {
+    if (readyNonce === 0 || !projectIdFromUrl) return;
+
+    const remembered = useWorkspaceStore.getState().get(projectIdFromUrl)
+      ?.showPreview;
+    if (remembered !== undefined) return;
+
+    setShowPreview(true);
+  }, [readyNonce, projectIdFromUrl]);
 
   useHotkeys(
     useMemo(

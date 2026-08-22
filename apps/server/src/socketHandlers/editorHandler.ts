@@ -29,6 +29,7 @@ import { logger } from "../lib/logger.js";
 import {
   getRunHistory,
   getRunState,
+  autoStartRun,
   restartRun,
   startRun,
   stopRun,
@@ -553,6 +554,17 @@ export const handleEditorSocketEvents = (
     // server does not show an empty pane under a "running" badge.
     socket.emit("runState", getRunState(projectId));
     socket.emit("runHistory", { chunks: getRunHistory(projectId) });
+
+    // Opening a project is what starts it. This is the right place for that
+    // rather than the connect handler: `runSubscribe` is already the signal
+    // that a client cares about the dev server, and it arrives once per
+    // playground mount.
+    //
+    // Gated on edit access for the same reason `runStart` is — a viewer must
+    // not spend the owner's container budget just by looking. Deliberately not
+    // wrapped in `handle`: nobody asked for this, so it reports nothing to the
+    // client and swallows its own failures (see autoStartRun).
+    if (canEdit()) void autoStartRun(projectId);
   });
 
   socket.on("runStart", () =>

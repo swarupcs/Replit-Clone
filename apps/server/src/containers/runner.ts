@@ -4,6 +4,7 @@ import type { Exec } from "dockerode";
 import type { RunState } from "@replit-clone/shared";
 import { ensureContainer, getPreviewTarget } from "./containerManager.js";
 import { getTemplate } from "../templates/registry.js";
+import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
 import { increment } from "../lib/metrics.js";
@@ -33,6 +34,9 @@ export interface RunSession {
   /** Output held back while the process group id's marker line is still
    *  potentially incomplete. */
   pgidBuffer?: string;
+  /** Set once an automatic start has been attempted for this project, and by
+   *  an explicit stop. See `autoStartRun`. */
+  autoStartSpent?: boolean;
 }
 
 const sessions = new Map<string, RunSession>();
@@ -225,7 +229,10 @@ async function templateForProject(projectId: string) {
  *  template registry and was injected into terminals as $START_COMMAND, but
  *  nothing ever ran it -- the user had to know to type it themselves.
  */
-export async function startRun(projectId: string): Promise<void> {
+export async function startRun(
+  projectId: string,
+  options: { auto?: boolean } = {},
+): Promise<void> {
   const current = session(projectId);
 
   // Already going: re-running would leave an orphaned process holding the port.
@@ -256,6 +263,15 @@ export async function startRun(projectId: string): Promise<void> {
   current.history = [];
   current.pgid = undefined;
   current.pgidBuffer = undefined;
+  // Running it on purpose re-arms the automatic start, so a stop followed by a
+  // run leaves the project behaving like one that was never stopped.
+  //
+  // Conditional because autoStartRun is itself a caller and clearing the flag
+  // for it would contradict the suppression it just set. Today that is belt
+  // and braces rather than load-bearing — every route back to `idle` goes
+  // through stopRun, which sets the flag again — so it is here to keep the
+  // flag meaning what its name says, not to fix an observable bug.
+  if (!options.auto) current.autoStartSpent = false;
   increment("runs_started");
   logger.info("run started", { projectId, command: template.startCommand });
   setState(projectId, { status: "starting", command: template.startCommand });
@@ -341,6 +357,51 @@ export async function startRun(projectId: string): Promise<void> {
   probeUntilReady(projectId);
 }
 
+/** Starts the dev server because someone opened the project, rather than
+ *  because they asked for it.
+ *
+ *  Every template's start command already begins with its install step
+ *  (`npm install && npm run dev`, `pip install -r requirements.txt && ...`),
+ *  so this covers dependencies as well as the server itself.
+ *
+ *  Three things it deliberately will NOT do:
+ *
+ *  - Restart after an explicit Stop. `stopRun` spends the same flag, so a user
+ *    who stops the dev server does not get it back the moment another tab
+ *    connects or they reload the page. Pressing Run clears it again.
+ *  - Relaunch a run that `exited`. A dev server that died wants looking at,
+ *    and starting it again on every reconnect turns one crash into a loop.
+ *  - Report failure to the client. Nobody asked for this, so a container that
+ *    cannot start (the per-user cap, most often) leaves the project sitting at
+ *    idle with the Run button exactly where it always was, rather than opening
+ *    the project onto an error nobody triggered.
+ */
+export async function autoStartRun(projectId: string): Promise<void> {
+  if (!env.AUTO_START_ON_OPEN) return;
+
+  const current = session(projectId);
+  if (current.state.status !== "idle" || current.autoStartSpent) return;
+
+  // Recorded before anything can await, so the attempt is unambiguous however
+  // the rest of this unwinds. Two tabs racing here are actually caught by
+  // `startRun`, which claims the state synchronously; this simply means the
+  // attempt is already written down by the time that happens.
+  current.autoStartSpent = true;
+
+  try {
+    await startRun(projectId, { auto: true });
+  } catch (error) {
+    // Given back, so opening the project again once there is room can try
+    // afresh. Leaving it spent would mean the project could never start
+    // itself again until the server restarted.
+    current.autoStartSpent = false;
+    logger.info("automatic start declined", {
+      projectId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /** Stops the run.
  *
  *  Killing the exec's own PID is not enough: `npm run dev` spawns the actual
@@ -356,8 +417,14 @@ export async function startRun(projectId: string): Promise<void> {
  *  psmisc.
  */
 export async function stopRun(projectId: string): Promise<void> {
-  const current = sessions.get(projectId);
-  if (!current) return;
+  // `session` rather than `sessions.get`: stopping a project with no session
+  // yet still has to record that stopping is what the user wanted, or opening
+  // it again would start the very server they just asked to be rid of.
+  const current = session(projectId);
+
+  // An explicit stop outranks any later automatic start. Cleared by startRun,
+  // so the Run button still works normally afterwards.
+  current.autoStartSpent = true;
 
   stopProbing(current);
 

@@ -83,6 +83,22 @@ const envSchema = z.object({
   MAX_CONTAINERS_PER_USER: z.coerce.number().int().positive().default(2),
   MAX_CONCURRENT_CONTAINERS: z.coerce.number().int().positive().default(3),
 
+  /** Start a project's dev server as soon as somebody opens it, instead of
+   *  waiting for the Run button.
+   *
+   *  Every template's start command installs its dependencies first, so this
+   *  covers `npm install` too — opening a project is meant to end with a live
+   *  preview and nothing pressed.
+   *
+   *  Worth turning off on a small VM: it converts "opened a project" into "a
+   *  container, an install and a dev server", which is a much larger commitment
+   *  than viewing a file tree. An explicit Stop always wins over it, whatever
+   *  this is set to. */
+  AUTO_START_ON_OPEN: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+
   /** How the preview proxy reaches a project's dev server.
    *
    *  "container-ip"  -- dial the container's address on the sandbox network.
