@@ -221,6 +221,15 @@ export interface ServerToClientEvents {
    *  the preview pane show the app the moment it comes up, rather than
    *  leaving the user to guess when to press reload. */
   previewReady: (payload: { port: number }) => void;
+  /** The project's files changed while its dev server is live. The preview
+   *  pane reloads on this rather than relying on the dev server's own
+   *  hot-reload: on a bind mount that swallows inotify (Docker Desktop on
+   *  Windows and macOS) a save reaches the disk but the watcher inside the
+   *  container is never told, so nothing hot-reloads — the preview just sits
+   *  there showing the previous render. A full reload asks the dev server
+   *  directly, and dev servers compile on request, so the fresh render is
+   *  built from what is on disk now. */
+  previewChanged: () => void;
   /** Container resource use, in reply to statsRequest. */
   containerStats: (payload: ContainerStats) => void;
   /** Results for the most recent `search`. `truncated` means a limit stopped

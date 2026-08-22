@@ -240,6 +240,9 @@ export const ProjectPlayground = () => {
     editorSocketConn.on("previewReady", () => {
       useRunStore.getState().markPreviewReady();
     });
+    editorSocketConn.on("previewChanged", () => {
+      useRunStore.getState().markPreviewContentChanged();
+    });
     editorSocketConn.on("containerStats", (stats) => {
       useRunStore.getState().setStats(stats);
     });

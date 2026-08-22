@@ -80,6 +80,7 @@ export const Browser = ({ projectId }: BrowserProps) => {
 
   /** Bumped by the server the moment the dev server answers its port. */
   const readyNonce = useRunStore((store) => store.readyNonce);
+  const contentNonce = useRunStore((store) => store.contentNonce);
   const [autoReload, setAutoReload] = useState(true);
 
   /** Which container port to preview. A project often serves more than one
@@ -110,6 +111,13 @@ export const Browser = ({ projectId }: BrowserProps) => {
   useEffect(() => {
     if (readyNonce > 0 && autoReload) setCacheBust((value) => value + 1);
   }, [readyNonce, autoReload]);
+
+  // A save the dev server may never hear about (a bind mount can swallow the
+  // watcher's events), so the pane reloads on the server's word instead. A
+  // request is compiled from disk, which is where the save verifiably landed.
+  useEffect(() => {
+    if (contentNonce > 0 && autoReload) setCacheBust((value) => value + 1);
+  }, [contentNonce, autoReload]);
 
   // Each remount starts a fresh load. The iframe is cross-origin, so `load` is
   // the only signal we get -- there is no way to observe a failed navigation.

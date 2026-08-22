@@ -10,6 +10,10 @@ interface RunStore {
   /** Bumped when the dev server starts answering, so the preview pane can
    *  reload itself instead of leaving the user to guess when to. */
   readyNonce: number;
+  /** Bumped when the project's files change while the run is live, for the
+   *  same reason: the preview reloads rather than waiting on a hot-reload
+   *  that a bind mount may never deliver. */
+  contentNonce: number;
   /** Latest container stats sample, or null before the first one. */
   stats: ContainerStats | null;
   /** Raw chunks, not lines: the terminal renderer handles splitting, and
@@ -17,6 +21,7 @@ interface RunStore {
   output: string[];
   setState: (state: RunState) => void;
   markPreviewReady: () => void;
+  markPreviewContentChanged: () => void;
   setStats: (stats: ContainerStats) => void;
   appendOutput: (chunk: string) => void;
   replaceOutput: (chunks: string[]) => void;
@@ -29,11 +34,15 @@ export const useRunStore = create<RunStore>((set) => ({
   state: initialState,
   output: [],
   readyNonce: 0,
+  contentNonce: 0,
   stats: null,
 
   setState: (state) => set({ state }),
 
   markPreviewReady: () => set((current) => ({ readyNonce: current.readyNonce + 1 })),
+
+  markPreviewContentChanged: () =>
+    set((current) => ({ contentNonce: current.contentNonce + 1 })),
 
   setStats: (stats) => set({ stats }),
 
@@ -45,5 +54,12 @@ export const useRunStore = create<RunStore>((set) => ({
 
   replaceOutput: (chunks) => set({ output: chunks }),
 
-  reset: () => set({ state: initialState, output: [], readyNonce: 0, stats: null }),
+  reset: () =>
+    set({
+      state: initialState,
+      output: [],
+      readyNonce: 0,
+      contentNonce: 0,
+      stats: null,
+    }),
 }));

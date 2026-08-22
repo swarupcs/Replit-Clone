@@ -20,6 +20,7 @@ import { prisma } from "./lib/prisma.js";
 import { logger } from "./lib/logger.js";
 import { touchProject } from "./service/projectService.js";
 import { retainProjectWatcher } from "./service/projectWatcher.js";
+import { createPreviewAnnouncer } from "./service/previewRefresh.js";
 import { reportExternalChanges } from "./service/collabWatch.js";
 import { flushAllDocs, setDocSaveListener } from "./service/collabService.js";
 import { startAccessWatch, watchAccess } from "./service/accessWatch.js";
@@ -112,6 +113,10 @@ app.use(errorHandler);
 const editorNamespace = io.of("/editor");
 installSocketAuth(editorNamespace);
 
+// One per process, not per connection: the announcements are per project and
+// debounced, so two tabs must not schedule two reloads for one save.
+const announcePreviewChange = createPreviewAnnouncer(editorNamespace);
+
 // While a file is shared the server writes it, so the client never sends
 // `writeFile` and never sees `writeFileSuccess` — which is the only thing that
 // clears a tab's unsaved marker. Without this every open file stayed dirty
@@ -138,6 +143,10 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
   // two refetch broadcasts per change.
   const releaseWatcher = retainProjectWatcher(projectId, () => {
     editorNamespace.to(projectId).emit("treeChanged");
+
+    // The preview reloads too — on a bind mount that swallows inotify, this
+    // is the only thing that ever tells it a save happened.
+    announcePreviewChange.announce(projectId);
 
     // A terminal command or a build step may have rewritten a file somebody is
     // editing. There is nothing to merge against — an external writer produces
