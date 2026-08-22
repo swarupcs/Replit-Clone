@@ -15,11 +15,11 @@ The codebase (pnpm monorepo: React 19 + Vite web IDE, Express/socket.io/dockerod
 - **Issue:** Download filename strips `"` and `\` but not CR/LF characters, leaving a theoretical header-injection vector into `Content-Disposition`.
 - **Fix:** ✅ Done — `sanitizeHeaderFilename()` strips quotes, backslashes, and all control bytes (incl. CR/LF) from the quoted filename; an RFC 5987 `filename*` fallback preserves the exact name when something was stripped. Test added in `fileTransferController.test.ts`.
 
-### 2. Test coverage gaps in the riskiest modules
+### 2. Test coverage gaps in the riskiest modules — ✅ DONE
 - **Where (server):** `socketHandlers/editorHandler.ts` (658 lines), `terminal/terminalGateway.ts`, `containers/containerManager.ts`
 - **Where (web):** `ProjectPlayground.tsx`, `Dashboard.tsx`
 - **Issue:** The most complex, race-prone code has no direct tests. Recent commits are all race-condition fixes in exactly this area (save-buffer races, watcher behavior on Windows/macOS).
-- **Fix:** Add Vitest suites for these modules first — highest payoff per effort.
+- **Fix:** ✅ Done — added `socketHandlers/editorHandler.test.ts` (24 tests: file ops, traversal/refusal paths, viewer READ_ONLY on every write event, shared-document join/save/relay/awareness guards, run relay and auto-start gating, search budget, disconnect cleanup) and `terminal/terminalGateway.test.ts` (8 tests over a real HTTP server + WebSocket client: subprotocol auth, viewer rejection, early-input buffering before the container exists, 4403 revocation close, 1011 container-failure close reason). `containerManager.ts` core Docker logic remains untested (needs a daemon); `ProjectPlayground.tsx`/`Dashboard.tsx` remain open.
 
 ### 3. Generated Prisma client inside `src/`
 - **Where:** `apps/server/src/generated/prisma`
