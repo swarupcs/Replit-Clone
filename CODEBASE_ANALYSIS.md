@@ -43,18 +43,20 @@ The codebase (pnpm monorepo: React 19 + Vite web IDE, Express/socket.io/dockerod
 - **E2E tests** — ✅ DONE | Playwright flow (`apps/web/e2e/`, `pnpm --filter web e2e`): signup → create static playground → edit in Monaco → Ctrl+S → dev server in a real container → preview proxy shows the edit. Runs against the developer's own `pnpm dev` stack and skips cleanly when it isn't up (global-setup probes web + API health). Each run deletes its project afterward so containers don't fill the concurrency cap. Exposed and fixed a real bug: deleting a project with a live run left its container running forever (`removeContainer` now stops before removing).
 - **Docs** — ✅ DONE | `docs/SECURITY.md` maps every trust boundary to its guard (paths, commands, identity, containers, limits) with file pointers and a disclosure policy. `CONTRIBUTING.md` covers setup, everyday commands, the three test tiers (incl. E2E expectations), the shared-contract / single-choke-point conventions, and how to add a template.
 - **Observability** — structured request logging with correlation IDs to help debug socket-heavy interactions (editor, terminal, watcher), where most recent bugs lived.
-- **Security extras** — `SECURITY.md` with a disclosure policy; consider CSP headers on the preview proxy.
+- **Security extras** — ✅ disclosure policy DONE (`docs/SECURITY.md`); CSP headers on the preview proxy remain open.
 
 ---
 
 ## Suggested priority order
 
-1. Content-Disposition CR/LF sanitize (minutes)
-2. Tests for `editorHandler.ts` / `terminalGateway.ts`
-3. Cross-file search & replace
-4. EDITOR share links
-5. E2E Playwright flow test
-6. Docs (security model + CONTRIBUTING)
+All six done — one commit each:
+
+1. ✅ Content-Disposition CR/LF sanitize (`ef3dd80`)
+2. ✅ Tests for `editorHandler.ts` / `terminalGateway.ts` (`cc85903`)
+3. ✅ Cross-file search & replace (`e40a566`)
+4. ✅ EDITOR share links (`67bc0d2`)
+5. ✅ E2E Playwright flow test — found and fixed a container leak (`e27d77b`)
+6. ✅ Docs (`dda5046` security model, `7430665` contributing guide)
 
 ## What's already solid (no action needed)
 
