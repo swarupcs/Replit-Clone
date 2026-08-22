@@ -299,6 +299,26 @@ describe("downloadFileController", () => {
     expect((response.body as Buffer).toString("utf8")).toBe("console.log(1)");
   });
 
+  /** The name reaches a response header, so quotes, backslashes, and control
+   *  characters (CR/LF above all) must not survive into it. */
+  it("strips header-hostile characters from the download filename", async () => {
+    // CR/LF cannot appear in a Windows filename, so the DEL control character
+    // stands in: stripped by the same rule, legal to create on every platform.
+    const onDisk = "badname.js";
+    await fs.writeFile(path.join(ROOT, onDisk), "x");
+
+    const response = await request(app)
+      .get(`/p/${TEST_PROJECT}/files`)
+      .query({ path: onDisk })
+      .set(auth());
+
+    expect(response.status).toBe(200);
+    const disposition = response.headers["content-disposition"] as string;
+    expect(disposition).toBe(
+      'attachment; filename="badname.js"; filename*=UTF-8\'\'bad%7Fname.js',
+    );
+  });
+
   /** Served from the API's origin, so rendering it inline is exactly the
    *  problem the preview sandbox exists to avoid. */
   it("marks the response so a browser will not render it", async () => {

@@ -40,6 +40,13 @@ function assertSafeName(name: string): string {
   return base;
 }
 
+/** The quoted-string in Content-Disposition ends at a quote or backslash, and
+ *  CR/LF (or any control byte) can split the header outright. */
+function sanitizeHeaderFilename(name: string): string {
+  // eslint-disable-next-line no-control-regex
+  return name.replace(/["\\\u0000-\u001f\u007f]/g, "");
+}
+
 interface UploadedFile {
   originalname: string;
   buffer: Buffer;
@@ -125,10 +132,15 @@ export async function downloadFileController(
   // `attachment` rather than inline: the file is the user's own content served
   // from the API's origin, and rendering it there is exactly the same problem
   // the preview sandbox exists to avoid.
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${path.posix.basename(relPath).replace(/["\\]/g, "")}"`,
-  );
+  const requestedName = path.posix.basename(relPath);
+  const safeName = sanitizeHeaderFilename(requestedName);
+  const parts = [`attachment; filename="${safeName}"`];
+  if (safeName !== requestedName) {
+    // Something was stripped (quotes, controls, non-ASCII); give the browser
+    // the exact name via RFC 5987 instead.
+    parts.push(`filename*=UTF-8''${encodeURIComponent(requestedName)}`);
+  }
+  res.setHeader("Content-Disposition", parts.join("; "));
   res.setHeader("Content-Type", "application/octet-stream");
   res.setHeader("Content-Length", String(stats.size));
   res.setHeader("X-Content-Type-Options", "nosniff");

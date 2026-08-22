@@ -10,10 +10,10 @@ The codebase (pnpm monorepo: React 19 + Vite web IDE, Express/socket.io/dockerod
 
 ## Fixes (small, prioritized)
 
-### 1. Content-Disposition header injection (low risk)
+### 1. Content-Disposition header injection (low risk) — ✅ DONE
 - **Where:** `apps/server/src/controllers/fileTransferController.ts:130`
 - **Issue:** Download filename strips `"` and `\` but not CR/LF characters, leaving a theoretical header-injection vector into `Content-Disposition`.
-- **Fix:** Sanitize CR/LF, or encode the filename per RFC 5987 (`filename*=UTF-8''...`). ~5-minute change.
+- **Fix:** ✅ Done — `sanitizeHeaderFilename()` strips quotes, backslashes, and all control bytes (incl. CR/LF) from the quoted filename; an RFC 5987 `filename*` fallback preserves the exact name when something was stripped. Test added in `fileTransferController.test.ts`.
 
 ### 2. Test coverage gaps in the riskiest modules
 - **Where (server):** `socketHandlers/editorHandler.ts` (658 lines), `terminal/terminalGateway.ts`, `containers/containerManager.ts`
