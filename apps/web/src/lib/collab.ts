@@ -23,6 +23,9 @@ interface LiveDoc {
   text: Y.Text;
   awareness: Awareness;
   binding?: MonacoBinding;
+  /** A bind asked for before the server's state arrived, held until it does.
+   *  See `bindDoc`. */
+  pendingBind?: { model: editor.ITextModel; codeEditor: editor.IStandaloneCodeEditor };
   /** Panes currently showing this file. The document outlives any one of
    *  them, so it is torn down on the last release rather than the first. */
   refCount: number;
@@ -72,6 +75,10 @@ export function installCollab(socket: EditorSocket): () => void {
     // back to the server as though it were a local edit.
     Y.applyUpdate(live.doc, new Uint8Array(state), "server");
     live.synced = true;
+
+    // Now that the text is the file's, a binding held back by `bindDoc` can
+    // safely take it to the model.
+    attachPendingBind(live);
     notify();
   };
 
@@ -166,11 +173,35 @@ export function retainDoc(
   return live;
 }
 
+/** Attaches a binding that was waiting for the document to sync. */
+function attachPendingBind(live: LiveDoc): void {
+  const pending = live.pendingBind;
+  if (!pending || live.binding) return;
+
+  live.pendingBind = undefined;
+  live.binding = new MonacoBinding(
+    live.text,
+    pending.model,
+    new Set([pending.codeEditor]),
+    live.awareness,
+  );
+}
+
 /** Binds a document to a Monaco model.
  *
  *  Bound once per file even when two panes show it: they share one Monaco
  *  model, so a single binding keeps both in step and a second would apply
  *  every change twice.
+ *
+ *  Held back until the server's state has arrived. `MonacoBinding`'s
+ *  constructor ends by pushing the Y.Text into the model, and `retainDoc` has
+ *  only just emitted `docJoin` — so binding straight away wrote an EMPTY
+ *  document over the contents the model was created with, and every file
+ *  opened blank until `docSync` landed a moment later and filled it back in.
+ *
+ *  If the sync never comes the binding simply never attaches, and the file
+ *  keeps showing what was read from disk without shared editing. That is the
+ *  right way round: an un-collaborative file beats an empty one.
  */
 export function bindDoc(
   relPath: string,
@@ -180,12 +211,8 @@ export function bindDoc(
   const live = docs.get(relPath);
   if (!live || live.binding) return;
 
-  live.binding = new MonacoBinding(
-    live.text,
-    model,
-    new Set([codeEditor]),
-    live.awareness,
-  );
+  live.pendingBind = { model, codeEditor };
+  if (live.synced) attachPendingBind(live);
 }
 
 /** Releases one reference, tearing the document down on the last. */
@@ -206,6 +233,10 @@ function releaseAll(relPath: string): void {
 }
 
 function destroy(relPath: string, live: LiveDoc): void {
+  // Dropped as well as the binding: a document torn down before it synced
+  // still holds a model and an editor here, and a later sync must not revive
+  // a binding onto a pane that has moved on.
+  live.pendingBind = undefined;
   live.binding?.destroy();
   live.awareness.destroy();
   live.doc.destroy();
