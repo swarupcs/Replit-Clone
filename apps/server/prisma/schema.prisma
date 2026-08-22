@@ -148,9 +148,9 @@ model Project {
   /// project is not shared by link at all; revoking clears it, which
   /// invalidates every link already handed out.
   shareToken String? @unique
-  /// What a link holder may do. Deliberately capped at VIEWER for now: handing
-  /// write access to anyone holding a URL is a different risk from handing it
-  /// to a named account.
+  /// What a link holder may do. EDITOR links are still named grants: redeeming
+  /// adds the signed-in user as a collaborator the owner can see and demote,
+  /// so a link never becomes an anonymous write credential.
   shareRole ProjectRole @default(VIEWER)
 
   collaborators ProjectCollaborator[]

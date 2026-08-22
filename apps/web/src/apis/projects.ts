@@ -146,6 +146,8 @@ export interface SharingState {
   level: AccessLevel;
   collaborators: Collaborator[];
   shareToken: string | null;
+  /** What the active link grants; null when no link exists. */
+  shareRole: ProjectRole | null;
 }
 
 export const getSharingApi = async (projectId: string): Promise<SharingState> => {
@@ -174,9 +176,14 @@ export const removeCollaboratorApi = async (
   await axios.delete(`/api/v1/projects/${projectId}/collaborators/${userId}`);
 };
 
-export const createShareLinkApi = async (projectId: string): Promise<string> => {
+/** Creates a new link granting `role`; any earlier link stops working. */
+export const createShareLinkApi = async (
+  projectId: string,
+  role: ProjectRole = "VIEWER",
+): Promise<string> => {
   const response = await axios.post<ApiSuccess<{ shareToken: string }>>(
     `/api/v1/projects/${projectId}/share-link`,
+    { role },
   );
   return response.data.data.shareToken;
 };

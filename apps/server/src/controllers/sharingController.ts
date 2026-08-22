@@ -20,6 +20,13 @@ const collaboratorSchema = z.object({
   role: z.enum(["VIEWER", "EDITOR"]),
 });
 
+/** What a new share link grants. An EDITOR link is still a named grant:
+ *  redeeming adds the signed-in user as a collaborator the owner can see and
+ *  demote, so it never becomes an anonymous write credential. */
+const shareRoleSchema = z.object({
+  role: z.enum(["VIEWER", "EDITOR"]).default("VIEWER"),
+});
+
 export async function listSharingController(
   req: Request<{ projectId: string }>,
   res: Response,
@@ -40,6 +47,11 @@ export async function listSharingController(
       // would let them re-share the project, which is the owner's call.
       shareToken:
         access?.level === "owner" ? (access.project.shareToken ?? null) : null,
+      // What the active link grants, so the owner can see what they handed out.
+      shareRole:
+        access?.level === "owner" && access.project.shareToken
+          ? access.project.shareRole
+          : null,
     },
   });
 }
@@ -83,15 +95,22 @@ export async function createShareLinkController(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
+  const role = shareRoleSchema.parse(req.body ?? {}).role;
 
-  const token = await rotateShareToken(projectId, getAuthContext(req).userId);
+  const token = await rotateShareToken(
+    projectId,
+    getAuthContext(req).userId,
+    role,
+  );
 
   res.json({
     success: true,
     // Said outright, because "create a new link" quietly breaking the old one
     // would be a nasty surprise.
-    message: "New link created. Any link shared earlier no longer works.",
-    data: { shareToken: token },
+    message:
+      `New ${role === "EDITOR" ? "edit" : "view"} link created. ` +
+      "Any link shared earlier no longer works.",
+    data: { shareToken: token, shareRole: role },
   });
 }
 

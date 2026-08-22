@@ -54,10 +54,10 @@ beforeEach(() => {
 });
 
 describe("listSharingController", () => {
-  it("shows the owner the share link itself", async () => {
+  it("shows the owner the share link itself and what it grants", async () => {
     access.getProjectAccess.mockResolvedValue({
       level: "owner",
-      project: { shareToken: SECRET },
+      project: { shareToken: SECRET, shareRole: "EDITOR" },
     });
     access.listCollaborators.mockResolvedValue([{ userId: "u1", role: "EDITOR" }]);
 
@@ -68,6 +68,7 @@ describe("listSharingController", () => {
       level: "owner",
       collaborators: [{ userId: "u1", role: "EDITOR" }],
       shareToken: SECRET,
+      shareRole: "EDITOR",
     });
   });
 
@@ -76,13 +77,14 @@ describe("listSharingController", () => {
   it.each([["editor"], ["viewer"]])("hides the share link from a %s", async (level) => {
     access.getProjectAccess.mockResolvedValue({
       level,
-      project: { shareToken: SECRET },
+      project: { shareToken: SECRET, shareRole: "VIEWER" },
     });
 
     const response = await request(app).get(`/p/${TEST_PROJECT}/sharing`).set(auth());
 
     expect(response.status).toBe(200);
     expect(response.body.data.shareToken).toBeNull();
+    expect(response.body.data.shareRole).toBeNull();
     expect(JSON.stringify(response.body)).not.toContain(SECRET);
   });
 
@@ -203,7 +205,7 @@ describe("removeCollaboratorController", () => {
 });
 
 describe("share links", () => {
-  it("creates a new link and says the old one has stopped working", async () => {
+  it("creates a new view link by default and says the old one has stopped working", async () => {
     access.rotateShareToken.mockResolvedValue(SECRET);
 
     const response = await request(app)
@@ -211,9 +213,34 @@ describe("share links", () => {
       .set(auth());
 
     expect(response.status).toBe(200);
-    expect(response.body.data).toEqual({ shareToken: SECRET });
+    expect(access.rotateShareToken).toHaveBeenCalledWith(TEST_PROJECT, TEST_USER.sub, "VIEWER");
+    expect(response.body.data).toEqual({ shareToken: SECRET, shareRole: "VIEWER" });
     // Rotating silently would be a nasty surprise for whoever holds the old one.
-    expect(response.body.message).toMatch(/no longer works/i);
+    expect(response.body.message).toMatch(/view link.*no longer works/i);
+  });
+
+  it("creates an edit link when asked", async () => {
+    access.rotateShareToken.mockResolvedValue(SECRET);
+
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/share-link`)
+      .set(auth())
+      .send({ role: "EDITOR" });
+
+    expect(response.status).toBe(200);
+    expect(access.rotateShareToken).toHaveBeenCalledWith(TEST_PROJECT, TEST_USER.sub, "EDITOR");
+    expect(response.body.data).toEqual({ shareToken: SECRET, shareRole: "EDITOR" });
+    expect(response.body.message).toMatch(/edit link.*no longer works/i);
+  });
+
+  it("refuses a role it does not know", async () => {
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/share-link`)
+      .set(auth())
+      .send({ role: "OWNER" });
+
+    expect(response.status).toBe(400);
+    expect(access.rotateShareToken).not.toHaveBeenCalled();
   });
 
   it("revokes a link and says existing collaborators keep their access", async () => {

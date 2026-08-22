@@ -162,10 +162,15 @@ export async function listCollaborators(
  *  Replacing rather than reusing means "create a new link" also revokes every
  *  link handed out before it, which is the behaviour someone reaches for when
  *  a link has gone somewhere it should not have.
+ *
+ *  `role` is what the NEXT holder of the link gets; an EDITOR link is still a
+ *  named grant — redeeming adds the signed-in user as a collaborator the owner
+ *  can see and demote, never an anonymous write credential.
  */
 export async function rotateShareToken(
   projectId: string,
   ownerId: string,
+  role: ProjectRole = ProjectRole.VIEWER,
 ): Promise<string> {
   await assertProjectAccess(projectId, ownerId, "owner");
 
@@ -175,7 +180,7 @@ export async function rotateShareToken(
 
   await prisma.project.update({
     where: { id: projectId },
-    data: { shareToken: token },
+    data: { shareToken: token, shareRole: role },
   });
 
   return token;

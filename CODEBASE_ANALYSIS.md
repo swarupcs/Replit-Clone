@@ -33,7 +33,7 @@ The codebase (pnpm monorepo: React 19 + Vite web IDE, Express/socket.io/dockerod
 ### Features
 | Enhancement | Notes |
 |---|---|
-| **Editable share links** | Schema deliberately caps share links at VIEWER (`prisma/schema.prisma`, `shareRole` comment). Adding EDITOR links is a natural next step — live revocation watching (`accessWatch.ts`, `collabWatch.ts`) already exists. |
+| **Editable share links** — ✅ DONE | `rotateShareToken` now takes a role; the create-link endpoint accepts `VIEWER`/`EDITOR` (default VIEWER) and the sharing listing returns `shareRole`. An EDITOR link is still a named grant — redeeming adds the signed-in user as a collaborator the owner can see and demote, never an anonymous write credential. ShareDialog offers a role selector for the link and a tag showing what the active link grants. |
 | **Cross-file search & replace** — ✅ DONE | `replaceInProject` socket event (editor-only, shares the search budget). The existing search worker gained a replace mode under the same deadline, with caps on files rewritten (200) and bytes added (32 MB); shared documents for rewritten files are dropped so they cannot write the old text back. SearchPanel shows a "Replace with" input + replace-all button (editors only) and re-runs the search afterwards. |
 | **Terminal improvements** | Persistent scrollback across reconnects, split terminals, restart-shell button. |
 | **Editor polish** | Command palette, go-to-definition. |

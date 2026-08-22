@@ -57,6 +57,9 @@ export const ShareDialog = ({
 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<ProjectRole>("VIEWER");
+  /** What a link created from here grants. Kept separate from the email
+   *  invite's role so changing one never silently changes the other. */
+  const [linkRole, setLinkRole] = useState<ProjectRole>("VIEWER");
 
   const { data, isLoading } = useQuery({
     queryKey: ["sharing", projectId],
@@ -88,7 +91,7 @@ export const ShareDialog = ({
   });
 
   const linkMutation = useMutation({
-    mutationFn: () => createShareLinkApi(projectId),
+    mutationFn: () => createShareLinkApi(projectId, linkRole),
     onSuccess: async (token) => {
       await refresh();
       await copyLink(token);
@@ -237,7 +240,9 @@ export const ShareDialog = ({
               >
                 {data.shareToken ? (
                   <>
-                    <Tag color="green">Link is active</Tag>
+                    <Tag color={data.shareRole === "EDITOR" ? "orange" : "green"}>
+                      {data.shareRole === "EDITOR" ? "Link grants edit" : "Link grants view"}
+                    </Tag>
                     <Button
                       size="small"
                       icon={<LinkOutlined />}
@@ -255,6 +260,15 @@ export const ShareDialog = ({
                     >
                       <Button size="small">New link</Button>
                     </Popconfirm>
+                    {/* The role chosen here is what the REPLACEMENT grants; the
+                        tag shows what the current one grants. */}
+                    <Select
+                      size="small"
+                      value={linkRole}
+                      onChange={setLinkRole}
+                      options={ROLE_OPTIONS}
+                      style={{ width: 120 }}
+                    />
                     <Button
                       size="small"
                       danger
@@ -265,13 +279,22 @@ export const ShareDialog = ({
                     </Button>
                   </>
                 ) : (
-                  <Button
-                    icon={<LinkOutlined />}
-                    loading={linkMutation.isPending}
-                    onClick={() => linkMutation.mutate()}
-                  >
-                    Create a view-only link
-                  </Button>
+                  <>
+                    <Button
+                      icon={<LinkOutlined />}
+                      loading={linkMutation.isPending}
+                      onClick={() => linkMutation.mutate()}
+                    >
+                      Create link
+                    </Button>
+                    <Select
+                      size="small"
+                      value={linkRole}
+                      onChange={setLinkRole}
+                      options={ROLE_OPTIONS}
+                      style={{ width: 120 }}
+                    />
+                  </>
                 )}
               </div>
 
@@ -279,9 +302,9 @@ export const ShareDialog = ({
                 type="secondary"
                 style={{ fontSize: 12, display: "block", marginTop: 6 }}
               >
-                Anyone signed in who opens the link is added as a viewer.
+                Anyone signed in who opens the link is added with the role shown.
                 Revoking it stops new people joining; those already added keep
-                their access.
+                their access and can be removed or demoted below.
               </Typography.Text>
             </div>
           </div>
