@@ -42,6 +42,14 @@ export interface RunSession {
   /** Set once an automatic start has been attempted for this project, and by
    *  an explicit stop. See `autoStartRun`. */
   autoStartSpent?: boolean;
+  /** True once this run reached `running` — i.e. the dev server really worked
+   *  before it died. Only such a run is worth an automatic restart after its
+   *  death: one that never became ready fails for a reason, and restarting it
+   *  would just repeat the failure. */
+  everReady?: boolean;
+  /** When the run exited, so the restart path can keep its distance from a
+   *  crash that just happened. */
+  exitedAt?: number;
 }
 
 const sessions = new Map<string, RunSession>();
@@ -226,6 +234,7 @@ function probeUntilReady(projectId: string): void {
 
       if (await isListening(projectId)) {
         stopProbing(live);
+        live.everReady = true;
         setState(projectId, { status: "running", command: live.state.command });
 
         const template = await templateForProject(projectId).catch(
@@ -286,6 +295,10 @@ export async function startRun(
   current.history = [];
   current.pgid = undefined;
   current.pgidBuffer = undefined;
+  // A new run has not yet earned anything: readiness is proven again, and the
+  // clock for "how long ago did it die" starts over if it dies.
+  current.everReady = false;
+  current.exitedAt = undefined;
   // Running it on purpose re-arms the automatic start, so a stop followed by a
   // run leaves the project behaving like one that was never stopped.
   //
@@ -376,6 +389,11 @@ export async function startRun(
       });
       live.stream = undefined;
       live.exec = undefined;
+      live.exitedAt = Date.now();
+      // A death re-arms one automatic attempt: `everReady` — which the next
+      // run has to earn again from scratch — is what stops this becoming a
+      // resurrection loop, not this flag.
+      live.autoStartSpent = false;
     })();
   };
 
@@ -474,6 +492,7 @@ export async function adoptRun(projectId: string): Promise<void> {
 
   live.pgid = pgid;
   live.pgidBuffer = undefined;
+  live.everReady = true;
 
   logger.info("adopted a dev server that was already running", {
     projectId,
@@ -495,23 +514,45 @@ export async function adoptRun(projectId: string): Promise<void> {
  *  (`npm install && npm run dev`, `pip install -r requirements.txt && ...`),
  *  so this covers dependencies as well as the server itself.
  *
- *  Three things it deliberately will NOT do:
+ *  Two situations, and the difference between them is the point:
  *
- *  - Restart after an explicit Stop. `stopRun` spends the same flag, so a user
- *    who stops the dev server does not get it back the moment another tab
- *    connects or they reload the page. Pressing Run clears it again.
- *  - Relaunch a run that `exited`. A dev server that died wants looking at,
- *    and starting it again on every reconnect turns one crash into a loop.
- *  - Report failure to the client. Nobody asked for this, so a container that
- *    cannot start (the per-user cap, most often) leaves the project sitting at
- *    idle with the Run button exactly where it always was, rather than opening
- *    the project onto an error nobody triggered.
+ *  - `idle`: a project that was never started (or was stopped on purpose, in
+ *    which case `stopRun`'s flag suppresses this — a user who stops the dev
+ *    server does not get it back because another tab connected).
+ *  - `exited`: the dev server died on its own. Opening the project starts it
+ *    again, provided that run had genuinely worked first (`everReady` — an
+ *    OOM kill of a healthy server is exactly what a refresh should bring
+ *    back). A run that never became ready is not restarted at all: it fails
+ *    for a reason, and restarting it just repeats the failure — the Run
+ *    button is there when the reason is fixed. The cooldown keeps a socket
+ *    reconnecting right after a crash from being a restart trigger.
+ *
+ *  Either way it does not report failure to the client: nobody asked for
+ *  this, so a container that cannot start (the per-user cap, most often)
+ *  leaves the project sitting where it was with the Run button exactly where
+ *  it always was, rather than opening the project onto an error nobody
+ *  triggered.
  */
+
+/** How long a run must have been dead before opening the project will start
+ *  it again — far enough that a socket reconnecting after a crash is not a
+ *  restart trigger, near enough that a human refresh (seconds, not minutes)
+ *  always qualifies. */
+const RESTART_COOLDOWN_MS = 3_000;
+
 export async function autoStartRun(projectId: string): Promise<void> {
   if (!env.AUTO_START_ON_OPEN) return;
 
   const current = session(projectId);
-  if (current.state.status !== "idle" || current.autoStartSpent) return;
+  if (current.autoStartSpent) return;
+
+  if (current.state.status === "exited") {
+    if (!current.everReady) return;
+    if (Date.now() - (current.exitedAt ?? 0) < RESTART_COOLDOWN_MS) return;
+    // Falls through to the single start below.
+  } else if (current.state.status !== "idle") {
+    return;
+  }
 
   // Recorded before anything can await, so the attempt is unambiguous however
   // the rest of this unwinds. Two tabs racing here are actually caught by

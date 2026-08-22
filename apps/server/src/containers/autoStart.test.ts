@@ -1,3 +1,4 @@
+import net from "node:net";
 import { PassThrough } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -5,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  a project by itself, and — more importantly — when it decides not to. */
 
 const ensureContainer = vi.fn();
-const getPreviewTarget = vi.fn(() => Promise.resolve(undefined));
+const getPreviewTarget = vi.fn();
 
 vi.mock("./containerManager.js", () => ({
   ensureContainer: (projectId: string): unknown => ensureContainer(projectId),
@@ -63,6 +64,7 @@ async function runThenStopByHand(): Promise<void> {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  getPreviewTarget.mockResolvedValue(undefined);
   streams = [];
   runner = await import("./runner.js");
   runner.forgetRun(PROJECT);
@@ -193,9 +195,54 @@ describe("what it refuses to do", () => {
     const callsAfterExit = ensureContainer.mock.calls.length;
     await runner.autoStartRun(PROJECT);
 
-    // A crash that relaunched itself on every reconnect would be a loop.
+    // Never ready, so restarting it would just repeat the failure.
     expect(ensureContainer.mock.calls.length).toBe(callsAfterExit);
   });
+
+  /** The report this grew from: a healthy dev server died (an OOM kill, most
+   *  often), and refreshing the page left the project dead. Opening a project
+   *  whose server USED to work should bring it back. */
+  it("restarts on the next open a run that had been ready and then died", async () => {
+    // Real clocks: the readiness probe and the restart cooldown are seconds
+    // by design, and faking them stalls the real sockets the probe uses.
+    const listener = net.createServer(() => undefined);
+    try {
+      workingContainer();
+      // A real listener on an ephemeral port, and the preview target pointed
+      // at it, so the readiness probe genuinely succeeds.
+      await new Promise<void>((resolve) =>
+        listener.listen(0, "127.0.0.1", resolve),
+      );
+      const address = listener.address();
+      getPreviewTarget.mockResolvedValue(
+        `http://127.0.0.1:${String((address as net.AddressInfo).port)}`,
+      );
+
+      await runner.startRun(PROJECT);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      expect(runner.getRunState(PROJECT).status).toBe("running");
+
+      // The dev server dies.
+      listener.close();
+      streams.at(-1)?.end();
+      await tick();
+      expect(runner.getRunState(PROJECT).status).toBe("exited");
+
+      // Immediately after the crash, a socket reconnecting is not a restart
+      // trigger.
+      await runner.autoStartRun(PROJECT);
+      expect(ensureContainer).toHaveBeenCalledTimes(1);
+
+      // Past the cooldown, a human refresh is.
+      await new Promise((resolve) => setTimeout(resolve, 3100));
+      await runner.autoStartRun(PROJECT);
+
+      expect(ensureContainer).toHaveBeenCalledTimes(2);
+      expect(runner.getRunState(PROJECT).status).toBe("starting");
+    } finally {
+      listener.close();
+    }
+  }, 20_000);
 
   it("stays quiet when there is no room for another container", async () => {
     ensureContainer.mockRejectedValue(new Error("container limit reached"));
