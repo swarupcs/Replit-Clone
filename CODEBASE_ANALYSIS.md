@@ -21,10 +21,10 @@ The codebase (pnpm monorepo: React 19 + Vite web IDE, Express/socket.io/dockerod
 - **Issue:** The most complex, race-prone code has no direct tests. Recent commits are all race-condition fixes in exactly this area (save-buffer races, watcher behavior on Windows/macOS).
 - **Fix:** ✅ Done — added `socketHandlers/editorHandler.test.ts` (24 tests: file ops, traversal/refusal paths, viewer READ_ONLY on every write event, shared-document join/save/relay/awareness guards, run relay and auto-start gating, search budget, disconnect cleanup) and `terminal/terminalGateway.test.ts` (8 tests over a real HTTP server + WebSocket client: subprotocol auth, viewer rejection, early-input buffering before the container exists, 4403 revocation close, 1011 container-failure close reason). `containerManager.ts` core Docker logic remains untested (needs a daemon); `ProjectPlayground.tsx`/`Dashboard.tsx` remain open.
 
-### 3. Generated Prisma client inside `src/`
+### 3. Generated Prisma client inside `src/` — ✅ NO CHANGE NEEDED
 - **Where:** `apps/server/src/generated/prisma`
 - **Issue:** Build artifact lives in the source tree; risk of accidental imports or commits.
-- **Fix:** Move the generator output out of `src/` (e.g., `apps/server/generated/`) or add an explicit gitignore pattern.
+- **Finding:** ✅ Verified it is already ignored via `apps/server/.gitignore` (`src/generated/`), so it cannot be committed. Relocating the generator output would change the schema, tsconfig, and every import for no functional gain — left as is.
 
 ---
 
