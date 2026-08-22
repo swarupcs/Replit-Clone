@@ -1,4 +1,5 @@
-import net from "node:net";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { PassThrough } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -205,17 +206,23 @@ describe("what it refuses to do", () => {
   it("restarts on the next open a run that had been ready and then died", async () => {
     // Real clocks: the readiness probe and the restart cooldown are seconds
     // by design, and faking them stalls the real sockets the probe uses.
-    const listener = net.createServer(() => undefined);
+    // HTTP, not a bare socket: the readiness probe makes a request, because
+    // accepting a connection and serving nothing is what Docker's published
+    // port does for a container with no dev server in it.
+    const listener = http.createServer((_request, response) => {
+      response.writeHead(200);
+      response.end("ok");
+    });
     try {
       workingContainer();
-      // A real listener on an ephemeral port, and the preview target pointed
-      // at it, so the readiness probe genuinely succeeds.
+      // A real server on an ephemeral port, and the preview target pointed at
+      // it, so the readiness probe genuinely succeeds.
       await new Promise<void>((resolve) =>
         listener.listen(0, "127.0.0.1", resolve),
       );
       const address = listener.address();
       getPreviewTarget.mockResolvedValue(
-        `http://127.0.0.1:${String((address as net.AddressInfo).port)}`,
+        `http://127.0.0.1:${String((address as AddressInfo).port)}`,
       );
 
       await runner.startRun(PROJECT);

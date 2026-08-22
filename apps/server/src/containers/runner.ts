@@ -1,4 +1,3 @@
-import net from "node:net";
 import type { Duplex } from "node:stream";
 import type { Exec } from "dockerode";
 import type { RunState } from "@replit-clone/shared";
@@ -8,11 +7,16 @@ import {
   getRunningContainer,
 } from "./containerManager.js";
 import { execCapture } from "./execCapture.js";
+import { isServing } from "./devServerProbe.js";
 import { getTemplate } from "../templates/registry.js";
 import { env, watchPollingEnv } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
 import { increment } from "../lib/metrics.js";
+import {
+  isResumable,
+  reconcileDecision,
+} from "./runReconciliation.js";
 
 /** How much output to retain per project so a client that connects late (or
  *  reconnects) can rebuild the log pane. Bounded so a chatty dev server cannot
@@ -182,30 +186,18 @@ function pushOutput(projectId: string, chunk: string): void {
   emit(projectId, { type: "output", chunk });
 }
 
-/** Opens a TCP connection to the dev server to decide whether it is actually
- *  listening.
+/** Whether the project's dev server is actually serving.
  *
- *  The preview proxy's own "is there a target" check only tells us the
- *  container is up, which is true the moment it starts -- long before `npm
- *  install` has finished and the dev server has bound its port. */
+ *  The preview proxy's own "is there a target" check only says the container is
+ *  up, which is true from the moment it starts -- long before `npm install` has
+ *  finished and anything has bound the port. Nor is a TCP connection enough to
+ *  tell the difference: see devServerProbe.ts, which is where that distinction
+ *  now lives. */
 async function isListening(projectId: string): Promise<boolean> {
   const target = await getPreviewTarget(projectId).catch(() => undefined);
   if (!target) return false;
 
-  const { hostname, port } = new URL(target);
-
-  return new Promise((resolve) => {
-    const socket = net.connect({ host: hostname, port: Number(port) });
-    const done = (result: boolean) => {
-      socket.destroy();
-      resolve(result);
-    };
-
-    socket.setTimeout(750);
-    socket.once("connect", () => done(true));
-    socket.once("timeout", () => done(false));
-    socket.once("error", () => done(false));
-  });
+  return isServing(target);
 }
 
 function stopProbing(current: RunSession): void {
@@ -445,62 +437,142 @@ function adoptionNotice(stoppable: boolean): string {
   return stoppable ? found + noHistory : found + noHistory + unstoppable;
 }
 
-/** Takes back over a dev server that is running with nothing watching it.
- *
- *  Run state lives in this process's memory, and the container outlives this
- *  process: restart the server — a deploy, a crash, `tsx watch` noticing a
- *  saved file — and every project that was running reads as `idle` while its
- *  dev server carries on serving the preview. Reloading the page then made it
- *  worse rather than better, because `autoStartRun` saw `idle` and launched a
- *  second dev server into a port the first one still held.
- *
- *  So the state is reconciled against the one thing that actually knows: the
- *  container. If something is answering on the template's dev port, there is a
- *  dev server, whatever this process remembers.
- *
- *  What cannot be recovered is the output. It streamed to a process that is
- *  gone, and Docker does not keep it. The log pane says so rather than
- *  presenting an empty history under a "running" badge.
- */
-export async function adoptRun(projectId: string): Promise<void> {
-  const current = session(projectId);
+function reclaimedNotice(decision: "lost" | "reclaimed"): string {
+  if (decision === "reclaimed") {
+    return (
+      "\r\n\x1b[33mThis project's container was reclaimed while nobody was " +
+      "using it, which stopped the dev server with it. Starting it again." +
+      "\x1b[0m\r\n"
+    );
+  }
 
-  // The same test is made again after the awaits below, which is the one that
-  // decides. This is only here to skip two Docker round trips for the ordinary
-  // case: a project whose run this process is already watching.
-  //
-  // `exec` as well as the status, because a run this process started is one it
-  // holds the stream for, whatever the status has since become.
-  if (current.state.status !== "idle" || current.exec) return;
+  return (
+    "\r\n\x1b[33mThe dev server is no longer running, though nothing " +
+    "recorded it stopping. Starting it again.\x1b[0m\r\n"
+  );
+}
+
+/** Puts the run state back in step with what is actually true.
+ *
+ *  Called when a client opens the project, which is the moment the answer is
+ *  wanted and the moment the user will next look. Three things it puts right,
+ *  all of which were previously permanent:
+ *
+ *  - A dev server serving with nothing watching it. The run state lives in this
+ *    process's memory while the dev server lives in the container, so restart
+ *    the server — a deploy, a crash, `tsx watch` noticing a saved file — and a
+ *    running project reads as idle. Reloading the page then made it worse, by
+ *    starting a second dev server into a port the first one still held.
+ *  - A run the state still calls `running` with nothing behind it. Docker does
+ *    not always close a hijacked exec stream when its process dies, so the
+ *    handler that records the exit never fires. `running` blocks adoption and
+ *    blocks the automatic start, so the project was wedged: every reload showed
+ *    "Running" over a dead preview, and only Stop-then-Run cleared it.
+ *  - A container reclaimed by the idle reaper, which is not a crash and should
+ *    come back by itself when the project is opened again.
+ *
+ *  What it will not do is recover the output of a run it did not start. That
+ *  streamed to a process that is gone and Docker keeps no copy, so the log says
+ *  so rather than showing an empty pane under a "running" badge.
+ */
+export async function reconcileRun(projectId: string): Promise<void> {
+  const current = session(projectId);
+  const before = current.state.status;
 
   const container = await getRunningContainer(projectId).catch(() => undefined);
-  if (!container) return;
 
-  if (!(await isListening(projectId))) return;
+  // Docker's answer, not this process's belief. Holding an exec object proves
+  // only that a run was started once, which is precisely the belief that goes
+  // stale — and taking it as proof of life is what wedged the project at
+  // "Running" with nothing running.
+  const execRunning = current.exec
+    ? await current.exec
+        .inspect()
+        .then((info) => info.Running)
+        .catch(() => undefined)
+    : undefined;
+
+  const listening = container ? await isListening(projectId) : false;
+
+  const decision = reconcileDecision({
+    status: before,
+    execRunning,
+    containerRunning: container !== undefined,
+    listening,
+  });
+
+  if (decision === "none") return;
+
+  // Re-read after the awaits. `startRun` claims the session synchronously, so a
+  // Run pressed while this was asking Docker its questions has already won, and
+  // acting on the answers to questions about the previous run would undo it.
+  const live = session(projectId);
+  if (live.state.status !== before || live.exec !== current.exec) return;
+
+  if (decision === "adopt") {
+    await adopt(projectId, live, container, execRunning === true);
+    return;
+  }
+
+  stopProbing(live);
+  live.stream?.destroy();
+  live.stream = undefined;
+  live.exec = undefined;
+  live.pgid = undefined;
+  live.pgidBuffer = undefined;
+
+  // The user did not stop this, so the suppression an explicit Stop leaves
+  // behind must not be applied to it. `isResumable` is what says so; the state
+  // going back to `idle` is what lets `autoStartRun` act on it.
+  if (isResumable(decision)) live.autoStartSpent = false;
+
+  logger.info("run reconciled against the container", { projectId, decision });
+  pushOutput(projectId, reclaimedNotice(decision));
+  setState(projectId, { status: "idle" });
+}
+
+/** Records that the project is serving, whoever started it.
+ *
+ *  `owned` distinguishes the two ways to get here. Usually this process knows
+ *  nothing about the run and is taking it over, which is worth saying in the
+ *  log because the output before now cannot come with it. But a run this
+ *  process started can also arrive here — one that came up after the ready
+ *  probe had given up on it — and that is a promotion, not a reunion, so it
+ *  says nothing.
+ */
+async function adopt(
+  projectId: string,
+  live: RunSession,
+  container: Awaited<ReturnType<typeof getRunningContainer>>,
+  owned: boolean,
+): Promise<void> {
+  if (!container) return;
 
   const template = await templateForProject(projectId).catch(() => undefined);
   if (!template) return;
 
-  // Re-read after the awaits. `startRun` claims the session synchronously, so a
-  // Run pressed while this was asking Docker its questions has already won —
-  // and overwriting it here would report `running` for a dev server that is
-  // still installing, and drop the process group of the one that is real.
-  const live = session(projectId);
-  if (live.state.status !== "idle" || live.exec) return;
-
   const pgid = await readLiveProcessGroup(container);
 
-  live.pgid = pgid;
+  // Never traded down: a run this process started already knows its own group
+  // from the marker on its stream, and the file could be missing.
+  live.pgid = pgid ?? live.pgid;
   live.pgidBuffer = undefined;
+  // It is serving, so this run has plainly worked — which is what the restart
+  // after a later death is allowed to rely on.
   live.everReady = true;
 
-  logger.info("adopted a dev server that was already running", {
-    projectId,
-    stoppable: pgid !== undefined,
-  });
+  if (!owned) {
+    logger.info("adopted a dev server that was already running", {
+      projectId,
+      stoppable: live.pgid !== undefined,
+    });
+    pushOutput(projectId, adoptionNotice(live.pgid !== undefined));
+  }
 
-  pushOutput(projectId, adoptionNotice(pgid !== undefined));
-  setState(projectId, { status: "running", command: template.startCommand });
+  setState(projectId, {
+    status: "running",
+    command: live.state.command ?? template.startCommand,
+  });
 
   // The preview is live this instant, so say so — the pane is otherwise
   // waiting for a `previewReady` that only a fresh start would ever send.

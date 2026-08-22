@@ -28,8 +28,8 @@ interface RunEvent {
 const runner = vi.hoisted(() => ({
   getRunHistory: vi.fn<() => string[]>(() => []),
   getRunState: vi.fn<() => string>(() => "idle"),
-  // The runSubscribe handler chains `.catch().then()` on adoptRun's result.
-  adoptRun: vi.fn(() => Promise.resolve(undefined)),
+  // The runSubscribe handler chains `.catch().then()` on reconcileRun's result.
+  reconcileRun: vi.fn(() => Promise.resolve(undefined)),
   autoStartRun: vi.fn(() => Promise.resolve(undefined)),
   restartRun: vi.fn(() => Promise.resolve(undefined)),
   startRun: vi.fn(() => Promise.resolve(undefined)),
@@ -77,6 +77,7 @@ vi.mock("../service/userQuotaService.js", () => ({
 }));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  extendLogContext: vi.fn(),
 }));
 
 import { handleEditorSocketEvents } from "./editorHandler.js";
@@ -466,7 +467,7 @@ describe("editorHandler: dev server", () => {
 
     expect(c.emitted).toContainEqual({ event: "runState", payload: "running" });
     expect(c.emitted).toContainEqual({ event: "runHistory", payload: { chunks: ["log line"] } });
-    expect(runner.adoptRun).toHaveBeenCalledWith(PROJECT);
+    expect(runner.reconcileRun).toHaveBeenCalledWith(PROJECT);
   });
 
   /** A viewer must not spend the owner's container budget just by looking. */
@@ -476,7 +477,7 @@ describe("editorHandler: dev server", () => {
     await c.send("runSubscribe", undefined);
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(runner.adoptRun).toHaveBeenCalled();
+    expect(runner.reconcileRun).toHaveBeenCalled();
     expect(runner.autoStartRun).not.toHaveBeenCalled();
   });
 

@@ -1,4 +1,4 @@
-import net from "node:net";
+import http from "node:http";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -33,12 +33,18 @@ const PROJECT = "7e1c4b02-9a3d-4f18-8b6e-2d5a7c9e0f31";
 
 let runner: typeof import("./runner.js");
 
-/** A real listener, because "is a dev server up" is answered by connecting to
- *  one. Stubbing that away would leave the probe itself untested. */
-let devServer: net.Server | undefined;
+/** A real HTTP server, because "is a dev server up" is answered by making a
+ *  request to one. A bare TCP listener would not do: accepting a connection and
+ *  serving nothing is precisely what Docker's published-port proxy does for a
+ *  container with no dev server in it, and telling those two apart is the
+ *  probe's whole job. */
+let devServer: http.Server | undefined;
 
 async function devServerListening(): Promise<void> {
-  devServer = net.createServer();
+  devServer = http.createServer((_request, response) => {
+    response.writeHead(200);
+    response.end("ok");
+  });
   await new Promise<void>((resolve) => {
     devServer?.listen(0, "127.0.0.1", resolve);
   });
@@ -60,6 +66,21 @@ function containerReports(pgid: string | undefined): void {
 /** Every command handed to the container, which is how a stop is observed: it
  *  signals a process group and reports nothing else. */
 let commands: string[][] = [];
+
+/** A container whose exec Docker still reports as running, which is what a run
+ *  in the middle of `npm install` looks like. */
+function liveExecContainer(): void {
+  commands = [];
+  ensureContainer.mockResolvedValue({
+    exec: (options: { Cmd: string[] }) => {
+      commands.push(options.Cmd);
+      return Promise.resolve({
+        start: () => Promise.resolve(new PassThrough()),
+        inspect: () => Promise.resolve({ Running: true }),
+      });
+    },
+  });
+}
 
 function stoppableContainer(): void {
   commands = [];
@@ -100,7 +121,7 @@ describe("a dev server that outlived the server process", () => {
     await devServerListening();
     containerReports("4242");
 
-    await runner.adoptRun(PROJECT);
+    await runner.reconcileRun(PROJECT);
 
     expect(runner.getRunState(PROJECT).status).toBe("running");
   });
@@ -109,7 +130,7 @@ describe("a dev server that outlived the server process", () => {
     await devServerListening();
     containerReports("4242");
 
-    await runner.adoptRun(PROJECT);
+    await runner.reconcileRun(PROJECT);
 
     expect(runner.getRunState(PROJECT).command).toContain("npm run dev");
   });
@@ -123,7 +144,7 @@ describe("a dev server that outlived the server process", () => {
     const events: string[] = [];
     const release = runner.subscribe(PROJECT, (event) => events.push(event.type));
 
-    await runner.adoptRun(PROJECT);
+    await runner.reconcileRun(PROJECT);
     release();
 
     expect(events).toContain("ready");
@@ -132,7 +153,7 @@ describe("a dev server that outlived the server process", () => {
   it("can be stopped, because it recovers the process group", async () => {
     await devServerListening();
     containerReports("4242");
-    await runner.adoptRun(PROJECT);
+    await runner.reconcileRun(PROJECT);
 
     await runner.stopRun(PROJECT);
 
@@ -147,7 +168,7 @@ describe("a dev server that outlived the server process", () => {
   it("stops the reload from starting a second one on top of it", async () => {
     await devServerListening();
     containerReports("4242");
-    await runner.adoptRun(PROJECT);
+    await runner.reconcileRun(PROJECT);
 
     await runner.autoStartRun(PROJECT);
 
@@ -159,7 +180,7 @@ describe("a dev server that outlived the server process", () => {
     await devServerListening();
     containerReports("4242");
 
-    await runner.adoptRun(PROJECT);
+    await runner.reconcileRun(PROJECT);
 
     expect(runner.getRunHistory(PROJECT).join("")).toContain("not available");
   });
@@ -170,7 +191,7 @@ describe("when there is nothing to adopt", () => {
     await devServerListening();
     getRunningContainer.mockResolvedValue(undefined);
 
-    await runner.adoptRun(PROJECT);
+    await runner.reconcileRun(PROJECT);
 
     expect(runner.getRunState(PROJECT).status).toBe("idle");
   });
@@ -183,7 +204,7 @@ describe("when there is nothing to adopt", () => {
     // Nothing is bound here, so the probe's connection is refused.
     getPreviewTarget.mockResolvedValue("http://127.0.0.1:1");
 
-    await runner.adoptRun(PROJECT);
+    await runner.reconcileRun(PROJECT);
 
     expect(runner.getRunState(PROJECT).status).toBe("idle");
   });
@@ -201,7 +222,7 @@ describe("when there is nothing to adopt", () => {
     getRunningContainer.mockImplementation(
       () => new Promise((resolve) => (answer = resolve)),
     );
-    const adopting = runner.adoptRun(PROJECT);
+    const adopting = runner.reconcileRun(PROJECT);
 
     ensureContainer.mockResolvedValue({
       exec: () =>
@@ -218,23 +239,114 @@ describe("when there is nothing to adopt", () => {
     expect(runner.getRunState(PROJECT).status).toBe("starting");
   });
 
-  it("does not disturb a run this process is already watching", async () => {
+  /** A run whose exec Docker still reports as alive is mid-flight: installing,
+   *  building, or a command that never listens at all. Nothing listening is
+   *  what that looks like, and mistaking it for a run that has vanished would
+   *  restart every project during its own `npm install`. */
+  it("leaves a run that is still starting alone", async () => {
+    getRunningContainer.mockResolvedValue({ id: "container" });
+    // Nothing bound, as during an install.
+    getPreviewTarget.mockResolvedValue("http://127.0.0.1:1");
+    liveExecContainer();
+    await runner.startRun(PROJECT);
+
+    await runner.reconcileRun(PROJECT);
+
+    expect(runner.getRunState(PROJECT).status).toBe("starting");
+  });
+
+  /** The ready probe gives up after a few minutes, so a dev server slower than
+   *  that used to be stuck at "starting" for as long as it ran. Opening the
+   *  project is a second chance to notice it came up. */
+  it("promotes its own run once the port answers", async () => {
     await devServerListening();
     containerReports("9999");
+    liveExecContainer();
+    await runner.startRun(PROJECT);
+    // The ready probe runs on a one-second timer and does not get a turn here.
+
+    await runner.reconcileRun(PROJECT);
+
+    expect(runner.getRunState(PROJECT).status).toBe("running");
+    // Its own history, not a "reconnected to a dev server" notice for a run it
+    // never lost.
+    expect(runner.getRunHistory(PROJECT).join("")).not.toContain("Reconnected");
+  });
+});
+
+/** End to end, against the runner rather than the rules: this is the state the
+ *  live server was found in — `running`, with nothing in the container and
+ *  nothing answering the port. */
+describe("a run wedged at running with nothing behind it", () => {
+  async function wedge(): Promise<void> {
+    await devServerListening();
+    containerReports("4242");
+    await runner.reconcileRun(PROJECT);
+    expect(runner.getRunState(PROJECT).status).toBe("running");
+
+    // The dev server goes away without the exec stream ever ending.
+    await new Promise<void>((resolve) => {
+      devServer?.close(() => resolve());
+    });
+    devServer = undefined;
+    getPreviewTarget.mockResolvedValue("http://127.0.0.1:1");
+  }
+
+  it("goes back to idle instead of reporting a dev server that is gone", async () => {
+    await wedge();
+
+    await runner.reconcileRun(PROJECT);
+
+    expect(runner.getRunState(PROJECT).status).toBe("idle");
+  });
+
+  /** The point of going back to idle rather than exited: `autoStartRun` acts on
+   *  idle, so opening the project brings the dev server back by itself. Before
+   *  this, `running` blocked both the adoption and the start, and only
+   *  Stop-then-Run cleared it. */
+  it("lets opening the project start it again", async () => {
+    await wedge();
+    await runner.reconcileRun(PROJECT);
+
+    await runner.autoStartRun(PROJECT);
+
+    expect(runner.getRunState(PROJECT).status).toBe("starting");
+  });
+
+  /** The exact shape found on the live server: this process started the run, so
+   *  it still holds the exec — but the stream never ended, so nothing recorded
+   *  the exit. Holding the exec is not evidence of life; only Docker knows. */
+  it("asks Docker rather than trusting the exec it is holding", async () => {
+    let processAlive = true;
+    getRunningContainer.mockResolvedValue({ id: "container" });
+    getPreviewTarget.mockResolvedValue("http://127.0.0.1:1");
     ensureContainer.mockResolvedValue({
-      exec: () =>
-        Promise.resolve({
+      exec: (options: { Cmd: string[] }) => {
+        commands.push(options.Cmd);
+        return Promise.resolve({
+          // Never ends, which is why the exit was never recorded.
           start: () => Promise.resolve(new PassThrough()),
-          inspect: () => Promise.resolve({ ExitCode: 0 }),
-        }),
+          inspect: () => Promise.resolve({ Running: processAlive }),
+        });
+      },
     });
     await runner.startRun(PROJECT);
-    const before = runner.getRunState(PROJECT).status;
+    expect(runner.getRunState(PROJECT).status).toBe("starting");
 
-    await runner.adoptRun(PROJECT);
+    processAlive = false;
+    await runner.reconcileRun(PROJECT);
 
-    expect(runner.getRunState(PROJECT).status).toBe(before);
-    expect(execCapture).not.toHaveBeenCalled();
+    expect(runner.getRunState(PROJECT).status).toBe("idle");
+  });
+
+  it("says what happened rather than changing the badge in silence", async () => {
+    await wedge();
+
+    await runner.reconcileRun(PROJECT);
+
+    expect(runner.getRunHistory(PROJECT).join("")).toContain(
+      "no longer running",
+    );
   });
 });
 
@@ -246,7 +358,7 @@ describe("a stale process group record", () => {
     await devServerListening();
     containerReports(undefined);
 
-    await runner.adoptRun(PROJECT);
+    await runner.reconcileRun(PROJECT);
 
     expect(runner.getRunState(PROJECT).status).toBe("running");
   });
@@ -255,7 +367,7 @@ describe("a stale process group record", () => {
     await devServerListening();
     containerReports(undefined);
 
-    await runner.adoptRun(PROJECT);
+    await runner.reconcileRun(PROJECT);
 
     expect(runner.getRunHistory(PROJECT).join("")).toContain(
       "Stop cannot signal",
@@ -265,7 +377,7 @@ describe("a stale process group record", () => {
   it("signals nothing when stopped", async () => {
     await devServerListening();
     containerReports(undefined);
-    await runner.adoptRun(PROJECT);
+    await runner.reconcileRun(PROJECT);
 
     await runner.stopRun(PROJECT);
 

@@ -30,7 +30,7 @@ import { logger } from "../lib/logger.js";
 import {
   getRunHistory,
   getRunState,
-  adoptRun,
+  reconcileRun,
   autoStartRun,
   restartRun,
   startRun,
@@ -588,10 +588,10 @@ export const handleEditorSocketEvents = (
     // this process's memory while the dev server lives in the container, so a
     // restarted server reads `running` as `idle` — and starting a second dev
     // server into a port the first one still holds is exactly what an
-    // unconditional `autoStartRun` did here. `adoptRun` settles which of the
+    // unconditional `autoStartRun` did here. `reconcileRun` settles which of the
     // two this is; whatever it decides is broadcast to the room, so the state
     // emitted above is corrected for every tab, not just this one.
-    void adoptRun(projectId)
+    void reconcileRun(projectId)
       .catch(() => undefined)
       .then(() => {
         if (canEdit()) return autoStartRun(projectId);
