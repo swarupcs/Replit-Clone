@@ -40,6 +40,7 @@ import {
 import { useAuthStore } from "../../../store/authStore.ts";
 import { registerPaneEditor } from "../../../lib/editorContext.ts";
 import { disposeUnwantedModels, trackModel } from "../../../lib/editorModels.ts";
+import { shouldReseedFromServer } from "../../../lib/bufferReseed.ts";
 
 const WRITE_DEBOUNCE_MS = 800;
 
@@ -75,6 +76,13 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   /** Set while the editor's contents are being replaced programmatically, so
    *  the resulting change event is not mistaken for the user typing. */
   const suppressChange = useRef(false);
+  /** The tab `value` this pane last took its contents from, per path.
+   *
+   *  `OpenTab.value` is a snapshot of what the SERVER last sent, not a mirror
+   *  of the buffer — it is set when a file is read and never again. Comparing
+   *  the model against it is therefore only meaningful when it has actually
+   *  changed, which is to say when the server has sent new contents. */
+  const seededFrom = useRef(new Map<string, string>());
   /** Bumped each time Monaco hands us an editor.
    *
    *  State, not a ref, because the effects below need to RUN again once the
@@ -157,16 +165,23 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     let model = monaco.editor.getModel(uri);
     if (!model) {
       model = monaco.editor.createModel(activeTab.value, language, uri);
-    } else if (!activeTab.isDirty && model.getValue() !== activeTab.value) {
-      // Only when the server's copy genuinely differs AND we have no unsaved
-      // local edits, so a reopen does not clobber in-flight typing.
-      //
+      seededFrom.current.set(activeTab.relPath, activeTab.value);
+    } else if (
+      shouldReseedFromServer({
+        seeded: seededFrom.current.get(activeTab.relPath),
+        tabValue: activeTab.value,
+        modelValue: model.getValue(),
+        isDirty: activeTab.isDirty,
+        isShared: isCollaborative(activeTab.relPath),
+      })
+    ) {
       // Suppressed because setValue raises a content-change event exactly like
       // a keystroke: without this, merely reopening a file marked it dirty and
       // queued a write of the contents it had just been given.
       suppressChange.current = true;
       model.setValue(activeTab.value);
       suppressChange.current = false;
+      seededFrom.current.set(activeTab.relPath, activeTab.value);
     }
 
     // Claimed as ours on every open, not only on creation: the second pane to
@@ -243,6 +258,10 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
 
     for (const path of viewStates.current.keys()) {
       if (!open.has(path)) viewStates.current.delete(path);
+    }
+
+    for (const path of seededFrom.current.keys()) {
+      if (!open.has(path)) seededFrom.current.delete(path);
     }
   }, [openPaths, mountTick]);
 
