@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Namespace, Socket } from "socket.io";
 import { MAX_FILE_BYTES } from "@replit-clone/shared";
-import { searchProject } from "../service/searchService.js";
+import { searchProject, replaceInProject } from "../service/searchService.js";
 import {
   applyDocUpdate,
   docsForSocket,
@@ -628,6 +628,36 @@ export const handleEditorSocketEvents = (
       const { matches, truncated } = await searchProject(projectId, options);
       socket.emit("searchResults", { query: options.query, matches, truncated });
     })(),
+  );
+
+  socket.on("replaceInProject", (options) =>
+    handle("replace across the project", async () => {
+      // Rewrites every matching file, so it shares the search budget rather
+      // than getting a second one of its own.
+      if (!searchBudget.take()) {
+        overBudget("replace");
+        return;
+      }
+
+      const result = await replaceInProject(projectId, options);
+
+      // A shared document holds the file's old text in memory and would write
+      // it back over the rewrite on its next flush. Dropped rather than
+      // flushed: the rewrite IS the newer text now, and everyone rejoining
+      // gets it from disk.
+      for (const file of result.files) {
+        dropDoc(projectId, file.relPath);
+      }
+
+      socket.emit("replaceResult", {
+        query: options.search.query,
+        files: result.files,
+        replacements: result.replacements,
+        truncated: result.truncated,
+      });
+
+      announceTreeChange();
+    }, true)(),
   );
 
   socket.on("statsRequest", () =>

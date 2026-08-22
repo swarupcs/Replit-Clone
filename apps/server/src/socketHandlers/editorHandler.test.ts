@@ -50,10 +50,23 @@ const searchProject = vi.hoisted(() =>
   ),
 );
 
+const replaceInProject = vi.hoisted(() =>
+  vi.fn<
+    () => Promise<{
+      files: { relPath: string; replacements: number }[];
+      replacements: number;
+      truncated: boolean;
+    }>
+  >(() => Promise.resolve({ files: [], replacements: 0, truncated: false })),
+);
+
 vi.mock("../service/collabService.js", () => collab);
 vi.mock("../containers/runner.js", () => runner);
 vi.mock("../containers/containerManager.js", () => containerManager);
-vi.mock("../service/searchService.js", () => ({ searchProject }));
+vi.mock("../service/searchService.js", () => ({
+  searchProject,
+  replaceInProject,
+}));
 vi.mock("./aiHandler.js", () => ({ installAiHandler: vi.fn() }));
 vi.mock("../service/diskUsageService.js", () => ({
   assertWithinQuota: vi.fn(() => Promise.resolve(undefined)),
@@ -165,6 +178,7 @@ beforeEach(async () => {
   runner.getRunState.mockReturnValue("idle");
   runner.getRunHistory.mockReturnValue([]);
   searchProject.mockResolvedValue({ matches: [], truncated: false });
+  replaceInProject.mockResolvedValue({ files: [], replacements: 0, truncated: false });
 
   await fs.rm(ROOT, { recursive: true, force: true });
   await fs.mkdir(ROOT, { recursive: true });
@@ -243,6 +257,7 @@ describe("editorHandler: file operations", () => {
       ["deleteFolder", { relPath: "d" }],
       ["renameEntry", { relPath: "a.txt", newName: "b.txt" }],
       ["moveEntry", { relPath: "a.txt", destDir: "d" }],
+      ["replaceInProject", { search: { query: "a" }, replacement: "b" }],
       ["runStart", undefined],
       ["runStop", undefined],
       ["runRestart", undefined],
@@ -497,6 +512,62 @@ describe("editorHandler: dev server", () => {
     expect(c.roomEmits).toContainEqual({ room: OTHER, event: "runOutput", payload: { chunk: "hello" } });
     expect(c.roomEmits).toContainEqual({ room: OTHER, event: "runState", payload: "running" });
     expect(c.roomEmits).toContainEqual({ room: OTHER, event: "previewReady", payload: { port: 3000 } });
+  });
+});
+
+describe("editorHandler: replace", () => {
+  it("rewrites the files, drops their live documents, and announces the change", async () => {
+    replaceInProject.mockResolvedValue({
+      files: [
+        { relPath: "src/a.ts", replacements: 3 },
+        { relPath: "src/b.ts", replacements: 1 },
+      ],
+      replacements: 4,
+      truncated: false,
+    });
+    const c = connect();
+
+    await c.send("replaceInProject", {
+      search: { query: "oldName" },
+      replacement: "newName",
+    });
+
+    expect(replaceInProject).toHaveBeenCalledWith(PROJECT, {
+      search: { query: "oldName" },
+      replacement: "newName",
+    });
+    // A shared document holds the file's pre-rewrite text in memory and would
+    // write it back over the rewrite on its next flush.
+    expect(collab.dropDoc).toHaveBeenCalledWith(PROJECT, "src/a.ts");
+    expect(collab.dropDoc).toHaveBeenCalledWith(PROJECT, "src/b.ts");
+    expect(c.emitted).toContainEqual({
+      event: "replaceResult",
+      payload: {
+        query: "oldName",
+        files: [
+          { relPath: "src/a.ts", replacements: 3 },
+          { relPath: "src/b.ts", replacements: 1 },
+        ],
+        replacements: 4,
+        truncated: false,
+      },
+    });
+    expect(c.roomEmits).toContainEqual({ room: PROJECT, event: "treeChanged", payload: undefined });
+  });
+
+  it("shares the search budget, so a loop of rewrites is cut off", async () => {
+    const c = connect();
+
+    for (let i = 0; i < 30; i += 1) {
+      await c.send("search", { query: "x" });
+    }
+    await c.send("replaceInProject", { search: { query: "x" }, replacement: "y" });
+
+    expect(replaceInProject).not.toHaveBeenCalled();
+    expect(c.emitted).toContainEqual({
+      event: "error",
+      payload: expect.objectContaining({ code: "TOO_MANY_REQUESTS" }),
+    });
   });
 });
 

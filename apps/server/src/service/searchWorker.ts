@@ -26,17 +26,38 @@ export interface SearchWorkerInput {
   /** Directory names never descended into. */
   ignored: string[];
   pattern: { source: string; flags: string };
+  /** When present, every match is replaced with this text (JavaScript
+   *  replacement patterns like $1 apply) and the file is written back.
+   *  Absent means search-only: nothing is written. */
+  replacement?: string;
   limits: {
     maxFileBytes: number;
     maxMatches: number;
     maxFilesScanned: number;
     maxLineLength: number;
+    /** Replace mode only: how many files may be rewritten. */
+    maxFilesWritten?: number;
+    /** Replace mode only: total bytes that may be added across all rewrites.
+     *  Shrinking never counts against it. */
+    maxTotalBytesAdded?: number;
   };
+}
+
+/** One file the rewrite touched. */
+export interface FileReplacement {
+  relPath: string;
+  replacements: number;
+  /** Size before and after, so quota accounting can apply its
+   *  `- replacing + incoming` arithmetic without re-statting the tree. */
+  bytesBefore: number;
+  bytesAfter: number;
 }
 
 export interface SearchWorkerOutput {
   matches: { relPath: string; line: number; column: number; preview: string }[];
   truncated: boolean;
+  /** Present in replace mode: the files that were rewritten. */
+  files?: FileReplacement[];
 }
 
 /** Bytes that mean this is not text. Checking a prefix is what every grep does
@@ -52,11 +73,52 @@ async function run(input: SearchWorkerInput): Promise<SearchWorkerOutput> {
   const pattern = new RegExp(input.pattern.source, input.pattern.flags);
 
   const matches: SearchWorkerOutput["matches"] = [];
+  const files: FileReplacement[] = [];
   let filesScanned = 0;
   let truncated = false;
+  let bytesAddedTotal = 0;
 
   function toRelative(absolute: string): string {
     return path.relative(root, absolute).split(path.sep).join("/");
+  }
+
+  /** Rewrite mode: one pass over the whole file, then one write. */
+  async function replaceInFile(
+    absolute: string,
+    contents: Buffer,
+  ): Promise<void> {
+    const text = contents.toString("utf8");
+
+    // Two passes on purpose: `match` counts, then `replace` expands the
+    // replacement patterns. A counting callback would have to re-implement
+    // that expansion to return the same string.
+    pattern.lastIndex = 0;
+    const found = text.match(pattern);
+    if (!found || found.length === 0) return;
+
+    const updated = text.replace(pattern, input.replacement ?? "");
+    if (updated === text) return;
+
+    const bytesAfter = Buffer.byteLength(updated, "utf8");
+    const bytesAdded = bytesAfter - contents.byteLength;
+
+    if (
+      files.length >= (limits.maxFilesWritten ?? limits.maxMatches) ||
+      bytesAddedTotal + Math.max(bytesAdded, 0) >
+        (limits.maxTotalBytesAdded ?? Number.MAX_SAFE_INTEGER)
+    ) {
+      truncated = true;
+      return;
+    }
+
+    await fs.writeFile(absolute, updated, "utf8");
+    files.push({
+      relPath: toRelative(absolute),
+      replacements: found.length,
+      bytesBefore: contents.byteLength,
+      bytesAfter,
+    });
+    bytesAddedTotal += Math.max(bytesAdded, 0);
   }
 
   async function scanFile(absolute: string): Promise<void> {
@@ -65,6 +127,11 @@ async function run(input: SearchWorkerInput): Promise<SearchWorkerOutput> {
 
     const contents = await fs.readFile(absolute).catch(() => undefined);
     if (!contents || looksBinary(contents.subarray(0, 8000))) return;
+
+    if (input.replacement !== undefined) {
+      await replaceInFile(absolute, contents);
+      return;
+    }
 
     const relPath = toRelative(absolute);
     const lines = contents.toString("utf8").split("\n");
@@ -130,7 +197,7 @@ async function run(input: SearchWorkerInput): Promise<SearchWorkerOutput> {
 
   await walk(root);
 
-  return { matches, truncated };
+  return { matches, truncated, files: input.replacement === undefined ? undefined : files };
 }
 
 // `parentPort` is null when this module is imported rather than spawned, which

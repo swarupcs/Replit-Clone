@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Input, Spin, Tooltip } from "antd";
-import { VscCaseSensitive, VscRegex, VscWholeWord } from "react-icons/vsc";
+import { Button, Input, Spin, Tooltip } from "antd";
+import { VscCaseSensitive, VscRegex, VscReplaceAll, VscWholeWord } from "react-icons/vsc";
 import type { SearchMatch } from "@replit-clone/shared";
 import { fileExtension } from "@replit-clone/shared";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
-import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
+import { useEditorSocketStore, selectCanEdit } from "../../../store/editorSocketStore.ts";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 
 /** Wait after the last keystroke before searching. Long enough that typing a
@@ -45,16 +45,20 @@ function groupByFile(matches: SearchMatch[]): FileGroup[] {
  */
 export const SearchPanel = () => {
   const { editorSocket } = useEditorSocketStore();
+  const canEdit = useEditorSocketStore(selectCanEdit);
 
   const [query, setQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [wholeWord, setWholeWord] = useState(false);
   const [isRegex, setIsRegex] = useState(false);
+  const [replacement, setReplacement] = useState("");
 
   const [matches, setMatches] = useState<SearchMatch[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** "Replaced N in M files", shown until the next search changes anything. */
+  const [summary, setSummary] = useState<string | null>(null);
 
   /** The query the displayed results belong to, so a slow reply for an old
    *  query cannot overwrite the results for a newer one. */
@@ -83,18 +87,43 @@ export const SearchPanel = () => {
       setError(payload.message);
     };
 
+    const onReplaced = (payload: {
+      replacements: number;
+      files: unknown[];
+      truncated: boolean;
+    }) => {
+      setSummary(
+        `Replaced ${String(payload.replacements)} in ${String(payload.files.length)} file` +
+          (payload.files.length === 1 ? "" : "s") +
+          (payload.truncated ? " · partial, run it again" : ""),
+      );
+      // The results on screen are stale now; re-run the search against the
+      // rewritten files.
+      setSearching(true);
+      editorSocket.emit("search", {
+        query: pendingQuery.current,
+        caseSensitive,
+        wholeWord,
+        isRegex,
+      });
+    };
+
     editorSocket.on("searchResults", onResults);
+    editorSocket.on("replaceResult", onReplaced);
     editorSocket.on("error", onError);
 
     return () => {
       editorSocket.off("searchResults", onResults);
+      editorSocket.off("replaceResult", onReplaced);
       editorSocket.off("error", onError);
     };
-  }, [editorSocket]);
+    // The toggles feed the follow-up search a replace triggers.
+  }, [editorSocket, caseSensitive, wholeWord, isRegex]);
 
   useEffect(() => {
     const trimmed = query.trim();
     pendingQuery.current = trimmed;
+    setSummary(null);
 
     if (!trimmed || !editorSocket) {
       setMatches([]);
@@ -189,6 +218,53 @@ export const SearchPanel = () => {
           </Tooltip>
         ))}
       </div>
+
+      {canEdit && (
+        <div style={{ padding: "0 10px 8px", display: "flex", gap: 4 }}>
+          <Input
+            size="small"
+            allowClear
+            placeholder="Replace with"
+            value={replacement}
+            onChange={(event) => setReplacement(event.target.value)}
+            style={{ fontSize: 12 }}
+          />
+          <Tooltip title="Replace every match in the project">
+            <Button
+              size="small"
+              type="text"
+              className="rc-icon-button"
+              aria-label="Replace all"
+              disabled={!query.trim() || !matches.length}
+              onClick={() =>
+                editorSocket?.emit("replaceInProject", {
+                  search: {
+                    query: query.trim(),
+                    caseSensitive,
+                    wholeWord,
+                    isRegex,
+                  },
+                  replacement,
+                })
+              }
+            >
+              <VscReplaceAll size={14} />
+            </Button>
+          </Tooltip>
+        </div>
+      )}
+
+      {summary && (
+        <div
+          style={{
+            padding: "0 14px 6px",
+            fontSize: 11.5,
+            color: "var(--rc-text-subtle)",
+          }}
+        >
+          {summary}
+        </div>
+      )}
 
       <div style={{ flex: 1, minHeight: 0, overflow: "auto", paddingBottom: 12 }}>
         {error ? (

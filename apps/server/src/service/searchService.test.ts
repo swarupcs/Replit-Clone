@@ -1,7 +1,11 @@
 import fs from "node:fs/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { projectRoot } from "../utils/projectPaths.js";
-import { searchProject, SearchTimeoutError } from "./searchService.js";
+import {
+  replaceInProject,
+  searchProject,
+  SearchTimeoutError,
+} from "./searchService.js";
 
 const PROJECT = "5d8f2a10-6c3b-4e9d-9f11-2a3b4c5d6e7f";
 const root = projectRoot(PROJECT);
@@ -126,5 +130,103 @@ describe("searchProject", () => {
     // nothing behind for the next.
     const { matches } = await search("greeting");
     expect(matches.length).toBeGreaterThan(0);
+  });
+});
+
+/** Replace has its own tree, so rewriting files cannot disturb the search
+ *  expectations above. */
+const REPLACE_PROJECT = "7a2b4c6d-8e9f-4a1b-8c3d-2e4f6a8b0c2d";
+const replaceRoot = projectRoot(REPLACE_PROJECT);
+
+const replaceAll = (query: string, replacement: string, options = {}) =>
+  replaceInProject(REPLACE_PROJECT, {
+    search: { query, ...options },
+    replacement,
+  });
+
+beforeAll(async () => {
+  await fs.mkdir(`${replaceRoot}/src`, { recursive: true });
+  await fs.mkdir(`${replaceRoot}/node_modules/dep`, { recursive: true });
+
+  await fs.writeFile(
+    `${replaceRoot}/src/main.ts`,
+    "const greeting = 'hello';\nexport function greet() {\n  return greeting;\n}\n",
+  );
+  await fs.writeFile(`${replaceRoot}/src/other.ts`, "// greeting lives in main\n");
+  await fs.writeFile(`${replaceRoot}/logo.png`, Buffer.from([0x89, 0x50, 0x00, 0x4e, 0x47]));
+  await fs.writeFile(`${replaceRoot}/node_modules/dep/index.js`, "var greeting = 1;\n");
+});
+
+afterAll(async () => {
+  await fs.rm(replaceRoot, { recursive: true, force: true });
+});
+
+describe("replaceInProject", () => {
+  it("rewrites every matching file and reports per-file counts", async () => {
+    const result = await replaceAll("greeting", "salutation");
+
+    expect(result.replacements).toBe(3);
+    expect(result.files).toEqual([
+      { relPath: "src/main.ts", replacements: 2 },
+      { relPath: "src/other.ts", replacements: 1 },
+    ]);
+    expect(result.truncated).toBe(false);
+
+    expect(await fs.readFile(`${replaceRoot}/src/main.ts`, "utf8")).toBe(
+      "const salutation = 'hello';\nexport function greet() {\n  return salutation;\n}\n",
+    );
+    // Binary files and ignored directories are left alone.
+    expect(await fs.readFile(`${replaceRoot}/node_modules/dep/index.js`, "utf8")).toBe(
+      "var greeting = 1;\n",
+    );
+  });
+
+  it("is case-insensitive by default, like search", async () => {
+    await fs.writeFile(`${replaceRoot}/src/case.txt`, "Hello there\nhello again\n");
+
+    const result = await replaceAll("hello", "goodbye", { query: "hello" });
+
+    expect(result.replacements).toBe(3);
+    expect(await fs.readFile(`${replaceRoot}/src/case.txt`, "utf8")).toBe(
+      "goodbye there\ngoodbye again\n",
+    );
+  });
+
+  it("expands regex groups in the replacement", async () => {
+    await fs.writeFile(`${replaceRoot}/src/pairs.txt`, "width: 10px\nheight: 20px\n");
+
+    const result = await replaceAll("(\\d+)px", "$1rem", { isRegex: true });
+
+    expect(result.replacements).toBe(2);
+    expect(await fs.readFile(`${replaceRoot}/src/pairs.txt`, "utf8")).toBe(
+      "width: 10rem\nheight: 20rem\n",
+    );
+  });
+
+  it("honours whole-word matching", async () => {
+    await fs.writeFile(`${replaceRoot}/src/words.txt`, "a cat catalog\n");
+
+    const result = await replaceAll("cat", "dog", { wholeWord: true });
+
+    expect(result.replacements).toBe(1);
+    expect(await fs.readFile(`${replaceRoot}/src/words.txt`, "utf8")).toBe(
+      "a dog catalog\n",
+    );
+  });
+
+  it("is a no-op for an empty query", async () => {
+    const result = await replaceAll("   ", "x");
+
+    expect(result).toEqual({ files: [], replacements: 0, truncated: false });
+    // The previous test's file is untouched evidence.
+    expect(await fs.readFile(`${replaceRoot}/src/words.txt`, "utf8")).toBe(
+      "a dog catalog\n",
+    );
+  });
+
+  it("refuses a replacement of absurd length", async () => {
+    await expect(replaceAll("x", "y".repeat(10_001))).rejects.toThrow(
+      /replacement is too long/i,
+    );
   });
 });

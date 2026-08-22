@@ -94,6 +94,18 @@ export interface SearchMatch {
   preview: string;
 }
 
+/** Replacing every match of a search across the project's files.
+ *
+ *  One shot rather than match-by-match: the client already has the matches
+ *  from `search`, and the server re-scans at replace time so files changed
+ *  since are handled correctly rather than patched from stale positions. */
+export interface ReplaceOptions {
+  search: SearchOptions;
+  /** What each match becomes. JavaScript replacement patterns ($1, $&…)
+   *  apply when the search is a regular expression. */
+  replacement: string;
+}
+
 /** Events the browser emits to the server. */
 export interface ClientToServerEvents {
   readFile: (payload: PathPayload) => void;
@@ -117,6 +129,8 @@ export interface ClientToServerEvents {
   statsRequest: () => void;
   /** Search the project's file contents. */
   search: (payload: SearchOptions) => void;
+  /** Replace every match across the project's files. */
+  replaceInProject: (payload: ReplaceOptions) => void;
 
   // --- Shared editing ----------------------------------------------------
   //
@@ -214,6 +228,15 @@ export interface ServerToClientEvents {
   searchResults: (payload: {
     query: string;
     matches: SearchMatch[];
+    truncated: boolean;
+  }) => void;
+  /** Outcome of `replaceInProject`. `truncated` means a limit stopped the
+   *  rewrite, so the list of files is partial and the search should be run
+   *  again to see what is left. */
+  replaceResult: (payload: {
+    query: string;
+    files: { relPath: string; replacements: number }[];
+    replacements: number;
     truncated: boolean;
   }) => void;
   /** A piece of the assistant's answer. */
