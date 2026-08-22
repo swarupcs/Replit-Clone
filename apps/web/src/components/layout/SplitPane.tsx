@@ -49,8 +49,30 @@ export const SplitPane = ({
   const sizeRef = useRef(size);
   sizeRef.current = size;
 
+  /** Ends the drag and reports the final size. Idempotent: pointer capture,
+   *  `pointerup` and the lost-button check below can each reach it. */
+  const stopDragging = useCallback(() => {
+    setDragging((wasDragging) => {
+      if (wasDragging) onResizeEnd?.(sizeRef.current);
+      return false;
+    });
+  }, [onResizeEnd]);
+
   const handleMove = useCallback(
     (event: PointerEvent) => {
+      // No button held means the release was missed — most often because the
+      // pointer was over the preview iframe when it happened, and a
+      // cross-origin frame consumes the event rather than letting it reach
+      // this document. Without this the divider kept following the mouse long
+      // after the user let go.
+      //
+      // Belt to the braces of `setPointerCapture` below, which is what stops
+      // the release going astray in the first place.
+      if (event.buttons === 0) {
+        stopDragging();
+        return;
+      }
+
       const container = containerRef.current;
       if (!container) return;
 
@@ -62,18 +84,18 @@ export const SplitPane = ({
       const limit = (isHorizontal ? rect.width : rect.height) - DIVIDER - minSize;
       setSize(Math.max(minSize, Math.min(raw, Math.min(maxSize, limit))));
     },
-    [isHorizontal, minSize, maxSize],
+    [isHorizontal, minSize, maxSize, stopDragging],
   );
 
   useEffect(() => {
     if (!dragging) return;
 
-    const stop = () => {
-      setDragging(false);
-      onResizeEnd?.(sizeRef.current);
-    };
     window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointerup", stopDragging);
+    // A cancelled pointer (the OS taking over, a touch becoming a gesture)
+    // never produces a pointerup, and would otherwise leave the drag stuck in
+    // exactly the same way.
+    window.addEventListener("pointercancel", stopDragging);
 
     // Without this, dragging over the editor or the preview iframe selects text
     // and the pointer stream stutters.
@@ -83,11 +105,12 @@ export const SplitPane = ({
 
     return () => {
       window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointerup", stopDragging);
+      window.removeEventListener("pointercancel", stopDragging);
       document.body.style.userSelect = previousUserSelect;
       document.body.style.cursor = "";
     };
-  }, [dragging, handleMove, isHorizontal, onResizeEnd]);
+  }, [dragging, handleMove, isHorizontal, stopDragging]);
 
   const bothVisible = showFirst && showSecond;
 
@@ -123,8 +146,24 @@ export const SplitPane = ({
           aria-orientation={isHorizontal ? "vertical" : "horizontal"}
           onPointerDown={(event) => {
             event.preventDefault();
+
+            // The fix for a drag that never ended. Everything below the
+            // divider is fair game to drag across, and one of those things is
+            // the preview iframe — which, being a separate (cross-origin)
+            // document, consumes the pointer stream entirely. The release
+            // happened inside it, this document never heard about it, and the
+            // divider went on following the mouse.
+            //
+            // Capturing retargets every later event for this pointer to the
+            // divider whatever sits underneath, so the release always comes
+            // back here. It also covers letting go outside the window.
+            event.currentTarget.setPointerCapture(event.pointerId);
             setDragging(true);
           }}
+          // Capture is released automatically when the pointer goes up, but
+          // the drag state has to be dropped with it — if anything else takes
+          // the capture away mid-drag, this is the only notice we get.
+          onLostPointerCapture={stopDragging}
           className="rc-divider"
           data-dragging={dragging}
           style={{
