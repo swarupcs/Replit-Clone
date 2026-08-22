@@ -3,6 +3,7 @@ import type { Duplex } from "node:stream";
 import type { WebSocket } from "ws";
 import { getTemplate } from "../templates/registry.js";
 import { logger } from "../lib/logger.js";
+import { watchPollingEnv } from "../config/env.js";
 
 /** Docker ignores a resize sent before the exec's process has claimed its TTY,
  *  and gives no error when it does. The requested size is re-sent at each of
@@ -62,6 +63,9 @@ export const handleTerminalCreation = (
         "TERM=xterm-256color",
         `DEV_PORT=${template.devPort}`,
         `START_COMMAND=${template.startCommand}`,
+        // A dev server started by hand from the shell needs the same treatment
+        // as one started by the Run button.
+        ...watchPollingEnv,
       ],
     },
     (err: Error | null, exec?: Exec) => {

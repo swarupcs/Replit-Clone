@@ -2,6 +2,10 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import dotenv from "dotenv";
 import { z } from "zod";
+import {
+  pollingEnv,
+  shouldPollForChanges,
+} from "./fileWatching.js";
 
 dotenv.config();
 
@@ -99,6 +103,16 @@ const envSchema = z.object({
     .default("true")
     .transform((value) => value === "true"),
 
+  /** Force the sandboxes' file watchers to poll, or force them not to.
+   *
+   *  Unset means "work it out from the host" — see `shouldPollForChanges`.
+   *  Worth setting explicitly for a host this cannot infer: WSL2 with the
+   *  project on a Windows drive needs "true", a Linux box does not. */
+  WATCH_POLLING: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value === "true")),
+
   /** How the preview proxy reaches a project's dev server.
    *
    *  "container-ip"  -- dial the container's address on the sandbox network.
@@ -164,3 +178,14 @@ const runningInContainer = existsSync("/.dockerenv");
 export const previewTargetMode: "container-ip" | "host-loopback" =
   env.PREVIEW_TARGET_MODE ??
   (runningInContainer ? "container-ip" : "host-loopback");
+
+/** Whether a project's dev server has to poll to notice a saved file. */
+export const watchPolling: boolean = shouldPollForChanges({
+  override: env.WATCH_POLLING,
+  inContainer: runningInContainer,
+  platform: process.platform,
+});
+
+/** Container environment that turns polling on, or nothing at all. Spread into
+ *  the `Env` of anything that starts a dev server. */
+export const watchPollingEnv: string[] = pollingEnv(watchPolling);

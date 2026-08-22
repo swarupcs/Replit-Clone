@@ -9,7 +9,7 @@ import {
 } from "./containerManager.js";
 import { execCapture } from "./execCapture.js";
 import { getTemplate } from "../templates/registry.js";
-import { env } from "../config/env.js";
+import { env, watchPollingEnv } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
 import { increment } from "../lib/metrics.js";
@@ -329,6 +329,9 @@ export async function startRun(
       "FORCE_COLOR=1",
       `DEV_PORT=${String(template.devPort)}`,
       `PREVIEW_BASE=/preview/${projectId}/`,
+      // Empty unless the host's bind mount swallows inotify, in which case
+      // nothing here would ever notice a saved file. See fileWatching.ts.
+      ...watchPollingEnv,
     ],
   });
 

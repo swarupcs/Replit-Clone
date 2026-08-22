@@ -15,6 +15,14 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 5173,
     strictPort: true,
+    // Polling, when the server says the host's bind mount does not deliver
+    // file events -- Docker Desktop on Windows and macOS. Without it a save
+    // reaches the container but nothing here ever notices, so HMR never fires
+    // and the preview sits on the previous version of the page.
+    watch: {
+      usePolling: process.env.CHOKIDAR_USEPOLLING === "true",
+      interval: Number(process.env.CHOKIDAR_INTERVAL ?? 1000),
+    },
     hmr: {
       // Dial back through the proxied path rather than the container's origin.
       path: `${base}@vite-hmr`,
