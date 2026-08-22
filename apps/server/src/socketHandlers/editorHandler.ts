@@ -10,6 +10,7 @@ import {
   dropDocsUnder,
   flushAndDropDoc,
   isLive,
+  flushDoc,
   joinDoc,
   leaveDoc,
 } from "../service/collabService.js";
@@ -500,6 +501,23 @@ export const handleEditorSocketEvents = (
       await leaveDoc(projectId, relPath, socket.id);
       announcePeers(relPath);
     })(),
+  );
+
+  socket.on("docSave", ({ relPath }) =>
+    handle(
+      "save the shared document",
+      async () => {
+        // Only for a document this socket actually has open, so a save cannot
+        // be asked for on a path the sender is not editing.
+        if (!socket.rooms.has(docRoom(relPath))) return;
+
+        await flushDoc(projectId, relPath);
+        // Everyone with it open, because a shared document is one merged
+        // buffer: saved for one of them is saved for all.
+        editorNamespace.to(docRoom(relPath)).emit("docSaved", { relPath });
+      },
+      true,
+    )(),
   );
 
   socket.on("docUpdate", ({ relPath, update }) =>

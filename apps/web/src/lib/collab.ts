@@ -1,6 +1,7 @@
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import { MonacoBinding } from "y-monaco";
+import { discardWrite } from "./pendingWrites.ts";
 import type { editor } from "monaco-editor";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
@@ -79,6 +80,14 @@ export function installCollab(socket: EditorSocket): () => void {
     // Now that the text is the file's, a binding held back by `bindDoc` can
     // safely take it to the model.
     attachPendingBind(live);
+
+    // From here the SERVER writes this file, so any client write still on the
+    // clock for it is both superseded and older than the document. Left in the
+    // queue it would be flushed later — by Ctrl+S, by a blur, by switching
+    // tabs — and would put that older buffer back on disk over everyone's
+    // merged work. Dropping it is what keeps `flushAllWrites` safe: once this
+    // has run, no queued path can be a shared one.
+    discardWrite(relPath);
     notify();
   };
 
@@ -213,6 +222,20 @@ export function bindDoc(
 
   live.pendingBind = { model, codeEditor };
   if (live.synced) attachPendingBind(live);
+}
+
+/** Asks the server to write a shared document to disk now.
+ *
+ *  The server owns the file while it is shared and writes it on a debounce
+ *  after the last change; this is how Ctrl+S reaches that instead of waiting
+ *  it out. Returns false when the path is not (yet) shared, so the caller can
+ *  fall back to writing it the ordinary way.
+ */
+export function saveDoc(socket: EditorSocket | null, relPath: string): boolean {
+  if (!socket || !isCollaborative(relPath)) return false;
+
+  socket.emit("docSave", { relPath });
+  return true;
 }
 
 /** Releases one reference, tearing the document down on the last. */

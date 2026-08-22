@@ -34,6 +34,7 @@ import {
   peerCount,
   releaseDoc,
   retainDoc,
+  saveDoc,
   subscribeCollab,
 } from "../../../lib/collab.ts";
 import { useAuthStore } from "../../../store/authStore.ts";
@@ -346,6 +347,16 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         suppressChange.current = false;
       }
     }
+
+    // A shared file is written by the SERVER, from the merged document, so
+    // asking it to write now is the only thing that actually saves one.
+    //
+    // This used to fall straight through to the client path below, where
+    // `queueIfAllowed` declines to queue a shared file — and then `flushWrite`
+    // sent whatever was still in the queue. Which was, at best, nothing, and
+    // at worst an older buffer queued before the document synced: Ctrl+S then
+    // put the PREVIOUS contents back on disk over the edit being saved.
+    if (saveDoc(editorSocket, relPath)) return;
 
     // Saves even when nothing is queued, so Ctrl+S is never a no-op the user
     // has to guess about.

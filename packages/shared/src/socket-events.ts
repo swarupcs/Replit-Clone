@@ -128,6 +128,14 @@ export interface ClientToServerEvents {
   docJoin: (payload: PathPayload) => void;
   /** Stop editing it. */
   docLeave: (payload: PathPayload) => void;
+  /** Write the shared document to disk now.
+   *
+   *  While a file is edited together the SERVER owns writing it, on a debounce
+   *  after the last change. Ctrl+S had no way to reach that, so it fell through
+   *  to the ordinary client write path — which is suppressed for shared files —
+   *  and saved nothing at all, or worse, flushed an older buffer left in the
+   *  queue from before the document synced. */
+  docSave: (payload: PathPayload) => void;
   /** A Yjs update produced locally. */
   docUpdate: (payload: { relPath: string; update: ArrayBuffer }) => void;
   /** Cursor and selection, for everyone else's benefit. Not persisted. */

@@ -32,7 +32,14 @@ import {
   isCollaborative,
   releaseDoc,
   retainDoc,
+  saveDoc,
 } from "./collab.ts";
+import {
+  pendingPaths,
+  queueWrite,
+  resetPendingWrites,
+  setWriteEmitter,
+} from "./pendingWrites.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 const PATH = "src/App.jsx";
@@ -101,6 +108,7 @@ let teardown: () => void;
 
 beforeEach(() => {
   bindings.length = 0;
+  resetPendingWrites();
   harness = fakeSocket();
   teardown = installCollab(harness.socket);
 });
@@ -211,5 +219,70 @@ describe("binding a shared document to the editor", () => {
     harness.deliver("docSync", { relPath: PATH, state: serverState(FILE) });
 
     expect(bindings).toHaveLength(0);
+  });
+});
+
+/** Saving a file that is edited together.
+ *
+ *  The server owns writing a shared file, from the merged document, on a
+ *  debounce after the last change. Ctrl+S had no way to reach that: it fell
+ *  through to the ordinary client write path, where queueing is suppressed for
+ *  shared files — so it flushed whatever was still in the queue instead. That
+ *  was an older buffer, queued before the document synced, and saving put
+ *  those PREVIOUS contents back on disk over the edit being saved.
+ */
+describe("saving a shared document", () => {
+  it("asks the server to write it, rather than writing it from here", () => {
+    retainDoc(harness.socket, PATH, IDENTITY);
+    harness.deliver("docSync", { relPath: PATH, state: serverState(FILE) });
+
+    expect(saveDoc(harness.socket, PATH)).toBe(true);
+    expect(harness.emitted.at(-1)).toEqual({
+      event: "docSave",
+      payload: { relPath: PATH },
+    });
+  });
+
+  it("declines a file that is not shared, so the caller writes it normally", () => {
+    retainDoc(harness.socket, PATH, IDENTITY);
+    // No docSync yet.
+    expect(saveDoc(harness.socket, PATH)).toBe(false);
+    expect(saveDoc(harness.socket, "never/opened.ts")).toBe(false);
+  });
+
+  it("declines when there is no socket to ask", () => {
+    retainDoc(harness.socket, PATH, IDENTITY);
+    harness.deliver("docSync", { relPath: PATH, state: serverState(FILE) });
+
+    expect(saveDoc(null, PATH)).toBe(false);
+  });
+
+  /** The write that produced the reported bug. */
+  it("drops a client write queued before the document synced", () => {
+    const sent: { relPath: string; data: string }[] = [];
+    setWriteEmitter((relPath, data) => sent.push({ relPath, data }));
+
+    retainDoc(harness.socket, PATH, IDENTITY);
+    // Typed in the moment before the server answered, so this path was not yet
+    // shared and the write was allowed to queue.
+    queueWrite(PATH, "stale contents", 5_000);
+    expect(pendingPaths()).toContain(PATH);
+
+    harness.deliver("docSync", { relPath: PATH, state: serverState(FILE) });
+
+    // Gone, and never sent: from here the server writes this file, and
+    // flushing that buffer later would put it back over everyone's work.
+    expect(pendingPaths()).not.toContain(PATH);
+    expect(sent).toEqual([]);
+  });
+
+  it("leaves other files' queued writes alone", () => {
+    setWriteEmitter(() => undefined);
+    queueWrite("other/file.ts", "still wanted", 5_000);
+
+    retainDoc(harness.socket, PATH, IDENTITY);
+    harness.deliver("docSync", { relPath: PATH, state: serverState(FILE) });
+
+    expect(pendingPaths()).toContain("other/file.ts");
   });
 });
