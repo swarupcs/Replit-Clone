@@ -399,7 +399,13 @@ export async function removeContainer(projectId: string): Promise<void> {
   const info = await findContainer(projectId);
   if (!info) return;
 
-  await docker.getContainer(info.Id).remove({ force: true }).catch(() => {});
+  const container = docker.getContainer(info.Id);
+  // Stop before remove: `remove({ force })` on a running container with an
+  // attached exec stream can be refused by the daemon, and with the failure
+  // swallowed the container outlived its project — unreaped, because nothing
+  // else knows its id once the row is gone.
+  await container.stop({ t: 2 }).catch(() => {});
+  await container.remove({ force: true }).catch(() => {});
   activeAttachments.delete(projectId);
   lastActiveAt.delete(projectId);
 }

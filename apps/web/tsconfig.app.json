@@ -10,5 +10,5 @@
     "noUnusedParameters": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo"
   },
-  "include": ["src"]
+  "include": ["src", "e2e", "playwright.config.ts"]
 }

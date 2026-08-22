@@ -40,7 +40,7 @@ The codebase (pnpm monorepo: React 19 + Vite web IDE, Express/socket.io/dockerod
 | **Git panel upgrades** | Currently argv-array exec only; add diff view, branch visualization, staging individual hunks. |
 
 ### Operations / Quality
-- **E2E tests** — no end-to-end flow test (create project → edit → run → preview). Playwright fits the browser-based nature of the app; CI already runs typecheck/lint/test/build on Node 22 with Postgres.
+- **E2E tests** — ✅ DONE | Playwright flow (`apps/web/e2e/`, `pnpm --filter web e2e`): signup → create static playground → edit in Monaco → Ctrl+S → dev server in a real container → preview proxy shows the edit. Runs against the developer's own `pnpm dev` stack and skips cleanly when it isn't up (global-setup probes web + API health). Each run deletes its project afterward so containers don't fill the concurrency cap. Exposed and fixed a real bug: deleting a project with a live run left its container running forever (`removeContainer` now stops before removing).
 - **Docs** — add `CONTRIBUTING.md`, per-app READMEs, and a `docs/` page for the security model (path traversal choke point, argv-array exec, token handling) — it's the project's strongest point and deserves a write-up.
 - **Observability** — structured request logging with correlation IDs to help debug socket-heavy interactions (editor, terminal, watcher), where most recent bugs lived.
 - **Security extras** — `SECURITY.md` with a disclosure policy; consider CSP headers on the preview proxy.

@@ -10,3 +10,8 @@ build/
 projects/
 .turbo/
 coverage/
+
+# Playwright
+apps/web/e2e/.artifacts/
+apps/web/playwright-report/
+apps/web/test-results/
