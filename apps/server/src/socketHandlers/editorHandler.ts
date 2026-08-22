@@ -30,6 +30,7 @@ import { logger } from "../lib/logger.js";
 import {
   getRunHistory,
   getRunState,
+  adoptRun,
   autoStartRun,
   restartRun,
   startRun,
@@ -582,7 +583,19 @@ export const handleEditorSocketEvents = (
     // not spend the owner's container budget just by looking. Deliberately not
     // wrapped in `handle`: nobody asked for this, so it reports nothing to the
     // client and swallows its own failures (see autoStartRun).
-    if (canEdit()) void autoStartRun(projectId);
+    //
+    // Reconciling first is what makes a reload safe. The run state lives in
+    // this process's memory while the dev server lives in the container, so a
+    // restarted server reads `running` as `idle` — and starting a second dev
+    // server into a port the first one still holds is exactly what an
+    // unconditional `autoStartRun` did here. `adoptRun` settles which of the
+    // two this is; whatever it decides is broadcast to the room, so the state
+    // emitted above is corrected for every tab, not just this one.
+    void adoptRun(projectId)
+      .catch(() => undefined)
+      .then(() => {
+        if (canEdit()) return autoStartRun(projectId);
+      });
   });
 
   socket.on("runStart", () =>

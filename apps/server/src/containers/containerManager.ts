@@ -366,6 +366,21 @@ export async function getPreviewTarget(
   return address ? `http://${address}:${String(wanted)}` : undefined;
 }
 
+/** The project's container, but only if one exists and is running.
+ *
+ *  Unlike `ensureContainer` this creates nothing. It is for asking questions
+ *  about a project that may well have no container, where starting one would
+ *  itself be the wrong answer — the run reconciler, most of all, which must be
+ *  able to say "nothing is running here" without making that false.
+ */
+export async function getRunningContainer(
+  projectId: string,
+): Promise<Container | undefined> {
+  const info = await findContainer(projectId);
+  if (!info || info.State !== "running") return undefined;
+  return docker.getContainer(info.Id);
+}
+
 /** Ports this project's preview may be pointed at. */
 export async function previewablePorts(projectId: string): Promise<number[]> {
   const template = await templateForProject(projectId);

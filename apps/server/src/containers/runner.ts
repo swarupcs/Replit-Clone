@@ -2,7 +2,12 @@ import net from "node:net";
 import type { Duplex } from "node:stream";
 import type { Exec } from "dockerode";
 import type { RunState } from "@replit-clone/shared";
-import { ensureContainer, getPreviewTarget } from "./containerManager.js";
+import {
+  ensureContainer,
+  getPreviewTarget,
+  getRunningContainer,
+} from "./containerManager.js";
+import { execCapture } from "./execCapture.js";
 import { getTemplate } from "../templates/registry.js";
 import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
@@ -53,6 +58,24 @@ const PGID_PATTERN = new RegExp(`${PGID_MARKER}(\\d+)\\r?\\n`);
 /** How much output to hold while waiting for the marker line. It is the first
  *  thing the launcher writes, so this only ever covers a chunk boundary. */
 const PGID_BUFFER_LIMIT = 4096;
+
+/** Where the launcher also records its process group id, inside the container.
+ *
+ *  The marker on stdout is enough while this process is the one watching the
+ *  stream. It is not enough across a server restart: the run keeps going, but
+ *  the only record of how to stop it lived in this process's memory. Writing it
+ *  where the run itself lives is what lets a restarted server take the run back
+ *  over rather than leaving an unstoppable dev server holding the port.
+ */
+export const PGID_FILE = "/tmp/rc-run.pgid";
+
+/** Reads a process group id out of a marker line.
+ *
+ *  Separate from `takeProcessGroupId`, which is a streaming parser that also
+ *  has to hold output back. This one is handed a complete, tiny reply. */
+export function parsePgidReport(text: string): string | undefined {
+  return new RegExp(`${PGID_MARKER}(\\d+)`).exec(text)?.[1];
+}
 
 /** Wraps a string as a single-quoted shell word. */
 export function shellQuote(value: string): string {
@@ -285,7 +308,9 @@ export async function startRun(
   // `$!`: setsid makes that shell the session leader, so its pid IS the group
   // id, whether or not setsid had to fork to get there. `bash -lc` so the
   // command can use the shell operators the registry writes it with.
-  const runScript = `echo "${PGID_MARKER}$$"; ${template.startCommand}`;
+  const runScript =
+    `echo "${PGID_MARKER}$$"; echo $$ > ${PGID_FILE}; ${template.startCommand}`;
+
   const exec = await container.exec({
     Cmd: [
       "/bin/bash",
@@ -355,6 +380,109 @@ export async function startRun(
   stream.on("close", finish);
 
   probeUntilReady(projectId);
+}
+
+/** Asks the container whether the run this server forgot is still going.
+ *
+ *  Returns the process group id only if the recorded one names a group that is
+ *  still alive, so a file left behind by a run that has since finished — and a
+ *  pid that has since been reused by something else — is not mistaken for the
+ *  dev server.
+ */
+async function readLiveProcessGroup(
+  container: Parameters<typeof execCapture>[0],
+): Promise<string | undefined> {
+  const script =
+    `p=$(cat ${PGID_FILE} 2>/dev/null || true); ` +
+    `if [ -n "$p" ] && kill -0 -"$p" 2>/dev/null; ` +
+    `then echo "${PGID_MARKER}$p"; fi`;
+
+  const result = await execCapture(container, ["/bin/sh", "-c", script]).catch(
+    () => undefined,
+  );
+
+  return result ? parsePgidReport(result.stdout) : undefined;
+}
+
+function adoptionNotice(stoppable: boolean): string {
+  const found =
+    "\r\n\x1b[36mReconnected to the dev server already running in this " +
+    "project.\x1b[0m\r\n";
+
+  // Lost with the process that was watching it: Docker keeps no copy of an
+  // exec's output, so this is stated rather than left as an empty pane under a
+  // "running" badge.
+  const noHistory =
+    "\x1b[33mIts output from before now is not available.\x1b[0m\r\n";
+
+  // Said plainly rather than left to be discovered by pressing Stop and having
+  // nothing happen.
+  const unstoppable =
+    "\x1b[33mIt also did not report a process group, so Stop cannot signal " +
+    "it. Restart the project container to clear it.\x1b[0m\r\n";
+
+  return stoppable ? found + noHistory : found + noHistory + unstoppable;
+}
+
+/** Takes back over a dev server that is running with nothing watching it.
+ *
+ *  Run state lives in this process's memory, and the container outlives this
+ *  process: restart the server — a deploy, a crash, `tsx watch` noticing a
+ *  saved file — and every project that was running reads as `idle` while its
+ *  dev server carries on serving the preview. Reloading the page then made it
+ *  worse rather than better, because `autoStartRun` saw `idle` and launched a
+ *  second dev server into a port the first one still held.
+ *
+ *  So the state is reconciled against the one thing that actually knows: the
+ *  container. If something is answering on the template's dev port, there is a
+ *  dev server, whatever this process remembers.
+ *
+ *  What cannot be recovered is the output. It streamed to a process that is
+ *  gone, and Docker does not keep it. The log pane says so rather than
+ *  presenting an empty history under a "running" badge.
+ */
+export async function adoptRun(projectId: string): Promise<void> {
+  const current = session(projectId);
+
+  // The same test is made again after the awaits below, which is the one that
+  // decides. This is only here to skip two Docker round trips for the ordinary
+  // case: a project whose run this process is already watching.
+  //
+  // `exec` as well as the status, because a run this process started is one it
+  // holds the stream for, whatever the status has since become.
+  if (current.state.status !== "idle" || current.exec) return;
+
+  const container = await getRunningContainer(projectId).catch(() => undefined);
+  if (!container) return;
+
+  if (!(await isListening(projectId))) return;
+
+  const template = await templateForProject(projectId).catch(() => undefined);
+  if (!template) return;
+
+  // Re-read after the awaits. `startRun` claims the session synchronously, so a
+  // Run pressed while this was asking Docker its questions has already won —
+  // and overwriting it here would report `running` for a dev server that is
+  // still installing, and drop the process group of the one that is real.
+  const live = session(projectId);
+  if (live.state.status !== "idle" || live.exec) return;
+
+  const pgid = await readLiveProcessGroup(container);
+
+  live.pgid = pgid;
+  live.pgidBuffer = undefined;
+
+  logger.info("adopted a dev server that was already running", {
+    projectId,
+    stoppable: pgid !== undefined,
+  });
+
+  pushOutput(projectId, adoptionNotice(pgid !== undefined));
+  setState(projectId, { status: "running", command: template.startCommand });
+
+  // The preview is live this instant, so say so — the pane is otherwise
+  // waiting for a `previewReady` that only a fresh start would ever send.
+  emit(projectId, { type: "ready", port: template.devPort });
 }
 
 /** Starts the dev server because someone opened the project, rather than
