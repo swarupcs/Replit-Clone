@@ -31,16 +31,21 @@ export default defineConfig({
     // Bind on all interfaces so the app is reachable from other LAN machines
     // once it runs on the VM.
     host: true,
-    // Pinned and strict: the server's CORS allowlist and the OAuth-style
-    // cookie path both key off this exact origin, so silently sliding to the
-    // next free port would break auth in confusing ways.
+    // Pinned and strict: the server's CORS allowlist, the preview CSP's
+    // frame-ancestors and the cookie path all key off this exact origin, so
+    // silently sliding to the next free port would break auth and blank the
+    // preview in confusing ways.
     //
     // 5173 is deliberately avoided -- that is the port project containers use.
-    // 5273 was also avoided: on Windows it falls inside a Hyper-V/WSL reserved
-    // range (netsh interface ipv4 show excludedportrange protocol=tcp), which
-    // makes binding fail with EACCES rather than EADDRINUSE. 4273 sits outside
-    // every range Hyper-V hands out by default.
-    port: 4273,
+    //
+    // ABOVE 15000 deliberately. On Windows, Docker Desktop lowers the TCP
+    // dynamic port range to 1024-15000 (netsh int ipv4 show dynamicport tcp),
+    // and Hyper-V reserves blocks anywhere inside it on every boot -- binding
+    // one then fails with EACCES rather than EADDRINUSE. This port chased that
+    // twice, 5273 then 4273, because both were only free on the day they were
+    // picked. Sitting above the range is what actually settles it; Postgres is
+    // on 15432 for the same reason.
+    port: 15273,
     strictPort: true,
   },
 });
