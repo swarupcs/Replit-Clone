@@ -110,11 +110,15 @@ export function installTerminalGateway(server: Server): void {
             for (const buffered of inbox.splice(0)) handler(buffered);
           };
 
+          // One id per terminal, used both to tell watches apart and to name
+          // the file the shell records its pid in.
+          const terminalId = nextTerminalId();
+
           // A shell is the most privileged thing on offer here, and its
           // authorisation was checked once at the upgrade and never again.
           // Someone removed from a project kept a working shell inside its
           // container until they closed the tab.
-          const releaseAccessWatch = watchAccess(`terminal:${String(nextTerminalId())}`, {
+          const releaseAccessWatch = watchAccess(`terminal:${String(terminalId)}`, {
             userId: claims.sub,
             projectId,
             level: "editor",
@@ -132,7 +136,7 @@ export function installTerminalGateway(server: Server): void {
 
           ws.on("close", releaseAccessWatch);
 
-          void startTerminal(ws, projectId, project.template, attachInput);
+          void startTerminal(ws, projectId, project.template, attachInput, terminalId);
         });
       } catch (error) {
         logger.warn("terminal upgrade rejected", {
@@ -150,19 +154,47 @@ async function startTerminal(
   projectId: string,
   templateId: string,
   attachInput: AttachInput,
+  terminalId: number,
 ): Promise<void> {
   attach(projectId);
-  increment("terminal_sessions");
-  ws.on("close", () => detach(projectId));
+
+  // Released exactly once, by whichever path gets there first. The failure
+  // path used to call `detach` directly AND leave the close handler in place,
+  // so a terminal that could not start decremented the project's attachment
+  // count twice — releasing an attachment that belonged to somebody else's
+  // editor socket, and letting the idle sweeper stop a container still in use.
+  let released = false;
+  const releaseAttachment = (): void => {
+    if (released) return;
+    released = true;
+    detach(projectId);
+  };
+
+  ws.on("close", releaseAttachment);
 
   try {
     await touchProject(projectId);
 
     const container = await ensureContainer(projectId);
-    handleTerminalCreation(container, ws, templateId, attachInput);
+
+    // The client can go away while the container is starting, and routinely
+    // does: React's StrictMode opens a socket and discards it on every mount,
+    // in development. Opening a shell for a socket nobody is holding leaves a
+    // /bin/bash running inside the container with nothing attached to it and
+    // nothing left that would ever close it.
+    if (ws.readyState !== ws.OPEN) {
+      releaseAttachment();
+      return;
+    }
+
+    // Counted here rather than on arrival, so the metric means "shells opened"
+    // and not "sockets seen". It read 11 for a project that never had more
+    // than a couple of shells in it.
+    increment("terminal_sessions");
+    handleTerminalCreation(container, ws, templateId, attachInput, terminalId);
   } catch (error) {
     logger.error("could not start terminal", error, { projectId });
-    detach(projectId);
+    releaseAttachment();
     // Relay the real reason when it is safe to show (an AppError, e.g. the
     // at-capacity 503), so the terminal can tell the user to close a project
     // instead of showing a bare "Disconnected". WebSocket close reasons are

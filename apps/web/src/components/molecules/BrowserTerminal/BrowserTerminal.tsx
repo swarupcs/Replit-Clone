@@ -79,169 +79,194 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
 
     setStatus("connecting");
 
-    const term = new Terminal({
-      cursorBlink: true,
-      // xterm paints to its own surface and cannot read CSS custom
-      // properties, so these mirror the --rc-* tokens in index.css.
-      theme: {
-        background: "#0a0b12",
-        foreground: "#e6e8f0",
-        cursor: "#a78bfa",
-        cursorAccent: "#0a0b12",
-        selectionBackground: "#2a2e42",
-        black: "#0a0b12",
-        red: "#f87171",
-        green: "#4ade80",
-        yellow: "#fbbf24",
-        blue: "#60a5fa",
-        magenta: "#a78bfa",
-        cyan: "#22d3ee",
-        white: "#e6e8f0",
-        brightBlack: "#6b7192",
-        brightRed: "#fca5a5",
-        brightGreen: "#86efac",
-        brightYellow: "#fcd34d",
-        brightBlue: "#93c5fd",
-        brightMagenta: "#c4b5fd",
-        brightCyan: "#67e8f9",
-        brightWhite: "#ffffff",
-      },
-      fontSize: 13,
-      fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-      lineHeight: 1.35,
-      convertEol: true,
-      scrollback: 5000,
-      // Padding lives on the wrapper, not the canvas, so the cursor never sits
-      // flush against the edge.
-      allowProposedApi: true,
-    });
-
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(container);
-    termRef.current = term;
-
-    // The browser WebSocket API cannot set an Authorization header, and a token
-    // in the query string lands in access logs, so it rides the subprotocol.
+    // Whether this run of the effect has been torn down. Shared by the
+    // deferred start below and every handler it registers.
     let disposed = false;
-    // Whether this socket ever reached OPEN. A close before it did points at a
-    // rejected handshake (usually a stale token) rather than a dropped
-    // connection, and the two want different recovery.
-    let opened = false;
 
-    const socket = new WebSocket(terminalWsUrl(projectId), ["auth", accessToken]);
-    socket.binaryType = "arraybuffer";
+    /** Builds the terminal and its socket, and returns their teardown. */
+    const connect = (host: HTMLDivElement, token: string): (() => void) => {
+      const term = new Terminal({
+        cursorBlink: true,
+        // xterm paints to its own surface and cannot read CSS custom
+        // properties, so these mirror the --rc-* tokens in index.css.
+        theme: {
+          background: "#0a0b12",
+          foreground: "#e6e8f0",
+          cursor: "#a78bfa",
+          cursorAccent: "#0a0b12",
+          selectionBackground: "#2a2e42",
+          black: "#0a0b12",
+          red: "#f87171",
+          green: "#4ade80",
+          yellow: "#fbbf24",
+          blue: "#60a5fa",
+          magenta: "#a78bfa",
+          cyan: "#22d3ee",
+          white: "#e6e8f0",
+          brightBlack: "#6b7192",
+          brightRed: "#fca5a5",
+          brightGreen: "#86efac",
+          brightYellow: "#fcd34d",
+          brightBlue: "#93c5fd",
+          brightMagenta: "#c4b5fd",
+          brightCyan: "#67e8f9",
+          brightWhite: "#ffffff",
+        },
+        fontSize: 13,
+        fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+        lineHeight: 1.35,
+        convertEol: true,
+        scrollback: 5000,
+        // Padding lives on the wrapper, not the canvas, so the cursor never
+        // sits flush against the edge.
+        allowProposedApi: true,
+      });
 
-    /** fit() reads renderer cell dimensions that do not exist until the element
-     *  is laid out; the first layout pass reports 0x0. */
-    function syncSize() {
-      // Every guard here matters: fit() and focus() both touch the renderer,
-      // which throws "Cannot read properties of undefined (reading
-      // 'dimensions')" once the Terminal has been disposed -- and React 19's
-      // StrictMode disposes one on every mount.
-      if (disposed) return;
-      if (!container || container.clientWidth === 0 || container.clientHeight === 0) {
-        return;
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(host);
+      termRef.current = term;
+
+      // The browser WebSocket API cannot set an Authorization header, and a
+      // token in the query string lands in access logs, so it rides the
+      // subprotocol.
+      //
+      // Whether this socket ever reached OPEN. A close before it did points at
+      // a rejected handshake (usually a stale token) rather than a dropped
+      // connection, and the two want different recovery.
+      let opened = false;
+
+      const socket = new WebSocket(terminalWsUrl(projectId), ["auth", token]);
+      socket.binaryType = "arraybuffer";
+
+      /** fit() reads renderer cell dimensions that do not exist until the
+       *  element is laid out; the first layout pass reports 0x0. */
+      function syncSize() {
+        // Every guard here matters: fit() and focus() both touch the renderer,
+        // which throws "Cannot read properties of undefined (reading
+        // 'dimensions')" once the Terminal has been disposed.
+        if (disposed) return;
+        if (host.clientWidth === 0 || host.clientHeight === 0) return;
+        try {
+          fitAddon.fit();
+        } catch {
+          return; // Detached mid-resize; the next tick refits.
+        }
+
+        // Tell the container's PTY the new size. Without this the shell always
+        // believed it had xterm's default 80x24, so full-screen TUIs and even
+        // line wrapping were wrong.
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+        }
       }
-      try {
-        fitAddon.fit();
-      } catch {
-        return; // Detached mid-resize; the next tick refits.
-      }
 
-      // Tell the container's PTY the new size. Without this the shell always
-      // believed it had xterm's default 80x24, so full-screen TUIs and even
-      // line wrapping were wrong.
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-      }
-    }
-
-    syncSize();
-    const resizeObserver = new ResizeObserver(syncSize);
-    resizeObserver.observe(container);
-
-    const keyInput = term.onData((data) => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(data);
-    });
-
-    socket.addEventListener("open", () => {
-      if (disposed) return;
-      // A healthy connection clears the backoff, so the next unexpected drop
-      // starts retrying promptly instead of at the tail of an old backoff.
-      opened = true;
-      retriesRef.current = 0;
-      setStatus("open");
       syncSize();
-      term.focus();
-      // The shell prints its prompt the moment the exec starts, which can land
-      // before this socket is attached. A bare newline makes bash redraw it, so
-      // the terminal is never left looking dead.
-      socket.send(String.fromCharCode(10));
-    });
+      const resizeObserver = new ResizeObserver(syncSize);
+      resizeObserver.observe(host);
 
-    socket.addEventListener("message", (event: MessageEvent<unknown>) => {
-      if (disposed) return;
-      const { data } = event;
+      const keyInput = term.onData((data) => {
+        if (socket.readyState === WebSocket.OPEN) socket.send(data);
+      });
 
-      if (typeof data === "string") term.write(data);
-      else if (data instanceof ArrayBuffer) term.write(new Uint8Array(data));
-    });
+      socket.addEventListener("open", () => {
+        if (disposed) return;
+        // A healthy connection clears the backoff, so the next unexpected drop
+        // starts retrying promptly instead of at the tail of an old backoff.
+        opened = true;
+        retriesRef.current = 0;
+        setStatus("open");
+        syncSize();
+        term.focus();
+        // The shell prints its prompt the moment the exec starts, which can
+        // land before this socket is attached. A bare newline makes bash
+        // redraw it, so the terminal is never left looking dead.
+        socket.send(String.fromCharCode(10));
+      });
 
-    socket.addEventListener("close", (event) => {
-      if (disposed) return;
-      setStatus("closed");
+      socket.addEventListener("message", (event: MessageEvent<unknown>) => {
+        if (disposed) return;
+        const { data } = event;
 
-      const MAX_RETRIES = 6;
-      if (retriesRef.current >= MAX_RETRIES) {
+        if (typeof data === "string") term.write(data);
+        else if (data instanceof ArrayBuffer) term.write(new Uint8Array(data));
+      });
+
+      socket.addEventListener("close", (event) => {
+        if (disposed) return;
+        setStatus("closed");
+
+        const MAX_RETRIES = 6;
+        if (retriesRef.current >= MAX_RETRIES) {
+          term.write(
+            `\r\n\x1b[31mTerminal disconnected${event.reason ? `: ${event.reason}` : ""}. Click reconnect to try again.\x1b[0m\r\n`,
+          );
+          return;
+        }
+
+        const attempt = retriesRef.current;
+        retriesRef.current += 1;
+        // 0.5s, 1s, 2s, 4s, 8s, capped at 10s.
+        const delay = Math.min(500 * 2 ** attempt, 10_000);
         term.write(
-          `\r\n\x1b[31mTerminal disconnected${event.reason ? `: ${event.reason}` : ""}. Click reconnect to try again.\x1b[0m\r\n`,
+          `\r\n\x1b[33mTerminal disconnected${event.reason ? `: ${event.reason}` : ""}. Reconnecting…\x1b[0m\r\n`,
         );
-        return;
-      }
 
-      const attempt = retriesRef.current;
-      retriesRef.current += 1;
-      // 0.5s, 1s, 2s, 4s, 8s, capped at 10s.
-      const delay = Math.min(500 * 2 ** attempt, 10_000);
-      term.write(
-        `\r\n\x1b[33mTerminal disconnected${event.reason ? `: ${event.reason}` : ""}. Reconnecting…\x1b[0m\r\n`,
-      );
-
-      reconnectTimerRef.current = window.setTimeout(() => {
-        void (async () => {
-          if (disposed) return;
-          // A close before OPEN is almost always a rejected handshake -- the
-          // stored access token was missing or expired. REST refreshes itself
-          // on a 401, but a WebSocket cannot, so do it here before retrying,
-          // otherwise every attempt presents the same dead token. Routed
-          // through the shared, de-duplicated refresher so this never races a
-          // REST refresh: refresh tokens are single-use and a reused one
-          // revokes the whole session. Best-effort -- if refresh fails the
-          // retry still runs and simply closes again.
-          if (!opened) {
-            try {
-              await refreshAccessToken();
-            } catch {
-              // No live session to refresh; the retry will surface that.
+        reconnectTimerRef.current = window.setTimeout(() => {
+          void (async () => {
+            if (disposed) return;
+            // A close before OPEN is almost always a rejected handshake -- the
+            // stored access token was missing or expired. REST refreshes
+            // itself on a 401, but a WebSocket cannot, so do it here before
+            // retrying, otherwise every attempt presents the same dead token.
+            // Routed through the shared, de-duplicated refresher so this never
+            // races a REST refresh: refresh tokens are single-use and a reused
+            // one revokes the whole session. Best-effort -- if refresh fails
+            // the retry still runs and simply closes again.
+            if (!opened) {
+              try {
+                await refreshAccessToken();
+              } catch {
+                // No live session to refresh; the retry will surface that.
+              }
             }
-          }
-          if (!disposed) setReconnectNonce((value) => value + 1);
-        })();
-      }, delay);
-    });
+            if (!disposed) setReconnectNonce((value) => value + 1);
+          })();
+        }, delay);
+      });
+
+      return () => {
+        resizeObserver.disconnect();
+        keyInput.dispose();
+        socket.close();
+        term.dispose();
+        termRef.current = null;
+      };
+    };
+
+    // Deferred by a tick rather than run inline.
+    //
+    // React's StrictMode mounts every component twice in development, running
+    // the effect, its cleanup, and the effect again — and that cleanup lands
+    // before any timer does. So the discarded pass builds nothing: no
+    // Terminal to dispose (whose renderer then threw on the way out), and no
+    // socket, which is what stopped every mount from opening a SECOND shell
+    // inside the project's container. Those shells outlived the socket that
+    // asked for them, so they accumulated for as long as the container lived.
+    let teardown: (() => void) | null = null;
+    const startTimer = window.setTimeout(() => {
+      if (disposed) return;
+      teardown = connect(container, accessToken);
+    }, 0);
 
     return () => {
       disposed = true;
+      clearTimeout(startTimer);
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
-      resizeObserver.disconnect();
-      keyInput.dispose();
-      socket.close();
-      term.dispose();
-      termRef.current = null;
+      teardown?.();
     };
   }, [projectId, hasSession, reconnectNonce]);
 

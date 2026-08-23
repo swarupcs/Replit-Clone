@@ -16,6 +16,7 @@ const handleTerminalCreation = vi.hoisted(() =>
       ws: unknown,
       templateId: string,
       attachInput: (handler: (data: string) => void) => void,
+      terminalId: number,
     ) => void
   >(),
 );
@@ -46,7 +47,8 @@ vi.mock("../containers/handleTerminalCreation.js", () => ({
 }));
 vi.mock("../service/projectService.js", () => projectService);
 vi.mock("../service/accessWatch.js", () => ({ watchAccess }));
-vi.mock("../lib/metrics.js", () => ({ increment: vi.fn() }));
+const increment = vi.hoisted(() => vi.fn<(name: string) => void>());
+vi.mock("../lib/metrics.js", () => ({ increment }));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   extendLogContext: vi.fn(),
@@ -129,6 +131,7 @@ describe("installTerminalGateway", () => {
         expect.anything(),
         "node",
         expect.any(Function),
+        expect.any(Number),
       ),
     );
     expect(projectService.assertProjectAccess).toHaveBeenCalledWith(
@@ -220,5 +223,68 @@ describe("installTerminalGateway", () => {
     const event = await nextClose(ws);
     expect(event.code).toBe(1011);
     expect(event.reason).toBe("Could not start the project container");
+  });
+
+  /** A shell outlives the socket that asked for one: nothing in the container
+   *  knows the browser has gone, and everything that would tear it down hangs
+   *  off the socket. React's StrictMode opens and immediately discards a
+   *  socket on every mount in development, so this ran on every single mount,
+   *  and the shells piled up for as long as the container lived. */
+  describe("a client that leaves while the container is starting", () => {
+    /** Opens a socket, closes it, and only then lets the container appear. */
+    async function leaveDuringStartup(): Promise<void> {
+      let releaseContainer: (() => void) | undefined;
+      containerManager.ensureContainer.mockReturnValue(
+        new Promise((resolve) => {
+          releaseContainer = () => resolve({ id: "container-1" });
+        }),
+      );
+
+      const { ws, outcome } = await openSocket();
+      expect(outcome).toBe("open");
+
+      ws.close();
+      // The server has to have SEEN the close before the container arrives —
+      // otherwise this proves nothing about the ordering it was written for.
+      await vi.waitFor(() => expect(containerManager.detach).toHaveBeenCalled());
+
+      releaseContainer?.();
+      // Give the resumed startup every chance to open a shell anyway.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    it("opens no shell", async () => {
+      await leaveDuringStartup();
+
+      expect(handleTerminalCreation).not.toHaveBeenCalled();
+    });
+
+    /** The metric read 11 for a project that never held more than a couple of
+     *  shells, because it counted sockets rather than shells. */
+    it("is not counted as a terminal session", async () => {
+      await leaveDuringStartup();
+
+      expect(increment).not.toHaveBeenCalledWith("terminal_sessions");
+    });
+
+    it("releases the project's attachment exactly once", async () => {
+      await leaveDuringStartup();
+
+      expect(containerManager.detach).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /** Attachments are a refcount that keeps the idle sweeper off a container in
+   *  use. The failure path used to detach directly AND leave its close handler
+   *  in place, so one failed terminal released somebody else's attachment. */
+  it("releases the attachment once, not twice, when the container cannot start", async () => {
+    containerManager.ensureContainer.mockRejectedValue(new Error("docker is down"));
+
+    const { ws } = await openSocket();
+    await nextClose(ws);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(containerManager.attach).toHaveBeenCalledTimes(1);
+    expect(containerManager.detach).toHaveBeenCalledTimes(1);
   });
 });

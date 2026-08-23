@@ -4,6 +4,7 @@ import type { WebSocket } from "ws";
 import { getTemplate } from "../templates/registry.js";
 import { logger } from "../lib/logger.js";
 import { watchPollingEnv } from "../config/env.js";
+import { hangUpShell, shellArgv, terminalPidFile } from "./terminalShell.js";
 
 /** Docker ignores a resize sent before the exec's process has claimed its TTY,
  *  and gives no error when it does. The requested size is re-sent at each of
@@ -46,12 +47,14 @@ export const handleTerminalCreation = (
   ws: WebSocket,
   templateId: string,
   attachInput: AttachInput,
+  terminalId: number,
 ): void => {
   const template = getTemplate(templateId);
+  const pidFile = terminalPidFile(terminalId);
 
   container.exec(
     {
-      Cmd: ["/bin/bash"],
+      Cmd: shellArgv(pidFile),
       AttachStdin: true,
       AttachStdout: true,
       AttachStderr: true,
@@ -77,10 +80,28 @@ export const handleTerminalCreation = (
 
       const startedExec = exec;
 
+      // Creating an exec does not run anything, so a client that has already
+      // gone costs nothing to abandon here — but starting one for it would
+      // spawn a shell with nobody on the other end.
+      if (ws.readyState !== ws.OPEN) return;
+
       startedExec.start({ hijack: true, stdin: true }, (startErr, stream) => {
         if (startErr || !stream) {
           logger.error("could not start terminal exec", startErr);
           ws.close(1011, "Could not start a shell");
+          return;
+        }
+
+        // Docker answers `start` well after the request, and the socket may
+        // have closed in between. Everything that tears this shell down hangs
+        // off `ws.on("close")`, registered at the END of this callback — so a
+        // socket that closed before we got here was never going to be heard,
+        // and its shell stayed in the container until the container itself
+        // went away. Close the stream now instead.
+        if (ws.readyState !== ws.OPEN) {
+          stream.end();
+          stream.destroy();
+          void hangUpShell(container, pidFile);
           return;
         }
 
@@ -119,11 +140,18 @@ export const handleTerminalCreation = (
           stream.write(raw);
         });
 
-        // The exec stream was previously never cleaned up on disconnect.
+        // The exec stream was previously never cleaned up on disconnect —
+        // and closing it turned out not to be enough on its own. See
+        // terminalShell.ts: Docker keeps the pty open, so the shell survives
+        // its own terminal unless something hangs it up.
+        let ended = false;
         const cleanup = (): void => {
+          if (ended) return;
+          ended = true;
           settleTimers.forEach(clearTimeout);
           stream.end();
           stream.destroy();
+          void hangUpShell(container, pidFile);
         };
 
         ws.on("close", cleanup);
