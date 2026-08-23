@@ -10,8 +10,14 @@ beforeEach(() => {
     streaming: false,
     activity: null,
     notice: null,
+    proposals: [],
   });
 });
+
+/** A change the assistant is offering. Nothing has been written. */
+function offer(id: string, relPath = "src/App.tsx") {
+  return { id, relPath, contents: "the new file", summary: "fix the thing" };
+}
 
 describe("setProject", () => {
   it("keeps the thread when the project has not changed", () => {
@@ -202,5 +208,81 @@ describe("clear", () => {
       activity: null,
       notice: null,
     });
+  });
+});
+
+describe("proposals", () => {
+  it("files a proposal against the reply that produced it", () => {
+    store().ask("fix it");
+    store().addProposal(offer("p-1"));
+
+    expect(store().proposals).toEqual([
+      { proposal: offer("p-1"), messageIndex: 1 },
+    ]);
+  });
+
+  /** One reply can offer several changes, and accepting one must not take the
+   *  others off the screen. */
+  it("resolves exactly the one named", () => {
+    store().ask("fix both");
+    store().addProposal(offer("p-1", "a.ts"));
+    store().addProposal(offer("p-2", "b.ts"));
+
+    store().resolveProposal("p-1");
+
+    expect(store().proposals.map((entry) => entry.proposal.id)).toEqual(["p-2"]);
+  });
+
+  it("keeps the cards from a reply that finished", () => {
+    store().ask("fix it");
+    store().appendDelta("here is one");
+    store().addProposal(offer("p-1"));
+
+    store().finish("complete");
+
+    expect(store().proposals).toHaveLength(1);
+  });
+
+  /** A reply that offered a change and then failed before writing a word gets
+   *  its empty turn pruned. A card left pointing past the end of the transcript
+   *  renders under whichever message later takes that index. */
+  it("drops cards whose turn was pruned away", () => {
+    store().ask("fix it");
+    store().addProposal(offer("p-1"));
+
+    store().fail("the assistant fell over");
+
+    expect(store().proposals).toEqual([]);
+  });
+
+  it("drops cards when a cancelled reply is pruned away", () => {
+    store().ask("fix it");
+    store().addProposal(offer("p-1"));
+
+    store().cancel();
+
+    expect(store().proposals).toEqual([]);
+  });
+
+  it("forgets every offer when the conversation is cleared", () => {
+    store().ask("fix it");
+    store().appendDelta("done");
+    store().addProposal(offer("p-1"));
+
+    store().clear();
+
+    expect(store().proposals).toEqual([]);
+  });
+
+  /** An offer is about a file in a specific project. */
+  it("forgets every offer when the project changes", () => {
+    store().setProject("p1");
+    store().ask("fix it");
+    store().appendDelta("done");
+    store().addProposal(offer("p-1"));
+
+    store().setProject("p2");
+
+    expect(store().proposals).toEqual([]);
   });
 });

@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import type { AiActivity, AiMessage, AiStopReason } from "@replit-clone/shared";
+import type {
+  AiActivity,
+  AiMessage,
+  AiProposal,
+  AiStopReason,
+} from "@replit-clone/shared";
 
 /** The assistant's conversation, for one project at a time.
  *
@@ -15,6 +20,16 @@ export type ChatNotice =
   | { kind: "error"; message: string }
   | { kind: "stopped"; reason: AiStopReason };
 
+/** A change the assistant has offered, and the turn it arrived on.
+ *
+ *  Held next to the transcript rather than inside it, because a proposal is not
+ *  something the assistant SAID — it never travels back as history. The index
+ *  is only so the card renders under the reply that produced it. */
+export interface PendingProposal {
+  proposal: AiProposal;
+  messageIndex: number;
+}
+
 interface AiChatStore {
   /** Which project this transcript belongs to, so opening another one does not
    *  inherit it. */
@@ -25,12 +40,18 @@ interface AiChatStore {
   /** What the assistant is doing right now, cleared when the reply ends. */
   activity: AiActivity | null;
   notice: ChatNotice | null;
+  /** Offered changes not yet accepted or discarded. */
+  proposals: PendingProposal[];
 
   /** Points the store at a project, clearing the thread if it changed. */
   setProject: (projectId: string) => void;
   /** Records the question and opens an empty assistant turn to stream into. */
   ask: (question: string) => void;
   appendDelta: (text: string) => void;
+  /** Files a change the assistant is offering against the reply in flight. */
+  addProposal: (proposal: AiProposal) => void;
+  /** Takes a card away once it has been accepted or discarded. */
+  resolveProposal: (id: string) => void;
   setActivity: (activity: AiActivity | null) => void;
   finish: (reason: AiStopReason) => void;
   fail: (message: string) => void;
@@ -63,18 +84,38 @@ function pruneEmptyReply(messages: AiMessage[]): AiMessage[] {
   return messages;
 }
 
+/** Drops cards whose turn is no longer in the transcript.
+ *
+ *  A reply that produced a proposal and then failed before writing a word gets
+ *  pruned, and its card would otherwise be left pointing past the end of the
+ *  list — rendered under whichever message later took that index. */
+function pruneOrphanedProposals(
+  proposals: PendingProposal[],
+  messageCount: number,
+): PendingProposal[] {
+  return proposals.filter((entry) => entry.messageIndex < messageCount);
+}
+
 export const useAiChatStore = create<AiChatStore>((set) => ({
   projectId: null,
   messages: [],
   streaming: false,
   activity: null,
   notice: null,
+  proposals: [],
 
   setProject: (projectId) => {
     set((state) =>
       state.projectId === projectId
         ? state
-        : { projectId, messages: [], streaming: false, activity: null, notice: null },
+        : {
+            projectId,
+            messages: [],
+            streaming: false,
+            activity: null,
+            notice: null,
+            proposals: [],
+          },
     );
   },
 
@@ -101,40 +142,74 @@ export const useAiChatStore = create<AiChatStore>((set) => ({
     );
   },
 
+  addProposal: (proposal) => {
+    set((state) => ({
+      proposals: [
+        ...state.proposals,
+        // The turn in flight is the last one, which is where `ask` put it.
+        { proposal, messageIndex: Math.max(0, state.messages.length - 1) },
+      ],
+    }));
+  },
+
+  resolveProposal: (id) => {
+    set((state) => ({
+      proposals: state.proposals.filter((entry) => entry.proposal.id !== id),
+    }));
+  },
+
   setActivity: (activity) => {
     set({ activity });
   },
 
   finish: (reason) => {
-    set((state) => ({
-      messages: pruneEmptyReply(state.messages),
-      streaming: false,
-      activity: null,
-      // "Complete" is the expected outcome and needs no announcement; the
-      // other reasons explain a reply that stops looking unfinished.
-      notice: reason === "complete" ? null : { kind: "stopped", reason },
-    }));
+    set((state) => {
+      const messages = pruneEmptyReply(state.messages);
+      return {
+        messages,
+        proposals: pruneOrphanedProposals(state.proposals, messages.length),
+        streaming: false,
+        activity: null,
+        // "Complete" is the expected outcome and needs no announcement; the
+        // other reasons explain a reply that stops looking unfinished.
+        notice: reason === "complete" ? null : { kind: "stopped", reason },
+      };
+    });
   },
 
   fail: (message) => {
-    set((state) => ({
-      messages: pruneEmptyReply(state.messages),
-      streaming: false,
-      activity: null,
-      notice: { kind: "error", message },
-    }));
+    set((state) => {
+      const messages = pruneEmptyReply(state.messages);
+      return {
+        messages,
+        proposals: pruneOrphanedProposals(state.proposals, messages.length),
+        streaming: false,
+        activity: null,
+        notice: { kind: "error", message },
+      };
+    });
   },
 
   cancel: () => {
-    set((state) => ({
-      messages: pruneEmptyReply(state.messages),
-      streaming: false,
-      activity: null,
-    }));
+    set((state) => {
+      const messages = pruneEmptyReply(state.messages);
+      return {
+        messages,
+        proposals: pruneOrphanedProposals(state.proposals, messages.length),
+        streaming: false,
+        activity: null,
+      };
+    });
   },
 
   clear: () => {
-    set({ messages: [], streaming: false, activity: null, notice: null });
+    set({
+      messages: [],
+      streaming: false,
+      activity: null,
+      notice: null,
+      proposals: [],
+    });
   },
 
   dismissNotice: () => {

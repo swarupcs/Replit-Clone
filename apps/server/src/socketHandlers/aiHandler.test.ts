@@ -27,12 +27,12 @@ interface Emitted {
 }
 
 /** A socket recording what was emitted and letting a test fire client events. */
-function fakeSocket() {
+function fakeSocket(accessLevel = "editor") {
   const handlers = new Map<string, ((payload?: unknown) => void)[]>();
   const emitted: Emitted[] = [];
 
   const socket = {
-    data: { projectId: PROJECT, userId: USER, accessLevel: "editor" },
+    data: { projectId: PROJECT, userId: USER, accessLevel },
     on(event: string, handler: (payload?: unknown) => void) {
       const list = handlers.get(event) ?? [];
       list.push(handler);
@@ -132,6 +132,90 @@ describe("installAiHandler", () => {
       tool: "read_file",
       detail: "src/App.tsx",
     });
+  });
+
+  /* ------------------------------------------------------- proposed changes */
+
+  /** Reads the canEdit the service was called with. */
+  function askedCanEdit(): boolean {
+    return (
+      aiService.streamAssistantReply.mock.calls[0]?.[0] as { canEdit: boolean }
+    ).canEdit;
+  }
+
+  it("relays a proposed change for the user to review", async () => {
+    const offer = {
+      id: "proposal-1",
+      relPath: "src/App.tsx",
+      contents: "the new file",
+      summary: "fix the thing",
+    };
+    aiService.streamAssistantReply.mockImplementation(
+      (options: { onProposal: (p: unknown) => void }) => {
+        options.onProposal(offer);
+        return Promise.resolve("complete");
+      },
+    );
+
+    const harness = fakeSocket();
+    installAiHandler(harness.socket);
+    harness.fire("aiAsk", QUESTION);
+    await settle();
+
+    expect(harness.payloadFor("aiProposal")).toEqual(offer);
+  });
+
+  /** The user stopped this answer. A card outliving it is an offer from a
+   *  conversation they already dismissed. */
+  it("says nothing about a proposal from a cancelled reply", async () => {
+    const reply = deferred<string>();
+    aiService.streamAssistantReply.mockImplementation(
+      (options: { signal: AbortSignal; onProposal: (p: unknown) => void }) => {
+        options.signal.addEventListener("abort", () => {
+          options.onProposal({ id: "p-1", relPath: "a.ts", contents: "x", summary: "y" });
+        });
+        return reply.promise;
+      },
+    );
+
+    const harness = fakeSocket();
+    installAiHandler(harness.socket);
+    harness.fire("aiAsk", QUESTION);
+    await settle();
+    harness.fire("aiCancel");
+    await reply.settleWith("cancelled");
+
+    expect(harness.events()).not.toContain("aiProposal");
+  });
+
+  it("tells the service this user may change the project", async () => {
+    const harness = fakeSocket("editor");
+    installAiHandler(harness.socket);
+    harness.fire("aiAsk", QUESTION);
+    await settle();
+
+    expect(askedCanEdit()).toBe(true);
+  });
+
+  it("counts an owner as able to change the project", async () => {
+    const harness = fakeSocket("owner");
+    installAiHandler(harness.socket);
+    harness.fire("aiAsk", QUESTION);
+    await settle();
+
+    expect(askedCanEdit()).toBe(true);
+  });
+
+  /** A viewer still gets the assistant — reading and explaining is what
+   *  read-only access is for. What they do not get is a tool whose only
+   *  purpose is to produce a change they could never apply. */
+  it("tells the service a viewer may not", async () => {
+    const harness = fakeSocket("viewer");
+    installAiHandler(harness.socket);
+    harness.fire("aiAsk", QUESTION);
+    await settle();
+
+    expect(askedCanEdit()).toBe(false);
   });
 
   it("passes the project and the question through", async () => {

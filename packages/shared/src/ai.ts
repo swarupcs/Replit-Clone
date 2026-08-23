@@ -66,3 +66,38 @@ export const AI_MAX_FILE_BYTES = 80_000;
  *  dropped from the front: the transcript is bounded, but the last exchanges —
  *  the ones the follow-up refers to — always survive. */
 export const AI_MAX_HISTORY = 40;
+
+/** A change the assistant would like to make, for a person to review.
+ *
+ *  The assistant still never writes. It proposes, the editor shows the proposal
+ *  against what is in the buffer, and nothing reaches the project until someone
+ *  has read that diff and accepted it. Accepting applies the change through the
+ *  editor's own model, so Ctrl+Z undoes it like any other edit — the two things
+ *  this feature was waiting on.
+ *
+ *  A proposal carries the file's WHOLE new contents rather than a patch. A
+ *  patch has to be applied by matching context that may have moved, and a near
+ *  miss silently lands in the wrong place; full contents either diff cleanly or
+ *  not at all. The cost is that the assistant has to reproduce the file, which
+ *  is why proposals are capped and confined to files that already exist.
+ */
+export interface AiProposal {
+  /** Unique within a conversation, so accepting one card cannot resolve another
+   *  — the assistant may propose several changes in a single reply. */
+  id: string;
+  /** Path relative to the project root, resolved and confined server-side. */
+  relPath: string;
+  /** The file as the assistant would have it, in full. */
+  contents: string;
+  /** One line on what this changes, shown on the card. */
+  summary: string;
+}
+
+/** Largest file the assistant may propose replacing.
+ *
+ *  Below `AI_MAX_FILE_BYTES`, deliberately: a file the assistant only ever saw
+ *  TRUNCATED is one it cannot rewrite without dropping the part it never read,
+ *  and a proposal that silently deletes the tail of a file is the exact failure
+ *  this whole review step exists to prevent.
+ */
+export const AI_MAX_PROPOSAL_BYTES = 40_000;

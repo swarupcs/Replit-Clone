@@ -1,4 +1,9 @@
-import type { AiActivity, AiAskPayload, AiStopReason } from "./ai.js";
+import type {
+  AiActivity,
+  AiAskPayload,
+  AiProposal,
+  AiStopReason,
+} from "./ai.js";
 
 /** Typed socket.io contract for the `/editor` namespace.
  *
@@ -258,6 +263,9 @@ export interface ServerToClientEvents {
   aiDelta: (payload: { text: string }) => void;
   /** The assistant used a tool. Display only — see the note in ai.ts. */
   aiActivity: (payload: AiActivity) => void;
+  /** The assistant would like to change a file. Nothing has been written: this
+   *  is an offer for the user to review as a diff and accept or discard. */
+  aiProposal: (payload: AiProposal) => void;
   /** The reply is finished, one way or another. */
   aiDone: (payload: { stopReason: AiStopReason }) => void;
   /** The reply failed. Separate from `error` because this belongs in the

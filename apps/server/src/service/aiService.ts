@@ -3,9 +3,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   AI_MAX_FILE_BYTES,
   AI_MAX_HISTORY,
+  AI_MAX_PROPOSAL_BYTES,
   type AiActivity,
   type AiEditorContext,
   type AiMessage,
+  type AiProposal,
   type AiStatus,
   type AiStopReason,
 } from "@replit-clone/shared";
@@ -20,12 +22,11 @@ import { AppError, BadRequestError } from "../utils/errors.js";
 
 /** The project assistant.
  *
- *  Deliberately READ-ONLY. It can look at the project and explain, review or
- *  draft code, but it cannot write a file, run a command, or touch the
- *  container. An assistant that edits the tree needs a diff to approve and an
- *  undo to fall back on, and shipping the writes before either of those exist
- *  would mean the first bad suggestion silently overwrites someone's work.
- *  Answers come back as text the user applies themselves.
+ *  It can read the project, and it can PROPOSE a change to a file — but it
+ *  cannot write one, run a command, or touch the container. A proposal is an
+ *  offer: it travels to the browser, the editor shows it as a diff against the
+ *  buffer, and only a person accepting it puts anything on disk. That is the
+ *  whole of the safety story, and it is why the writes never live here.
  */
 
 /** How many times the model may call a tool before we stop it.
@@ -134,7 +135,10 @@ function clamp(contents: string, label: string): string {
   );
 }
 
-async function buildSystemPrompt(projectId: string): Promise<string> {
+async function buildSystemPrompt(
+  projectId: string,
+  canEdit: boolean,
+): Promise<string> {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   const template = project ? getTemplate(project.template) : undefined;
 
@@ -164,9 +168,20 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
     "You can read any of these with the read_file tool. Read before you answer:",
     "a confident answer about code you have not looked at is worse than a slow one.",
     "",
-    "You cannot edit files, run commands, or install packages — you have no tools",
-    "for any of that. When a change is needed, show the code and say which file it",
-    "goes in; the user applies it themselves. Never claim to have made a change.",
+    ...(canEdit
+      ? [
+          "When a change is worth making, offer it with propose_edit. That writes",
+          "nothing: the user gets a diff against their own buffer and decides. So",
+          "never say you have changed, edited or fixed a file — say the change is",
+          "waiting for their review. Propose only what you have read in full, and",
+          "only for files that already exist.",
+        ]
+      : [
+          "This user has read-only access to the project, so you have no way to",
+          "offer a change to a file. Show the code and say which file it goes in.",
+        ]),
+    "",
+    "You cannot run commands or install packages — you have no tools for either.",
     "",
     "Keep answers short and concrete. Use fenced code blocks with a language tag,",
     "and label the file above each block. Prefer showing the few lines that change",
@@ -224,6 +239,154 @@ const READ_FILE_TOOL: Anthropic.Messages.Tool = {
   },
 };
 
+const PROPOSE_EDIT_TOOL: Anthropic.Messages.Tool = {
+  name: "propose_edit",
+  description:
+    "Offer a change to an existing file for the user to review. This does NOT " +
+    "write anything: the user sees your version as a diff against theirs and " +
+    "decides. Give the file's COMPLETE new contents, not a patch and not an " +
+    "excerpt — whatever you send replaces the file if they accept, so " +
+    "anything you leave out is deleted. Read the file first. Use this only " +
+    "for files that already exist; to create a new one, show the code and say " +
+    "where it goes.",
+  input_schema: {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description: "Path relative to the project root, e.g. src/App.tsx",
+      },
+      contents: {
+        type: "string",
+        description: "The complete new contents of the file.",
+      },
+      summary: {
+        type: "string",
+        description: "One short line on what this changes, e.g. \"handle the empty case\".",
+      },
+    },
+    required: ["path", "contents", "summary"],
+  },
+};
+
+/** Unique per proposal so the browser can resolve exactly one card. */
+let proposalCounter = 0;
+
+/** Validates one propose_edit call and turns it into a reviewable proposal.
+ *
+ *  Nothing here writes. The checks are about not wasting the user's attention
+ *  on an offer that could never be applied, and about the two ways a proposal
+ *  could destroy work if it were accepted unread: a path that escapes the
+ *  project, and a rewrite of a file the assistant only ever saw part of.
+ */
+async function runProposeEdit(
+  projectId: string,
+  rawInput: unknown,
+): Promise<{
+  content: string;
+  isError: boolean;
+  detail: string;
+  proposal?: AiProposal;
+}> {
+  const input = (rawInput ?? {}) as {
+    path?: unknown;
+    contents?: unknown;
+    summary?: unknown;
+  };
+  const relPath = input.path;
+  const contents = input.contents;
+
+  if (typeof relPath !== "string" || relPath.length === 0) {
+    return {
+      content: "propose_edit needs a `path` string.",
+      isError: true,
+      detail: "(no path)",
+    };
+  }
+
+  if (typeof contents !== "string") {
+    return {
+      content: "propose_edit needs a `contents` string holding the whole file.",
+      isError: true,
+      detail: relPath,
+    };
+  }
+
+  if (contents.length > AI_MAX_PROPOSAL_BYTES) {
+    return {
+      content:
+        `\`${relPath}\` is too large to propose in full ` +
+        `(the limit is ${String(AI_MAX_PROPOSAL_BYTES)} characters). ` +
+        "Show the change as code in your answer instead.",
+      isError: true,
+      detail: relPath,
+    };
+  }
+
+  try {
+    const absolute = resolveInProject(projectId, relPath);
+    const stats = await fs.stat(absolute);
+
+    if (stats.isDirectory()) {
+      return {
+        content: `\`${relPath}\` is a directory, not a file.`,
+        isError: true,
+        detail: relPath,
+      };
+    }
+
+    // The assistant is offering to REPLACE this file. If the file is larger
+    // than it is allowed to see in one piece, then whatever it read was
+    // truncated, and its version is missing the tail whether it knows that or
+    // not. Accepting that proposal would delete the rest of the file.
+    if (stats.size > AI_MAX_PROPOSAL_BYTES) {
+      return {
+        content:
+          `\`${relPath}\` is larger than you can be shown in full, so a ` +
+          "replacement would drop the part you never saw. Describe the change " +
+          "in your answer instead.",
+        isError: true,
+        detail: relPath,
+      };
+    }
+  } catch (error) {
+    if (error instanceof AppError) {
+      // A path that escapes the project, reported to the model in its terms.
+      return { content: error.message, isError: true, detail: relPath };
+    }
+    return {
+      content:
+        `\`${relPath}\` does not exist. propose_edit only changes files that ` +
+        "are already there; to create one, show the code and say where it goes.",
+      isError: true,
+      detail: relPath,
+    };
+  }
+
+  proposalCounter += 1;
+  const summary =
+    typeof input.summary === "string" && input.summary.trim() !== ""
+      ? input.summary.trim()
+      : "Proposed change";
+
+  return {
+    // Said plainly, because a model told "done" will tell the user it made the
+    // change — and it has not. Nothing is on disk until a person accepts.
+    content:
+      `Proposed. \`${relPath}\` is waiting for the user to review the diff and ` +
+      "accept or discard it. Nothing has been written. Do not tell them the " +
+      "change is made; tell them it is waiting for review.",
+    isError: false,
+    detail: relPath,
+    proposal: {
+      id: `proposal-${String(proposalCounter)}`,
+      relPath,
+      contents,
+      summary,
+    },
+  };
+}
+
 /** Runs one read_file call.
  *
  *  Every path goes through `resolveInProject`, the same choke point the editor
@@ -276,6 +439,38 @@ async function runReadFile(
   }
 }
 
+interface ToolOutcome {
+  content: string;
+  isError: boolean;
+  detail: string;
+  proposal?: AiProposal;
+}
+
+/** Dispatches one tool call.
+ *
+ *  A tool the caller was not given is treated as unknown rather than run —
+ *  the model is told what it may use, but what it may DO is decided here.
+ */
+async function runTool(
+  projectId: string,
+  use: Anthropic.Messages.ToolUseBlock,
+  canEdit: boolean,
+): Promise<ToolOutcome> {
+  if (use.name === READ_FILE_TOOL.name) {
+    return runReadFile(projectId, use.input);
+  }
+
+  if (use.name === PROPOSE_EDIT_TOOL.name && canEdit) {
+    return runProposeEdit(projectId, use.input);
+  }
+
+  return {
+    content: `Unknown tool \`${use.name}\`.`,
+    isError: true,
+    detail: use.name,
+  };
+}
+
 /* ------------------------------------------------------------------ stream */
 
 export interface StreamOptions {
@@ -284,8 +479,17 @@ export interface StreamOptions {
   context?: AiEditorContext;
   /** Aborts the reply mid-flight. */
   signal: AbortSignal;
+  /** Whether this user may change the project at all.
+   *
+   *  A viewer gets the assistant — reading and explaining is exactly what
+   *  read-only access is for — but is not offered a tool whose only purpose is
+   *  to produce a change they could not apply. Withholding the tool is better
+   *  than refusing each call: the model plans around what it has. */
+  canEdit: boolean;
   onDelta: (text: string) => void;
   onActivity: (activity: AiActivity) => void;
+  /** A change the assistant is offering. Nothing has been written. */
+  onProposal: (proposal: AiProposal) => void;
 }
 
 /** Answers one question, streaming the reply.
@@ -297,14 +501,26 @@ export interface StreamOptions {
 export async function streamAssistantReply(
   options: StreamOptions,
 ): Promise<AiStopReason> {
-  const { projectId, messages, context, signal, onDelta, onActivity } = options;
+  const {
+    projectId,
+    messages,
+    context,
+    signal,
+    canEdit,
+    onDelta,
+    onActivity,
+    onProposal,
+  } = options;
 
   if (messages.length === 0) {
     throw new BadRequestError("Ask a question first", "AI_EMPTY_REQUEST");
   }
 
   const anthropic = getClient();
-  const system = await buildSystemPrompt(projectId);
+  const system = await buildSystemPrompt(projectId, canEdit);
+  const tools = canEdit
+    ? [READ_FILE_TOOL, PROPOSE_EDIT_TOOL]
+    : [READ_FILE_TOOL];
 
   // Oldest turns fall off the front: the follow-up almost always refers to the
   // last few, and an unbounded transcript is an unbounded bill.
@@ -330,7 +546,7 @@ export async function streamAssistantReply(
         max_tokens: env.AI_MAX_TOKENS,
         system,
         messages: conversation,
-        tools: [READ_FILE_TOOL],
+        tools,
       },
       { signal },
     );
@@ -362,18 +578,20 @@ export async function streamAssistantReply(
     for (const use of toolUses) {
       if (signal.aborted) return "cancelled";
 
-      // Only one tool exists; anything else is the model inventing one.
-      const outcome =
-        use.name === READ_FILE_TOOL.name
-          ? await runReadFile(projectId, use.input)
-          : {
-              content: `Unknown tool \`${use.name}\`.`,
-              isError: true,
-              detail: use.name,
-            };
+      // Anything not in `tools` is the model inventing one — including
+      // propose_edit when this user is a viewer, which is the case that
+      // matters: a tool it was never given cannot be talked into existing.
+      const outcome = await runTool(projectId, use, canEdit);
 
       increment("ai_tool_calls");
       onActivity({ tool: use.name, detail: outcome.detail });
+
+      // Reported only once the call has been validated, so a proposal the user
+      // sees is one that could actually be applied.
+      if (outcome.proposal) {
+        increment("ai_proposals");
+        onProposal(outcome.proposal);
+      }
 
       results.push({
         type: "tool_result",

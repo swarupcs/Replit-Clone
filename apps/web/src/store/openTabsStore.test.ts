@@ -23,6 +23,7 @@ beforeEach(() => {
     secondaryRelPath: null,
     splitOpen: false,
     focusedPane: "primary",
+    review: null,
   });
 });
 
@@ -251,5 +252,63 @@ describe("split panes", () => {
 
     expect(selectPaneTab("primary")(store())?.relPath).toBe("a.ts");
     expect(selectPaneTab("secondary")(store())?.relPath).toBe("b.ts");
+  });
+});
+
+describe("reviewing a proposed change", () => {
+  const offer = {
+    id: "p-1",
+    relPath: "src/App.tsx",
+    summary: "fix the thing",
+    contents: "the new file",
+  };
+
+  /** The reviewer has to be looking at the file the change is against; the
+   *  focused pane may well be showing something else. */
+  it("brings the file up in the primary pane", () => {
+    openAll("src/App.tsx", "other.ts");
+    store().openToSide("other.ts");
+
+    store().startReview(offer);
+
+    expect(store().activeRelPath).toBe("src/App.tsx");
+    expect(store().focusedPane).toBe("primary");
+  });
+
+  it("ends when it is closed", () => {
+    openAll("src/App.tsx");
+    store().startReview(offer);
+
+    store().endReview();
+
+    expect(store().review).toBeNull();
+  });
+
+  /** A closed file has no buffer, so the diff would be against nothing. */
+  it("ends when the file it is against is closed", () => {
+    openAll("src/App.tsx", "other.ts");
+    store().startReview(offer);
+
+    store().closeTab("src/App.tsx");
+
+    expect(store().review).toBeNull();
+  });
+
+  it("survives closing some other file", () => {
+    openAll("src/App.tsx", "other.ts");
+    store().startReview(offer);
+
+    store().closeTab("other.ts");
+
+    expect(store().review).toMatchObject({ relPath: "src/App.tsx" });
+  });
+
+  it("ends when every tab is closed", () => {
+    openAll("src/App.tsx");
+    store().startReview(offer);
+
+    store().closeAll();
+
+    expect(store().review).toBeNull();
   });
 });

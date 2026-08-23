@@ -41,6 +41,7 @@ import {
   resetAiBudgets,
   streamAssistantReply,
 } from "./aiService.js";
+import { AI_MAX_PROPOSAL_BYTES, type AiProposal } from "@replit-clone/shared";
 import { projectRoot } from "../utils/projectPaths.js";
 import { AppError } from "../utils/errors.js";
 
@@ -93,17 +94,21 @@ async function ask(
 ) {
   const deltas: string[] = [];
   const activity: { tool: string; detail: string }[] = [];
+  const proposals: AiProposal[] = [];
 
   const stopReason = await streamAssistantReply({
     projectId: PROJECT,
     messages: [{ role: "user", content: question }],
     signal: new AbortController().signal,
+    // The common case. The read-only path says so explicitly.
+    canEdit: true,
     onDelta: (text) => deltas.push(text),
     onActivity: (entry) => activity.push(entry),
+    onProposal: (proposal) => proposals.push(proposal),
     ...extra,
   });
 
-  return { stopReason, deltas, activity, text: deltas.join("") };
+  return { stopReason, deltas, activity, proposals, text: deltas.join("") };
 }
 
 /** The params the SDK was called with on a given round. */
@@ -174,13 +179,16 @@ describe("streamAssistantReply", () => {
     });
   });
 
-  /** Read-only is the whole design. One tool, and it reads. */
-  it("offers exactly one tool, and it is read_file", async () => {
+  /** Two tools: one reads, one offers. Neither writes. */
+  it("offers read_file and propose_edit, and nothing else", async () => {
     streamMock.mockReturnValue(fakeStream({ text: ["ok"] }));
 
     await ask();
 
-    expect(callParams().tools.map((tool) => tool.name)).toEqual(["read_file"]);
+    expect(callParams().tools.map((tool) => tool.name)).toEqual([
+      "read_file",
+      "propose_edit",
+    ]);
   });
 
   it("puts the project's file listing in the system prompt", async () => {
@@ -194,12 +202,22 @@ describe("streamAssistantReply", () => {
     expect(system).toContain("demo");
   });
 
-  it("tells the model plainly that it cannot change anything", async () => {
+  /** A model that says "I fixed it" when nothing has been written has lied to
+   *  the user about the state of their project. */
+  it("tells the model a proposal is not a change", async () => {
     streamMock.mockReturnValue(fakeStream({ text: ["ok"] }));
 
     await ask();
 
-    expect(callParams().system).toMatch(/cannot edit files/i);
+    expect(callParams().system).toMatch(/waiting for their review/i);
+  });
+
+  it("tells the model plainly that it cannot run anything", async () => {
+    streamMock.mockReturnValue(fakeStream({ text: ["ok"] }));
+
+    await ask();
+
+    expect(callParams().system).toMatch(/cannot run commands/i);
   });
 
   it("still answers when the file listing cannot be read", async () => {
@@ -218,8 +236,10 @@ describe("streamAssistantReply", () => {
         projectId: PROJECT,
         messages: [],
         signal: new AbortController().signal,
+        canEdit: true,
         onDelta: () => undefined,
         onActivity: () => undefined,
+        onProposal: () => undefined,
       }),
     ).rejects.toThrow(AppError);
   });
@@ -271,8 +291,10 @@ describe("editor context", () => {
       ],
       context: { relPath: "src/App.tsx", contents: "x" },
       signal: new AbortController().signal,
+      canEdit: true,
       onDelta: () => undefined,
       onActivity: () => undefined,
+      onProposal: () => undefined,
     });
 
     const { messages } = callParams();
@@ -441,6 +463,212 @@ describe("the read_file tool", () => {
   });
 });
 
+describe("the propose_edit tool", () => {
+  const propose = (input: unknown, id = "tool-1") => ({
+    type: "tool_use",
+    id,
+    name: "propose_edit",
+    input,
+  });
+
+  /** Reads the tool_result the model was handed for the call. */
+  function toolResult(round = 1): { content: string; is_error?: boolean } {
+    const results = callParams(round).messages.at(-1)?.content as {
+      content: string;
+      is_error?: boolean;
+    }[];
+    return results[0] ?? { content: "" };
+  }
+
+  function proposing(input: unknown): void {
+    streamMock
+      .mockReturnValueOnce(
+        fakeStream({ stopReason: "tool_use", content: [propose(input)] }),
+      )
+      .mockReturnValueOnce(fakeStream({ text: ["Have a look."] }));
+  }
+
+  const GOOD = { path: "src/App.tsx", contents: "export const App = () => <p />;", summary: "render something" };
+
+  it("hands the proposal out for review", async () => {
+    proposing(GOOD);
+
+    const { proposals } = await ask();
+
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        relPath: "src/App.tsx",
+        contents: "export const App = () => <p />;",
+        summary: "render something",
+      }),
+    ]);
+  });
+
+  /** The browser resolves one card at a time, and a reply may carry several. */
+  it("gives each proposal an id of its own", async () => {
+    streamMock
+      .mockReturnValueOnce(
+        fakeStream({
+          stopReason: "tool_use",
+          content: [propose(GOOD), propose(GOOD, "tool-2")],
+        }),
+      )
+      .mockReturnValueOnce(fakeStream({ text: ["Two of them."] }));
+
+    const { proposals } = await ask();
+
+    expect(proposals).toHaveLength(2);
+    expect(proposals[0]?.id).not.toBe(proposals[1]?.id);
+  });
+
+  /** THE guarantee. A tool that wrote would make the review step decorative. */
+  it("writes nothing to the file", async () => {
+    proposing(GOOD);
+
+    await ask();
+
+    const onDisk = await fs.readFile(path.join(ROOT, "src", "App.tsx"), "utf8");
+    expect(onDisk).toBe("export const App = () => null;");
+  });
+
+  /** A model told "done" tells the user the change is made. It is not. */
+  it("tells the model the change is waiting, not made", async () => {
+    proposing(GOOD);
+
+    await ask();
+
+    expect(toolResult().is_error).toBeFalsy();
+    expect(toolResult().content).toMatch(/nothing has been written/i);
+  });
+
+  it("reports the file it touched, for the activity line", async () => {
+    proposing(GOOD);
+
+    const { activity } = await ask();
+
+    expect(activity).toEqual([{ tool: "propose_edit", detail: "src/App.tsx" }]);
+  });
+
+  /* --------------------------------------------------------- what it refuses */
+
+  it.each([
+    ["a parent traversal", "../../../../etc/passwd"],
+    ["a windows traversal", "..\\..\\..\\windows\\win.ini"],
+  ])("refuses %s", async (_label, badPath) => {
+    proposing({ ...GOOD, path: badPath });
+
+    const { proposals } = await ask();
+
+    expect(proposals).toEqual([]);
+    expect(toolResult().is_error).toBe(true);
+  });
+
+  /** propose_edit replaces a file. Offering to "replace" one that is not there
+   *  would create it, and the diff would have nothing to show on the left. */
+  it("refuses a file that does not exist", async () => {
+    proposing({ ...GOOD, path: "src/Nope.tsx" });
+
+    const { proposals } = await ask();
+
+    expect(proposals).toEqual([]);
+    expect(toolResult().content).toMatch(/does not exist/i);
+  });
+
+  it("refuses a directory", async () => {
+    proposing({ ...GOOD, path: "src" });
+
+    const { proposals } = await ask();
+
+    expect(proposals).toEqual([]);
+    expect(toolResult().content).toMatch(/is a directory/i);
+  });
+
+  it("refuses a call with no path", async () => {
+    proposing({ contents: "x", summary: "y" });
+
+    const { proposals } = await ask();
+
+    expect(proposals).toEqual([]);
+    expect(toolResult().is_error).toBe(true);
+  });
+
+  /** Without this the file is replaced by the word "undefined". */
+  it("refuses a call with no contents", async () => {
+    proposing({ path: "src/App.tsx", summary: "y" });
+
+    const { proposals } = await ask();
+
+    expect(proposals).toEqual([]);
+    expect(toolResult().content).toMatch(/contents/i);
+  });
+
+  it("refuses a proposal larger than the ceiling", async () => {
+    proposing({ ...GOOD, contents: "x".repeat(AI_MAX_PROPOSAL_BYTES + 1) });
+
+    const { proposals } = await ask();
+
+    expect(proposals).toEqual([]);
+    expect(toolResult().content).toMatch(/too large/i);
+  });
+
+  /** The one that would destroy work. A file the assistant could only ever see
+   *  TRUNCATED is one whose tail is missing from anything it writes back, so
+   *  accepting the proposal would delete the part it never read. */
+  it("refuses to replace a file bigger than it can be shown", async () => {
+    const big = path.join(ROOT, "big.txt");
+    await fs.writeFile(big, "x".repeat(AI_MAX_PROPOSAL_BYTES + 1000));
+    proposing({ ...GOOD, path: "big.txt", contents: "just the first bit" });
+
+    const { proposals } = await ask();
+
+    await fs.rm(big, { force: true });
+
+    expect(proposals).toEqual([]);
+    expect(toolResult().content).toMatch(/never saw/i);
+  });
+
+  it("falls back to a plain summary rather than refusing over one", async () => {
+    proposing({ path: "src/App.tsx", contents: "x" });
+
+    const { proposals } = await ask();
+
+    expect(proposals[0]?.summary).toBeTruthy();
+  });
+
+  /* ------------------------------------------------------------- for viewers */
+
+  describe("for a user with read-only access", () => {
+    const readOnly = { canEdit: false };
+
+    it("is not offered at all", async () => {
+      streamMock.mockReturnValue(fakeStream({ text: ["ok"] }));
+
+      await ask("what does this do?", readOnly);
+
+      expect(callParams().tools.map((tool) => tool.name)).toEqual(["read_file"]);
+    });
+
+    it("says so in the system prompt rather than leaving it to be discovered", async () => {
+      streamMock.mockReturnValue(fakeStream({ text: ["ok"] }));
+
+      await ask("what does this do?", readOnly);
+
+      expect(callParams().system).toMatch(/read-only access/i);
+    });
+
+    /** A tool it was never given is a tool it cannot be talked into using: the
+     *  decision is made here, not in the prompt. */
+    it("does nothing when the model calls it anyway", async () => {
+      proposing(GOOD);
+
+      const { proposals } = await ask("change it", readOnly);
+
+      expect(proposals).toEqual([]);
+      expect(toolResult().content).toMatch(/unknown tool/i);
+    });
+  });
+});
+
 describe("cancellation", () => {
   it("reports cancelled without ever calling the model", async () => {
     const controller = new AbortController();
@@ -450,8 +678,10 @@ describe("cancellation", () => {
       projectId: PROJECT,
       messages: [{ role: "user", content: "hi" }],
       signal: controller.signal,
+      canEdit: true,
       onDelta: () => undefined,
       onActivity: () => undefined,
+      onProposal: () => undefined,
     });
 
     expect(stopReason).toBe("cancelled");
@@ -474,8 +704,10 @@ describe("cancellation", () => {
       projectId: PROJECT,
       messages: [{ role: "user", content: "hi" }],
       signal: controller.signal,
+      canEdit: true,
       onDelta: () => undefined,
       onActivity: () => undefined,
+      onProposal: () => undefined,
     });
 
     expect(stopReason).toBe("cancelled");

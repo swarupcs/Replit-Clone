@@ -19,11 +19,15 @@ import type { EditorSocket } from "./editorHandler.js";
 
 /** Deliberately allowed for a VIEWER.
  *
- *  Everything the assistant can do is read the project and talk about it,
- *  which is precisely what read-only access is for; making it editor-only
- *  would refuse a read-only feature to read-only users for no reason. The cost
- *  it incurs is bounded per USER by the hourly budget, which is the right
- *  control for a bill — an access level is not one.
+ *  Everything the assistant can do on its own is read the project and talk
+ *  about it, which is precisely what read-only access is for; making it
+ *  editor-only would refuse a read-only feature to read-only users for no
+ *  reason. The cost it incurs is bounded per USER by the hourly budget, which
+ *  is the right control for a bill — an access level is not one.
+ *
+ *  What a viewer does not get is `propose_edit`. It writes nothing either, but
+ *  its whole purpose is to produce a change, and offering one to somebody who
+ *  cannot apply it is a dead end dressed up as a feature.
  */
 export function installAiHandler(socket: EditorSocket): void {
   const { projectId, userId } = socket.data;
@@ -65,6 +69,12 @@ export function installAiHandler(socket: EditorSocket): void {
           messages: payload.messages,
           context: payload.context,
           signal: controller.signal,
+          // Read at ASK time, not at connect: access can be revoked or
+          // demoted while a socket is open, and the level that matters is the
+          // one in force when the question is asked.
+          canEdit:
+            socket.data.accessLevel === "editor" ||
+            socket.data.accessLevel === "owner",
           onDelta: (text) => {
             // Guarded: a cancelled stream can emit one more chunk before it
             // unwinds, and that chunk belongs to a reply the user has already
@@ -73,6 +83,12 @@ export function installAiHandler(socket: EditorSocket): void {
           },
           onActivity: (activity) => {
             if (!controller.signal.aborted) socket.emit("aiActivity", activity);
+          },
+          onProposal: (proposal) => {
+            // A cancelled reply's proposals go with it: the user stopped this
+            // answer, and a card outliving it would be an offer from a
+            // conversation they already dismissed.
+            if (!controller.signal.aborted) socket.emit("aiProposal", proposal);
           },
         });
 

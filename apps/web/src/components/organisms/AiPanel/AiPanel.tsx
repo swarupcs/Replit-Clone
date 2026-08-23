@@ -3,13 +3,23 @@ import { Alert, Empty, Tooltip, message as antdMessage } from "antd";
 import {
   VscClearAll,
   VscCopy,
+  VscDiff,
   VscSend,
   VscSparkle,
   VscStopCircle,
 } from "react-icons/vsc";
-import type { AiActivity, AiMessage, AiStopReason } from "@replit-clone/shared";
+import type {
+  AiActivity,
+  AiMessage,
+  AiProposal,
+  AiStopReason,
+} from "@replit-clone/shared";
 import { useAiChatStore } from "../../../store/aiChatStore.ts";
-import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
+import {
+  selectCanEdit,
+  useEditorSocketStore,
+} from "../../../store/editorSocketStore.ts";
+import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 import { currentEditorContext } from "../../../lib/editorContext.ts";
 import { parseSegments } from "./markdown.ts";
 
@@ -27,10 +37,11 @@ const STOP_COPY: Record<string, string> = {
 
 /** The project assistant.
  *
- *  Read-only by design: it explains and drafts, and the user applies what they
- *  want. There is deliberately no "apply this change" button — that needs a
- *  diff to approve and an undo to fall back on, and without both the first bad
- *  suggestion silently overwrites someone's work.
+ *  It explains and drafts, and it can OFFER a change — but it never makes one.
+ *  A proposal arrives as a card here; opening it shows the assistant's version
+ *  against the buffer in the editor's diff, and applying it goes through the
+ *  editor's own undo stack. The diff and the undo are what this waited for:
+ *  without both, the first bad suggestion silently overwrites someone's work.
  */
 export function AiPanel({ projectId, model }: Props) {
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
@@ -39,12 +50,16 @@ export function AiPanel({ projectId, model }: Props) {
   const streaming = useAiChatStore((state) => state.streaming);
   const activity = useAiChatStore((state) => state.activity);
   const notice = useAiChatStore((state) => state.notice);
+  const proposals = useAiChatStore((state) => state.proposals);
 
   const setProject = useAiChatStore((state) => state.setProject);
   const ask = useAiChatStore((state) => state.ask);
   const clear = useAiChatStore((state) => state.clear);
   const cancel = useAiChatStore((state) => state.cancel);
   const dismissNotice = useAiChatStore((state) => state.dismissNotice);
+
+  const canEdit = useEditorSocketStore(selectCanEdit);
+  const resolveProposal = useAiChatStore((state) => state.resolveProposal);
 
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -73,17 +88,22 @@ export function AiPanel({ projectId, model }: Props) {
     const onError = ({ message }: { code: string; message: string }) => {
       store().fail(message);
     };
+    const onProposal = (proposal: AiProposal) => {
+      store().addProposal(proposal);
+    };
 
     editorSocket.on("aiDelta", onDelta);
     editorSocket.on("aiActivity", onActivity);
     editorSocket.on("aiDone", onDone);
     editorSocket.on("aiError", onError);
+    editorSocket.on("aiProposal", onProposal);
 
     return () => {
       editorSocket.off("aiDelta", onDelta);
       editorSocket.off("aiActivity", onActivity);
       editorSocket.off("aiDone", onDone);
       editorSocket.off("aiError", onError);
+      editorSocket.off("aiProposal", onProposal);
     };
   }, [editorSocket]);
 
@@ -123,6 +143,30 @@ export function AiPanel({ projectId, model }: Props) {
       ...(context ? { context } : {}),
     });
   }, [draft, editorSocket, streaming, ask]);
+
+  /** Opens a proposal in the editor's diff.
+   *
+   *  The file has to be showing for there to be a buffer to compare against.
+   *  One that is already open is left exactly as it is — re-reading it from the
+   *  server would throw away anything typed since, which is precisely the work
+   *  the review exists to protect. */
+  const review = useCallback(
+    (proposal: AiProposal) => {
+      const tabs = useOpenTabsStore.getState();
+
+      if (!tabs.tabs.some((tab) => tab.relPath === proposal.relPath)) {
+        editorSocket?.emit("readFile", { relPath: proposal.relPath });
+      }
+
+      tabs.startReview({
+        id: proposal.id,
+        relPath: proposal.relPath,
+        summary: proposal.summary,
+        contents: proposal.contents,
+      });
+    },
+    [editorSocket],
+  );
 
   const stop = useCallback(() => {
     editorSocket?.emit("aiCancel");
@@ -172,21 +216,33 @@ export function AiPanel({ projectId, model }: Props) {
             styles={{ image: { height: 40 } }}
             description={
               <span style={{ color: "var(--rc-text-muted)", fontSize: 12.5 }}>
-                Ask about this project. The assistant can read your files —
-                it cannot change them.
+                Ask about this project. The assistant reads your files, and
+                can offer a change for you to review — it never makes one.
               </span>
             }
           />
         )}
 
         {messages.map((entry, index) => (
-          <Bubble
-            // Index is a stable key here: messages are only ever appended, and
-            // the last one is mutated in place as it streams.
-            key={index}
-            message={entry}
-            streaming={streaming && index === messages.length - 1}
-          />
+          <div key={index}>
+            <Bubble
+              // Index is a stable key here: messages are only ever appended,
+              // and the last one is mutated in place as it streams.
+              message={entry}
+              streaming={streaming && index === messages.length - 1}
+            />
+            {proposals
+              .filter((pending) => pending.messageIndex === index)
+              .map((pending) => (
+                <ProposalCard
+                  key={pending.proposal.id}
+                  proposal={pending.proposal}
+                  canEdit={canEdit}
+                  onReview={review}
+                  onDiscard={resolveProposal}
+                />
+              ))}
+          </div>
         ))}
 
         {activity && (
@@ -285,6 +341,60 @@ export function AiPanel({ projectId, model }: Props) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One offered change, before anybody has looked at it.
+ *
+ *  Says which file and what for, and stops there. The decision belongs in front
+ *  of the diff, not in front of a one-line summary, so the only affordance that
+ *  leads anywhere is the one that opens it. */
+function ProposalCard({
+  proposal,
+  canEdit,
+  onReview,
+  onDiscard,
+}: {
+  proposal: AiProposal;
+  canEdit: boolean;
+  onReview: (proposal: AiProposal) => void;
+  onDiscard: (id: string) => void;
+}) {
+  return (
+    <div className="rc-proposal-card">
+      <span className="rc-proposal-text">
+        {proposal.summary}
+        <span className="rc-proposal-path" title={proposal.relPath}>
+          {proposal.relPath}
+        </span>
+      </span>
+
+      <button
+        className="rc-review-button"
+        onClick={() => onDiscard(proposal.id)}
+        aria-label={`Discard the change to ${proposal.relPath}`}
+      >
+        Discard
+      </button>
+      <Tooltip
+        title={
+          canEdit
+            ? "See it against your file before anything is applied"
+            : "You have read-only access to this project"
+        }
+      >
+        <button
+          className="rc-review-button"
+          data-primary
+          disabled={!canEdit}
+          onClick={() => onReview(proposal)}
+          aria-label={`Review the change to ${proposal.relPath}`}
+        >
+          <VscDiff size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+          Review
+        </button>
+      </Tooltip>
     </div>
   );
 }

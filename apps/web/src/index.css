@@ -701,3 +701,83 @@ body {
 .rc-chat-input:focus {
   border-color: var(--rc-border-strong);
 }
+
+/* The bar above a proposed change, while it is being reviewed. Deliberately
+   loud: it sits over a diff, and the two buttons below it are the only way
+   anything the assistant offered reaches a file. */
+.rc-review-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 6px 8px 6px 10px;
+  font-size: 12px;
+  color: var(--rc-text);
+  background: var(--rc-accent-soft);
+  border-bottom: 1px solid var(--rc-border);
+}
+
+.rc-review-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rc-review-button {
+  padding: 2px 10px;
+  font: inherit;
+  font-size: 11.5px;
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-radius-sm);
+  background: transparent;
+  color: var(--rc-text);
+  cursor: pointer;
+  transition:
+    background-color 0.12s var(--rc-ease),
+    border-color 0.12s var(--rc-ease);
+}
+
+.rc-review-button:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.rc-review-button[data-primary] {
+  border-color: var(--rc-accent);
+  color: var(--rc-accent);
+}
+
+.rc-review-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* A proposal card in the assistant panel, before it is opened for review. */
+.rc-proposal-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 7px 8px 7px 10px;
+  border: 1px solid var(--rc-border);
+  border-left: 2px solid var(--rc-accent);
+  border-radius: var(--rc-radius-sm);
+  background: var(--rc-surface-sunken);
+  font-size: 12.5px;
+}
+
+.rc-proposal-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.rc-proposal-path {
+  display: block;
+  font-family: var(--rc-mono);
+  font-size: 11px;
+  color: var(--rc-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

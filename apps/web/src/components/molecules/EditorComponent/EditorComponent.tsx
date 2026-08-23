@@ -6,7 +6,7 @@ import Editor, { DiffEditor } from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { Flex, Tooltip, Typography } from "antd";
-import { VscDiff } from "react-icons/vsc";
+import { VscDiff, VscSparkle } from "react-icons/vsc";
 import { MAX_FILE_BYTES } from "@replit-clone/shared";
 import draculaTheme from "../../../theme/dracula.json";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
@@ -21,6 +21,7 @@ import {
 } from "../../../store/openTabsStore.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
+import { useAiChatStore } from "../../../store/aiChatStore.ts";
 import {
   flushAllWrites,
   flushWrite,
@@ -118,6 +119,27 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const [writeError, setWriteError] = useState<string | null>(null);
   /** Showing the unsaved changes rather than the editor. */
   const [showDiff, setShowDiff] = useState(false);
+
+  const review = useOpenTabsStore((state) => state.review);
+  const endReview = useOpenTabsStore((state) => state.endReview);
+  const resolveProposal = useAiChatStore((state) => state.resolveProposal);
+
+  /** The proposal this pane is showing, if it is the one showing it.
+   *
+   *  Primary only: the same file can be open in both panes, and two diffs of
+   *  one change is one more than anybody needs. */
+  const reviewing =
+    pane === "primary" && review && activeTab && review.relPath === activeTab.relPath
+      ? review
+      : null;
+
+  /** The buffer as it stood when the review opened — the left-hand side.
+   *
+   *  Captured rather than read at render time because Monaco owns the live
+   *  text and reading it during render would be reading through a side door.
+   *  Re-taken whenever the proposal or the file changes, so the diff is never
+   *  against a buffer from before. */
+  const [reviewBase, setReviewBase] = useState("");
   /** The buffer as it stands, captured when the diff opens. Monaco owns the
    *  live text, so there is nothing in React state to compare against. */
   const [diffCurrent, setDiffCurrent] = useState("");
@@ -405,6 +427,43 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     queueWrite(relPath, data, delay);
   }
 
+  // After the attach effect above, so the model for this file is in place and
+  // `getValue` is the file being reviewed rather than the one before it.
+  useEffect(() => {
+    if (!reviewing) return;
+    setReviewBase(editorRef.current?.getValue() ?? "");
+  }, [reviewing, activeTab, mountTick]);
+
+  /** Applies the proposal into the buffer, as one undoable edit.
+   *
+   *  Through the editor's own edit stack rather than `setValue`, so Ctrl+Z
+   *  takes the whole change back out. That undo was half of what this feature
+   *  was waiting on; the diff the user just read was the other half. The write
+   *  itself goes the ordinary way — the change event marks the tab dirty and
+   *  queues it — so a shared file is still saved by the server from the merged
+   *  document, and nothing here needs to know the difference.
+   */
+  function acceptReview() {
+    const codeEditor = editorRef.current;
+    const model = codeEditor?.getModel();
+    if (!codeEditor || !model || !reviewing) return;
+
+    codeEditor.pushUndoStop();
+    codeEditor.executeEdits("assistant", [
+      { range: model.getFullModelRange(), text: reviewing.contents },
+    ]);
+    codeEditor.pushUndoStop();
+
+    resolveProposal(reviewing.id);
+    endReview();
+    codeEditor.focus();
+  }
+
+  function discardReview() {
+    if (reviewing) resolveProposal(reviewing.id);
+    endReview();
+  }
+
   function handleChange(value: string | undefined) {
     if (suppressChange.current) return;
     if (value === undefined || !activeTab) return;
@@ -534,7 +593,70 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         </Tooltip>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, display: showDiff ? "block" : "none" }}>
+      {/* A change the assistant has offered. Nothing has been written: this is
+          the diff, and the two buttons are the only way anything reaches the
+          file. */}
+      {reviewing && (
+        <div className="rc-review-bar">
+          <VscSparkle size={13} style={{ flex: "none" }} />
+          <span className="rc-review-summary" title={reviewing.summary}>
+            {reviewing.summary}
+          </span>
+          <span style={{ display: "flex", gap: 6, flex: "none" }}>
+            <button
+              className="rc-review-button"
+              onClick={discardReview}
+              aria-label="Discard the proposed change"
+            >
+              Discard
+            </button>
+            <button
+              className="rc-review-button"
+              data-primary
+              onClick={acceptReview}
+              disabled={!canEdit}
+              title={
+                canEdit
+                  ? "Apply this change to the buffer — Ctrl+Z undoes it"
+                  : "You have read-only access to this project"
+              }
+              aria-label="Apply the proposed change"
+            >
+              Apply
+            </button>
+          </span>
+        </div>
+      )}
+
+      <div style={{ flex: 1, minHeight: 0, display: reviewing ? "block" : "none" }}>
+        <DiffEditor
+          height="100%"
+          width="100%"
+          theme="dracula"
+          language={language}
+          // Left is the buffer as it stands; right is what the assistant would
+          // have instead.
+          original={reviewBase}
+          modified={reviewing?.contents ?? ""}
+          options={{
+            readOnly: true,
+            renderSideBySide: true,
+            fontSize: settings.fontSize,
+            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false,
+            automaticLayout: true,
+          }}
+        />
+      </div>
+
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: showDiff && !reviewing ? "block" : "none",
+        }}
+      >
         <DiffEditor
           height="100%"
           width="100%"
@@ -556,8 +678,16 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
       </div>
 
       {/* Hidden rather than unmounted while diffing, so the models, undo
-          history and scroll position all survive the round trip. */}
-      <div style={{ flex: 1, minHeight: 0, display: showDiff ? "none" : "block" }}>
+          history and scroll position all survive the round trip. Which matters
+          twice over for a review: the undo stack it is hidden behind is what
+          takes an applied proposal back out. */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: showDiff || reviewing ? "none" : "block",
+        }}
+      >
         <Editor
           height="100%"
           width="100%"

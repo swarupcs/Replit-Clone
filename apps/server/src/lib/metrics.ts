@@ -20,6 +20,7 @@ export type CounterName =
   | "auth_failures"
   | "ai_requests"
   | "ai_tool_calls"
+  | "ai_proposals"
   | "ai_errors";
 
 const counters = new Map<CounterName, number>();
