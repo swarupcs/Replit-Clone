@@ -3,10 +3,10 @@ import { hasBash } from "../test/capabilities.js";
 import { describe, expect, it } from "vitest";
 import {
   PGID_MARKER,
-  shellQuote,
   takeProcessGroupId,
   type RunSession,
 } from "./runner.js";
+import { shellQuote } from "./runLog.js";
 
 function session(): RunSession {
   return { state: { status: "starting" }, history: [] };

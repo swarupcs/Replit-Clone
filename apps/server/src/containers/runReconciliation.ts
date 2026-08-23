@@ -32,6 +32,16 @@ export interface RunReality {
    *  a run was started, which is exactly the belief that goes stale. Only
    *  Docker knows whether that process is still alive. */
   execRunning?: boolean;
+  /** Whether the process group the run recorded inside the container is still
+   *  alive.
+   *
+   *  The answer for a run this process did not start, and the one that makes
+   *  an INSTALLING run recognisable. `execRunning` covers a run we hold the
+   *  exec for; after a server restart we hold nothing, and a project part-way
+   *  through `npm install` is not listening either — so it read as a project
+   *  that had never been started, and opening it launched a second install
+   *  into the same directory as the first. */
+  processGroupAlive?: boolean;
   /** Whether the project has a container that is up. */
   containerRunning: boolean;
   /** Whether something accepts connections on the template's dev port. */
@@ -62,12 +72,15 @@ export type Reconciliation =
  *    that dies takes only its own process group with it.
  *  - Nothing listening YET versus nothing listening ANY MORE. A run in
  *    `starting` has nothing listening by definition — `npm install` takes a
- *    while — so the live exec is what tells the two apart, and it must come
- *    from Docker rather than from this process's own memory.
+ *    while — so the live process is what tells the two apart, and it must come
+ *    from Docker rather than from this process's own memory. Either witness
+ *    will do: the exec, while we still hold one, or the process group the run
+ *    recorded in the container, which is all that is left after a restart.
  */
 export function reconcileDecision({
   status,
   execRunning,
+  processGroupAlive,
   containerRunning,
   listening,
 }: RunReality): Reconciliation {
@@ -77,6 +90,21 @@ export function reconcileDecision({
   // A run whose process Docker still reports as alive is mid-flight: it is
   // installing, or building, or is a command that never listens at all.
   if (execRunning === true) return "none";
+
+  // The same thing, for a run this process did not start. Nothing is serving
+  // yet, but something is plainly working towards it — so this is a run to
+  // take over and report the progress of, not an absence to fill by starting
+  // a second one beside it.
+  if (processGroupAlive === true) {
+    // Already accounted for. A dev server that stops answering for a moment —
+    // restarting itself after a config change, rebuilding — would otherwise
+    // flap the badge back to "starting" and replay its log every time somebody
+    // opened the project. The wedge this whole function exists for is the
+    // opposite case, and it is still caught below: nothing serving and nothing
+    // alive.
+    if (status === "starting" || status === "running") return "none";
+    return "adopt";
+  }
 
   switch (status) {
     case "starting":

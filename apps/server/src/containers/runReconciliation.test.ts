@@ -126,3 +126,107 @@ describe("nothing to do", () => {
     ).toBe("none");
   });
 });
+
+/** The state a NEW project is in for its first few minutes: `npm install` is
+ *  running, nothing is listening yet, and the run has no exec in this process
+ *  because the server restarted under it.
+ *
+ *  Without a second witness that reads as a project nobody has ever started —
+ *  so opening it launched a second install into the same directory as the
+ *  first, and the user watched two npms fight over one node_modules while the
+ *  Output pane showed neither.
+ */
+describe("a run that is alive but not yet serving", () => {
+  it("is taken over rather than read as never started", () => {
+    expect(
+      reconcileDecision(
+        reality({
+          status: "idle",
+          processGroupAlive: true,
+          containerRunning: true,
+          listening: false,
+        }),
+      ),
+    ).toBe("adopt");
+  });
+
+  /** Already accounted for. Adopting a run this process is already tracking
+   *  would replay its log over output it never lost. */
+  it("is left alone when the state already says starting", () => {
+    expect(
+      reconcileDecision(
+        reality({
+          status: "starting",
+          processGroupAlive: true,
+          containerRunning: true,
+          listening: false,
+        }),
+      ),
+    ).toBe("none");
+  });
+
+  /** A run wedged at `running` with nothing serving, but whose process really
+   *  is alive, is mid-something — a rebuild, a restart of its own — not gone.
+   *  Demoting it to idle would let the automatic start put a second one beside
+   *  a process still holding the port. */
+  it("is not declared lost while its process is still there", () => {
+    expect(
+      reconcileDecision(
+        reality({
+          status: "running",
+          processGroupAlive: true,
+          containerRunning: true,
+          listening: false,
+        }),
+      ),
+    ).toBe("none");
+  });
+
+  /** The exec settles it first when we have one: it is Docker's answer about
+   *  the very process we started, where the recorded group is a pid read out
+   *  of a file the run wrote. */
+  it("does not override the exec this process holds", () => {
+    expect(
+      reconcileDecision(
+        reality({
+          status: "starting",
+          execRunning: true,
+          processGroupAlive: false,
+          containerRunning: true,
+          listening: false,
+        }),
+      ),
+    ).toBe("none");
+  });
+
+  /** Serving outranks everything. A group id that has gone stale — the run
+   *  finished and the kernel reused the pid — must not stop an adoption that
+   *  a live HTTP response has already justified. */
+  it("does not stop a serving run being adopted", () => {
+    expect(
+      reconcileDecision(
+        reality({
+          status: "idle",
+          processGroupAlive: false,
+          containerRunning: true,
+          listening: true,
+        }),
+      ),
+    ).toBe("adopt");
+  });
+
+  /** The distinction the whole thing rests on: nothing listening AND nothing
+   *  alive is a run that has gone, whatever the state still claims. */
+  it("is still lost when no process group answers", () => {
+    expect(
+      reconcileDecision(
+        reality({
+          status: "running",
+          processGroupAlive: false,
+          containerRunning: true,
+          listening: false,
+        }),
+      ),
+    ).toBe("lost");
+  });
+});

@@ -17,6 +17,12 @@ import {
   isResumable,
   reconcileDecision,
 } from "./runReconciliation.js";
+import {
+  followRunLog,
+  readRunLog,
+  recordedRunArgv,
+  type LogFollower,
+} from "./runLog.js";
 
 /** How much output to retain per project so a client that connects late (or
  *  reconnects) can rebuild the log pane. Bounded so a chatty dev server cannot
@@ -54,6 +60,9 @@ export interface RunSession {
   /** When the run exited, so the restart path can keep its distance from a
    *  crash that just happened. */
   exitedAt?: number;
+  /** Tail of the container-side recording, for a run this process did not
+   *  start and so has no stream of its own for. See runLog.ts. */
+  follower?: LogFollower;
 }
 
 const sessions = new Map<string, RunSession>();
@@ -89,9 +98,16 @@ export function parsePgidReport(text: string): string | undefined {
   return new RegExp(`${PGID_MARKER}(\\d+)`).exec(text)?.[1];
 }
 
-/** Wraps a string as a single-quoted shell word. */
-export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
+/** Takes the launcher's marker lines out of a RECORDED log.
+ *
+ *  The marker is stripped from the live stream as it goes past, by the
+ *  streaming parser below. The container-side recording gets no such treatment
+ *  — `script` records the pty faithfully, marker and all — so a replayed log
+ *  would open with `__rc_pgid__:12345` above the user's own output. Global,
+ *  because a recording can span more than one run of the same container.
+ */
+export function withoutMarkerLines(text: string): string {
+  return text.replace(new RegExp(`${PGID_MARKER}\\d+\\r?\\n?`, "g"), "");
 }
 
 /** Takes the marker line out of the stream, returning what is left to display.
@@ -285,6 +301,10 @@ export async function startRun(
   }
 
   current.history = [];
+  // A fresh run writes its own stream, and truncates the recording the old
+  // follower was reading. Leaving it attached would interleave the two.
+  current.follower?.stop();
+  current.follower = undefined;
   current.pgid = undefined;
   current.pgidBuffer = undefined;
   // A new run has not yet earned anything: readiness is proven again, and the
@@ -305,23 +325,20 @@ export async function startRun(
   setState(projectId, { status: "starting", command: template.startCommand });
   pushOutput(projectId, `$ ${template.startCommand}\r\n`);
 
-  // `setsid` puts the run in a session — and so a process group — of its own,
-  // which is what lets stopRun signal exactly what this run started, including
-  // the dev server `npm run dev` spawns as a child, and nothing else.
+  // The run reports its own `$$` as the process group `stopRun` will signal —
+  // which is exactly what this run started, including the dev server that
+  // `npm run dev` spawns as a child, and nothing else. `script` is what makes
+  // that pid a session leader, and so a group id: it puts its command on a
+  // fresh pty and the command takes that pty as its controlling terminal.
   //
-  // The inner shell reports its own `$$` rather than the launcher reporting
-  // `$!`: setsid makes that shell the session leader, so its pid IS the group
-  // id, whether or not setsid had to fork to get there. `bash -lc` so the
-  // command can use the shell operators the registry writes it with.
+  // Recording the output is the other half of what `script` is here for. See
+  // runLog.ts — in short, the log has to outlive this process, and it has to
+  // come off a terminal or every tool in it stops emitting colour.
   const runScript =
     `echo "${PGID_MARKER}$$"; echo $$ > ${PGID_FILE}; ${template.startCommand}`;
 
   const exec = await container.exec({
-    Cmd: [
-      "/bin/bash",
-      "-lc",
-      `setsid /bin/bash -lc ${shellQuote(runScript)} & wait $!`,
-    ],
+    Cmd: recordedRunArgv(runScript),
     AttachStdout: true,
     AttachStderr: true,
     Tty: true,
@@ -417,16 +434,25 @@ async function readLiveProcessGroup(
   return result ? parsePgidReport(result.stdout) : undefined;
 }
 
-function adoptionNotice(stoppable: boolean): string {
-  const found =
-    "\r\n\x1b[36mReconnected to the dev server already running in this " +
-    "project.\x1b[0m\r\n";
+function adoptionNotice(
+  stoppable: boolean,
+  recorded: boolean,
+  listening: boolean,
+): string {
+  const found = listening
+    ? "\r\n\x1b[36mReconnected to the dev server already running in this " +
+      "project.\x1b[0m\r\n"
+    : "\r\n\x1b[36mReconnected to this project's run, which is still " +
+      "starting up.\x1b[0m\r\n";
 
-  // Lost with the process that was watching it: Docker keeps no copy of an
-  // exec's output, so this is stated rather than left as an empty pane under a
-  // "running" badge.
-  const noHistory =
-    "\x1b[33mIts output from before now is not available.\x1b[0m\r\n";
+  // The run records its output inside the container precisely so this can be
+  // read back (see runLog.ts). A run started before that existed — or in a
+  // container that has since been recreated — has nothing to read, and saying
+  // so beats an empty pane under a "Running" badge.
+  const log = recorded
+    ? "\x1b[90m--- what it said before now, replayed from the container " +
+      "---\x1b[0m\r\n"
+    : "\x1b[33mIts output from before now was not recorded.\x1b[0m\r\n";
 
   // Said plainly rather than left to be discovered by pressing Stop and having
   // nothing happen.
@@ -434,7 +460,7 @@ function adoptionNotice(stoppable: boolean): string {
     "\x1b[33mIt also did not report a process group, so Stop cannot signal " +
     "it. Restart the project container to clear it.\x1b[0m\r\n";
 
-  return stoppable ? found + noHistory : found + noHistory + unstoppable;
+  return stoppable ? found + log : found + log + unstoppable;
 }
 
 function reclaimedNotice(decision: "lost" | "reclaimed"): string {
@@ -494,9 +520,19 @@ export async function reconcileRun(projectId: string): Promise<void> {
 
   const listening = container ? await isListening(projectId) : false;
 
+  // Only worth asking when nothing else already answers it: a run that is
+  // serving, or one whose exec we still hold, needs no second witness. This is
+  // for the run part-way through `npm install` after a server restart, which
+  // otherwise looks exactly like a project nobody has ever started.
+  const processGroupAlive =
+    container && !listening && execRunning !== true
+      ? (await readLiveProcessGroup(container)) !== undefined
+      : undefined;
+
   const decision = reconcileDecision({
     status: before,
     execRunning,
+    processGroupAlive,
     containerRunning: container !== undefined,
     listening,
   });
@@ -510,12 +546,14 @@ export async function reconcileRun(projectId: string): Promise<void> {
   if (live.state.status !== before || live.exec !== current.exec) return;
 
   if (decision === "adopt") {
-    await adopt(projectId, live, container, execRunning === true);
+    await adopt(projectId, live, container, execRunning === true, listening);
     return;
   }
 
   stopProbing(live);
   live.stream?.destroy();
+  live.follower?.stop();
+  live.follower = undefined;
   live.stream = undefined;
   live.exec = undefined;
   live.pgid = undefined;
@@ -545,6 +583,7 @@ async function adopt(
   live: RunSession,
   container: Awaited<ReturnType<typeof getRunningContainer>>,
   owned: boolean,
+  listening: boolean,
 ): Promise<void> {
   if (!container) return;
 
@@ -557,26 +596,88 @@ async function adopt(
   // from the marker on its stream, and the file could be missing.
   live.pgid = pgid ?? live.pgid;
   live.pgidBuffer = undefined;
-  // It is serving, so this run has plainly worked — which is what the restart
-  // after a later death is allowed to rely on.
-  live.everReady = true;
+  // Only a run that is actually serving has earned this. An adopted run still
+  // installing has proved nothing yet, and calling it proven would be a claim
+  // this cannot support.
+  //
+  // Defensive rather than load-bearing, and deliberately left untested: the
+  // flag is read only on the way out of `exited`, which an adopted run cannot
+  // reach — nothing holds its exec, so nothing records its exit. Written the
+  // true way so that stops being an accident if it ever can.
+  if (listening) live.everReady = true;
 
   if (!owned) {
-    logger.info("adopted a dev server that was already running", {
+    logger.info("adopted a run already going in the container", {
       projectId,
+      listening,
       stoppable: live.pgid !== undefined,
     });
-    pushOutput(projectId, adoptionNotice(live.pgid !== undefined));
+
+    // What it said before now, read back off the container-side recording.
+    // Without this the pane sat empty under a "Running" badge — worst during
+    // an install, where the output IS the only progress there is.
+    const recorded = await readRunLog(container).catch(() => undefined);
+    const replay = recorded === undefined ? "" : withoutMarkerLines(recorded);
+    // Whether there is anything WORTH replaying, not whether a file existed: a
+    // recording holding only the launcher's own marker reads as an empty pane
+    // with a heading over it.
+    const hasReplay = replay.trim().length > 0;
+
+    pushOutput(
+      projectId,
+      adoptionNotice(live.pgid !== undefined, hasReplay, listening),
+    );
+    if (hasReplay) pushOutput(projectId, replay);
+
+    await attachLogFollower(projectId, live, container);
   }
 
   setState(projectId, {
-    status: "running",
+    status: listening ? "running" : "starting",
     command: live.state.command ?? template.startCommand,
   });
 
-  // The preview is live this instant, so say so — the pane is otherwise
-  // waiting for a `previewReady` that only a fresh start would ever send.
-  emit(projectId, { type: "ready", port: template.devPort });
+  if (listening) {
+    // The preview is live this instant, so say so — the pane is otherwise
+    // waiting for a `previewReady` that only a fresh start would ever send.
+    emit(projectId, { type: "ready", port: template.devPort });
+    return;
+  }
+
+  // Still working towards it. Probing is what promotes this to `running` and
+  // loads the preview the moment the port opens, exactly as it would for a run
+  // this process had started itself.
+  probeUntilReady(projectId);
+}
+
+/** Streams the rest of an adopted run's output.
+ *
+ *  The run's own exec belongs to a process that is gone, so there is no stream
+ *  to take back. Following the recording is what replaces it: the same bytes,
+ *  read from the file the run is still writing to. */
+async function attachLogFollower(
+  projectId: string,
+  live: RunSession,
+  container: NonNullable<Awaited<ReturnType<typeof getRunningContainer>>>,
+): Promise<void> {
+  live.follower?.stop();
+  live.follower = undefined;
+
+  try {
+    live.follower = await followRunLog(container, (chunk) => {
+      // Checked per chunk: the follower outlives its own start, and a run
+      // stopped in the meantime must not go on writing to a pane that says so.
+      if (sessions.get(projectId) !== live) return;
+      pushOutput(projectId, chunk);
+    });
+  } catch (error) {
+    // The replay above already landed, so this degrades to a pane that stops
+    // updating rather than one that never filled.
+    logger.info("could not follow the run's recording", {
+      projectId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /** Starts the dev server because someone opened the project, rather than
@@ -714,6 +815,10 @@ export async function stopRun(projectId: string): Promise<void> {
   }
 
   current.stream?.destroy();
+  // Nothing is writing the recording any more, so a follower left on it would
+  // sit open against the container for as long as the project did.
+  current.follower?.stop();
+  current.follower = undefined;
   current.stream = undefined;
   current.exec = undefined;
   current.pgid = undefined;

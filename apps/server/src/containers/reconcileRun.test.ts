@@ -10,7 +10,12 @@ const ensureContainer = vi.fn();
 const getRunningContainer = vi.fn();
 const getPreviewTarget = vi.fn<() => Promise<string | undefined>>();
 const execCapture =
-  vi.fn<() => Promise<{ stdout: string; stderr: string; exitCode: number }>>();
+  vi.fn<
+    (
+      container: unknown,
+      argv: string[],
+    ) => Promise<{ stdout: string; stderr: string; exitCode: number }>
+  >();
 
 vi.mock("./containerManager.js", () => ({
   ensureContainer: (projectId: string): unknown => ensureContainer(projectId),
@@ -20,7 +25,8 @@ vi.mock("./containerManager.js", () => ({
 }));
 
 vi.mock("./execCapture.js", () => ({
-  execCapture: (): unknown => execCapture(),
+  execCapture: (container: unknown, argv: string[]): unknown =>
+    execCapture(container, argv),
 }));
 
 vi.mock("../lib/prisma.js", () => ({
@@ -40,6 +46,10 @@ let runner: typeof import("./runner.js");
  *  probe's whole job. */
 let devServer: http.Server | undefined;
 
+/** Every command handed to the container, which is how a stop is observed: it
+ *  signals a process group and reports nothing else. */
+let commands: string[][] = [];
+
 async function devServerListening(): Promise<void> {
   devServer = http.createServer((_request, response) => {
     response.writeHead(200);
@@ -53,19 +63,52 @@ async function devServerListening(): Promise<void> {
   getPreviewTarget.mockResolvedValue(`http://127.0.0.1:${String(port)}`);
 }
 
-/** What the container says when asked for the process group it recorded. */
-function containerReports(pgid: string | undefined): void {
-  getRunningContainer.mockResolvedValue({ id: "container" });
-  execCapture.mockResolvedValue({
-    stdout: pgid === undefined ? "" : `${runner.PGID_MARKER}${pgid}\n`,
-    stderr: "",
-    exitCode: 0,
+/** Streams handed to the log follower, so a test can assert it attached and
+ *  the fixture can push output down it. */
+let followerStreams: PassThrough[] = [];
+
+/** What the container says when asked its two questions.
+ *
+ *  `pgid` is the process group the run recorded — undefined for a run that has
+ *  finished, or one whose recorded pid the kernel has since reused. `recorded`
+ *  is the run's own output, kept inside the container so a server that has
+ *  restarted can replay it; undefined means there is no recording to read.
+ */
+function containerReports(
+  pgid: string | undefined,
+  recorded?: string,
+): void {
+  getRunningContainer.mockResolvedValue({
+    id: "container",
+    exec: (options: { Cmd: string[] }) => {
+      commands.push(options.Cmd);
+      const stream = new PassThrough();
+      followerStreams.push(stream);
+      return Promise.resolve({
+        start: () => Promise.resolve(stream),
+        inspect: () => Promise.resolve({ ExitCode: 0 }),
+      });
+    },
+  });
+
+  execCapture.mockImplementation((_container, argv) => {
+    const command = argv.join(" ");
+
+    if (command.includes("rc-run.log")) {
+      return Promise.resolve(
+        recorded === undefined
+          ? { stdout: "", stderr: "", exitCode: 1 }
+          : { stdout: recorded, stderr: "", exitCode: 0 },
+      );
+    }
+
+    return Promise.resolve({
+      stdout: pgid === undefined ? "" : `${runner.PGID_MARKER}${pgid}\n`,
+      stderr: "",
+      exitCode: 0,
+    });
   });
 }
-
-/** Every command handed to the container, which is how a stop is observed: it
- *  signals a process group and reports nothing else. */
-let commands: string[][] = [];
 
 /** A container whose exec Docker still reports as running, which is what a run
  *  in the middle of `npm install` looks like. */
@@ -97,6 +140,7 @@ function stoppableContainer(): void {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  followerStreams = [];
   getPreviewTarget.mockResolvedValue(undefined);
   getRunningContainer.mockResolvedValue(undefined);
   runner = await import("./runner.js");
@@ -176,14 +220,100 @@ describe("a dev server that outlived the server process", () => {
     expect(runner.getRunState(PROJECT).status).toBe("running");
   });
 
-  it("says the earlier output is gone rather than showing an empty log", async () => {
+  /** The run records its output inside the container precisely so this can be
+   *  read back. Without it the project came back with a "Running" badge over a
+   *  pane that was empty and would stay empty — the dev server was still
+   *  talking, but to a process that no longer existed. */
+  it("replays what the run said before the server restarted", async () => {
+    await devServerListening();
+    containerReports("4242", "> next dev\r\nready on :3000\r\n");
+
+    await runner.reconcileRun(PROJECT);
+
+    expect(runner.getRunHistory(PROJECT).join("")).toContain("ready on :3000");
+  });
+
+  /** The launcher prints its process group id for the live stream to pick up,
+   *  and `script` records that faithfully along with everything else. Replayed
+   *  unfiltered, the pane opens with our own bookkeeping above the user's
+   *  output. */
+  it("keeps the launcher's own marker out of the replay", async () => {
+    await devServerListening();
+    containerReports(
+      "4242",
+      `${runner.PGID_MARKER}4242\r\n> next dev\r\n`,
+    );
+
+    await runner.reconcileRun(PROJECT);
+
+    const log = runner.getRunHistory(PROJECT).join("");
+    expect(log).toContain("> next dev");
+    expect(log).not.toContain(runner.PGID_MARKER);
+  });
+
+  /** A replay is a snapshot. Everything the dev server says AFTER it has to
+   *  arrive too, or the pane is frozen at the moment of the reload — which is
+   *  the same empty pane, just with a head start. */
+  it("goes on showing what the run says next", async () => {
+    await devServerListening();
+    containerReports("4242", "> next dev\r\n");
+    await runner.reconcileRun(PROJECT);
+
+    expect(followerStreams).toHaveLength(1);
+    followerStreams[0]?.write("compiled in 84ms\r\n");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(runner.getRunHistory(PROJECT).join("")).toContain("compiled in 84ms");
+  });
+
+  it("says so when there is no recording to replay", async () => {
     await devServerListening();
     containerReports("4242");
 
     await runner.reconcileRun(PROJECT);
 
-    expect(runner.getRunHistory(PROJECT).join("")).toContain("not available");
+    expect(runner.getRunHistory(PROJECT).join("")).toContain("not recorded");
   });
+});
+
+/** Opening a NEW project runs `npm install` before the dev server, which is
+ *  minutes of the only feedback there is. Reload during it and this process
+ *  holds no exec, nothing is listening, and the run used to read as a project
+ *  nobody had ever started — so opening it launched a SECOND install into the
+ *  same directory as the first. */
+describe("a run still installing when the server restarted", () => {
+  function installing(recorded?: string): void {
+    containerReports("4242", recorded);
+    // Nothing bound: the install has not reached the dev server yet.
+    getPreviewTarget.mockResolvedValue("http://127.0.0.1:1");
+  }
+
+  it("is taken over rather than treated as never started", async () => {
+    installing();
+
+    await runner.reconcileRun(PROJECT);
+
+    expect(runner.getRunState(PROJECT).status).toBe("starting");
+  });
+
+  it("is not started a second time on top of itself", async () => {
+    installing();
+    await runner.reconcileRun(PROJECT);
+
+    await runner.autoStartRun(PROJECT);
+
+    expect(ensureContainer).not.toHaveBeenCalled();
+  });
+
+  /** The install's own output is the progress bar. */
+  it("replays the install's output so far", async () => {
+    installing("added 214 packages\r\n");
+
+    await runner.reconcileRun(PROJECT);
+
+    expect(runner.getRunHistory(PROJECT).join("")).toContain("added 214 packages");
+  });
+
 });
 
 describe("when there is nothing to adopt", () => {
@@ -196,11 +326,12 @@ describe("when there is nothing to adopt", () => {
     expect(runner.getRunState(PROJECT).status).toBe("idle");
   });
 
-  /** A container is up long before its dev server has bound a port — `npm
-   *  install` alone takes a while. Adopting on the container's existence would
-   *  report `running` for a project that serves nothing. */
-  it("leaves a container whose dev server is not listening alone", async () => {
-    containerReports("4242");
+  /** A container is up long before its dev server has bound a port, and it
+   *  stays up long after one has died. Adopting on the container's existence
+   *  would report `running` for a project that serves nothing — so with
+   *  nothing listening AND no live process group, there is nothing there. */
+  it("leaves a container with nothing running in it alone", async () => {
+    containerReports(undefined);
     // Nothing is bound here, so the probe's connection is refused.
     getPreviewTarget.mockResolvedValue("http://127.0.0.1:1");
 
@@ -284,12 +415,14 @@ describe("a run wedged at running with nothing behind it", () => {
     await runner.reconcileRun(PROJECT);
     expect(runner.getRunState(PROJECT).status).toBe("running");
 
-    // The dev server goes away without the exec stream ever ending.
+    // The dev server goes away without the exec stream ever ending, taking its
+    // process group with it.
     await new Promise<void>((resolve) => {
       devServer?.close(() => resolve());
     });
     devServer = undefined;
     getPreviewTarget.mockResolvedValue("http://127.0.0.1:1");
+    containerReports(undefined);
   }
 
   it("goes back to idle instead of reporting a dev server that is gone", async () => {
@@ -318,7 +451,7 @@ describe("a run wedged at running with nothing behind it", () => {
    *  the exit. Holding the exec is not evidence of life; only Docker knows. */
   it("asks Docker rather than trusting the exec it is holding", async () => {
     let processAlive = true;
-    getRunningContainer.mockResolvedValue({ id: "container" });
+    containerReports(undefined);
     getPreviewTarget.mockResolvedValue("http://127.0.0.1:1");
     ensureContainer.mockResolvedValue({
       exec: (options: { Cmd: string[] }) => {
@@ -374,6 +507,10 @@ describe("a stale process group record", () => {
     );
   });
 
+  /** Named rather than counted: an adopted run also opens a follower on its
+   *  recording, so "issued no commands at all" stopped being the same claim as
+   *  "signalled nobody". Signalling a pid the kernel has handed to something
+   *  else is the thing that must not happen. */
   it("signals nothing when stopped", async () => {
     await devServerListening();
     containerReports(undefined);
@@ -381,7 +518,9 @@ describe("a stale process group record", () => {
 
     await runner.stopRun(PROJECT);
 
-    expect(commands).toEqual([]);
+    expect(commands.filter((argv) => argv.join(" ").includes("kill"))).toEqual(
+      [],
+    );
   });
 });
 
