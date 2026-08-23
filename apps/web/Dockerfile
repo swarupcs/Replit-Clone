@@ -17,6 +17,11 @@ COPY apps/web apps/web
 ARG VITE_BACKEND_URL=http://localhost:8080
 ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
 
+# The origin previews are served from, which must NOT be the API's. Baked in
+# the same way, and for the same reason.
+ARG VITE_PREVIEW_ORIGIN=http://localhost:8081
+ENV VITE_PREVIEW_ORIGIN=$VITE_PREVIEW_ORIGIN
+
 RUN pnpm --filter @replit-clone/shared build \
     && pnpm --filter @replit-clone/web build
 

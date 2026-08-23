@@ -3,6 +3,10 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { createServer } from "node:http";
+import {
+  createPreviewServer,
+  listenForPreviews,
+} from "./previewServer.js";
 import { Server } from "socket.io";
 import type {
   ClientToServerEvents,
@@ -15,16 +19,21 @@ import {
   installPreviewUpgrade,
   previewGuard,
 } from "./routes/preview.js";
-import { env, isProduction } from "./config/env.js";
+import { env, isProduction, previewPort } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";
 import { logger } from "./lib/logger.js";
 import { touchProject } from "./service/projectService.js";
 import { retainProjectWatcher } from "./service/projectWatcher.js";
-import { createPreviewAnnouncer } from "./service/previewRefresh.js";
+import {
+  createPreviewAnnouncer,
+  createPreviewHealthAnnouncer,
+} from "./service/previewRefresh.js";
 import { reportExternalChanges } from "./service/collabWatch.js";
+import { touchFilesInContainer } from "./service/containerTouch.js";
 import { flushAllDocs, setDocSaveListener } from "./service/collabService.js";
 import { startAccessWatch, watchAccess } from "./service/accessWatch.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
+import { installSocketLogger } from "./middlewares/socketLogger.js";
 import { pruneExpiredRefreshTokens } from "./service/refreshTokenService.js";
 import { pruneUserTokens } from "./service/userTokenService.js";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
@@ -97,10 +106,36 @@ app.get("/ping", (_req, res) => {
 
 app.get("/health", asyncHandler(healthCheck));
 
+const editorNamespace = io.of("/editor");
+installSocketAuth(editorNamespace);
+// After auth: it logs connections that were admitted, and reads the user and
+// project auth recorded on the socket.
+installSocketLogger(editorNamespace);
+
+// One per process, not per connection: the announcements are per project and
+// debounced, so two tabs must not schedule two reloads for one save.
+const announcePreviewChange = createPreviewAnnouncer(editorNamespace);
+
+// Sees every preview response as it is proxied, so the room can be told when
+// the dev server starts or stops answering with errors.
+const announcePreviewHealth = createPreviewHealthAnnouncer(editorNamespace);
+
 // Mounted BEFORE the body parsers: the proxy has to stream the original request
 // body through, and express.json would have already consumed it.
-const previewProxy = createPreviewProxy();
-app.use("/preview/:projectId", previewGuard, previewProxy);
+const previewProxy = createPreviewProxy(announcePreviewHealth);
+
+// Mounted on the API's own origin ONLY when previews have not been given one
+// of their own. Sharing this origin means a project's code runs same-origin
+// with the API, which the editor answers by withholding `allow-same-origin`
+// from the iframe — and that costs every client-rendered preview its module
+// scripts. See previewServer.ts.
+if (previewPort === 0) {
+  app.use("/preview/:projectId", previewGuard, previewProxy);
+}
+
+// Built either way, so shutdown has one thing to close; only bound when
+// previews have an origin of their own.
+const previewServer = createPreviewServer(previewProxy);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -109,13 +144,6 @@ app.use("/api", apiRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
-
-const editorNamespace = io.of("/editor");
-installSocketAuth(editorNamespace);
-
-// One per process, not per connection: the announcements are per project and
-// debounced, so two tabs must not schedule two reloads for one save.
-const announcePreviewChange = createPreviewAnnouncer(editorNamespace);
 
 // While a file is shared the server writes it, so the client never sends
 // `writeFile` and never sees `writeFileSuccess` — which is the only thing that
@@ -141,12 +169,16 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
   // One watcher per project, shared by every tab. It used to be created per
   // connection, so two tabs meant two recursive watchers over the same tree and
   // two refetch broadcasts per change.
-  const releaseWatcher = retainProjectWatcher(projectId, () => {
+  const releaseWatcher = retainProjectWatcher(projectId, (changedFiles) => {
     editorNamespace.to(projectId).emit("treeChanged");
 
     // The preview reloads too — on a bind mount that swallows inotify, this
     // is the only thing that ever tells it a save happened.
     announcePreviewChange.announce(projectId);
+
+    // And the container's own watchers must be told as well, or a tool the
+    // user started in the terminal sits dead while the file beside it changes.
+    void touchFilesInContainer(projectId, changedFiles);
 
     // A terminal command or a build step may have rewritten a file somebody is
     // editing. There is nothing to merge against — an external writer produces
@@ -189,8 +221,9 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
 installTerminalGateway(server);
 
 // Vite's HMR socket rides the preview path, and Express middleware does not run
-// for upgrades — so this authorises and routes them itself.
-installPreviewUpgrade(server, previewProxy);
+// for upgrades — so this authorises and routes them itself. Only when previews
+// share this origin; the dedicated listener installs its own.
+if (previewPort === 0) installPreviewUpgrade(server, previewProxy);
 
 // Last, after every handler that owns a path has had its turn.
 //
@@ -318,6 +351,8 @@ async function start(): Promise<void> {
   server.listen(env.PORT, () => {
     logger.info("server listening", { port: env.PORT });
   });
+
+  if (previewPort !== 0) listenForPreviews(previewServer, previewPort);
 }
 
 /** Reports a fatal startup failure and exits.
@@ -357,6 +392,8 @@ async function shutdown(signal: string): Promise<void> {
     logger.error("could not flush documents on shutdown", error);
   });
   await new Promise<void>((resolve) => {
+    previewServer.close();
+
     server.close(() => {
       resolve();
     });

@@ -25,6 +25,20 @@ const envSchema = z.object({
    *  well inside this window for anyone actually using the editor. */
   PREVIEW_TOKEN_TTL_HOURS: z.coerce.number().int().positive().default(12),
 
+  /** Port serving project previews, on an origin of its own.
+   *
+   *  Previews must NOT share the API's origin: a project's code would then run
+   *  same-origin with the API and could mint itself a session from the refresh
+   *  cookie. Serving them from their own origin is what lets the editor grant
+   *  the preview iframe `allow-same-origin` — without which the frame has an
+   *  opaque origin and every module script in it fails CORS, which is a white
+   *  pane rather than a running app.
+   *
+   *  Defaults to the API's port plus one. Set to 0 to serve previews from the
+   *  API's own origin instead, accepting the trade above; the editor then
+   *  withholds `allow-same-origin` and only server-rendered previews work. */
+  PREVIEW_PORT: z.coerce.number().int().min(0).optional(),
+
   WEB_ORIGIN: z.string().url().default("http://localhost:5273"),
 
   /** This server's own public origin. Needed because an OAuth redirect_uri has
@@ -171,6 +185,9 @@ export const env = parsed.data;
 export const PROJECTS_ROOT: string = path.resolve(env.PROJECTS_DIR);
 
 export const isProduction = env.NODE_ENV === "production";
+
+/** Where previews are served, or 0 to keep them on the API's own origin. */
+export const previewPort: number = env.PREVIEW_PORT ?? env.PORT + 1;
 
 /** True when this process is itself running inside a container. */
 const runningInContainer = existsSync("/.dockerenv");

@@ -49,6 +49,12 @@ services:
       # The server is on the sandbox network, so it can reach project
       # containers directly and nothing is published to the host.
       PREVIEW_TARGET_MODE: container-ip
+      # Previews get an origin of their own, published below. Sharing the API's
+      # origin would let a project's code -- and anything it installs -- reach
+      # the API same-origin, and the editor's answer to that (withholding
+      # `allow-same-origin` from the iframe) breaks every client-rendered
+      # preview: an opaque origin fails CORS on its own module scripts.
+      PREVIEW_PORT: 3001
     # /health checks Postgres and the Docker daemon; /ping always answered 200
     # no matter what state the process was in.
     healthcheck:
@@ -59,6 +65,7 @@ services:
       start_period: 40s
     ports:
       - "8080:3000"
+      - "8081:3001"
     volumes:
       # Equivalent to host root. Auth and path confinement are what make this
       # acceptable; do not expose this service to the internet.
@@ -77,6 +84,7 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         VITE_BACKEND_URL: http://${HOST_IP:-localhost}:8080
+        VITE_PREVIEW_ORIGIN: http://${HOST_IP:-localhost}:8081
     restart: unless-stopped
     depends_on:
       - server
