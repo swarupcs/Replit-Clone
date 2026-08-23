@@ -44,7 +44,7 @@ function groupByFile(matches: SearchMatch[]): FileGroup[] {
  *  and reading them. This is the other half.
  */
 export const SearchPanel = () => {
-  const { editorSocket } = useEditorSocketStore();
+  const editorSocket = useEditorSocketStore((state) => state.editorSocket);
   const canEdit = useEditorSocketStore(selectCanEdit);
 
   const [query, setQuery] = useState("");

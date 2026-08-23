@@ -38,7 +38,7 @@ function formatCountdown(seconds: number): string {
 }
 
 export const RunControl = () => {
-  const { editorSocket } = useEditorSocketStore();
+  const editorSocket = useEditorSocketStore((state) => state.editorSocket);
   const canEdit = useEditorSocketStore(selectCanEdit);
   const { status, exitCode, command } = useRunStore((store) => store.state);
   const stats = useRunStore((store) => store.stats);

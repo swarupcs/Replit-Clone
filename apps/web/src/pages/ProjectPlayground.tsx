@@ -55,8 +55,14 @@ export const ProjectPlayground = () => {
    *  fifteen minutes, and depending on its value tore down the editor socket
    *  (and, through the panel, every terminal) each time it did. */
   const hasSession = useAuthStore((state) => state.accessToken !== null);
-  const { setProjectId } = useTreeStructureStore();
-  const { setEditorSocket, lastError, clearError } = useEditorSocketStore();
+  // One value per subscription. Reading a whole store here re-rendered the
+  // ENTIRE playground — editor, terminal, preview and all — every time
+  // anything in it moved: a tree refetch, an externally-changed file, a
+  // change of access level.
+  const setProjectId = useTreeStructureStore((state) => state.setProjectId);
+  const setEditorSocket = useEditorSocketStore((state) => state.setEditorSocket);
+  const lastError = useEditorSocketStore((state) => state.lastError);
+  const clearError = useEditorSocketStore((state) => state.clearError);
   const externallyChanged = useEditorSocketStore((state) => state.externallyChanged);
   const activeTab = useOpenTabsStore(selectActiveTab);
   const closeAllTabs = useOpenTabsStore((state) => state.closeAll);

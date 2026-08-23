@@ -23,7 +23,7 @@ const ACTION_COPY: Record<PendingAction, { title: string; okText: string }> = {
 
 export const FileContextMenu = () => {
   const { x, y, isOpen, node, close } = useFileContextMenuStore();
-  const { editorSocket } = useEditorSocketStore();
+  const editorSocket = useEditorSocketStore((state) => state.editorSocket);
   const projectId = useTreeStructureStore((state) => state.projectId);
   /** What Delete will act on: the selection when this row is part of one,
    *  otherwise just this row. */

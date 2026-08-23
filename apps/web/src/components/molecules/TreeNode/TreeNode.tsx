@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { CSSProperties, DragEvent, MouseEvent } from "react";
 import { IoIosArrowForward } from "react-icons/io";
 import { FaFolder, FaFolderOpen } from "react-icons/fa";
@@ -19,24 +19,40 @@ interface TreeNodeProps {
   depth?: number;
 }
 
-export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
-  const { editorSocket } = useEditorSocketStore();
-  const { expandedPaths, toggleExpanded } = useTreeStructureStore();
-  const activeRelPath = useOpenTabsStore((state) => state.activeRelPath);
-  const { open: openContextMenu } = useFileContextMenuStore();
+/** One row of the file tree, and its children.
+ *
+ *  Every subscription here is to a single value, and the component is memoised.
+ *  Both matter because this renders once per file in the project: reading a
+ *  whole store subscribes every row to every change in it, so opening a context
+ *  menu, reporting an externally-changed file, or expanding any one folder
+ *  re-rendered the entire tree. The stores whose actions are read
+ *  (`toggleExpanded`, `open`, `click`) hand back stable references, so those
+ *  subscriptions never fire at all.
+ */
+function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
+  const relPath = node?.relPath ?? null;
+
+  const editorSocket = useEditorSocketStore((state) => state.editorSocket);
+  const toggleExpanded = useTreeStructureStore((state) => state.toggleExpanded);
+  const openContextMenu = useFileContextMenuStore((state) => state.open);
   /** Highlighted while something is being dragged over this row. */
   const [dropping, setDropping] = useState(false);
   const click = useTreeSelectionStore((state) => state.click);
   const isSelected = useTreeSelectionStore((state) =>
-    node ? state.selected.has(node.relPath) : false,
+    relPath === null ? false : state.selected.has(relPath),
   );
+  // Booleans about THIS row rather than the collections they come from. The
+  // Set and the active path both change identity whenever anything in them
+  // does, so subscribing to either would wake every row for one row's news.
+  const isExpanded = useTreeStructureStore((state) =>
+    // The root node is always expanded; it has no row of its own to click.
+    relPath === "" || (relPath !== null && state.expandedPaths.has(relPath)),
+  );
+  const isActive = useOpenTabsStore((state) => state.activeRelPath === relPath);
 
   if (!node) return null;
 
   const isFolder = node.type === "directory";
-  // The root node is always expanded; it has no row of its own to click.
-  const isExpanded = node.relPath === "" || expandedPaths.has(node.relPath);
-  const isActive = activeRelPath === node.relPath;
 
   function handleContextMenu(event: MouseEvent) {
     event.preventDefault();
@@ -181,4 +197,11 @@ export const TreeNode = ({ node, depth = 0 }: TreeNodeProps) => {
       )}
     </div>
   );
-};
+}
+
+/** Memoised so a parent's re-render does not cascade.
+ *
+ *  `node` comes from the tree in the store and keeps its identity between
+ *  refetches that did not change it, so expanding one folder re-renders that
+ *  folder and mounts its children — and leaves every other row alone. */
+export const TreeNode = memo(TreeNodeRow);

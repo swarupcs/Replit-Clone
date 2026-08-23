@@ -1,6 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
+/** Counts renders per file row — only a file renders a FileIcon, which makes
+ *  it a per-row counter without touching the components under test. */
+const rowRenders = new Map<string, number>();
+
+vi.mock("../../atoms/FileIcon/FileIcon.tsx", () => ({
+  FileIcon: ({ name }: { name: string }) => {
+    rowRenders.set(name, (rowRenders.get(name) ?? 0) + 1);
+    return <span />;
+  },
+}));
 import type { TreeNodeData } from "@replit-clone/shared";
 import { TreeStructure } from "./TreeStructure.tsx";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
@@ -32,6 +43,7 @@ function projectWith(folders: number): TreeNodeData {
 }
 
 beforeEach(() => {
+  rowRenders.clear();
   useTreeStructureStore.setState({
     projectId: "p1",
     treeStructure: projectWith(80),
@@ -111,5 +123,54 @@ describe("TreeStructure", () => {
     expect(useTreeSelectionStore.getState().visibleOrder.length).toBeGreaterThan(
       0,
     );
+  });
+});
+
+/** The panel re-renders for reasons of its own — a keystroke in the filter, a
+ *  refresh spinner, the new-file input opening. None of those change the tree,
+ *  and re-rendering every row for them is the cost this guards against. */
+describe("what the panel's own state costs the tree", () => {
+  /** Files at the root, so every row shows without expanding anything. */
+  function flatProject(): TreeNodeData {
+    return {
+      name: "root",
+      relPath: "",
+      type: "directory",
+      children: [
+        { name: "a.ts", relPath: "a.ts", type: "file" },
+        { name: "b.ts", relPath: "b.ts", type: "file" },
+      ],
+    };
+  }
+
+  beforeEach(() => {
+    useTreeStructureStore.setState({
+      projectId: "p1",
+      treeStructure: flatProject(),
+      expandedPaths: new Set<string>(),
+    });
+    rowRenders.clear();
+  });
+
+  it("renders no row again when the new-file input opens", () => {
+    render(<TreeStructure />);
+    const before = [rowRenders.get("a.ts"), rowRenders.get("b.ts")];
+
+    fireEvent.click(screen.getByLabelText("New file"));
+
+    expect([rowRenders.get("a.ts"), rowRenders.get("b.ts")]).toEqual(before);
+  });
+
+  /** A filter that trims to nothing leaves the tree exactly as it was, so the
+   *  keystroke belongs to the input and to nothing else. */
+  it("renders no row again for a keystroke that changes no result", () => {
+    render(<TreeStructure />);
+    const before = [rowRenders.get("a.ts"), rowRenders.get("b.ts")];
+
+    fireEvent.change(screen.getByPlaceholderText(/filter/i), {
+      target: { value: "  " },
+    });
+
+    expect([rowRenders.get("a.ts"), rowRenders.get("b.ts")]).toEqual(before);
   });
 });

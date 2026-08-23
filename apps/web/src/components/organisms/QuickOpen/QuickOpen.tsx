@@ -39,7 +39,7 @@ const MAX_RESULTS = 50;
  */
 export const QuickOpen = ({ open, onClose }: QuickOpenProps) => {
   const treeStructure = useTreeStructureStore((store) => store.treeStructure);
-  const { editorSocket } = useEditorSocketStore();
+  const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
   const [query, setQuery] = useState("");
   const [highlighted, setHighlighted] = useState(0);

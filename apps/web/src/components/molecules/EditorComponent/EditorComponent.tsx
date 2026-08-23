@@ -104,7 +104,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const focusPane = useOpenTabsStore((state) => state.focusPane);
   const splitOpen = useOpenTabsStore((state) => state.splitOpen);
   const markDirty = useOpenTabsStore((state) => state.markDirty);
-  const { editorSocket } = useEditorSocketStore();
+  const editorSocket = useEditorSocketStore((state) => state.editorSocket);
   const canEdit = useEditorSocketStore(selectCanEdit);
   const user = useAuthStore((state) => state.user);
 

@@ -67,9 +67,14 @@ function folderPaths(node: TreeNodeData, into: string[] = []): string[] {
 }
 
 export const TreeStructure = () => {
-  const { treeStructure, refreshTree, projectId, collapseAll, revealPaths } =
-    useTreeStructureStore();
-  const { editorSocket } = useEditorSocketStore();
+  // The panel genuinely needs the tree itself, so it re-renders when the tree
+  // changes — but not for everything else in these two stores.
+  const treeStructure = useTreeStructureStore((state) => state.treeStructure);
+  const projectId = useTreeStructureStore((state) => state.projectId);
+  const refreshTree = useTreeStructureStore((state) => state.refreshTree);
+  const collapseAll = useTreeStructureStore((state) => state.collapseAll);
+  const revealPaths = useTreeStructureStore((state) => state.revealPaths);
+  const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
