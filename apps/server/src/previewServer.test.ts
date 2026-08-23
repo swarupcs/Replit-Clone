@@ -67,6 +67,19 @@ describe("cross-origin headers", () => {
     expect(response.headers["access-control-allow-origin"]).toBeUndefined();
   });
 
+  /** Helmet's default `X-Frame-Options: SAMEORIGIN` says the preview may not
+   *  be framed by another origin — which is the one thing it exists to be. A
+   *  browser is meant to ignore it when CSP `frame-ancestors` is also present,
+   *  and the preview route sets that, but a header stating the opposite of
+   *  what is wanted should not be sent on the strength of a precedence rule. */
+  it("does not tell the browser it may not be framed", async () => {
+    const response = await request(createPreviewServer(proxy)).get(
+      `/preview/${PROJECT}/`,
+    );
+
+    expect(response.headers["x-frame-options"]).toBeUndefined();
+  });
+
   /** Helmet's default would set `Cross-Origin-Resource-Policy: same-origin`,
    *  which stops the editor framing the preview at all. */
   it("does not block being framed by the editor", async () => {

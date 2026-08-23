@@ -44,6 +44,13 @@ export function createPreviewServer(previewProxy: PreviewProxy): Server {
       crossOriginEmbedderPolicy: false,
       // Framed by the editor, which is a different origin by design.
       crossOriginResourcePolicy: false,
+      // Same reason, and it can only do harm here: being framed by the editor
+      // is the point. `X-Frame-Options: SAMEORIGIN` says the opposite, and
+      // while a browser is meant to ignore it when the response also carries
+      // CSP `frame-ancestors` — which the preview route sets, naming the
+      // editor — a header that contradicts the one that matters is not worth
+      // relying on a precedence rule for.
+      frameguard: false,
     }),
   );
 
