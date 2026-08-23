@@ -28,6 +28,7 @@ vi.mock("../service/projectAccessService.js", () => projectAccessService);
 vi.mock("../service/fileTreeService.js", () => fileTreeService);
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  extendLogContext: vi.fn(),
 }));
 
 import {

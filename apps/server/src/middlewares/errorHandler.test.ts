@@ -13,6 +13,7 @@ import {
 
 vi.mock("../lib/logger.js", () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+  extendLogContext: vi.fn(),
 }));
 
 interface Captured {

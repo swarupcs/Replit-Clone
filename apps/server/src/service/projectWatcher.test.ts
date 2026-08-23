@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { projectRoot } from "../utils/projectPaths.js";
 import { retainProjectWatcher } from "./projectWatcher.js";
@@ -8,7 +9,7 @@ const root = projectRoot(PROJECT);
 
 const releases: (() => void)[] = [];
 
-function watch(onChange: () => void): () => void {
+function watch(onChange: (changedFiles: string[]) => void): () => void {
   const release = retainProjectWatcher(PROJECT, onChange);
   releases.push(release);
   return release;
@@ -37,6 +38,26 @@ describe("retainProjectWatcher", () => {
     // Five writes used to mean five broadcasts, each triggering a full tree
     // refetch in every connected client.
     expect(calls).toBeLessThan(5);
+  });
+
+  /** The container touch needs WHICH files changed, or it would have to
+   *  touch the whole tree — one exec per save is only cheap when it names
+   *  the save's files. */
+  it("reports the burst's files, project-relative and POSIX", async () => {
+    await fs.mkdir(`${root}/src`, { recursive: true });
+    const calls: string[][] = [];
+    watch((changedFiles) => calls.push(changedFiles));
+    await settle(300);
+
+    await fs.writeFile(`${root}/src${path.sep}App.tsx`, "x");
+    await fs.writeFile(`${root}/index.html`, "x");
+    await settle(1500);
+
+    expect(calls).toHaveLength(1);
+    // Backslashes from the host watcher would be directory separators that
+    // do not exist inside the Linux container.
+    expect(calls[0]).toContain("src/App.tsx");
+    expect(calls[0]).toContain("index.html");
   });
 
   it("ignores changes under directories the tree never shows", async () => {
@@ -80,6 +101,28 @@ describe("retainProjectWatcher", () => {
     await settle(1200);
 
     expect(calls).toBe(0);
+  });
+
+  /** State that belongs to the WATCH rather than to a socket — the record of
+   *  which changes the server caused itself — is dropped on this answer. Two
+   *  tabs release twice, and dropping it on the first would let the loop that
+   *  record prevents run for the tab still open. */
+  it("reports whether the release was the last one", async () => {
+    await fs.mkdir(root, { recursive: true });
+    const first = watch(() => undefined);
+    const second = watch(() => undefined);
+
+    expect(first()).toBe(false);
+    expect(second()).toBe(true);
+  });
+
+  it("does not call a repeated release the last one", async () => {
+    await fs.mkdir(root, { recursive: true });
+    const release = watch(() => undefined);
+    watch(() => undefined);
+
+    expect(release()).toBe(false);
+    expect(release()).toBe(false);
   });
 
   it("survives a release being called twice", async () => {

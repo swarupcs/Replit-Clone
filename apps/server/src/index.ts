@@ -30,6 +30,10 @@ import {
 } from "./service/previewRefresh.js";
 import { reportExternalChanges } from "./service/collabWatch.js";
 import { touchFilesInContainer } from "./service/containerTouch.js";
+import {
+  forgetTouchEchoes,
+  withoutOurOwnTouches,
+} from "./service/touchEcho.js";
 import { flushAllDocs, setDocSaveListener } from "./service/collabService.js";
 import { startAccessWatch, watchAccess } from "./service/accessWatch.js";
 import { installSocketAuth } from "./middlewares/socketAuth.js";
@@ -169,7 +173,15 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
   // One watcher per project, shared by every tab. It used to be created per
   // connection, so two tabs meant two recursive watchers over the same tree and
   // two refetch broadcasts per change.
-  const releaseWatcher = retainProjectWatcher(projectId, (changedFiles) => {
+  const releaseWatcher = retainProjectWatcher(projectId, (reported) => {
+    // Our own `touch` below lands on the host file too, so it comes back
+    // through this same watcher as a change to the files we just touched.
+    // Acting on that is a loop with no exit, and it ran: the tree refetched
+    // forever, and the preview reloaded so often the dev server never finished
+    // recompiling. Echoes are recognised and spent here rather than answered.
+    const changedFiles = withoutOurOwnTouches(projectId, reported);
+    if (changedFiles.length === 0) return;
+
     editorNamespace.to(projectId).emit("treeChanged");
 
     // The preview reloads too — on a bind mount that swallows inotify, this
@@ -212,7 +224,9 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
 
   socket.on("disconnect", () => {
     detach(projectId);
-    releaseWatcher();
+    // Only once nobody is watching any more: the echoes belong to the watch,
+    // not to this socket, and another tab may still be reading them.
+    if (releaseWatcher()) forgetTouchEchoes(projectId);
     releaseAccessWatch();
   });
 });

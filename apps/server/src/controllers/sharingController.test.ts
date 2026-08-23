@@ -17,6 +17,7 @@ vi.mock("../service/projectAccessService.js", () => access);
 vi.mock("../lib/prisma.js", () => ({ prisma: { project: { findUnique } } }));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  extendLogContext: vi.fn(),
 }));
 
 import {

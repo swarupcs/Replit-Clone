@@ -21,6 +21,7 @@ vi.mock("../utils/projectPaths.js", async (importOriginal) => ({
 }));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  extendLogContext: vi.fn(),
 }));
 
 import {

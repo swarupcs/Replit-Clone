@@ -31,6 +31,7 @@ vi.mock("../lib/prisma.js", () => ({ prisma: { project: { findUnique } } }));
 vi.mock("./fileTreeService.js", () => ({ buildFileTree }));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  extendLogContext: vi.fn(),
 }));
 
 import {

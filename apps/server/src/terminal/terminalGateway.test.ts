@@ -49,6 +49,7 @@ vi.mock("../service/accessWatch.js", () => ({ watchAccess }));
 vi.mock("../lib/metrics.js", () => ({ increment: vi.fn() }));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  extendLogContext: vi.fn(),
 }));
 
 import { installTerminalGateway } from "./terminalGateway.js";

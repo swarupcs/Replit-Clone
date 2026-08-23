@@ -12,6 +12,7 @@ vi.mock("../service/oauthService.js", () => oauthService);
 vi.mock("../service/refreshTokenService.js", () => ({ issueRefreshToken }));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  extendLogContext: vi.fn(),
 }));
 
 import { githubCallback, githubStart, githubStatus } from "./oauthController.js";

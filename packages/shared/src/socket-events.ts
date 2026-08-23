@@ -230,6 +230,12 @@ export interface ServerToClientEvents {
    *  directly, and dev servers compile on request, so the fresh render is
    *  built from what is on disk now. */
   previewChanged: () => void;
+  /** The dev server answered the preview with an error — a compile failure,
+   *  most often. Sent once per bout, not per failing request, and only for
+   *  the page itself; asset traffic cannot flip this. */
+  previewError: (payload: { status: number }) => void;
+  /** The dev server is answering normally again after a reported error. */
+  previewRecovered: () => void;
   /** Container resource use, in reply to statsRequest. */
   containerStats: (payload: ContainerStats) => void;
   /** Results for the most recent `search`. `truncated` means a limit stopped

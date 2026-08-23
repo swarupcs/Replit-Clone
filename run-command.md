@@ -1,4 +1,6 @@
-cd apps/server && npx tsx watch src/index.ts
+cd apps/server
+npx tsx watch src/index.ts
 
-
-cd apps/web && npx vite
+cd apps/web
+npx vite
+```

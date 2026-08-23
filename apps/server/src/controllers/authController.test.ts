@@ -39,6 +39,7 @@ vi.mock("../lib/mailer.js", () => ({
 }));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  extendLogContext: vi.fn(),
 }));
 vi.mock("argon2", () => ({
   default: { hash: vi.fn().mockResolvedValue("argon2-hash"), argon2id: 2 },

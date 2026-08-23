@@ -8,6 +8,7 @@ import express from "express";
 import { Server as SocketIoServer } from "socket.io";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createPreviewProxy, installPreviewUpgrade, previewGuard } from "./preview.js";
+import { errorHandler } from "../middlewares/errorHandler.js";
 import { installTerminalGateway } from "../terminal/terminalGateway.js";
 import {
   PREVIEW_COOKIE_NAME,
@@ -99,8 +100,16 @@ function close(instance: HttpServer | undefined): Promise<void> {
 }
 
 beforeAll(async () => {
-  devServer = createServer((_req, res) => {
-    res.writeHead(200, { "Content-Type": "text/html" });
+  devServer = createServer((req, res) => {
+    const headers: Record<string, string> = { "Content-Type": "text/html" };
+    // The stand-in for a compromised sandbox: markup that tries to relax the
+    // framing policy and smuggle in a permissive CSP of its own.
+    if (req.url?.includes("hostile")) {
+      headers["Content-Security-Policy"] =
+        "frame-ancestors *; base-uri *; object-src *";
+      headers["X-Frame-Options"] = "DENY";
+    }
+    res.writeHead(200, headers);
     res.end("<h1>dev server</h1>");
   });
   const devPort = await listen(devServer);
@@ -128,6 +137,9 @@ beforeAll(async () => {
 
   const previewProxy = createPreviewProxy();
   app.use("/preview/:projectId", previewGuard, previewProxy);
+  // As in index.ts, so error responses go through OUR handler — Express's own
+  // finalhandler would replace the guard's CSP with `default-src 'none'`.
+  app.use(errorHandler);
 
   installTerminalGateway(server);
   installPreviewUpgrade(server, previewProxy);
@@ -245,7 +257,20 @@ const openSockets: net.Socket[] = [];
  *  never happens and the test passes for the wrong reason. A browser holds the
  *  connection open, so this does too.
  */
-function get(path: string, headers: Record<string, string> = {}): Promise<number> {
+async function get(path: string, headers: Record<string, string> = {}): Promise<number> {
+  const status = await getResponse(path, headers).then((response) =>
+    /^HTTP\/1\.1 (\d{3})/.exec(response)?.[1],
+  );
+  if (!status) throw new Error("no status line in the response");
+  return Number(status);
+}
+
+/** The same request as `get`, but returns the whole response — headers
+ *  included, which is what the CSP assertions need to see. */
+async function getResponse(
+  path: string,
+  headers: Record<string, string> = {},
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = net.connect(port, "127.0.0.1");
     openSockets.push(socket);
@@ -266,10 +291,7 @@ function get(path: string, headers: Record<string, string> = {}): Promise<number
 
     socket.on("data", (chunk: Buffer) => {
       response += chunk.toString("utf8");
-      // The status line is all this needs; the body is the stand-in dev
-      // server's and says nothing about routing.
-      const status = /^HTTP\/1\.1 (\d{3})/.exec(response)?.[1];
-      if (status && response.includes("\r\n\r\n")) resolve(Number(status));
+      if (response.includes("\r\n\r\n")) resolve(response);
     });
 
     socket.on("close", () => {
@@ -405,5 +427,41 @@ describe("upgrade routing", () => {
     const { response } = await rawUpgrade("/terminal?projectId=../../etc");
 
     expect(response).toContain("401 Unauthorized");
+  });
+});
+
+describe("preview CSP", () => {
+  /** The one CSP header a preview response carries, out of the raw response. */
+  function cspHeader(response: string): string[] {
+    return [...response.matchAll(/content-security-policy: ?([^\r\n]*)/gi)].map(
+      (match) => match[1] ?? "",
+    );
+  }
+
+  it("answers hostile dev-server markup with the platform's CSP, not the sandbox's", async () => {
+    const response = await getResponse(`/preview/${PROJECT}/hostile.html`, {
+      Cookie: previewCookie(),
+    });
+
+    // Exactly one CSP — ours — and every directive in it is the platform's.
+    const headers = cspHeader(response);
+    expect(headers).toHaveLength(1);
+    expect(headers[0]).toContain("frame-ancestors 'self'");
+    expect(headers[0]).toContain("base-uri 'self'");
+    expect(headers[0]).toContain("object-src 'none'");
+    // The sandbox's attempts to speak for itself are dropped, headers and all.
+    expect(headers[0]).not.toContain("frame-ancestors *");
+    expect(response).not.toMatch(/x-frame-options/i);
+  });
+
+  it("carries the same CSP on responses the guard answers itself", async () => {
+    // No cookie: the guard refuses before the proxy is ever reached, and its
+    // refusal is still a document served into the editor's iframe.
+    const response = await getResponse(`/preview/${PROJECT}/`);
+
+    expect(await get(`/preview/${PROJECT}/`)).toBe(401);
+    const headers = cspHeader(response);
+    expect(headers).toHaveLength(1);
+    expect(headers[0]).toContain("object-src 'none'");
   });
 });

@@ -76,7 +76,11 @@ in the server joins a client string onto a host path.
   image (`images/`): a non-root `sandbox` user, on a dedicated sandbox bridge
   network (`replit-clone-sandbox`) separate from the host's default bridge —
   no ports are published to the host in the default mode; the preview proxy is
-  the only way in.
+  the only way in. Each preview response carries the platform's CSP
+  (`frame-ancestors` limited to the editor, `base-uri 'self'`,
+  `object-src 'none'`), and the sandbox's own CSP/X-Frame-Options headers are
+  dropped — defense in depth against a compromised sandbox serving hostile
+  markup into the IDE's iframe.
 - Containers are capped: memory, CPUs, a global concurrency limit, a
   per-user limit, and an idle reaper (`containers/containerManager.ts`).
 - The terminal is a shell *inside that container*, reached by a WebSocket

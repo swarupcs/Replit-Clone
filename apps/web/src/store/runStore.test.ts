@@ -34,4 +34,32 @@ describe("runStore preview nonces", () => {
     expect(state.contentNonce).toBe(0);
     expect(state.state.status).toBe("idle");
   });
+
+  describe("preview health", () => {
+    it("records a dev-server error until recovery", () => {
+      useRunStore.getState().setPreviewError(500);
+      expect(useRunStore.getState().previewError).toBe(500);
+
+      useRunStore.getState().setPreviewError(null);
+      expect(useRunStore.getState().previewError).toBeNull();
+    });
+
+    /** A restart is a fresh dev server; a stale error must not linger over
+     *  the pane while the new one comes up. */
+    it("clears the error when the preview becomes ready again", () => {
+      useRunStore.getState().setPreviewError(500);
+
+      useRunStore.getState().markPreviewReady();
+
+      expect(useRunStore.getState().previewError).toBeNull();
+    });
+
+    it("clears the error on reset", () => {
+      useRunStore.getState().setPreviewError(500);
+
+      useRunStore.getState().reset();
+
+      expect(useRunStore.getState().previewError).toBeNull();
+    });
+  });
 });

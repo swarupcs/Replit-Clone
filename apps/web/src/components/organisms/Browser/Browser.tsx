@@ -81,6 +81,7 @@ export const Browser = ({ projectId }: BrowserProps) => {
   /** Bumped by the server the moment the dev server answers its port. */
   const readyNonce = useRunStore((store) => store.readyNonce);
   const contentNonce = useRunStore((store) => store.contentNonce);
+  const previewError = useRunStore((store) => store.previewError);
   const [autoReload, setAutoReload] = useState(true);
 
   /** Which container port to preview. A project often serves more than one
@@ -241,6 +242,33 @@ export const Browser = ({ projectId }: BrowserProps) => {
           />
         </Tooltip>
       </div>
+
+      {/* The dev server answered the page with an error — a compile failure,
+          most often. Said here so a broken save is never mistaken for an
+          ignored one; the Output pane carries the compiler's own message. */}
+      {previewError !== null && (
+        <div
+          role="alert"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 12px",
+            fontSize: 12,
+            color: "var(--rc-red)",
+            background: "var(--rc-surface-sunken)",
+            borderBottom: "1px solid var(--rc-border)",
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>
+            The dev server returned an error
+            {previewError ? ` (HTTP ${String(previewError)})` : ""}.
+          </span>
+          <span style={{ color: "var(--rc-text-subtle)" }}>
+            Your latest changes may not compile — see the Output pane.
+          </span>
+        </div>
+      )}
 
       {/* Checkerboard ground so a transparent or short page is visibly the
           preview surface rather than an empty pane. */}

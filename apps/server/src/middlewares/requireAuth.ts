@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { verifyAccessToken } from "../service/tokenService.js";
 import { UnauthorizedError } from "../utils/errors.js";
+import { extendLogContext } from "../lib/logger.js";
 
 export interface AuthContext {
   userId: string;
@@ -36,6 +37,9 @@ export function requireAuth(
   try {
     const claims = verifyAccessToken(header.slice("Bearer ".length));
     authContexts.set(req, { userId: claims.sub, email: claims.email });
+    // Everything this request logs from here on says who it was for — the
+    // piece a correlation id alone cannot supply.
+    extendLogContext({ userId: claims.sub });
     next();
   } catch (error) {
     next(error);

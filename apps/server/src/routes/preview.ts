@@ -1,4 +1,4 @@
-import type { IncomingMessage, Server } from "node:http";
+import { type IncomingMessage, Agent, Server } from "node:http";
 import type { Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
@@ -13,6 +13,7 @@ import { getTemplate } from "../templates/registry.js";
 import { PREVIEW_COOKIE_NAME, verifyPreviewToken } from "../service/tokenService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
 import { UnauthorizedError } from "../utils/errors.js";
+import { noteHmrClosed, noteHmrOpen } from "../service/hmrSockets.js";
 import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { increment } from "../lib/metrics.js";
@@ -45,8 +46,28 @@ async function expectsPreviewBase(projectId: string): Promise<boolean> {
   return getTemplate(project.template).expectsPreviewBase;
 }
 
-/** Restricts who may frame a preview. `self` covers opening one in its own tab. */
-const frameAncestors = `frame-ancestors 'self' ${env.WEB_ORIGIN}`;
+/** The CSP every preview response carries — ours, never the dev server's.
+ *
+ *  The sandbox is treated as untrusted, so defense in depth means limiting what
+ *  markup it serves can do even though it runs on this origin. Only directives
+ *  that hold for EVERY template are set: a preview is an arbitrary user app
+ *  (inline scripts, eval, HMR websockets, CDN fetches), so script/connect
+ *  restrictions would break templates rather than protect anyone. What remains
+ *  still closes the moves a hostile document cannot accomplish with plain
+ *  script on this origin:
+ *
+ *  - frame-ancestors: only the editor may frame a preview; `self` covers
+ *    opening one in its own tab.
+ *  - base-uri: an injected <base> would silently redirect every relative
+ *    script and fetch in the page to a host the attacker chooses.
+ *  - object-src: plugin embeds are unused by every template and are a
+ *    classic delivery vehicle for content a script tag could not carry.
+ */
+const previewCsp = [
+  `frame-ancestors 'self' ${env.WEB_ORIGIN}`,
+  "base-uri 'self'",
+  "object-src 'none'",
+].join("; ");
 
 /** Authorises a preview request from the `preview_token` cookie.
  *
@@ -81,17 +102,29 @@ export function previewGuard(
       // this route, and the comment below about SameSite=Lax stopping a
       // third-party frame does not hold in a split deployment, where the
       // cookie is deliberately SameSite=None so it can travel to the API host.
-      res.setHeader("Content-Security-Policy", frameAncestors);
+      res.setHeader("Content-Security-Policy", previewCsp);
 
       await authorisePreview(projectId, cookies?.[PREVIEW_COOKIE_NAME]);
       await ensureContainer(projectId);
 
-      const target = await resolveTarget(
+      let target = await resolveTarget(
         projectId,
         requestedPort(req.query["port"]),
       );
       if (!target) {
-        // The container is up but nothing is listening yet. An iframe deserves
+        // One more chance before declaring the dev server down: the probe
+        // dials the container with a short timeout, and a dev server busy
+        // with a compile can miss that window. A 502 here parks the preview
+        // on a "nothing running" page that nothing ever retries, so a
+        // transient miss must not be the answer.
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        target = await resolveTarget(
+          projectId,
+          requestedPort(req.query["port"]),
+        );
+      }
+      if (!target) {
+        // The container is up but nothing is listening. An iframe deserves
         // a readable page rather than a JSON error body.
         res.status(502).type("html").send(DEV_SERVER_DOWN_HTML);
         return;
@@ -142,8 +175,14 @@ function stripCredentials(proxyReq: {
  *  at http://localhost:<port>, which only worked when the backend ran on the
  *  viewer's own machine and opened one host port per project. Containers now
  *  publish nothing at all.
+ *
+ *  `health` is told the outcome of each DOCUMENT request, so the room can be
+ *  told when the dev server starts or stops answering with errors — a compile
+ *  failure answers the page with a 5xx whatever the framework.
  */
-export function createPreviewProxy(): PreviewProxy {
+export function createPreviewProxy(health?: {
+  observe: (projectId: string, ok: boolean) => void;
+}): PreviewProxy {
   // http-proxy-middleware's handler is declared as returning Promise<void>,
   // while Express's RequestHandler is declared as returning void. Express
   // ignores a handler's return value entirely, so the two are compatible in
@@ -151,6 +190,13 @@ export function createPreviewProxy(): PreviewProxy {
   // eslint-disable-next-line @typescript-eslint/no-misused-promises
   return createProxyMiddleware<Request, Response>({
     router: (req) => targets.get(req) ?? "http://127.0.0.1:1",
+    // A connection per request. Pooled keep-alive sockets to a container's
+    // published port go stale the moment Docker Desktop's backend pauses on a
+    // bind-mount write, and the next request over them dies with ECONNRESET —
+    // which the iframe reads as "start your dev server", minutes after it was
+    // demonstrably running. The handshake per request costs a millisecond
+    // locally; the stale pool cost every reload after a save.
+    agent: new Agent({ keepAlive: false }),
     changeOrigin: true,
     // Vite's HMR socket rides this same path, but it is proxied EXPLICITLY by
     // installPreviewUpgrade (which authorises first, then calls proxy.upgrade).
@@ -184,14 +230,38 @@ export function createPreviewProxy(): PreviewProxy {
       proxyReqWs: stripCredentials,
       // Reasserted here because the proxy copies the dev server's own headers
       // onto the response, which would otherwise replace ours.
-      proxyRes: (proxyRes, _req, res) => {
+      proxyRes: (proxyRes, req, res) => {
         delete proxyRes.headers["content-security-policy"];
         delete proxyRes.headers["content-security-policy-report-only"];
         // The older header too. Browsers that still honour it would let a dev
         // server sending DENY blank the preview pane, and the project's own
         // framing policy is not the one that governs here — ours is.
         delete proxyRes.headers["x-frame-options"];
-        res.setHeader("Content-Security-Policy", frameAncestors);
+        res.setHeader("Content-Security-Policy", previewCsp);
+
+        // Only the page and its scripts decide health, and not equally:
+        //
+        // - A document that 5xxes is an error in ANY framework (Next does
+        //   this); a document that 2xxes says the page rendered.
+        // - A script that 5xxes is a compile error even when the document
+        //   itself was 200 — Vite serves the page and reports the broken
+        //   transform on the module request. A script that succeeds says
+        //   nothing: one working module is not a healthy page.
+        //
+        // Subresources load AFTER the document, so within one debounce window
+        // a failing script's `false` lands after the document's `true` and is
+        // the state that settles. Other destinations (images, fetches) never
+        // vote: a missing favicon is not a compile error.
+        if (health) {
+          const dest = req.headers["sec-fetch-dest"];
+          const projectId = (req as Request<{ projectId: string }>).params
+            .projectId;
+          const failed = (proxyRes.statusCode ?? 200) >= 500;
+          const navigates = dest === "document" || dest === "iframe";
+          if (projectId && (dest === "script" ? failed : navigates)) {
+            health.observe(projectId, !failed);
+          }
+        }
       },
       error: (error, _req, res) => {
         increment("preview_errors");
@@ -305,6 +375,24 @@ export function installPreviewUpgrade(
         // asked for /preview/<id>/... and 404.
         if (!keepPrefix) {
           req.url = stripPreviewPrefix(url.pathname, url.search, projectId);
+        }
+
+        // A Vite dev server dials back on <base>/@vite-hmr for hot updates.
+        // While that socket is connected it pushes each save to the page
+        // itself, and the preview announcer stands down so our full reload
+        // does not throw away the state the socket just preserved. Counted
+        // per connection, and released however the socket ends.
+        const isHmr = url.pathname.includes("/@vite-hmr");
+        if (isHmr) {
+          noteHmrOpen(projectId);
+          let released = false;
+          const release = () => {
+            if (released) return;
+            released = true;
+            noteHmrClosed(projectId);
+          };
+          socket.on("close", release);
+          socket.on("error", release);
         }
 
         proxy.upgrade(req as Request, socket as Socket, head);

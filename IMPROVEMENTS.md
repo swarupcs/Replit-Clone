@@ -8,7 +8,11 @@ what it is, why it matters, and where it would live._
 
 ## High value — reliability of what just broke
 
-### 1. Surface dev-server errors in the preview
+### 1. Surface dev-server errors in the preview ✅ (done)
+Done: the preview proxy reports every page/script response to a health
+announcer, which tells the project's room `previewError`/`previewRecovered`
+once per bout (debounced); the preview pane shows a banner pointing at the
+Output pane, cleared on recovery or restart.
 A save with a syntax error reloads into the framework's error overlay, but
 nothing in the Run pane or preview toolbar explains that a compile failed.
 - **What:** a compile-failed indicator on the preview pane (from run-output
@@ -16,34 +20,44 @@ nothing in the Run pane or preview toolbar explains that a compile failed.
 - **Why:** closes the loop users hit when editing broken code — the case that
   looked like "changes not reflected" in the original report.
 
-### 2. True HMR for Vite templates on Windows/macOS
-The preview now full-reloads on save everywhere, but Vite projects could keep
-component state across edits.
-- **What:** map the existing `CHOKIDAR_*` env vars in the templates'
-  `vite.config` to `server.watch` — chokidar v3 does not read those env vars
-  itself, so the current pass-through does nothing for Vite.
-- **Where:** `apps/server/templates/*-vite/vite.config.*`.
+### 2. True HMR for Vite templates on Windows/macOS ✅ (done)
+Done: the templates already mapped `CHOKIDAR_*` to `server.watch` (`e31d89c`);
+what clobbered HMR was our own `previewChanged` full reload. The proxy's
+upgrade handler now counts each project's live `/@vite-hmr` sockets
+(`service/hmrSockets.ts`), and the preview announcer stands down while any is
+connected — Vite pushes the update itself and the preview keeps its state.
+Sockets that drop fall back to the full reload automatically.
 
-### 3. Notify watchers inside the container
-Tools started manually in the terminal still rely on the inotify the bind
-mount swallows.
-- **What:** on file change, `docker exec touch` the changed files (verified to
-  work during diagnosis) alongside the preview reload, for projects whose run
-  output indicates a watcher-based tool.
-- **Where:** alongside `service/previewRefresh.ts`.
+### 3. Notify watchers inside the container ✅ (done)
+Done: the project watcher now reports WHICH files changed, and
+`service/containerTouch.ts` batches one `docker exec touch -c` per change
+window (deduped, capped at 200 files, `watchPolling`-gated so Linux hosts
+skip it) — a real write from the container's side of the mount, so inotify
+fires for terminal-started tools that read none of the polling env vars.
+`-c` keeps deletions from being resurrected.
 
 ## Medium — from the original analysis, still open
 
-### 4. Observability: structured request logging with correlation IDs
-Every recent bug (save races, run state, watcher events) lived in socket
-interactions that leave no trace to grep afterwards. This would have halved
-the diagnosis time of both bugs fixed this session.
+### 4. Observability: structured request logging with correlation IDs ✅ (done)
+Done: the HTTP half already existed (`middlewares/requestLogger.ts` over
+`lib/logger.ts`'s AsyncLocalStorage); the socket half was the gap. New
+`middlewares/socketLogger.ts` gives each admitted editor connection one
+correlation id, re-enters the log context for every inbound packet (so logs
+inside event handlers carry `requestId`/`userId`/`projectId`), and logs
+connect/disconnect; `requireAuth` now stamps `userId` into the HTTP context
+via `extendLogContext` too.
 - **Where:** a `requestLogger`/socket handshake middleware pair in
   `apps/server/src/middlewares/`, logger already in `lib/logger.ts`.
 
-### 5. CSP headers on the preview proxy
-The last open item from `docs/SECURITY.md` — defense in depth against a
-compromised sandbox serving hostile markup into the IDE origin's iframe.
+### 5. CSP headers on the preview proxy ✅ (done)
+Done: the preview now answers every response — proxied pages, the guard's own
+error pages, everything — with the platform's CSP instead of the sandbox's:
+`frame-ancestors 'self' <web origin>; base-uri 'self'; object-src 'none'`.
+Only directives that hold for every template are set (previews are arbitrary
+user apps: inline scripts, eval, HMR websockets), so the additions are the
+moves a hostile document can't do with plain script: an injected `<base>`
+redirecting every relative URL to an attacker's host, and plugin-embed
+payloads. The dev server's own CSP/X-Frame-Options are dropped as before.
 - **Where:** `apps/server/src/routes/preview.ts`.
 
 ### 6. Git panel upgrades
@@ -78,5 +92,4 @@ containers with no DB row would clean future strays automatically.
 
 ## Recommended order
 
-1 → 4 → 6: finish the preview story, pay down the debugging cost of everything
-else, then close the biggest visible feature gap.
+Items 1–5 are done. Next: 6 — close the biggest visible feature gap.

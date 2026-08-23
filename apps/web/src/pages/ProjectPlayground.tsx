@@ -243,6 +243,12 @@ export const ProjectPlayground = () => {
     editorSocketConn.on("previewChanged", () => {
       useRunStore.getState().markPreviewContentChanged();
     });
+    editorSocketConn.on("previewError", ({ status }) => {
+      useRunStore.getState().setPreviewError(status);
+    });
+    editorSocketConn.on("previewRecovered", () => {
+      useRunStore.getState().setPreviewError(null);
+    });
     editorSocketConn.on("containerStats", (stats) => {
       useRunStore.getState().setStats(stats);
     });
