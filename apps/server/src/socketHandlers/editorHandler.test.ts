@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -84,7 +85,14 @@ import { handleEditorSocketEvents } from "./editorHandler.js";
 import { docRoomName } from "./editorHandler.js";
 import { projectRoot } from "../utils/projectPaths.js";
 
-const PROJECT = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+/** Its own id, generated rather than written down.
+ *
+ *  This suite creates and deletes a real directory under PROJECTS_DIR, and so
+ *  do others. Vitest runs test files in parallel, so a literal shared with
+ *  another suite means each one's teardown deletes the other's fixtures
+ *  mid-test. See `TEST_PROJECT` in the API harness, which is the id this used
+ *  to duplicate. */
+const PROJECT: string = randomUUID();
 const USER = { sub: "11111111-1111-4111-8111-111111111111", email: "a@example.com" };
 const ROOT = projectRoot(PROJECT);
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import type { Express, RequestHandler, Request, Response } from "express";
 import cookieParser from "cookie-parser";
@@ -19,7 +20,16 @@ export const TEST_USER = {
   email: "owner@example.com",
 };
 
-export const TEST_PROJECT = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+/** A project id nobody else is using.
+ *
+ *  Generated per test MODULE, not written down. Suites that exercise real path
+ *  handling create a real directory under PROJECTS_DIR named after this, and
+ *  vitest runs test files in parallel — so a fixed id meant one suite's
+ *  teardown deleting another's fixtures mid-test, which surfaced as an upload
+ *  failing with a 500 only when the whole workspace ran at once. Fresh per
+ *  module, two suites can never name the same directory.
+ */
+export const TEST_PROJECT: string = randomUUID();
 
 export function bearer(user: { sub: string; email: string } = TEST_USER): string {
   return `Bearer ${signAccessToken(user)}`;

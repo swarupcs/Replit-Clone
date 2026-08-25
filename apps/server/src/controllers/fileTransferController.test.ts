@@ -13,6 +13,13 @@ const claimOneForSandbox = vi.hoisted(() => vi.fn());
 
 vi.mock("../service/projectService.js", () => projectService);
 vi.mock("../service/diskUsageService.js", () => diskUsageService);
+// The upload path checks the OWNER's overall budget too, and the real one
+// reaches Postgres. Unmocked it was answering out of its own fail-open
+// timeout, which made every case in this file wait on a database that is not
+// running to decide something this suite is not testing.
+vi.mock("../service/userQuotaService.js", () => ({
+  assertUserDiskQuota: vi.fn(() => Promise.resolve(undefined)),
+}));
 // Only the chown is stubbed: path resolution is the security boundary this
 // suite exists to exercise, so it stays real.
 vi.mock("../utils/projectPaths.js", async (importOriginal) => ({
