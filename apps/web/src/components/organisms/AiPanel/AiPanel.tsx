@@ -8,11 +8,12 @@ import {
   VscSparkle,
   VscStopCircle,
 } from "react-icons/vsc";
-import type {
-  AiActivity,
-  AiMessage,
-  AiProposal,
-  AiStopReason,
+import {
+  AI_MAX_MESSAGE_CHARS,
+  type AiActivity,
+  type AiMessage,
+  type AiProposal,
+  type AiStopReason,
 } from "@replit-clone/shared";
 import { useAiChatStore } from "../../../store/aiChatStore.ts";
 import {
@@ -308,6 +309,10 @@ export function AiPanel({ projectId, model }: Props) {
             className="rc-chat-input"
             rows={2}
             value={draft}
+            // The server refuses a longer question outright. Stopping it here
+            // means a paste that is too big is visibly truncated as it lands,
+            // rather than accepted, sent, and bounced.
+            maxLength={AI_MAX_MESSAGE_CHARS}
             placeholder="Ask about your code…"
             aria-label="Ask the assistant"
             onChange={(event) => setDraft(event.target.value)}

@@ -3,7 +3,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   AI_MAX_FILE_BYTES,
   AI_MAX_HISTORY,
+  AI_MAX_MESSAGE_CHARS,
   AI_MAX_PROPOSAL_BYTES,
+  AI_MAX_TRANSCRIPT_CHARS,
   type AiActivity,
   type AiEditorContext,
   type AiMessage,
@@ -471,6 +473,87 @@ async function runTool(
   };
 }
 
+/* -------------------------------------------------------------- transcript */
+
+/** The transcript, bounded and checked, in the order it will be sent.
+ *
+ *  Everything here arrives from the browser over a socket, so none of it is
+ *  trusted: the shape is checked, and both the size of one message and the size
+ *  of the whole conversation are capped. The history LIMIT bounded the number
+ *  of turns and nothing bounded their length, which left the cost of a single
+ *  question open-ended — the hourly budget counts requests, and a request that
+ *  can carry a megabyte is not a budget.
+ *
+ *  The newest message is REFUSED when it is over the ceiling, because it is the
+ *  one the user just wrote and silently sending a trimmed version of somebody's
+ *  question is worse than telling them it did not fit. Older turns are trimmed
+ *  instead: they have already been answered, and refusing the whole
+ *  conversation over something further up it would strand the user with a
+ *  thread they can no longer use.
+ */
+/** Says so, rather than cutting an earlier turn off mid-sentence. */
+const TRUNCATION_MARKER = "\n\n[earlier message truncated]";
+
+export function prepareTranscript(messages: AiMessage[]): AiMessage[] {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new BadRequestError("Ask a question first", "AI_EMPTY_REQUEST");
+  }
+
+  for (const message of messages) {
+    if (
+      typeof message?.content !== "string" ||
+      (message.role !== "user" && message.role !== "assistant")
+    ) {
+      throw new BadRequestError(
+        "That conversation is not in a shape the assistant can read",
+        "AI_BAD_REQUEST",
+      );
+    }
+  }
+
+  const newest = messages[messages.length - 1];
+  if (newest && newest.content.length > AI_MAX_MESSAGE_CHARS) {
+    throw new BadRequestError(
+      `That message is too long (the limit is ${String(AI_MAX_MESSAGE_CHARS)} ` +
+        "characters). Open the file instead — the assistant can read it.",
+      "AI_MESSAGE_TOO_LONG",
+    );
+  }
+
+  // Oldest first out, on both counts: the follow-up refers to the last few
+  // turns, so what has to go is always the front of the thread.
+  const recent = messages.slice(-AI_MAX_HISTORY).map((message) =>
+    message.content.length > AI_MAX_MESSAGE_CHARS
+      ? {
+          ...message,
+          content:
+            message.content.slice(0, AI_MAX_MESSAGE_CHARS) +
+            TRUNCATION_MARKER,
+        }
+      : message,
+  );
+
+  const kept: AiMessage[] = [];
+  let total = 0;
+
+  for (let index = recent.length - 1; index >= 0; index--) {
+    const message = recent[index];
+    if (!message) continue;
+
+    // The newest is kept whatever the running total says: it is under the
+    // per-message cap by the check above, and a question with no question in
+    // it is not worth sending.
+    if (kept.length > 0 && total + message.content.length > AI_MAX_TRANSCRIPT_CHARS) {
+      break;
+    }
+
+    kept.unshift(message);
+    total += message.content.length;
+  }
+
+  return kept;
+}
+
 /* ------------------------------------------------------------------ stream */
 
 export interface StreamOptions {
@@ -512,9 +595,9 @@ export async function streamAssistantReply(
     onProposal,
   } = options;
 
-  if (messages.length === 0) {
-    throw new BadRequestError("Ask a question first", "AI_EMPTY_REQUEST");
-  }
+  // Checked and bounded before anything is spent on it: the client is the
+  // browser, and the browser is not trusted with how large a question is.
+  const recent = prepareTranscript(messages);
 
   const anthropic = getClient();
   const system = await buildSystemPrompt(projectId, canEdit);
@@ -522,9 +605,6 @@ export async function streamAssistantReply(
     ? [READ_FILE_TOOL, PROPOSE_EDIT_TOOL]
     : [READ_FILE_TOOL];
 
-  // Oldest turns fall off the front: the follow-up almost always refers to the
-  // last few, and an unbounded transcript is an unbounded bill.
-  const recent = messages.slice(-AI_MAX_HISTORY);
   const conversation: Anthropic.Messages.MessageParam[] = recent.map(
     (message, index) => ({
       role: message.role,

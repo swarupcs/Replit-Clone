@@ -67,6 +67,25 @@ export const AI_MAX_FILE_BYTES = 80_000;
  *  the ones the follow-up refers to — always survive. */
 export const AI_MAX_HISTORY = 40;
 
+/** Largest single message the assistant will accept.
+ *
+ *  The history COUNT was bounded and the message SIZE was not, so a client
+ *  could spend an unbounded number of tokens per question — the hourly budget
+ *  counts requests, and a request has no natural ceiling. This is the ceiling.
+ *  Generous for anything typed or pasted as a question; a whole file belongs in
+ *  the editor context or behind `read_file`, both of which are capped already.
+ */
+export const AI_MAX_MESSAGE_CHARS = 20_000;
+
+/** Largest whole transcript that travels with one question.
+ *
+ *  Bounds a conversation of individually-legal messages, which `AI_MAX_HISTORY`
+ *  alone does not: forty maximum-size turns is eight hundred thousand
+ *  characters. Oldest turns are dropped to fit, the same way the history limit
+ *  drops them — the last exchanges are what a follow-up refers to.
+ */
+export const AI_MAX_TRANSCRIPT_CHARS = 120_000;
+
 /** A change the assistant would like to make, for a person to review.
  *
  *  The assistant still never writes. It proposes, the editor shows the proposal
