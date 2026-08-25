@@ -324,12 +324,25 @@ one file per round trip, so it needs a bulk-read event, an invalidation story
 for external writes, and a memory budget for large projects. That is a phase,
 not a step, and half of it would be worse than none.
 
-### Phase 5 — Test coverage for the two untested pages
-**Goal:** `ProjectPlayground.tsx` (629 lines) and `Dashboard.tsx` (560) get
-direct tests — the largest untested surface left.
-- Render with mocked socket + API; cover tab open/close, unsaved-work guard,
-  access-level downgrade, run-state transitions, project create/delete/rename.
-**Verify:** `pnpm --filter web test`.
+### Phase 5 — Test coverage for the two untested pages ✅
+**Goal:** `ProjectPlayground.tsx` and `Dashboard.tsx` — the largest untested
+surface left, and the two files `CODEBASE_ANALYSIS.md` left open.
+- `Dashboard.test.tsx` — 12 tests: listing, opening a card, filtering by name
+  *and* template, case/whitespace handling, ordering by last activity rather
+  than creation, delete-behind-a-confirmation, duplicate, share, create, and
+  staying put when create fails.
+- `ProjectPlayground.test.tsx` — 21 tests: layout toggles and their
+  persistence, sidebar view switching, every hotkey (including Ctrl+P and
+  Ctrl+Shift+P not claiming each other's chord), the palette's run commands
+  against live run state, a viewer being refused, and both banners.
+  Monaco/xterm/preview are stood in for; the socket is a fake whose captured
+  handlers deliver `projectAccess` the way the server does.
+**Verified:** typecheck, lint, 1144 tests (+33), build — all clean.
+
+Two things the tests had to be taught rather than assume: react-query hands a
+mutation function a context argument beside the variable, and access level is
+null until the server announces it, so a page rendered without that event is
+correctly read-only.
 
 ### Phase 6 — Remaining polish
 - Per-app READMEs (`apps/web`, `apps/server`) pointing at `CONTRIBUTING.md` and
@@ -360,6 +373,6 @@ afternoon.
 - [x] Phase 2 — git diff view
 - [x] Phase 3 — multiple terminals (already built; pinned with tests)
 - [x] Phase 4 — command palette
-- [ ] Phase 5 — page test coverage
+- [x] Phase 5 — page test coverage
 - [ ] Phase 6 — remaining polish
 - [ ] Phase 7 — deferred (branches, remotes, hunk staging, discard)
