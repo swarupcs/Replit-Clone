@@ -82,9 +82,10 @@ reconnect today), and side-by-side terminals rather than tabbed ones.
 
 ## Low — nice to have
 
-### 8. Per-app READMEs
-`apps/web` and `apps/server` READMEs pointing at `CONTRIBUTING.md` and
-`docs/SECURITY.md`.
+### 8. Per-app READMEs ✅ (done)
+Done: `apps/server/README.md` and `apps/web/README.md` — layout, the handful of
+conventions worth knowing before changing anything, how to run each suite, and
+pointers to `CONTRIBUTING.md` and `docs/SECURITY.md`.
 
 ### 9. E2E coverage for the new flows
 Specs for "save → preview reloads" and "EDITOR share-link redemption" would pin
@@ -103,7 +104,9 @@ garbage, and deleting them would be unrecoverable.
 
 ## Recommended order
 
-Items 1–5, 7 and 10 are done. The rest are tracked in
-`docs/REPLIT_CLONE_PLAN.md`, which supersedes this list and sequences them:
-6 (git panel) is split there into a diff view and the branch/remote work that
-needs a threat model first.
+Items 1–5, 7, 8 and 10 are done, and 6 is half done (the diff view shipped;
+branches and remotes need a threat model first). Only 9 is untouched: both
+specs need a live stack and a Docker daemon to run, and a spec that has never
+passed is a claim rather than coverage.
+
+`docs/REPLIT_CLONE_PLAN.md` supersedes this list and sequences what is left.

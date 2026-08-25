@@ -344,11 +344,28 @@ mutation function a context argument beside the variable, and access level is
 null until the server announces it, so a page rendered without that event is
 correctly read-only.
 
-### Phase 6 — Remaining polish
-- Per-app READMEs (`apps/web`, `apps/server`) pointing at `CONTRIBUTING.md` and
-  `docs/SECURITY.md` (`IMPROVEMENTS.md` #8).
-- E2E specs for save→preview-reload and EDITOR share-link redemption (#9).
-- Monaco chunk is 4 MB; evaluate `manualChunks` splitting by language worker.
+### Phase 6 — Remaining polish ✅ *(partly; one item deliberately not done)*
+- **Per-app READMEs** ✅ (`IMPROVEMENTS.md` #8). `apps/server/README.md` and
+  `apps/web/README.md`: layout, the three things to know before changing
+  anything, how to run the tests, and pointers to `CONTRIBUTING.md` and
+  `docs/SECURITY.md`. Every structural and behavioural claim in them was
+  checked against the code — one draft assertion ("container tests use a faked
+  docker client") was wrong and was corrected: the tests use hand-built
+  stand-ins typed as dockerode's `Container`, and `containerManager.ts`'s own
+  Docker calls remain covered only by the E2E suite.
+- **Monaco chunking** ✅ *already done*. `vite.config.ts` already splits monaco,
+  xterm, antd and react-icons into their own chunks, with
+  `chunkSizeWarningLimit` set just above Monaco so the warning still fires if
+  anything else grows that large. Monaco is ~4 MB self-hosted and behind the
+  lazy playground route; there is nothing further worth doing. The roadmap
+  listed this without checking — corrected.
+- **E2E specs** ❌ *not written, deliberately*. Save→preview-reload and EDITOR
+  share-link redemption both need a live stack and a Docker daemon to
+  exercise. This environment has the Docker client but no daemon
+  (`/var/run/docker.sock` absent), so a spec written here could be typechecked
+  but never once run. An end-to-end test that has never passed is not
+  coverage — it is a claim. Left for an environment with a daemon; the two
+  flows and where they belong are recorded in `IMPROVEMENTS.md` #9.
 
 ### Phase 7 — Deferred, deliberately
 Not attempted in this pass; each needs a design decision rather than an
@@ -374,5 +391,5 @@ afternoon.
 - [x] Phase 3 — multiple terminals (already built; pinned with tests)
 - [x] Phase 4 — command palette
 - [x] Phase 5 — page test coverage
-- [ ] Phase 6 — remaining polish
+- [x] Phase 6 — remaining polish (E2E specs deferred: no Docker daemon here)
 - [ ] Phase 7 — deferred (branches, remotes, hunk staging, discard)
