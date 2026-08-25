@@ -184,7 +184,8 @@ listed changed files without being able to show what changed in them.
    alone.
 6. **Editor** — done bar polish. Monaco, tabs, split panes, dirty state,
    format-on-save, project-wide search **and replace**, quick-open, diff against
-   disk, persisted settings. → **Phase 4** adds command palette + go-to-definition.
+   disk, persisted settings. → **Phase 4** added the command palette;
+   go-to-definition is scoped in §7.
 7. **Terminal** — done. Real PTY, resize, 5000-line scrollback, automatic
    reconnect with backoff, and a tab per shell with several per project.
    → **Phase 3** found this already built and pinned it with tests.
@@ -296,12 +297,32 @@ lifecycle:
 - `IMPROVEMENTS.md` #7 corrected.
 **Verified:** typecheck, lint, 1091 tests, build — all clean.
 
-### Phase 4 — Editor polish
-**Goal:** command palette and go-to-definition.
-- Command palette (Ctrl/Cmd-Shift-P) over the existing `QuickOpen` fuzzy scorer,
-  listing real commands (run, stop, save, format, toggle panels, git refresh).
-- Monaco TS worker definition provider wired for in-project navigation.
-**Verify:** tests for the command registry and fuzzy ranking.
+### Phase 4 — Command palette ✅
+**Goal, as planned:** command palette and go-to-definition. The palette
+shipped; go-to-definition turned out to be a phase of its own and moved to §7.
+- `lib/commands.ts` — new: the `Command` shape and `filterCommands`, ranking
+  over the existing fuzzy scorer against `"Category: Title"` so "git" reaches
+  "Source control: Commit". Disabled commands are kept and greyed with a
+  reason rather than hidden — a palette that silently omits "Stop" reads as a
+  missing feature. 8 tests.
+- `CommandPalette.tsx` — new: same shape as QuickOpen deliberately (modal high
+  on the page, one input, arrow navigation), since they are one gesture aimed
+  at different things. Closes before running so a command can open its own
+  dialog. 12 tests.
+- `ProjectPlayground.tsx` — 12 commands wired to the *same* handlers the
+  buttons and shortcuts use, never a second copy of the behaviour; Ctrl/Cmd
+  +Shift+P registered alongside the existing chords.
+- `test/setup.ts` — jsdom ships no `scrollIntoView`; stubbed, since any
+  keep-the-row-in-view list calls it from an effect on every render.
+**Verified:** typecheck, lint, 1111 tests (+20), build — all clean.
+
+**Why go-to-definition moved:** Monaco creates a model only when a tab is
+opened (`EditorComponent.tsx:189`), so its TS worker only ever sees files the
+user already has open — cross-file navigation would find nothing. Making it
+real needs every project source file in the worker, and the socket API reads
+one file per round trip, so it needs a bulk-read event, an invalidation story
+for external writes, and a memory budget for large projects. That is a phase,
+not a step, and half of it would be worse than none.
 
 ### Phase 5 — Test coverage for the two untested pages
 **Goal:** `ProjectPlayground.tsx` (629 lines) and `Dashboard.tsx` (560) get
@@ -324,6 +345,9 @@ afternoon.
 - **Git remotes** — push/pull/clone. Blocked on credential storage for a
   container running untrusted code. Needs a threat model first.
 - **Hunk-level staging** — needs a patch editor (see §4).
+- **Cross-file go-to-definition** — needs the project's sources in Monaco's TS
+  worker: a bulk-read socket event, invalidation on external writes, and a
+  memory budget. See Phase 4 for why it is not a one-liner.
 - **Discard / revert changes** — destructive; needs confirmation UX and an
   interaction story with live Yjs documents.
 
@@ -335,7 +359,7 @@ afternoon.
 - [x] Phase 1 — documentation truth-up
 - [x] Phase 2 — git diff view
 - [x] Phase 3 — multiple terminals (already built; pinned with tests)
-- [ ] Phase 4 — editor polish
+- [x] Phase 4 — command palette
 - [ ] Phase 5 — page test coverage
 - [ ] Phase 6 — remaining polish
 - [ ] Phase 7 — deferred (branches, remotes, hunk staging, discard)

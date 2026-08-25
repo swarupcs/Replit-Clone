@@ -35,6 +35,8 @@ import { useWorkspaceStore } from "../store/workspaceStore.ts";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
 import { QuickOpen } from "../components/organisms/QuickOpen/QuickOpen.tsx";
+import { CommandPalette } from "../components/organisms/CommandPalette/CommandPalette.tsx";
+import type { Command } from "../lib/commands.ts";
 import { EnvVarsDialog } from "../components/organisms/EnvVarsDialog/EnvVarsDialog.tsx";
 import { EditorSettingsDialog } from "../components/organisms/EditorSettingsDialog/EditorSettingsDialog.tsx";
 import { SearchPanel } from "../components/organisms/SearchPanel/SearchPanel.tsx";
@@ -79,6 +81,7 @@ export const ProjectPlayground = () => {
   const [showSidebar, setShowSidebar] = useState(restored?.showSidebar ?? true);
   const [showPanel, setShowPanel] = useState(restored?.showPanel ?? true);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** Which sidebar view is showing. */
@@ -157,6 +160,10 @@ export const ProjectPlayground = () => {
    *  itself is not the user choosing to have it open, and recording it would
    *  make this a one-time event for the life of the browser profile.
    */
+  /** Subscribed rather than read on demand, so the palette's Run entries say
+   *  what the dev server is actually doing when it opens. */
+  const runStatus = useRunStore((store) => store.state.status);
+
   const readyNonce = useRunStore((store) => store.readyNonce);
   useEffect(() => {
     if (readyNonce === 0 || !projectIdFromUrl) return;
@@ -168,10 +175,135 @@ export const ProjectPlayground = () => {
     setShowPreview(true);
   }, [readyNonce, projectIdFromUrl]);
 
+  /** What the command palette offers.
+   *
+   *  Every entry drives the same handler the button or shortcut does, rather
+   *  than a second copy of the behaviour -- the palette is another way in, not
+   *  another implementation. `keys` is display only; the shortcut itself is
+   *  registered below.
+   */
+  const commands = useMemo<Command[]>(() => {
+    const isLive = runStatus === "running" || runStatus === "starting";
+    const viewerReason = "Needs edit access";
+
+    return [
+      {
+        id: "run.toggle",
+        category: "Run",
+        title: isLive ? "Stop the dev server" : "Start the dev server",
+        enabled: canEdit && Boolean(editorSocket),
+        disabledReason: canEdit ? "Not connected" : viewerReason,
+        run: () => editorSocket?.emit(isLive ? "runStop" : "runStart"),
+      },
+      {
+        id: "run.restart",
+        category: "Run",
+        title: "Restart the dev server",
+        enabled: canEdit && Boolean(editorSocket) && runStatus !== "idle",
+        disabledReason: canEdit ? "Nothing is running" : viewerReason,
+        run: () => editorSocket?.emit("runRestart"),
+      },
+      {
+        id: "go.file",
+        category: "Go",
+        title: "Go to file…",
+        keys: "Ctrl+P",
+        run: () => setQuickOpen(true),
+      },
+      {
+        id: "view.search",
+        category: "View",
+        title: "Search across the project",
+        keys: "Ctrl+Shift+F",
+        run: () => {
+          setSidebarView("search");
+          setShowSidebar(true);
+        },
+      },
+      {
+        id: "view.files",
+        category: "View",
+        title: "Show the file tree",
+        run: () => {
+          setSidebarView("files");
+          setShowSidebar(true);
+        },
+      },
+      {
+        id: "view.git",
+        category: "Source control",
+        title: "Show source control",
+        run: () => {
+          setSidebarView("git");
+          setShowSidebar(true);
+        },
+      },
+      {
+        id: "view.sidebar",
+        category: "View",
+        title: "Toggle the sidebar",
+        keys: "Ctrl+B",
+        run: toggleSidebar,
+      },
+      {
+        id: "view.panel",
+        category: "View",
+        title: "Toggle the terminal panel",
+        keys: "Ctrl+`",
+        run: togglePanel,
+      },
+      {
+        id: "view.preview",
+        category: "View",
+        title: "Toggle the preview",
+        keys: "Ctrl+J",
+        run: togglePreview,
+      },
+      {
+        id: "file.closeTab",
+        category: "File",
+        title: "Close the active editor tab",
+        keys: "Ctrl+Alt+W",
+        run: () => {
+          const active = useOpenTabsStore.getState().activeRelPath;
+          if (active) closeActiveTab(active);
+        },
+      },
+      {
+        id: "project.env",
+        category: "Project",
+        title: "Environment variables…",
+        run: () => setEnvOpen(true),
+      },
+      {
+        id: "editor.settings",
+        category: "Editor",
+        title: "Editor settings…",
+        run: () => setSettingsOpen(true),
+      },
+    ];
+  }, [
+    canEdit,
+    closeActiveTab,
+    editorSocket,
+    runStatus,
+    togglePanel,
+    togglePreview,
+    toggleSidebar,
+  ]);
+
   useHotkeys(
     useMemo(
       () => [
         { key: "p", mod: true, handler: () => setQuickOpen(true) },
+        {
+          // Distinct from the Ctrl+P above: useHotkeys matches shift exactly,
+          // so the two cannot claim each other's chord whatever the order.
+          key: "p",
+          mod: true,
+          shift: true,
+          handler: () => setPaletteOpen(true),
+        },
         {
           key: "f",
           mod: true,
@@ -611,6 +743,12 @@ export const ProjectPlayground = () => {
       </div>
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        commands={commands}
+      />
 
       <EditorSettingsDialog
         open={settingsOpen}
