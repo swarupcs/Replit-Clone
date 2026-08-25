@@ -1,4 +1,5 @@
 import type {
+  GitBranch,
   GitChange,
   GitChangeState,
   GitCommit,
@@ -13,7 +14,12 @@ const APP_DIR = "/home/sandbox/app";
 
 /** The shapes below are declared once, in the shared package, so the web app
  *  and this service cannot drift apart on what a change looks like. */
-export type { GitChange, GitCommit, GitStatus } from "@replit-clone/shared";
+export type {
+  GitBranch,
+  GitChange,
+  GitCommit,
+  GitStatus,
+} from "@replit-clone/shared";
 export type ChangeState = GitChangeState;
 
 /** Maps one half of a porcelain status code to a state.
@@ -272,4 +278,125 @@ export async function history(
   if (exitCode !== 0) return [];
 
   return parseLog(stdout);
+}
+
+/** Parses `git branch --format=%(refname:short)%00%(HEAD)`.
+ *
+ *  NUL between the name and the marker, because a branch name may contain
+ *  almost anything git's ref rules allow -- including spaces -- and splitting
+ *  on one would corrupt those names.
+ *
+ *  A detached HEAD is skipped: git lists it as "(HEAD detached at abc1234)",
+ *  which is a state rather than a branch and cannot be switched to by name.
+ */
+export function parseBranches(raw: string): GitBranch[] {
+  const branches: GitBranch[] = [];
+
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+
+    const [name = "", marker = ""] = line.split("\0");
+    if (!name || name.startsWith("(")) continue;
+
+    branches.push({ name, current: marker.trim() === "*" });
+  }
+
+  return branches;
+}
+
+/** Every local branch, current one marked. */
+export async function branches(projectId: string): Promise<GitBranch[]> {
+  if (!(await isRepo(projectId))) return [];
+
+  const { stdout, exitCode } = await git(projectId, [
+    "branch",
+    "--format=%(refname:short)%00%(HEAD)",
+  ]);
+
+  // An unborn branch has no refs yet, so `branch` lists nothing.
+  if (exitCode !== 0) return [];
+
+  return parseBranches(stdout);
+}
+
+/** Rejects a name git would refuse, or that would be read as a flag.
+ *
+ *  `git check-ref-format` is the authority, so this asks git rather than
+ *  reimplementing its rules -- but a leading dash has to be caught FIRST,
+ *  because such a name would be read as an option by the very command asked
+ *  to validate it.
+ */
+export async function assertValidBranchName(
+  projectId: string,
+  name: string,
+): Promise<void> {
+  if (!name || name.startsWith("-")) {
+    throw new BadRequestError("That is not a usable branch name");
+  }
+
+  // No `--` here: check-ref-format does not accept one, and treats it as the
+  // name being checked. The leading-dash guard above is what makes that safe.
+  const { exitCode } = await git(projectId, ["check-ref-format", "--branch", name]);
+
+  if (exitCode !== 0) {
+    throw new BadRequestError("That is not a usable branch name");
+  }
+}
+
+/** Creates a branch at HEAD and switches to it. */
+export async function createBranch(
+  projectId: string,
+  name: string,
+): Promise<void> {
+  await assertValidBranchName(projectId, name);
+
+  // The `--` goes AFTER the name: it means "no pathspecs follow", which is
+  // what disambiguates a branch from a file. Putting it before would make git
+  // read the name as a pathspec instead.
+  const { stderr, stdout, exitCode } = await git(projectId, [
+    "checkout",
+    "-b",
+    name,
+    "--",
+  ]);
+
+  if (exitCode !== 0) {
+    const message = (stderr || stdout).trim().split("\n")[0] ?? "git failed";
+    throw new BadRequestError(message, "GIT_FAILED");
+  }
+}
+
+/** Switches to an existing branch, but only from a clean worktree.
+ *
+ *  git itself is more permissive: it carries uncommitted changes across when
+ *  they do not conflict. That is a footgun in an editor where the files are
+ *  also open in other people's tabs -- edits silently follow you onto another
+ *  branch and get committed there. Refusing is the honest answer, and the
+ *  message says what to do about it.
+ */
+export async function switchBranch(
+  projectId: string,
+  name: string,
+): Promise<void> {
+  await assertValidBranchName(projectId, name);
+
+  const current = await status(projectId);
+  if (current.changes.length > 0) {
+    throw new BadRequestError(
+      "Commit or discard your changes before switching branch",
+      "WORKTREE_DIRTY",
+    );
+  }
+
+  // `--` after the name, not before -- see createBranch.
+  const { stderr, stdout, exitCode } = await git(projectId, [
+    "checkout",
+    name,
+    "--",
+  ]);
+
+  if (exitCode !== 0) {
+    const message = (stderr || stdout).trim().split("\n")[0] ?? "git failed";
+    throw new BadRequestError(message, "GIT_FAILED");
+  }
 }

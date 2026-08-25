@@ -1,5 +1,8 @@
 import type {
   ApiSuccess,
+  GitBranch,
+  GitBranchResponse,
+  GitBranchesResponse,
   GitCommit,
   GitCommitResponse,
   GitDiffResponse,
@@ -283,6 +286,30 @@ export const getGitLogApi = async (
   const response = await axios.get<GitLogResponse>(
     `/api/v1/projects/${projectId}/git/log`,
     { params: { limit } },
+  );
+  return response.data.data;
+};
+
+export const getGitBranchesApi = async (
+  projectId: string,
+): Promise<GitBranch[]> => {
+  const response = await axios.get<GitBranchesResponse>(
+    `/api/v1/projects/${projectId}/git/branches`,
+  );
+  return response.data.data;
+};
+
+/** Switches to `name`, or creates it at HEAD when `create` is set. Answers with
+ *  both the new status and the new branch list, so the panel redraws from one
+ *  round trip. */
+export const gitBranchApi = async (
+  projectId: string,
+  name: string,
+  create = false,
+): Promise<{ status: GitStatus; branches: GitBranch[] }> => {
+  const response = await axios.post<GitBranchResponse>(
+    `/api/v1/projects/${projectId}/git/branch`,
+    { name, create },
   );
   return response.data.data;
 };

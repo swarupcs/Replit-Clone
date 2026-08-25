@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLog, parseStatus } from "./gitService.js";
+import { parseBranches, parseLog, parseStatus } from "./gitService.js";
 
 /** Builds a NUL-terminated porcelain payload the way git actually emits it. */
 function porcelain(...entries: string[]): string {
@@ -175,5 +175,49 @@ describe("parseLog", () => {
 
   it("returns nothing for empty output", () => {
     expect(parseLog("")).toEqual([]);
+  });
+});
+
+describe("parseBranches", () => {
+  /** Builds what `git branch --format=%(refname:short)%00%(HEAD)` emits. */
+  function listing(...entries: [string, boolean][]): string {
+    return entries.map(([name, current]) => `${name}\0${current ? "*" : " "}`).join("\n");
+  }
+
+  it("reads names and marks the current branch", () => {
+    const branches = parseBranches(listing(["main", true], ["feature", false]));
+    expect(branches).toEqual([
+      { name: "main", current: true },
+      { name: "feature", current: false },
+    ]);
+  });
+
+  it("returns nothing for an empty listing", () => {
+    expect(parseBranches("")).toEqual([]);
+  });
+
+  it("keeps a name containing a space", () => {
+    // git allows it, so splitting on whitespace would corrupt the name.
+    const branches = parseBranches(listing(["feat/two words", false]));
+    expect(branches[0]?.name).toBe("feat/two words");
+  });
+
+  it("keeps slashes and dots in a name", () => {
+    const branches = parseBranches(listing(["release/1.2.x", false]));
+    expect(branches[0]?.name).toBe("release/1.2.x");
+  });
+
+  it("skips a detached HEAD, which is a state rather than a branch", () => {
+    const branches = parseBranches(listing(["(HEAD detached at abc1234)", true]));
+    expect(branches).toEqual([]);
+  });
+
+  it("ignores blank lines", () => {
+    expect(parseBranches("\n\n")).toEqual([]);
+  });
+
+  it("marks nothing current when none is", () => {
+    const branches = parseBranches(listing(["main", false]));
+    expect(branches[0]?.current).toBe(false);
   });
 });

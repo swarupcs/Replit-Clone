@@ -87,6 +87,12 @@ export interface GitStatus {
   changes: GitChange[];
 }
 
+export interface GitBranch {
+  name: string;
+  /** True for the branch HEAD is on. */
+  current: boolean;
+}
+
 export interface GitCommit {
   hash: string;
   shortHash: string;
@@ -100,6 +106,17 @@ export type GitStatusResponse = ApiSuccess<GitStatus>;
 
 /** GET /api/v1/projects/:projectId/git/log */
 export type GitLogResponse = ApiSuccess<GitCommit[]>;
+
+/** GET /api/v1/projects/:projectId/git/branches */
+export type GitBranchesResponse = ApiSuccess<GitBranch[]>;
+
+/** POST /api/v1/projects/:projectId/git/branch — create, or switch to, a
+ *  branch. Both answer with the resulting status so the panel can redraw from
+ *  one round trip. */
+export type GitBranchResponse = ApiSuccess<{
+  status: GitStatus;
+  branches: GitBranch[];
+}>;
 
 /** GET /api/v1/projects/:projectId/git/diff */
 export type GitDiffResponse = ApiSuccess<{

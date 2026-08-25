@@ -37,6 +37,8 @@ const api = vi.hoisted(() => ({
   getGitStatusApi: vi.fn(),
   getGitLogApi: vi.fn(),
   getGitDiffApi: vi.fn(),
+  getGitBranchesApi: vi.fn(),
+  gitBranchApi: vi.fn(),
   gitStageApi: vi.fn(),
   gitUnstageApi: vi.fn(),
   gitCommitApi: vi.fn(),
@@ -45,7 +47,24 @@ const api = vi.hoisted(() => ({
 
 vi.mock("../../../apis/projects.ts", () => api);
 
-const { getGitStatusApi, getGitLogApi, getGitDiffApi } = api;
+const { getGitStatusApi, getGitLogApi, getGitDiffApi, getGitBranchesApi, gitBranchApi } =
+  api;
+
+const BRANCHES = [
+  { name: "main", current: true },
+  { name: "feature", current: false },
+];
+
+/** antd's static `message` renders through its own portal and needs app
+ *  context, so what it was ASKED to say is asserted instead of what it drew. */
+const messageError = vi.hoisted(() => vi.fn());
+vi.mock("antd", async () => {
+  const actual = await vi.importActual<typeof import("antd")>("antd");
+  return {
+    ...actual,
+    message: { ...actual.message, error: messageError },
+  };
+});
 
 const emitted: { event: string; payload: unknown }[] = [];
 
@@ -54,6 +73,14 @@ beforeEach(() => {
   getGitStatusApi.mockResolvedValue(STATUS);
   getGitLogApi.mockResolvedValue([]);
   getGitDiffApi.mockResolvedValue(PATCH);
+  getGitBranchesApi.mockResolvedValue(BRANCHES);
+  gitBranchApi.mockResolvedValue({
+    status: { ...STATUS, branch: "feature" },
+    branches: [
+      { name: "main", current: false },
+      { name: "feature", current: true },
+    ],
+  });
 
   useEditorSocketStore.setState({
     editorSocket: {
@@ -172,5 +199,112 @@ describe("SourceControlPanel diffs", () => {
     fireEvent.click(screen.getByText("App.tsx"));
 
     expect(await screen.findByText("is now this")).toBeDefined();
+  });
+});
+
+describe("SourceControlPanel branches", () => {
+  /** Opens the branch picker, which is the current branch's own button. */
+  async function openPicker() {
+    await renderPanel();
+    fireEvent.click(screen.getByLabelText("Switch branch"));
+  }
+
+  it("shows the current branch", async () => {
+    await renderPanel();
+    expect(screen.getByLabelText("Switch branch").textContent).toContain("main");
+  });
+
+  it("lists the other branches, but not the current one", async () => {
+    await openPicker();
+
+    expect(await screen.findByText("feature")).toBeDefined();
+    // "main" is the button's own label, not a menu entry to switch to.
+    expect(screen.getAllByText("main")).toHaveLength(1);
+  });
+
+  it("switches when one is picked", async () => {
+    await openPicker();
+    fireEvent.click(await screen.findByText("feature"));
+
+    await waitFor(() => {
+      expect(gitBranchApi).toHaveBeenCalledWith(PROJECT, "feature", false);
+    });
+  });
+
+  it("shows the new branch as current afterwards", async () => {
+    await openPicker();
+    fireEvent.click(await screen.findByText("feature"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Switch branch").textContent).toContain(
+        "feature",
+      );
+    });
+  });
+
+  it("reports the server's reason for refusing, not the status code", async () => {
+    gitBranchApi.mockRejectedValue({
+      response: {
+        data: {
+          message: "Commit or discard your changes before switching branch",
+        },
+      },
+    });
+
+    await openPicker();
+    fireEvent.click(await screen.findByText("feature"));
+
+    await waitFor(() => {
+      expect(messageError).toHaveBeenCalledWith(
+        "Commit or discard your changes before switching branch",
+      );
+    });
+  });
+
+  it("falls back to its own wording when the server sent no message", async () => {
+    gitBranchApi.mockRejectedValue(new Error("Network Error"));
+
+    await openPicker();
+    fireEvent.click(await screen.findByText("feature"));
+
+    await waitFor(() => {
+      expect(messageError).toHaveBeenCalledWith("Network Error");
+    });
+  });
+
+  it("creates a branch from the dialog", async () => {
+    await openPicker();
+    fireEvent.click(await screen.findByText("New branch…"));
+
+    fireEvent.change(
+      await screen.findByPlaceholderText("feature/what-you-are-doing"),
+      { target: { value: "feature/new" } },
+    );
+    fireEvent.click(screen.getByText("Create"));
+
+    await waitFor(() => {
+      expect(gitBranchApi).toHaveBeenCalledWith(PROJECT, "feature/new", true);
+    });
+  });
+
+  it("will not create a branch with no name", async () => {
+    await openPicker();
+    fireEvent.click(await screen.findByText("New branch…"));
+
+    fireEvent.change(
+      await screen.findByPlaceholderText("feature/what-you-are-doing"),
+      { target: { value: "   " } },
+    );
+    fireEvent.click(screen.getByText("Create"));
+
+    expect(gitBranchApi).not.toHaveBeenCalled();
+  });
+
+  it("gives a viewer no way to change branch", async () => {
+    await renderPanel(false);
+
+    expect(screen.queryByLabelText("Switch branch")).toBeNull();
+    // The branch is still shown, just not as a control.
+    expect(screen.getByText("main")).toBeDefined();
   });
 });

@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Empty, Input, Spin, Tooltip, message } from "antd";
+import {
+  Button,
+  Dropdown,
+  Empty,
+  Input,
+  Modal,
+  Spin,
+  Tooltip,
+  message,
+} from "antd";
 import {
   VscAdd,
   VscCheck,
@@ -8,14 +17,21 @@ import {
   VscRemove,
   VscSourceControl,
 } from "react-icons/vsc";
-import type { GitChange, GitCommit, GitStatus } from "@replit-clone/shared";
+import type {
+  GitBranch,
+  GitChange,
+  GitCommit,
+  GitStatus,
+} from "@replit-clone/shared";
 import { fileExtension } from "@replit-clone/shared";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { DiffView } from "./DiffView.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import {
+  getGitBranchesApi,
   getGitLogApi,
   getGitStatusApi,
+  gitBranchApi,
   gitCommitApi,
   gitInitApi,
   gitStageApi,
@@ -58,6 +74,10 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
    *  so the staged and unstaged entries for one file expand independently. */
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  const [branches, setBranches] = useState<GitBranch[]>([]);
+  /** Non-null while the "new branch" dialog is open, holding the typed name. */
+  const [newBranch, setNewBranch] = useState<string | null>(null);
+
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
   const refresh = useCallback(
@@ -66,7 +86,10 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
       try {
         const next = await getGitStatusApi(projectId);
         setStatus(next);
-        if (next.isRepo) setCommits(await getGitLogApi(projectId, 20));
+        if (next.isRepo) {
+          setCommits(await getGitLogApi(projectId, 20));
+          setBranches(await getGitBranchesApi(projectId));
+        }
       } catch {
         // A project whose container will not start should not spam the panel;
         // the empty state below already says the repository is unavailable.
@@ -102,14 +125,52 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
     };
   }, [status]);
 
+  /** The server's own message, when it sent one.
+   *
+   *  Axios turns a 400 into "Request failed with status code 400", which tells
+   *  the user nothing -- and git's refusals are the cases where the reason IS
+   *  the useful part ("commit or discard your changes before switching
+   *  branch"). The API always answers a failure with `{ message }`.
+   */
+  const reasonFrom = (error: unknown, fallback: string): string => {
+    const body = (error as { response?: { data?: { message?: unknown } } })
+      .response?.data;
+
+    if (typeof body?.message === "string" && body.message) return body.message;
+    return error instanceof Error && error.message ? error.message : fallback;
+  };
+
   const act = async (work: () => Promise<GitStatus>, failure: string) => {
     setBusy(true);
     try {
       setStatus(await work());
     } catch (error) {
-      const detail =
-        error instanceof Error && error.message ? error.message : failure;
-      void message.error(detail);
+      void message.error(reasonFrom(error, failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Switches to a branch, or creates one at HEAD.
+   *
+   *  Separate from `act` because this answers with the branch list as well as
+   *  the status, and both have to land together or the picker shows the old
+   *  branch as current.
+   */
+  const changeBranch = async (name: string, create: boolean) => {
+    setBusy(true);
+    try {
+      const result = await gitBranchApi(projectId, name, create);
+      setStatus(result.status);
+      setBranches(result.branches);
+      setNewBranch(null);
+      // Switching rewrote the worktree, so the history belongs to the new
+      // branch now.
+      setCommits(await getGitLogApi(projectId, 20));
+    } catch (error) {
+      void message.error(
+        reasonFrom(error, create ? "Could not create the branch" : "Could not switch branch"),
+      );
     } finally {
       setBusy(false);
     }
@@ -330,10 +391,46 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
           padding: "6px 8px",
         }}
       >
-        <span style={{ fontSize: 12, opacity: 0.75, flex: 1 }}>
-          {status.branch ?? "HEAD"}
-          {status.unborn ? " · no commits yet" : ""}
-        </span>
+        {canWrite ? (
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: [
+                ...branches
+                  .filter((branch) => !branch.current)
+                  .map((branch) => ({
+                    key: `switch:${branch.name}`,
+                    label: branch.name,
+                    onClick: () => {
+                      void changeBranch(branch.name, false);
+                    },
+                  })),
+                ...(branches.length > 1 ? [{ type: "divider" as const }] : []),
+                {
+                  key: "new",
+                  label: "New branch…",
+                  onClick: () => setNewBranch(""),
+                },
+              ],
+            }}
+          >
+            <button
+              type="button"
+              className="rc-icon-button"
+              style={{ flex: 1, justifyContent: "flex-start", fontSize: 12 }}
+              aria-label="Switch branch"
+              disabled={busy}
+            >
+              {status.branch ?? "HEAD"}
+              {status.unborn ? " · no commits yet" : ""}
+            </button>
+          </Dropdown>
+        ) : (
+          <span style={{ fontSize: 12, opacity: 0.75, flex: 1 }}>
+            {status.branch ?? "HEAD"}
+            {status.unborn ? " · no commits yet" : ""}
+          </span>
+        )}
         <Tooltip title="History">
           <button
             type="button"
@@ -463,6 +560,34 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
           </>
         )}
       </div>
+
+      <Modal
+        open={newBranch !== null}
+        title="New branch"
+        okText="Create"
+        okButtonProps={{ disabled: !newBranch?.trim() }}
+        confirmLoading={busy}
+        onOk={() => {
+          const name = newBranch?.trim();
+          if (name) void changeBranch(name, true);
+        }}
+        onCancel={() => setNewBranch(null)}
+        destroyOnHidden
+      >
+        <Input
+          autoFocus
+          placeholder="feature/what-you-are-doing"
+          value={newBranch ?? ""}
+          onChange={(event) => setNewBranch(event.target.value)}
+          onPressEnter={() => {
+            const name = newBranch?.trim();
+            if (name) void changeBranch(name, true);
+          }}
+        />
+        <div style={{ marginTop: 8, fontSize: 12, color: "var(--rc-text-subtle)" }}>
+          Created at the current commit, and switched to straight away.
+        </div>
+      </Modal>
     </div>
   );
 }

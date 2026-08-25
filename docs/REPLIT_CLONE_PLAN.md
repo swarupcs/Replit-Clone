@@ -151,7 +151,7 @@ Honest scoring of what a user would notice.
 | Sharing / permissions | ✅ | ✅ viewer/editor/owner + links | none |
 | Container isolation & limits | ✅ | ✅ 512 MB, 0.5 CPU, 256 PID, caps dropped | none |
 | Quotas | ✅ | ✅ per-user projects/disk/containers | none |
-| Git | ✅ full | ⚠️ status/stage/commit/log | **no diff UI, no branches, no remotes, no discard** |
+| Git | ✅ full | ✅ status/stage/commit/log/diff/branches | no remotes, no hunk staging, no discard |
 | AI assistant | ✅ | ✅ panel + apply-change | none |
 | Env vars / secrets | ✅ | ✅ injected, rebuild on change | none |
 | Package caching | ✅ | ✅ named cache volume | none |
@@ -367,11 +367,46 @@ correctly read-only.
   coverage — it is a claim. Left for an environment with a daemon; the two
   flows and where they belong are recorded in `IMPROVEMENTS.md` #9.
 
-### Phase 7 — Deferred, deliberately
-Not attempted in this pass; each needs a design decision rather than an
-afternoon.
-- **Git branches** — list/create/switch/merge. Mechanically easy; the question
-  is what happens to a dirty worktree and live shared documents on switch.
+### Phase 7 — Git branches ✅
+The deferred item whose design question turned out to have a defensible answer,
+so it was built rather than left.
+
+**The two hazards, and what was decided:**
+- *Dirty worktree.* git is permissive — it carries uncommitted changes across
+  when they do not conflict. In an editor where those files are also open in
+  other people's tabs, that means edits silently follow you onto another branch
+  and get committed there. `switchBranch` refuses unless the worktree is clean
+  and says why.
+- *Live shared documents.* A switch rewrites files under anyone with the
+  project open, and a live Yjs document still holding the old branch's text
+  would write it back over the new one. The controller calls `forgetProject`
+  after a successful switch — the same move the search-and-replace path already
+  makes — so every editor reloads from disk. It is called only on success, so a
+  refused switch costs nobody their buffer.
+
+**Shipped:** `parseBranches` + `branches`/`createBranch`/`switchBranch`/
+`assertValidBranchName` in `gitService.ts`; `GET /git/branches` and
+`POST /git/branch` (viewer to list, editor to change); shared `GitBranch`
+types; a branch picker and a new-branch dialog in the panel, with viewers
+getting the plain label they had before.
+
+Also fixed on the way through: the panel reported git's refusals as "Request
+failed with status code 400", losing the server's actual message — which for
+these is the entire point. `reasonFrom` now reads `{ message }` off the error
+body, which improves stage, unstage and commit failures too.
+
+**Two real bugs caught before they shipped**, both in git argument order:
+`git checkout -- <name>` treats the name as a *pathspec*, so it would have
+tried to discard a file rather than switch branch; and `check-ref-format
+--branch -- <name>` is a usage error that rejects every name. Verified against
+a real git repository, and corrected to `checkout <name> --` and
+`check-ref-format --branch <name>`. The leading-dash guard is what keeps
+dropping that separator safe.
+
+**Verified:** typecheck, lint, 1169 tests (+25), build — all clean.
+
+### Phase 8 — Still deferred, deliberately
+Each needs a design decision rather than an afternoon.
 - **Git remotes** — push/pull/clone. Blocked on credential storage for a
   container running untrusted code. Needs a threat model first.
 - **Hunk-level staging** — needs a patch editor (see §4).
@@ -392,4 +427,5 @@ afternoon.
 - [x] Phase 4 — command palette
 - [x] Phase 5 — page test coverage
 - [x] Phase 6 — remaining polish (E2E specs deferred: no Docker daemon here)
-- [ ] Phase 7 — deferred (branches, remotes, hunk staging, discard)
+- [x] Phase 7 — git branches
+- [ ] Phase 8 — still deferred (remotes, hunk staging, discard, go-to-definition)

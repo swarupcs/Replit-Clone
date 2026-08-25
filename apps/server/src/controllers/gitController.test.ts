@@ -10,14 +10,21 @@ const git = vi.hoisted(() => ({
   unstage: vi.fn(),
   commit: vi.fn(),
   history: vi.fn(),
+  branches: vi.fn(),
+  createBranch: vi.fn(),
+  switchBranch: vi.fn(),
 }));
+const forgetProject = vi.hoisted(() => vi.fn());
 const findUnique = vi.hoisted(() => vi.fn());
 
 vi.mock("../service/projectAccessService.js", () => projectAccessService);
 vi.mock("../service/gitService.js", () => git);
 vi.mock("../lib/prisma.js", () => ({ prisma: { user: { findUnique } } }));
+vi.mock("../service/collabService.js", () => ({ forgetProject }));
 
 import {
+  gitBranchController,
+  gitBranchesController,
   gitCommitController,
   gitDiffController,
   gitInitController,
@@ -37,6 +44,8 @@ const app = apiApp([
   { method: "post", path: "/p/:projectId/git/stage", handler: gitStageController },
   { method: "post", path: "/p/:projectId/git/unstage", handler: gitUnstageController },
   { method: "post", path: "/p/:projectId/git/commit", handler: gitCommitController },
+  { method: "get", path: "/p/:projectId/git/branches", handler: gitBranchesController },
+  { method: "post", path: "/p/:projectId/git/branch", handler: gitBranchController },
 ]);
 
 const STATUS = { branch: "main", staged: [], unstaged: [] };
@@ -45,6 +54,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   projectAccessService.assertProjectAccess.mockResolvedValue({ id: TEST_PROJECT });
   git.status.mockResolvedValue(STATUS);
+  git.branches.mockResolvedValue([{ name: "main", current: true }]);
   findUnique.mockResolvedValue({ email: TEST_USER.email });
 });
 
@@ -343,5 +353,106 @@ describe("gitStageController / gitUnstageController", () => {
     expect(response.status).toBe(200);
     expect(git.unstage).toHaveBeenCalledWith(TEST_PROJECT, ["a.txt"]);
     expect(response.body.data).toEqual(STATUS);
+  });
+});
+
+describe("branches", () => {
+  it("lists them for a viewer", async () => {
+    const response = await request(app)
+      .get(`/p/${TEST_PROJECT}/git/branches`)
+      .set(auth());
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual([{ name: "main", current: true }]);
+    expect(projectAccessService.assertProjectAccess).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      TEST_USER.sub,
+      "viewer",
+    );
+  });
+
+  it("needs editor access to create or switch", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/branch`)
+      .set(auth())
+      .send({ name: "feature" });
+
+    expect(projectAccessService.assertProjectAccess).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      TEST_USER.sub,
+      "editor",
+    );
+  });
+
+  it("switches to an existing branch by default", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/branch`)
+      .set(auth())
+      .send({ name: "feature" });
+
+    expect(git.switchBranch).toHaveBeenCalledWith(TEST_PROJECT, "feature");
+    expect(git.createBranch).not.toHaveBeenCalled();
+  });
+
+  it("creates one when asked to", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/branch`)
+      .set(auth())
+      .send({ name: "feature", create: true });
+
+    expect(git.createBranch).toHaveBeenCalledWith(TEST_PROJECT, "feature");
+    expect(git.switchBranch).not.toHaveBeenCalled();
+  });
+
+  it("drops shared documents, so none writes the old branch back", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/branch`)
+      .set(auth())
+      .send({ name: "feature" });
+
+    expect(forgetProject).toHaveBeenCalledWith(TEST_PROJECT);
+  });
+
+  it("answers with the resulting status and branch list", async () => {
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/git/branch`)
+      .set(auth())
+      .send({ name: "feature" });
+
+    expect(response.body.data.status).toEqual(STATUS);
+    expect(response.body.data.branches).toEqual([{ name: "main", current: true }]);
+  });
+
+  it("refuses a name that starts with a dash", async () => {
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/git/branch`)
+      .set(auth())
+      .send({ name: "--upload-pack=evil" });
+
+    expect(response.status).toBe(400);
+    expect(git.switchBranch).not.toHaveBeenCalled();
+    // Nothing was touched, so nothing needed dropping.
+    expect(forgetProject).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty name", async () => {
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/git/branch`)
+      .set(auth())
+      .send({ name: "   " });
+
+    expect(response.status).toBe(400);
+    expect(git.switchBranch).not.toHaveBeenCalled();
+  });
+
+  it("keeps documents when the switch itself fails", async () => {
+    git.switchBranch.mockRejectedValue(new ForbiddenError("dirty"));
+
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/branch`)
+      .set(auth())
+      .send({ name: "feature" });
+
+    expect(forgetProject).not.toHaveBeenCalled();
   });
 });

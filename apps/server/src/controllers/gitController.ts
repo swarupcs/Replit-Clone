@@ -5,6 +5,7 @@ import { assertProjectAccess } from "../service/projectAccessService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
 import { prisma } from "../lib/prisma.js";
 import * as git from "../service/gitService.js";
+import { forgetProject } from "../service/collabService.js";
 
 /** Paths come from the client, so they are constrained the same way the editor
  *  constrains them: relative, and unable to climb out of the project.
@@ -27,6 +28,24 @@ const relativePath = z
 
 const pathsSchema = z.object({ paths: z.array(relativePath).min(1).max(500) });
 const commitSchema = z.object({ message: z.string().trim().min(1).max(2000) });
+
+/** A branch name, plus whether to create it.
+ *
+ *  Only the shape is checked here -- git's own `check-ref-format` is the
+ *  authority on what a ref may be called, and the service asks it. The leading
+ *  dash is rejected at both layers because such a name would be read as an
+ *  option by the command asked to validate it. */
+const branchSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .refine((value) => !value.startsWith("-"), {
+      message: "Branch name must not start with a dash",
+    }),
+  create: z.boolean().optional(),
+});
 const diffQuerySchema = z.object({
   path: relativePath,
   staged: z
@@ -156,5 +175,50 @@ export async function gitLogController(
     success: true,
     message: "History",
     data: await git.history(projectId, limit),
+  });
+}
+
+export async function gitBranchesController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+
+  res.json({
+    success: true,
+    message: "Branches",
+    data: await git.branches(projectId),
+  });
+}
+
+/** Creates a branch, or switches to one.
+ *
+ *  One route for both because the panel does them from the same control, and
+ *  both answer with the same pair -- the resulting status and branch list --
+ *  so the panel redraws from a single round trip.
+ *
+ *  Switching rewrites the worktree under anyone with the project open, so every
+ *  shared document is dropped afterwards: a live Yjs document still holding the
+ *  old branch's text would otherwise write it back over the new one.
+ */
+export async function gitBranchController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { name, create } = branchSchema.parse(req.body ?? {});
+
+  if (create) await git.createBranch(projectId, name);
+  else await git.switchBranch(projectId, name);
+
+  forgetProject(projectId);
+
+  res.json({
+    success: true,
+    message: create ? "Branch created" : "Switched branch",
+    data: {
+      status: await git.status(projectId),
+      branches: await git.branches(projectId),
+    },
   });
 }

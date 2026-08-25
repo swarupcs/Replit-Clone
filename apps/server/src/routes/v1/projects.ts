@@ -31,6 +31,8 @@ import {
   uploadFilesController,
 } from "../../controllers/fileTransferController.js";
 import {
+  gitBranchController,
+  gitBranchesController,
   gitCommitController,
   gitDiffController,
   gitInitController,
@@ -77,6 +79,8 @@ router.get("/:projectId/ports", asyncHandler(getProjectPorts));
 router.get("/:projectId/git/status", asyncHandler(gitStatusController));
 router.get("/:projectId/git/diff", asyncHandler(gitDiffController));
 router.get("/:projectId/git/log", asyncHandler(gitLogController));
+router.get("/:projectId/git/branches", asyncHandler(gitBranchesController));
+router.post("/:projectId/git/branch", asyncHandler(gitBranchController));
 router.post("/:projectId/git/init", asyncHandler(gitInitController));
 router.post("/:projectId/git/stage", asyncHandler(gitStageController));
 router.post("/:projectId/git/unstage", asyncHandler(gitUnstageController));
