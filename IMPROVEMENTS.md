@@ -60,9 +60,17 @@ redirecting every relative URL to an attacker's host, and plugin-embed
 payloads. The dev server's own CSP/X-Frame-Options are dropped as before.
 - **Where:** `apps/server/src/routes/preview.ts`.
 
-### 6. Git panel upgrades
-Currently commit/status only. Add a diff view, branch visualization, and
-staging individual hunks.
+### 6. Git panel upgrades ✅ (mostly done)
+Done: a **diff view** — clicking a changed file expands its patch in place,
+add/delete coloured with both files' line numbers; the server had computed
+these all along and nothing ever asked for them. And **branches** — list,
+create and switch, with a switch refused unless the worktree is clean and the
+project's shared documents dropped afterwards so none writes the old branch's
+text back. Failures now report git's own message rather than the status code.
+
+Still open: staging individual **hunks**, which needs a patch editor to be
+worth anything, and **remotes** (push/pull/clone), which needs a design for
+storing credentials reachable from a container running untrusted code.
 - **Where:** `apps/web/src/components/organisms/SourceControlPanel/`,
   `apps/server/src/service/gitService.ts`.
 
@@ -104,9 +112,9 @@ garbage, and deleting them would be unrecoverable.
 
 ## Recommended order
 
-Items 1–5, 7, 8 and 10 are done, and 6 is half done (the diff view shipped;
-branches and remotes need a threat model first). Only 9 is untouched: both
-specs need a live stack and a Docker daemon to run, and a spec that has never
-passed is a claim rather than coverage.
+Items 1–5, 7, 8 and 10 are done, and 6 is mostly done — the diff view and
+branches shipped; hunk staging and remotes are what remain. Only 9 is
+untouched: both specs need a live stack and a Docker daemon to run, and a spec
+that has never passed is a claim rather than coverage.
 
 `docs/REPLIT_CLONE_PLAN.md` supersedes this list and sequences what is left.
