@@ -157,10 +157,12 @@ Honest scoring of what a user would notice.
 | Package caching | ✅ | ✅ named cache volume | none |
 | Deployment of user apps | ✅ | ❌ | out of scope (see §6) |
 
-**The gap is git.** Everything else a user touches daily is built. The server
-already computes diffs (`gitService.diff`, `GET /:id/git/diff`) — and the web
-app never calls it. That is the single largest visible hole: a source-control
-panel that lists changed files but cannot show what changed in them.
+**The gap is git.** Everything else a user touches daily is built. Diffs went
+further than expected: the server computes them (`gitService.diff`), the route
+serves them (`GET /:id/git/diff`), the shared response type is declared, and
+`getGitDiffApi` is written in the web client — and **no component ever called
+it**. The whole chain existed bar its last link, so a source-control panel
+listed changed files without being able to show what changed in them.
 
 ---
 
@@ -259,14 +261,19 @@ commit.
 **Acceptance:** every command and count in the README matches observed output.
 **Verify:** run each documented command.
 
-### Phase 2 — Git diff view *(the main gap)*
+### Phase 2 — Git diff view ✅ *(the main gap)*
 **Goal:** see what changed in a file, from the source-control panel.
-- `apps/web/src/apis/projects.ts` — add `getGitDiffApi` (endpoint exists).
-- `apps/web/src/components/organisms/SourceControlPanel/DiffView.tsx` — new:
-  parse unified diff, render hunks with add/delete colouring and line numbers.
-- `SourceControlPanel.tsx` — click a changed file → diff; staged vs unstaged.
-- Tests: diff parser (hunk headers, +/-/context, renames, binary, empty).
-**Depends on:** nothing. **Verify:** `pnpm -r test`, `typecheck`, `lint`.
+- `utils/parseUnifiedDiff.ts` — new: unified patch → hunks, with both files'
+  line numbers resolved. Pure and tested apart from the component, the same
+  split `gitService.parseStatus` makes on the server. 13 tests.
+- `SourceControlPanel/DiffView.tsx` — new: renders the patch inline, add/delete
+  colouring, dual line-number gutters, `+n −n` summary, binary and error states.
+  Cancels in-flight requests so a late answer cannot overwrite a newer file.
+- `SourceControlPanel.tsx` — a row now expands its diff; the file icon opens the
+  file for editing. One diff open at a time; staged and unstaged rows for the
+  same file expand independently. 10 tests.
+- `getGitDiffApi` needed no work — it already existed, unused.
+**Verified:** typecheck, lint, 1079 tests (+23), build — all clean.
 
 ### Phase 3 — Multiple terminals
 **Goal:** more than one shell per project.
@@ -313,7 +320,7 @@ afternoon.
 
 - [x] Phase 0 — verification (green across the board, no bugs)
 - [x] Phase 1 — documentation truth-up
-- [ ] Phase 2 — git diff view
+- [x] Phase 2 — git diff view
 - [ ] Phase 3 — multiple terminals
 - [ ] Phase 4 — editor polish
 - [ ] Phase 5 — page test coverage

@@ -11,6 +11,7 @@ import {
 import type { GitChange, GitCommit, GitStatus } from "@replit-clone/shared";
 import { fileExtension } from "@replit-clone/shared";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
+import { DiffView } from "./DiffView.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import {
   getGitLogApi,
@@ -39,6 +40,9 @@ interface Props {
 
 /** Source control for the project's own repository.
  *
+ *  Clicking a changed file expands its diff in place; the row's icon still
+ *  opens the file for editing.
+ *
  *  Staging is per file rather than per hunk. Hunk-level staging needs a patch
  *  editor to be worth anything, and half of one is worse than none.
  */
@@ -49,6 +53,10 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+
+  /** Which row's diff is open, as `"s"|"u":path` -- the same key the rows use,
+   *  so the staged and unstaged entries for one file expand independently. */
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
@@ -175,17 +183,33 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
     const state = isStaged ? change.staged : change.unstaged;
     const badge = state ? BADGE[state] : undefined;
     const name = change.path.split("/").pop() ?? change.path;
+    const key = `${isStaged ? "s" : "u"}:${change.path}`;
+    const isOpen = expanded === key;
 
     return (
+      <div key={key}>
       <div
-        key={`${isStaged ? "s" : "u"}:${change.path}`}
         className="rc-tree-row"
+        data-active={isOpen}
         onClick={() => {
-          openFile(change.path);
+          // The row shows the change; opening the file for editing is what the
+          // icon is for. Clicking an open row closes it again.
+          setExpanded(isOpen ? null : key);
         }}
         title={change.from ? `${change.from} → ${change.path}` : change.path}
       >
-        <FileIcon extension={fileExtension(change.path)} name={name} />
+        <span
+          role="button"
+          tabIndex={-1}
+          title={`Open ${name}`}
+          style={{ display: "flex", alignItems: "center" }}
+          onClick={(event) => {
+            event.stopPropagation();
+            openFile(change.path);
+          }}
+        >
+          <FileIcon extension={fileExtension(change.path)} name={name} />
+        </span>
         <span
           style={{
             flex: 1,
@@ -250,6 +274,11 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
             {badge.letter}
           </span>
         )}
+      </div>
+
+      {isOpen && (
+        <DiffView projectId={projectId} path={change.path} staged={isStaged} />
+      )}
       </div>
     );
   };
