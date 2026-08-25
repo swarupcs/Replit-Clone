@@ -34,6 +34,7 @@ import {
   gitBranchController,
   gitBranchesController,
   gitCommitController,
+  gitDiscardController,
   gitDiffController,
   gitInitController,
   gitLogController,
@@ -84,6 +85,7 @@ router.post("/:projectId/git/branch", asyncHandler(gitBranchController));
 router.post("/:projectId/git/init", asyncHandler(gitInitController));
 router.post("/:projectId/git/stage", asyncHandler(gitStageController));
 router.post("/:projectId/git/unstage", asyncHandler(gitUnstageController));
+router.post("/:projectId/git/discard", asyncHandler(gitDiscardController));
 router.post("/:projectId/git/commit", asyncHandler(gitCommitController));
 router.patch("/:projectId", asyncHandler(renameProjectController));
 router.post("/:projectId/duplicate", createLimiter, asyncHandler(duplicateProjectController));

@@ -39,6 +39,7 @@ const api = vi.hoisted(() => ({
   getGitDiffApi: vi.fn(),
   getGitBranchesApi: vi.fn(),
   gitBranchApi: vi.fn(),
+  gitDiscardApi: vi.fn(),
   gitStageApi: vi.fn(),
   gitUnstageApi: vi.fn(),
   gitCommitApi: vi.fn(),
@@ -47,8 +48,14 @@ const api = vi.hoisted(() => ({
 
 vi.mock("../../../apis/projects.ts", () => api);
 
-const { getGitStatusApi, getGitLogApi, getGitDiffApi, getGitBranchesApi, gitBranchApi } =
-  api;
+const {
+  getGitStatusApi,
+  getGitLogApi,
+  getGitDiffApi,
+  getGitBranchesApi,
+  gitBranchApi,
+  gitDiscardApi,
+} = api;
 
 const BRANCHES = [
   { name: "main", current: true },
@@ -74,6 +81,7 @@ beforeEach(() => {
   getGitLogApi.mockResolvedValue([]);
   getGitDiffApi.mockResolvedValue(PATCH);
   getGitBranchesApi.mockResolvedValue(BRANCHES);
+  gitDiscardApi.mockResolvedValue({ ...STATUS, changes: [] });
   gitBranchApi.mockResolvedValue({
     status: { ...STATUS, branch: "feature" },
     branches: [
@@ -306,5 +314,80 @@ describe("SourceControlPanel branches", () => {
     expect(screen.queryByLabelText("Switch branch")).toBeNull();
     // The branch is still shown, just not as a control.
     expect(screen.getByText("main")).toBeDefined();
+  });
+});
+
+describe("SourceControlPanel discarding", () => {
+  const DISCARD_LABEL = "Discard changes to src/App.tsx";
+
+  it("does nothing until the confirmation is accepted", async () => {
+    await renderPanel();
+    fireEvent.click(screen.getByLabelText(DISCARD_LABEL));
+
+    expect(await screen.findByText("Discard changes?")).toBeDefined();
+    expect(gitDiscardApi).not.toHaveBeenCalled();
+  });
+
+  it("says the change cannot be undone", async () => {
+    await renderPanel();
+    fireEvent.click(screen.getByLabelText(DISCARD_LABEL));
+
+    expect(await screen.findByText(/cannot be undone/)).toBeDefined();
+  });
+
+  it("discards once confirmed", async () => {
+    await renderPanel();
+    fireEvent.click(screen.getByLabelText(DISCARD_LABEL));
+
+    const confirm = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Discard",
+    );
+    fireEvent.click(confirm as HTMLElement);
+
+    await waitFor(() => {
+      expect(gitDiscardApi).toHaveBeenCalledWith(PROJECT, ["src/App.tsx"]);
+    });
+  });
+
+  it("does nothing when the confirmation is cancelled", async () => {
+    await renderPanel();
+    fireEvent.click(screen.getByLabelText(DISCARD_LABEL));
+
+    const cancel = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Cancel",
+    );
+    fireEvent.click(cancel as HTMLElement);
+
+    expect(gitDiscardApi).not.toHaveBeenCalled();
+  });
+
+  it("warns that a new file is deleted rather than reverted", async () => {
+    getGitStatusApi.mockResolvedValue({
+      ...STATUS,
+      changes: [{ path: "src/App.tsx", unstaged: "untracked" }],
+    });
+    await renderPanel();
+    fireEvent.click(screen.getByLabelText(DISCARD_LABEL));
+
+    expect(await screen.findByText(/it is deleted/)).toBeDefined();
+  });
+
+  it("offers no discard on a staged row, where unstage is the way back", async () => {
+    await renderPanel();
+
+    expect(screen.queryByLabelText("Discard changes to src/new.ts")).toBeNull();
+  });
+
+  it("gives a viewer no way to discard anything", async () => {
+    await renderPanel(false);
+
+    expect(screen.queryByLabelText(DISCARD_LABEL)).toBeNull();
+  });
+
+  it("does not open the file's diff when the discard button is clicked", async () => {
+    await renderPanel();
+    fireEvent.click(screen.getByLabelText(DISCARD_LABEL));
+
+    expect(getGitDiffApi).not.toHaveBeenCalled();
   });
 });

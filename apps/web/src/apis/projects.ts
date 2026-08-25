@@ -313,3 +313,16 @@ export const gitBranchApi = async (
   );
   return response.data.data;
 };
+
+/** Throws away local changes to these paths. Destructive and not undoable —
+ *  the caller confirms first. */
+export const gitDiscardApi = async (
+  projectId: string,
+  paths: string[],
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/discard`,
+    { paths },
+  );
+  return response.data.data;
+};

@@ -14,6 +14,7 @@ import {
   VscCheck,
   VscHistory,
   VscRefresh,
+  VscDiscard,
   VscRemove,
   VscSourceControl,
 } from "react-icons/vsc";
@@ -32,6 +33,7 @@ import {
   getGitLogApi,
   getGitStatusApi,
   gitBranchApi,
+  gitDiscardApi,
   gitCommitApi,
   gitInitApi,
   gitStageApi,
@@ -77,6 +79,10 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
   const [branches, setBranches] = useState<GitBranch[]>([]);
   /** Non-null while the "new branch" dialog is open, holding the typed name. */
   const [newBranch, setNewBranch] = useState<string | null>(null);
+
+  /** The change awaiting a discard confirmation. Held rather than acted on,
+   *  because discarding is not undoable. */
+  const [discarding, setDiscarding] = useState<GitChange | null>(null);
 
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
@@ -296,6 +302,23 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
             ? change.path.slice(0, change.path.lastIndexOf("/"))
             : ""}
         </span>
+
+        {canWrite && !isStaged && (
+          <Tooltip title="Discard changes">
+            <button
+              type="button"
+              className="rc-icon-button"
+              aria-label={`Discard changes to ${change.path}`}
+              disabled={busy}
+              onClick={(event) => {
+                event.stopPropagation();
+                setDiscarding(change);
+              }}
+            >
+              <VscDiscard size={13} />
+            </button>
+          </Tooltip>
+        )}
 
         {canWrite && (
           <Tooltip title={isStaged ? "Unstage" : "Stage"}>
@@ -560,6 +583,32 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
           </>
         )}
       </div>
+
+      <Modal
+        open={discarding !== null}
+        title="Discard changes?"
+        okText="Discard"
+        okButtonProps={{ danger: true }}
+        confirmLoading={busy}
+        onOk={() => {
+          const path = discarding?.path;
+          if (!path) return;
+          void act(
+            () => gitDiscardApi(projectId, [path]),
+            "Could not discard the changes",
+          ).then(() => setDiscarding(null));
+        }}
+        onCancel={() => setDiscarding(null)}
+        destroyOnHidden
+      >
+        <span style={{ color: "var(--rc-text-muted)" }}>
+          Your changes to <b>{discarding?.path}</b> are thrown away.{" "}
+          {discarding?.unstaged === "untracked"
+            ? "The file is new, so it is deleted."
+            : "The file goes back to the last commit."}{" "}
+          This cannot be undone — the work is in no commit and git keeps no copy.
+        </span>
+      </Modal>
 
       <Modal
         open={newBranch !== null}

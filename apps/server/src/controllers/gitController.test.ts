@@ -11,19 +11,22 @@ const git = vi.hoisted(() => ({
   commit: vi.fn(),
   history: vi.fn(),
   branches: vi.fn(),
+  discard: vi.fn(),
   createBranch: vi.fn(),
   switchBranch: vi.fn(),
 }));
 const forgetProject = vi.hoisted(() => vi.fn());
+const dropDoc = vi.hoisted(() => vi.fn());
 const findUnique = vi.hoisted(() => vi.fn());
 
 vi.mock("../service/projectAccessService.js", () => projectAccessService);
 vi.mock("../service/gitService.js", () => git);
 vi.mock("../lib/prisma.js", () => ({ prisma: { user: { findUnique } } }));
-vi.mock("../service/collabService.js", () => ({ forgetProject }));
+vi.mock("../service/collabService.js", () => ({ forgetProject, dropDoc }));
 
 import {
   gitBranchController,
+  gitDiscardController,
   gitBranchesController,
   gitCommitController,
   gitDiffController,
@@ -46,6 +49,7 @@ const app = apiApp([
   { method: "post", path: "/p/:projectId/git/commit", handler: gitCommitController },
   { method: "get", path: "/p/:projectId/git/branches", handler: gitBranchesController },
   { method: "post", path: "/p/:projectId/git/branch", handler: gitBranchController },
+  { method: "post", path: "/p/:projectId/git/discard", handler: gitDiscardController },
 ]);
 
 const STATUS = { branch: "main", staged: [], unstaged: [] };
@@ -454,5 +458,101 @@ describe("branches", () => {
       .send({ name: "feature" });
 
     expect(forgetProject).not.toHaveBeenCalled();
+  });
+});
+
+describe("discard", () => {
+  it("needs editor access", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/discard`)
+      .set(auth())
+      .send({ paths: ["a.txt"] });
+
+    expect(projectAccessService.assertProjectAccess).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      TEST_USER.sub,
+      "editor",
+    );
+  });
+
+  it("discards the named paths", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/discard`)
+      .set(auth())
+      .send({ paths: ["a.txt", "dir/b.txt"] });
+
+    expect(git.discard).toHaveBeenCalledWith(TEST_PROJECT, ["a.txt", "dir/b.txt"]);
+  });
+
+  it("drops each discarded file's shared document", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/discard`)
+      .set(auth())
+      .send({ paths: ["a.txt", "dir/b.txt"] });
+
+    // Otherwise a live document would write the discarded text straight back.
+    expect(dropDoc).toHaveBeenCalledWith(TEST_PROJECT, "a.txt");
+    expect(dropDoc).toHaveBeenCalledWith(TEST_PROJECT, "dir/b.txt");
+  });
+
+  it("leaves other files' documents alone", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/discard`)
+      .set(auth())
+      .send({ paths: ["a.txt"] });
+
+    expect(dropDoc).toHaveBeenCalledTimes(1);
+    expect(forgetProject).not.toHaveBeenCalled();
+  });
+
+  it("answers with the status afterwards", async () => {
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/git/discard`)
+      .set(auth())
+      .send({ paths: ["a.txt"] });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual(STATUS);
+  });
+
+  it("refuses a path that climbs out of the project", async () => {
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/git/discard`)
+      .set(auth())
+      .send({ paths: ["../../etc/passwd"] });
+
+    expect(response.status).toBe(400);
+    expect(git.discard).not.toHaveBeenCalled();
+  });
+
+  it("refuses a path that looks like a flag", async () => {
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/git/discard`)
+      .set(auth())
+      .send({ paths: ["--force"] });
+
+    expect(response.status).toBe(400);
+    expect(git.discard).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty list", async () => {
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/git/discard`)
+      .set(auth())
+      .send({ paths: [] });
+
+    expect(response.status).toBe(400);
+    expect(git.discard).not.toHaveBeenCalled();
+  });
+
+  it("keeps documents when the discard itself fails", async () => {
+    git.discard.mockRejectedValue(new ForbiddenError("nope"));
+
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/discard`)
+      .set(auth())
+      .send({ paths: ["a.txt"] });
+
+    expect(dropDoc).not.toHaveBeenCalled();
   });
 });

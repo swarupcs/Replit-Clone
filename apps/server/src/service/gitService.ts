@@ -400,3 +400,37 @@ export async function switchBranch(
     throw new BadRequestError(message, "GIT_FAILED");
   }
 }
+
+/** Throws away local changes to the given paths, whatever state they are in.
+ *
+ *  One recipe covers every state git can report, which is why it is three
+ *  commands rather than a switch on the status letter:
+ *
+ *   1. `reset` unstages, so a staged change is discarded too rather than
+ *      surviving in the index. A path that was not staged is unaffected.
+ *   2. `checkout` restores tracked content from the index -- which after step 1
+ *      is HEAD -- so a modification is undone and a deletion is brought back.
+ *      It has nothing to say about a path that was never committed.
+ *   3. `clean` removes what is still untracked, which is how a brand-new file
+ *      (staged or not) goes away. Steps 2 and 3 are each no-ops for the states
+ *      the other handles.
+ *
+ *  Exit codes are deliberately not checked past the first: `checkout` fails on
+ *  an untracked path and `clean` has nothing to do for a tracked one, and
+ *  neither is an error from the caller's point of view. What the user asked for
+ *  is "leave nothing of my changes to these paths", and afterwards there is
+ *  nothing -- the status the caller reads back is the real answer.
+ *
+ *  DESTRUCTIVE and not undoable: the work is not in a commit and git keeps no
+ *  copy. The confirmation belongs in the UI, and does.
+ */
+export async function discard(
+  projectId: string,
+  paths: string[],
+): Promise<void> {
+  if (paths.length === 0) return;
+
+  await gitOrThrow(projectId, ["reset", "--", ...paths]);
+  await git(projectId, ["checkout", "--", ...paths]);
+  await git(projectId, ["clean", "-f", "--", ...paths]);
+}

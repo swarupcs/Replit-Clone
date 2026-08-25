@@ -5,7 +5,7 @@ import { assertProjectAccess } from "../service/projectAccessService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
 import { prisma } from "../lib/prisma.js";
 import * as git from "../service/gitService.js";
-import { forgetProject } from "../service/collabService.js";
+import { dropDoc, forgetProject } from "../service/collabService.js";
 
 /** Paths come from the client, so they are constrained the same way the editor
  *  constrains them: relative, and unable to climb out of the project.
@@ -220,5 +220,34 @@ export async function gitBranchController(
       status: await git.status(projectId),
       branches: await git.branches(projectId),
     },
+  });
+}
+
+/** Throws away local changes to the named paths.
+ *
+ *  Destructive and not undoable, so it is the owner's-and-editor's business
+ *  only and the UI confirms first.
+ *
+ *  Each discarded path's shared document is dropped: a live Yjs document still
+ *  holding the edited text would write it straight back over the version just
+ *  restored, which would make the discard look like it silently failed. Dropped
+ *  per path rather than for the whole project, so files nobody asked about keep
+ *  their in-flight edits.
+ */
+export async function gitDiscardController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { paths } = pathsSchema.parse(req.body ?? {});
+
+  await git.discard(projectId, paths);
+
+  for (const path of paths) dropDoc(projectId, path);
+
+  res.json({
+    success: true,
+    message: "Discarded",
+    data: await git.status(projectId),
   });
 }
