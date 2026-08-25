@@ -66,10 +66,19 @@ staging individual hunks.
 - **Where:** `apps/web/src/components/organisms/SourceControlPanel/`,
   `apps/server/src/service/gitService.ts`.
 
-### 7. Terminal UX
-Persistent scrollback across reconnects, split terminals, restart-shell button.
-- **Where:** `apps/web/src/components/molecules/BrowserTerminal/`,
-  `apps/server/src/terminal/terminalGateway.ts`.
+### 7. Terminal UX ✅ (mostly done, before this entry was written)
+This item was stale on arrival. Multiple terminals shipped with the split-pane
+work: `BottomPanel` runs a tab per shell, each with its own socket and PTY, and
+panes are hidden rather than unmounted so switching tabs cannot kill a shell.
+The gateway already gave every terminal its own id so two on one project are
+watched and released separately. `BrowserTerminal` keeps 5000 lines of
+scrollback and reconnects on its own with backoff, which is what the
+"restart-shell button" was for.
+
+What is genuinely left: scrollback that survives a *reload* (it survives a
+reconnect today), and side-by-side terminals rather than tabbed ones.
+- **Where:** `apps/web/src/components/organisms/BottomPanel/`,
+  `apps/web/src/components/molecules/BrowserTerminal/`.
 
 ## Low — nice to have
 
@@ -94,7 +103,7 @@ garbage, and deleting them would be unrecoverable.
 
 ## Recommended order
 
-Items 1–5 and 10 are done. The rest are tracked in `docs/REPLIT_CLONE_PLAN.md`,
-which supersedes this list and sequences them: 6 (git panel) is split there
-into a diff view and the branch/remote work that needs a threat model first,
-and 7 (terminal) into multiple terminals and the remainder.
+Items 1–5, 7 and 10 are done. The rest are tracked in
+`docs/REPLIT_CLONE_PLAN.md`, which supersedes this list and sequences them:
+6 (git panel) is split there into a diff view and the branch/remote work that
+needs a threat model first.

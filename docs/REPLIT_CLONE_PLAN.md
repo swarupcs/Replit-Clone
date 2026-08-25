@@ -144,7 +144,7 @@ Honest scoring of what a user would notice.
 |---|---|---|---|
 | Projects from templates | ✅ | ✅ 12 templates | none |
 | Editor (Monaco, tabs, split, search, quick-open) | ✅ | ✅ | command palette, go-to-definition |
-| Real shell | ✅ | ✅ PTY over WS | **one terminal only** — no split/tabs |
+| Real shell | ✅ | ✅ PTY over WS, tabbed, multiple per project | side-by-side rather than tabbed |
 | Run / stop / restart | ✅ | ✅ + live output, exit codes | none |
 | Preview | ✅ | ✅ proxy, auto-reload, HMR-aware | none |
 | Multiplayer editing | ✅ | ✅ Yjs CRDT + cursors | none |
@@ -185,8 +185,9 @@ listed changed files without being able to show what changed in them.
 6. **Editor** — done bar polish. Monaco, tabs, split panes, dirty state,
    format-on-save, project-wide search **and replace**, quick-open, diff against
    disk, persisted settings. → **Phase 4** adds command palette + go-to-definition.
-7. **Terminal** — done bar multiplexing. Real PTY, resize, 5000-line scrollback,
-   automatic reconnect with backoff. → **Phase 3** adds multiple terminals.
+7. **Terminal** — done. Real PTY, resize, 5000-line scrollback, automatic
+   reconnect with backoff, and a tab per shell with several per project.
+   → **Phase 3** found this already built and pinned it with tests.
 8. **Run / stop** — done. Per-template start command, streamed stdout/stderr,
    exit codes, restart, persisted run log.
 9. **Preview** — done. Reverse proxy (not a published port), auto-reload on
@@ -275,13 +276,25 @@ commit.
 - `getGitDiffApi` needed no work — it already existed, unused.
 **Verified:** typecheck, lint, 1079 tests (+23), build — all clean.
 
-### Phase 3 — Multiple terminals
-**Goal:** more than one shell per project.
-- `BottomPanel` gains terminal tabs: add, close, switch.
-- `BrowserTerminal` keyed per session so each owns its socket and scrollback.
-- Server: confirm `terminalGateway` admits concurrent execs per project and that
-  detach accounting stays balanced when one of several closes.
-**Depends on:** Phase 2 only for commit order. **Verify:** tests + manual.
+### Phase 3 — Multiple terminals ✅ *(already built; pinned with tests)*
+**Goal, as planned:** more than one shell per project.
+**What was actually found:** already implemented and shipped with the
+split-pane work. `BottomPanel` runs a tab per shell, each with its own socket
+and PTY; panes are hidden rather than unmounted so a tab switch cannot kill a
+shell; the gateway gives every terminal its own id so two on one project are
+watched and released separately. `IMPROVEMENTS.md` #7 listing it as open was
+stale, and this roadmap inherited that error.
+
+Building it again would have been destructive, so the phase became what the
+feature actually lacked — it had **no tests at all**, despite a fiddly tab
+lifecycle:
+- `BottomPanel.test.tsx` — 12 tests: add/close/switch, panes staying mounted
+  across switches (a remount would kill the PTY), renumbering by position so
+  closed ids never show as gaps, selection moving off a closed shell, the last
+  shell being replaced rather than leaving an empty panel, middle-click close,
+  run-start pulling focus to the output, and a viewer getting no shell.
+- `IMPROVEMENTS.md` #7 corrected.
+**Verified:** typecheck, lint, 1091 tests, build — all clean.
 
 ### Phase 4 — Editor polish
 **Goal:** command palette and go-to-definition.
@@ -321,7 +334,7 @@ afternoon.
 - [x] Phase 0 — verification (green across the board, no bugs)
 - [x] Phase 1 — documentation truth-up
 - [x] Phase 2 — git diff view
-- [ ] Phase 3 — multiple terminals
+- [x] Phase 3 — multiple terminals (already built; pinned with tests)
 - [ ] Phase 4 — editor polish
 - [ ] Phase 5 — page test coverage
 - [ ] Phase 6 — remaining polish
