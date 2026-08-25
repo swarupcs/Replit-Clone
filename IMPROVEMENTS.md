@@ -82,14 +82,19 @@ Specs for "save → preview reloads" and "EDITOR share-link redemption" would pi
 down the two newest features the way `playground-flow.spec.ts` pins the basics.
 - **Where:** `apps/web/e2e/`.
 
-### 10. Boot-time sweep for orphaned containers
-`removeContainer` now stops before removing, but a sweep for `rc-project-*`
-containers with no DB row would clean future strays automatically.
-- **Where:** `apps/server/src/containers/containerManager.ts`
-  (`reconcileOnBoot` is the natural hook).
+### 10. Boot-time sweep for orphaned containers ✅ (done)
+Done: `reconcileOnBoot` in `containers/containerManager.ts` lists every
+`rc-project-*` container against the project ids in the database and
+force-removes the ones no row claims. Project *directories* with no row are
+reported rather than deleted — a row missing at boot more likely means the
+database is not the one this server used last than that the user's files are
+garbage, and deleting them would be unrecoverable.
 
 ---
 
 ## Recommended order
 
-Items 1–5 are done. Next: 6 — close the biggest visible feature gap.
+Items 1–5 and 10 are done. The rest are tracked in `docs/REPLIT_CLONE_PLAN.md`,
+which supersedes this list and sequences them: 6 (git panel) is split there
+into a diff view and the branch/remote work that needs a threat model first,
+and 7 (terminal) into multiple terminals and the remainder.

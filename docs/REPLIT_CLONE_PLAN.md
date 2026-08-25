@@ -251,7 +251,7 @@ tracked as Phase 1 work, not as bugs:
 Ordered by user-visible value. Each is independently shippable and gets its own
 commit.
 
-### Phase 1 — Documentation truth-up
+### Phase 1 — Documentation truth-up ✅
 **Goal:** no statement in the repo's docs is false.
 - `README.md`: correct the test count; note `pnpm --filter web e2e`.
 - `IMPROVEMENTS.md`: close #10 (orphan sweep — `reconcileOnBoot` does it).
@@ -312,7 +312,7 @@ afternoon.
 ## 7. Progress
 
 - [x] Phase 0 — verification (green across the board, no bugs)
-- [ ] Phase 1 — documentation truth-up
+- [x] Phase 1 — documentation truth-up
 - [ ] Phase 2 — git diff view
 - [ ] Phase 3 — multiple terminals
 - [ ] Phase 4 — editor polish
