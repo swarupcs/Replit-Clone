@@ -191,5 +191,14 @@ piece of work and the one that changes who can use the product at all.
   schema only, and the empty state says so rather than letting a clean list
   read as "this project type checks".
 
-Still open: **#1** (responsive), **#3** (presence), **#6** (notifications), and
-all of Tier 3.
+- [x] **#3 — presence.** A stack in the status bar, and a dot per person on
+  the tree row and tab for a file they have open. Not click-to-follow: that
+  needs cursor positions and scroll sync, which is a new feature rather than a
+  display of what already exists. Presence is per document, so it shows people
+  who have a file open — someone sitting in the project with nothing open is
+  connected but in no document.
+- [x] **#6 — one notification system per kind.** A socket error is transient
+  and became a toast; a file changed on disk is persistent state and became a
+  chip in the status bar. No more banners resizing the editor mid-keystroke.
+
+Still open: **#1** (responsive) and all of Tier 3.
