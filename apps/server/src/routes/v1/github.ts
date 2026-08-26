@@ -6,6 +6,7 @@ import {
   githubConnectStart,
   githubConnectionStatus,
   githubDisconnect,
+  githubImportController,
   githubReposController,
 } from "../../controllers/githubController.js";
 
@@ -23,5 +24,6 @@ router.get("/callback", asyncHandler(githubConnectCallback));
 router.delete("/connection", requireAuth, asyncHandler(githubDisconnect));
 
 router.get("/repos", requireAuth, asyncHandler(githubReposController));
+router.post("/import", requireAuth, asyncHandler(githubImportController));
 
 export default router;

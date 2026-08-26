@@ -37,6 +37,7 @@ import {
 import { useAuth } from "../hooks/useAuth.ts";
 import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx";
 import { GithubConnectionCard } from "../components/organisms/GithubConnectionCard/GithubConnectionCard.tsx";
+import { ImportRepoDialog } from "../components/organisms/ImportRepoDialog/ImportRepoDialog.tsx";
 
 /** Relative time for the card footer -- "3 days ago" reads better than a date
  *  when you're scanning a list of things you made recently. */
@@ -109,6 +110,7 @@ export const Dashboard = () => {
   const [renameValue, setRenameValue] = useState("");
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [githubOpen, setGithubOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [sharing, setSharing] = useState<Project | null>(null);
 
   const { data: projects, isLoading } = useQuery({
@@ -262,6 +264,14 @@ export const Dashboard = () => {
               style={{ width: 150 }}
               aria-label="Sort projects"
             />
+
+            <Button
+              size="large"
+              icon={<VscGithub />}
+              onClick={() => setImportOpen(true)}
+            >
+              Import repo
+            </Button>
 
             <Button
               type="primary"
@@ -456,6 +466,21 @@ export const Dashboard = () => {
       <GithubConnectionCard
         open={githubOpen}
         onClose={() => setGithubOpen(false)}
+      />
+
+      <ImportRepoDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        // Straight into the imported project: importing is not something
+        // anyone does in order to look at a dashboard.
+        onImported={(project) => {
+          setImportOpen(false);
+          void navigate(`/project/${project.id}`);
+        }}
+        onConnect={() => {
+          setImportOpen(false);
+          setGithubOpen(true);
+        }}
       />
 
       {sharing && (

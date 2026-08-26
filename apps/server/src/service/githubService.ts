@@ -382,3 +382,24 @@ export async function listRepos(
     hasMore: data.length === PAGE_SIZE,
   };
 }
+
+/** One repository, by name.
+ *
+ *  Asked for before an import rather than trusting what the browser sent: the
+ *  default branch and the size have to come from GitHub, and this is also what
+ *  establishes that the caller can actually see the repository.
+ */
+export async function getRepo(
+  userId: string,
+  owner: string,
+  name: string,
+): Promise<GithubRepo> {
+  const token = await githubToken(userId);
+
+  const { data } = await githubApi<RawRepo>(
+    token,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+  );
+
+  return toRepo(data);
+}

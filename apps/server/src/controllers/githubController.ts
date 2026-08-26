@@ -9,9 +9,11 @@ import {
   connectGithub,
   disconnectGithub,
   githubConnection,
+  getRepo,
   isGithubReposConfigured,
   listRepos,
 } from "../service/githubService.js";
+import { importRepository } from "../service/repoImportService.js";
 import { z } from "zod";
 import { BadRequestError, UnauthorizedError } from "../utils/errors.js";
 
@@ -188,5 +190,42 @@ export async function githubReposController(
     success: true,
     message: "GitHub repositories",
     data: result,
+  });
+}
+
+
+/** What an import may name.
+ *
+ *  The owner and repository are checked again in the service before they reach
+ *  a command line; this is the shape check, and it is what turns a malformed
+ *  request into a 400 rather than an exception.
+ */
+const importSchema = z.object({
+  owner: z.string().trim().min(1).max(100),
+  repo: z.string().trim().min(1).max(100),
+  ref: z.string().trim().max(200).optional(),
+  name: z.string().trim().max(100).optional(),
+});
+
+export async function githubImportController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const { userId } = getAuthContext(req);
+  const body = importSchema.parse(req.body);
+
+  // Asked of GitHub rather than taken from the request: the default branch and
+  // the size have to be authoritative, and fetching it is also what establishes
+  // that this caller can see the repository at all.
+  const repo = await getRepo(userId, body.owner, body.repo);
+
+  const project = await importRepository(userId, body, repo);
+
+  logger.info("import requested", { userId, repo: repo.fullName });
+
+  res.status(201).json({
+    success: true,
+    message: "Repository imported",
+    data: { project },
   });
 }

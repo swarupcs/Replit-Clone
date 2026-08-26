@@ -197,3 +197,6 @@ export type GithubReposResponse = ApiSuccess<{
   repos: GithubRepo[];
   hasMore: boolean;
 }>;
+
+/** POST /api/v1/github/import */
+export type GithubImportResponse = ApiSuccess<{ project: Project }>;

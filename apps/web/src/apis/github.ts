@@ -1,7 +1,11 @@
 import type {
   GithubConnectResponse,
   GithubConnectionInfo,
+  GithubImportResponse,
+  GithubRepo,
+  GithubReposResponse,
   GithubStatusResponse,
+  Project,
 } from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
@@ -24,4 +28,27 @@ export const startGithubConnectApi = async (): Promise<string> => {
 
 export const disconnectGithubApi = async (): Promise<void> => {
   await axios.delete("/api/v1/github/connection");
+};
+
+export const listGithubReposApi = async (params: {
+  query?: string;
+  page?: number;
+}): Promise<{ repos: GithubRepo[]; hasMore: boolean }> => {
+  const response = await axios.get<GithubReposResponse>("/api/v1/github/repos", {
+    params,
+  });
+  return response.data.data;
+};
+
+export const importGithubRepoApi = async (body: {
+  owner: string;
+  repo: string;
+  ref?: string;
+  name?: string;
+}): Promise<Project> => {
+  const response = await axios.post<GithubImportResponse>(
+    "/api/v1/github/import",
+    body,
+  );
+  return response.data.data.project;
 };
