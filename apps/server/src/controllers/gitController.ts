@@ -429,6 +429,44 @@ async function isSoleOccupant(projectId: string): Promise<boolean> {
   return collaborators === 0 && !project?.shareToken;
 }
 
+/** The stored GitHub token, but only for a remote that is actually GitHub.
+ *
+ *  git's credential helper answers whatever host git asks it about — it is
+ *  handed the request on stdin and prints a password regardless. So spending
+ *  the connection on a remote pointing anywhere else hands somebody's GitHub
+ *  token to that host.
+ *
+ *  Remotes are added at *editor* level and may name any https host, while
+ *  pushing is the owner's. Those do not overlap today — a project with an
+ *  editor has a collaborator, and a project with a collaborator cannot be
+ *  pushed from here at all — but they only have to overlap once: a
+ *  collaborator adds a mirror, is removed, and the next owner push sends the
+ *  token to them. A README saying "add this remote and push" needs no
+ *  collaborator at all.
+ *
+ *  A pasted token is unaffected: choosing to give a credential to a particular
+ *  remote is exactly what typing one in means.
+ */
+async function githubForRemote(
+  projectId: string,
+  name: string,
+  userId: string,
+): Promise<string> {
+  const remote = (await git.remotes(projectId)).find(
+    (entry) => entry.name === name,
+  );
+
+  if (!remote || !parseGithubRemote(remote.url)) {
+    throw new BadRequestError(
+      `${name} is not a GitHub remote, so your connected GitHub account ` +
+        "cannot be used for it. Supply an access token for this push instead.",
+      "REMOTE_NOT_GITHUB",
+    );
+  }
+
+  return githubToken(userId);
+}
+
 /** Pushes a branch, with a token supplied for this one call.
  *
  *  The owner's alone — not because an editor could not be trusted with the
@@ -457,7 +495,7 @@ export async function gitPushController(
   // A token in the request wins: someone pasting one is pushing to a forge
   // this server knows nothing about, and their explicit choice should not be
   // overridden by a connection meant for GitHub.
-  const credential = token ?? (await githubToken(userId));
+  const credential = token ?? (await githubForRemote(projectId, name, userId));
 
   await git.pushRemote(projectId, name, branch, credential);
 

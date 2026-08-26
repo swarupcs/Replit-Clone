@@ -101,6 +101,17 @@ that only needs the login cannot reach the secret by accident.
 The sole-occupant rule is what governs spending it either way. A stored token
 makes pushing less tedious; it does not make a shared container private.
 
+**A stored token is only ever offered to GitHub.** git's credential helper
+answers whatever host git asks it about — it is handed the request on stdin and
+prints a password regardless — so a push to a remote pointing elsewhere would
+hand somebody's GitHub token to that host. Remotes are added at *editor* level
+and may name any https host, while pushing is the owner's; those do not overlap
+today, but they only have to once (a collaborator adds a mirror and is removed;
+a README says "add this remote and push"). So the fallback checks the named
+remote is a GitHub one first, and refuses otherwise. A **pasted** token is
+unaffected: choosing to give a credential to a particular remote is exactly what
+typing one in means.
+
 Pushing is also the owner's alone at the access-control layer, not merely by
 the sharing check: it spends the owner's credential, so an editor cannot ask
 for it.

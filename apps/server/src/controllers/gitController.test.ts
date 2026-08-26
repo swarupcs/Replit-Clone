@@ -876,6 +876,9 @@ describe("push", () => {
 
   it("falls back to the connected GitHub account when no token is sent", async () => {
     githubToken.mockResolvedValue("from-the-connection");
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://github.com/a/b.git" },
+    ]);
 
     const response = await post({ token: undefined });
 
@@ -904,9 +907,56 @@ describe("push", () => {
     expect(githubToken).not.toHaveBeenCalled();
   });
 
+  /** git's credential helper answers whatever host git asks it about, so
+   *  spending the stored GitHub token on a remote that is not GitHub hands
+   *  somebody's token to that host. Remotes are added at editor level and may
+   *  name any https host. */
+  it("refuses to spend the stored token on a remote that is not GitHub", async () => {
+    githubToken.mockResolvedValue("from-the-connection");
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://evil.test/mirror.git" },
+    ]);
+
+    const response = await post({ token: undefined });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("REMOTE_NOT_GITHUB");
+    expect(git.pushRemote).not.toHaveBeenCalled();
+    // And the credential is never even read.
+    expect(githubToken).not.toHaveBeenCalled();
+  });
+
+  it("still lets a pasted token reach a non-GitHub remote", async () => {
+    // Choosing to give a credential to a particular remote is exactly what
+    // typing one in means.
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://gitlab.com/a/b.git" },
+    ]);
+
+    const response = await post({ token: "typed-in" });
+
+    expect(response.status).toBe(200);
+    expect(git.pushRemote).toHaveBeenCalledWith(
+      expect.any(String),
+      "origin",
+      "main",
+      "typed-in",
+    );
+  });
+
+  it("refuses when the named remote does not exist at all", async () => {
+    githubToken.mockResolvedValue("from-the-connection");
+    git.remotes.mockResolvedValue([]);
+
+    expect((await post({ token: undefined })).body.code).toBe("REMOTE_NOT_GITHUB");
+  });
+
   it("refuses with neither a token nor a connection", async () => {
     // The real service throws this when there is nothing stored; the error
     // handler maps it by type, so a look-alike would come back a 500.
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://github.com/a/b.git" },
+    ]);
     githubToken.mockRejectedValue(
       new BadRequestError(
         "Connect your GitHub account first.",
