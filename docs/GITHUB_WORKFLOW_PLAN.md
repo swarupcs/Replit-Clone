@@ -161,7 +161,7 @@ Each is a commit, each verified before the next starts.
 - [x] Phase 3 — import one
 - [x] Phase 4 — push without retyping
 - [x] Phase 5 — pull requests
-- [ ] Phase 6 — the rest of the loop
+- [x] Phase 6 — the rest of the loop
 
 ### Notes from building it
 

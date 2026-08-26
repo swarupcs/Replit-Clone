@@ -33,7 +33,16 @@ const collaboratorCount = vi.hoisted(() => vi.fn());
 const projectFindUnique = vi.hoisted(() => vi.fn());
 
 const githubToken = vi.hoisted(() => vi.fn());
-vi.mock("../service/githubService.js", () => ({ githubToken }));
+
+/** Only the credential is stubbed. `parseGithubRemote` is a pure function the
+ *  controller's behaviour is defined in terms of, so replacing it would leave
+ *  these tests asserting against a stand-in rather than the real rules. */
+vi.mock("../service/githubService.js", async () => ({
+  ...(await vi.importActual<typeof import("../service/githubService.js")>(
+    "../service/githubService.js",
+  )),
+  githubToken,
+}));
 
 vi.mock("../lib/prisma.js", () => ({
   prisma: {
@@ -61,6 +70,7 @@ import {
   gitStageController,
   gitStatusController,
   gitUnstageController,
+  githubRepoController,
 } from "./gitController.js";
 import { apiApp, bearer, TEST_PROJECT, TEST_USER } from "../test/apiHarness.js";
 import { BadRequestError, ForbiddenError } from "../utils/errors.js";
@@ -82,6 +92,11 @@ const app = apiApp([
   { method: "post", path: "/p/:projectId/git/fetch", handler: gitFetchController },
   { method: "post", path: "/p/:projectId/git/pull", handler: gitPullController },
   { method: "post", path: "/p/:projectId/git/push", handler: gitPushController },
+  {
+    method: "get",
+    path: "/p/:projectId/github/repo",
+    handler: githubRepoController,
+  },
 ]);
 
 const STATUS = { branch: "main", staged: [], unstaged: [] };
@@ -924,5 +939,59 @@ describe("push", () => {
     const response = await post();
 
     expect(JSON.stringify(response.body)).not.toContain("secret-value");
+  });
+});
+
+
+describe("which GitHub repository a project belongs to", () => {
+  const get = () =>
+    request(app).get(`/p/${TEST_PROJECT}/github/repo`).set(auth());
+
+  it("derives it from the project's own remotes", async () => {
+    // Never from the request: a browser naming the repository is a thing to
+    // get wrong or to lie about.
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "git@github.com:octocat/hello.git" },
+    ]);
+
+    const response = await get();
+
+    expect(response.body.data).toEqual({
+      owner: "octocat",
+      repo: "hello",
+      url: "https://github.com/octocat/hello",
+    });
+  });
+
+  it("prefers origin over any other remote", async () => {
+    // A fork's origin is the fork, which is where a pull request comes from.
+    git.remotes.mockResolvedValue([
+      { name: "upstream", url: "https://github.com/original/hello.git" },
+      { name: "origin", url: "https://github.com/me/hello.git" },
+    ]);
+
+    expect((await get()).body.data.owner).toBe("me");
+  });
+
+  it("falls back to another GitHub remote when origin is not one", async () => {
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "/srv/repos/hello.git" },
+      { name: "github", url: "https://github.com/octocat/hello.git" },
+    ]);
+
+    expect((await get()).body.data.owner).toBe("octocat");
+  });
+
+  it("is null when nothing points at GitHub", async () => {
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://gitlab.com/octocat/hello.git" },
+    ]);
+
+    expect((await get()).body.data).toBeNull();
+  });
+
+  it("is null with no remotes at all", async () => {
+    git.remotes.mockResolvedValue([]);
+    expect((await get()).body.data).toBeNull();
   });
 });

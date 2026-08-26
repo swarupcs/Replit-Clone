@@ -544,3 +544,35 @@ export async function githubCreatePullController(
     data: await createPullRequest(userId, { owner, repo, ...input }),
   });
 }
+
+
+/** Which GitHub repository this project points at, if any.
+ *
+ *  Lets the panel offer a pull request and an "open on GitHub" link only when
+ *  there is somewhere for them to go — better than offering both and failing on
+ *  a project whose remote is a GitLab one or a path on disk.
+ */
+export async function githubRepoController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+
+  const remotes = await git.remotes(projectId);
+  const ordered = [
+    ...remotes.filter((remote) => remote.name === "origin"),
+    ...remotes.filter((remote) => remote.name !== "origin"),
+  ];
+
+  const found = ordered
+    .map((remote) => parseGithubRemote(remote.url))
+    .find((parsed) => parsed !== null);
+
+  res.json({
+    success: true,
+    message: "GitHub repository",
+    data: found
+      ? { ...found, url: `https://github.com/${found.owner}/${found.repo}` }
+      : null,
+  });
+}

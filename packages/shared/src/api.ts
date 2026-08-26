@@ -217,3 +217,11 @@ export type GithubPullsResponse = ApiSuccess<GithubPullRequest[]>;
 
 /** POST /api/v1/projects/:projectId/github/pulls */
 export type GithubPullResponse = ApiSuccess<GithubPullRequest>;
+
+/** GET /api/v1/projects/:projectId/github/repo — null when the project's
+ *  remotes point somewhere that is not GitHub. */
+export type GithubProjectRepoResponse = ApiSuccess<{
+  owner: string;
+  repo: string;
+  url: string;
+} | null>;

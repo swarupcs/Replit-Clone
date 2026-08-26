@@ -48,6 +48,7 @@ const api = vi.hoisted(() => ({
   gitPushApi: vi.fn(),
   getGithubPullsApi: vi.fn(),
   createGithubPullApi: vi.fn(),
+  getGithubProjectRepoApi: vi.fn(),
   gitStageApi: vi.fn(),
   gitUnstageApi: vi.fn(),
   gitCommitApi: vi.fn(),
@@ -76,6 +77,7 @@ const {
   gitPushApi,
   getGithubPullsApi,
   createGithubPullApi,
+  getGithubProjectRepoApi,
 } = api;
 
 const BRANCHES = [
@@ -100,6 +102,11 @@ beforeEach(() => {
   emitted.length = 0;
   getGithubStatusApi.mockResolvedValue({ configured: true, connection: null });
   getGithubPullsApi.mockResolvedValue([]);
+  getGithubProjectRepoApi.mockResolvedValue({
+    owner: "a",
+    repo: "b",
+    url: "https://github.com/a/b",
+  });
   createGithubPullApi.mockResolvedValue({
     number: 7,
     title: "Add a thing",
@@ -858,6 +865,49 @@ describe("SourceControlPanel pull requests", () => {
     await renderPanel(true, false);
     fireEvent.click(screen.getByLabelText("Remotes"));
 
+    expect(screen.queryByText(/Open a pull request/)).toBeNull();
+  });
+});
+
+
+/** git computes both of these on every status and the panel showed neither, so
+ *  "am I ahead of the remote" was a question only the terminal could answer. */
+describe("SourceControlPanel upstream state", () => {
+  it("shows how far ahead and behind the branch is", async () => {
+    getGitStatusApi.mockResolvedValue({ ...STATUS, ahead: 2, behind: 3 });
+    await renderPanel();
+
+    expect(await screen.findByText("↑2")).toBeDefined();
+    expect(screen.getByText("↓3")).toBeDefined();
+  });
+
+  it("says nothing when the branch is level with its upstream", async () => {
+    await renderPanel();
+
+    expect(screen.queryByText(/↑/)).toBeNull();
+    expect(screen.queryByText(/↓/)).toBeNull();
+  });
+
+  it("links out to the repository on GitHub", async () => {
+    await renderPanel();
+
+    const link = await screen.findByLabelText("Open on GitHub");
+    expect(link.getAttribute("href")).toBe("https://github.com/a/b");
+    // A new tab, and never handing the opener to it.
+    expect(link.getAttribute("rel")).toContain("noopener");
+  });
+
+  it("offers neither the link nor a pull request off GitHub", async () => {
+    // A GitLab remote, or a path on disk. Offering both and failing is worse
+    // than offering neither.
+    getGithubProjectRepoApi.mockResolvedValue(null);
+    await renderPanel();
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Open on GitHub")).toBeNull();
+    });
+
+    fireEvent.click(screen.getByLabelText("Remotes"));
     expect(screen.queryByText(/Open a pull request/)).toBeNull();
   });
 });

@@ -23,6 +23,7 @@ import type {
   GithubPullRequest,
   GithubPullsResponse,
   GithubPullResponse,
+  GithubProjectRepoResponse,
 } from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
@@ -442,6 +443,16 @@ export const createGithubPullApi = async (
       base: body.base,
       ...(body.description ? { body: body.description } : {}),
     },
+  );
+  return response.data.data;
+};
+
+/** Which GitHub repository this project points at, or null. */
+export const getGithubProjectRepoApi = async (
+  projectId: string,
+): Promise<{ owner: string; repo: string; url: string } | null> => {
+  const response = await axios.get<GithubProjectRepoResponse>(
+    `/api/v1/projects/${projectId}/github/repo`,
   );
   return response.data.data;
 };

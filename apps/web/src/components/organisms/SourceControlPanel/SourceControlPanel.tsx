@@ -15,6 +15,7 @@ import {
   VscHistory,
   VscRefresh,
   VscCloud,
+  VscGithub,
   VscDiscard,
   VscRemove,
   VscSourceControl,
@@ -44,6 +45,7 @@ import {
   gitPushApi,
   getGithubPullsApi,
   createGithubPullApi,
+  getGithubProjectRepoApi,
   getGitRemotesApi,
   gitCommitApi,
   gitInitApi,
@@ -121,6 +123,12 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
   /** A pull request that already exists for this branch, so the panel offers
    *  the link instead of a second attempt that GitHub would refuse. */
   const [existingPull, setExistingPull] = useState<GithubPullRequest | null>(null);
+  /** The GitHub repository this project's remotes point at, or null when they
+   *  point somewhere else — which is how the panel knows not to offer a pull
+   *  request rather than offering one that cannot work. */
+  const [githubRepo, setGithubRepo] = useState<
+    { owner: string; repo: string; url: string } | null
+  >(null);
 
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
@@ -149,6 +157,24 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Re-asked whenever the remotes change, since adding one is what turns a
+  // local project into a GitHub one.
+  useEffect(() => {
+    let cancelled = false;
+
+    void getGithubProjectRepoApi(projectId)
+      .then((found) => {
+        if (!cancelled) setGithubRepo(found);
+      })
+      .catch(() => {
+        if (!cancelled) setGithubRepo(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, remotes]);
 
   // Asked once, and only by the owner: nobody else is offered pushing, so
   // nobody else needs to know whether a credential could be supplied.
@@ -674,6 +700,40 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
             {status.unborn ? " · no commits yet" : ""}
           </span>
         )}
+
+        {/* git has been computing these all along and the panel showed
+            neither, so "am I ahead of the remote" was a question only the
+            terminal could answer. */}
+        {(status.ahead ?? 0) > 0 && (
+          <span
+            title={`${String(status.ahead)} commit(s) to push`}
+            style={{ fontSize: 11, color: "var(--rc-text-subtle)", flex: "none" }}
+          >
+            ↑{status.ahead}
+          </span>
+        )}
+        {(status.behind ?? 0) > 0 && (
+          <span
+            title={`${String(status.behind)} commit(s) to pull`}
+            style={{ fontSize: 11, color: "var(--rc-text-subtle)", flex: "none" }}
+          >
+            ↓{status.behind}
+          </span>
+        )}
+
+        {githubRepo && (
+          <Tooltip title={`Open ${githubRepo.owner}/${githubRepo.repo} on GitHub`}>
+            <a
+              className="rc-icon-button"
+              aria-label="Open on GitHub"
+              href={githubRepo.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <VscGithub size={14} />
+            </a>
+          </Tooltip>
+        )}
         {canWrite && remotes.length > 0 && (
           <Dropdown
             trigger={["click"]}
@@ -702,7 +762,7 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
                 // One entry, not one per remote: a pull request belongs to the
                 // repository, and which one that is comes from the remotes
                 // themselves rather than from a choice made here.
-                isOwner && status?.branch
+                isOwner && status?.branch && githubRepo
                   ? [
                       {
                         key: "pull-request",
