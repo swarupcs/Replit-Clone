@@ -48,7 +48,8 @@ import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.ts";
-import { installCollab } from "../lib/collab.ts";
+import { installCollab, peers, subscribeCollab } from "../lib/collab.ts";
+import { usePresenceStore } from "../store/presenceStore.ts";
 import {
   clearProjectSources,
   installProjectSources,
@@ -110,6 +111,19 @@ export const ProjectPlayground = () => {
   const openedProjectRef = useRef<string | undefined>(undefined);
 
   useUnsavedWorkGuard();
+
+  // Who else is here. The awareness transport has been running all along; the
+  // registry is read in one place and published to a store, so the tree and the
+  // tab strip can each ask about their own file without every row subscribing
+  // to every collaboration event.
+  useEffect(() => {
+    const publish = () => {
+      usePresenceStore.getState().setPresence(peers());
+    };
+
+    publish();
+    return subscribeCollab(publish);
+  }, []);
 
   // A failed operation is transient news: it happened, it is over, and it does
   // not describe the project's current state. It used to be a banner at the

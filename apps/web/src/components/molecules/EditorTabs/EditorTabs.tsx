@@ -6,6 +6,7 @@ import { VscSplitHorizontal } from "react-icons/vsc";
 import { Tooltip } from "antd";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
+import { usePresenceStore } from "../../../store/presenceStore.ts";
 
 /** The open-file tab strip.
  *
@@ -16,6 +17,9 @@ export const EditorTabs = () => {
   const { tabs, activeRelPath, secondaryRelPath, splitOpen, setActive, closeTab } =
     useOpenTabsStore();
   const openToSide = useOpenTabsStore((state) => state.openToSide);
+  /** The whole map: the strip holds a handful of tabs, so one subscription for
+   *  the lot is cheaper than one per tab. */
+  const colorsByFile = usePresenceStore((state) => state.colorsByFile);
   const closeSplit = useOpenTabsStore((state) => state.closeSplit);
 
   /** A tab whose close is waiting on confirmation, because it still has edits
@@ -119,6 +123,25 @@ export const EditorTabs = () => {
           >
             <FileIcon extension={tab.extension} />
             <span>{tab.name}</span>
+
+            {colorsByFile[tab.relPath] && (
+              <span
+                aria-label="Someone else is in this file"
+                style={{ display: "flex", gap: 2, flex: "none" }}
+              >
+                {colorsByFile[tab.relPath]?.split(",").map((color, index) => (
+                  <span
+                    key={index}
+                    style={{
+                      width: 5,
+                      height: 5,
+                      borderRadius: 999,
+                      background: color,
+                    }}
+                  />
+                ))}
+              </span>
+            )}
 
             {/* A real button: it was a `span`, so closing a file was a
                 mouse-only gesture and screen readers were told nothing about

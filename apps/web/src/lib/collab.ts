@@ -48,6 +48,78 @@ export function peerCount(relPath: string): number {
   return docs.get(relPath)?.peers ?? 0;
 }
 
+/** Somebody else in the project, and where they are.
+ *
+ *  Keyed by name, which is the account's email: awareness is per document and
+ *  each document has its own client id, so the same person in two files is two
+ *  client ids and must be folded back into one person.
+ */
+export interface Peer {
+  key: string;
+  name: string;
+  color: string;
+  /** The files they have open, which is the only place presence exists — a
+   *  collaborator with no file open is in the project but not in any
+   *  document, and cannot be seen from here. */
+  files: string[];
+}
+
+/** Reads one document's awareness, skipping our own entry. */
+function othersIn(live: LiveDoc): { name: string; color: string }[] {
+  const found: { name: string; color: string }[] = [];
+
+  for (const [clientId, state] of live.awareness.getStates()) {
+    if (clientId === live.awareness.clientID) continue;
+
+    const user = (state as { user?: { name?: unknown; color?: unknown } }).user;
+    if (typeof user?.name !== "string") continue;
+
+    found.push({
+      name: user.name,
+      color: typeof user.color === "string" ? user.color : colorFor(user.name),
+    });
+  }
+
+  return found;
+}
+
+/** Everyone else currently in the project, folded across documents. */
+export function peers(): Peer[] {
+  const byName = new Map<string, Peer>();
+
+  for (const [relPath, live] of docs) {
+    for (const person of othersIn(live)) {
+      const existing = byName.get(person.name);
+      if (existing) {
+        if (!existing.files.includes(relPath)) existing.files.push(relPath);
+        continue;
+      }
+
+      byName.set(person.name, {
+        key: person.name,
+        name: person.name,
+        color: person.color,
+        files: [relPath],
+      });
+    }
+  }
+
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Everyone else in one file. */
+export function peersIn(relPath: string): Peer[] {
+  const live = docs.get(relPath);
+  if (!live) return [];
+
+  return othersIn(live).map((person) => ({
+    key: person.name,
+    name: person.name,
+    color: person.color,
+    files: [relPath],
+  }));
+}
+
 type Listener = () => void;
 const listeners = new Set<Listener>();
 
@@ -104,6 +176,10 @@ export function installCollab(socket: EditorSocket): () => void {
 
     void import("y-protocols/awareness").then(({ applyAwarenessUpdate }) => {
       applyAwarenessUpdate(live.awareness, new Uint8Array(update), "server");
+      // Who is present has changed. Only the peer COUNT used to announce
+      // itself, so anything reading awareness for names and colours never
+      // heard about someone arriving.
+      notify();
     });
   };
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 /** Counts renders per file row — only a file renders a FileIcon, which makes
  *  it a per-row counter without touching the components under test. */
@@ -17,6 +17,7 @@ import { TreeStructure } from "./TreeStructure.tsx";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
 import { useTreeSelectionStore } from "../../../store/treeSelectionStore.ts";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
+import { usePresenceStore } from "../../../store/presenceStore.ts";
 
 /** A project with `folders` top-level directories, each holding one file.
  *
@@ -313,5 +314,56 @@ describe("keyboard navigation", () => {
         .getAllByRole("treeitem")
         .filter((node) => node.getAttribute("tabindex") === "0"),
     ).toHaveLength(1);
+  });
+});
+
+
+/** Presence marks the files someone else is in. The tree renders one row per
+ *  file in the project, so how it subscribes matters as much as what it
+ *  shows. */
+describe("presence in the tree", () => {
+  function flatProject(): TreeNodeData {
+    return {
+      name: "root",
+      relPath: "",
+      type: "directory",
+      children: [
+        { name: "a.ts", relPath: "a.ts", type: "file" },
+        { name: "b.ts", relPath: "b.ts", type: "file" },
+      ],
+    };
+  }
+
+  beforeEach(() => {
+    useTreeStructureStore.setState({
+      projectId: "p1",
+      treeStructure: flatProject(),
+      expandedPaths: new Set<string>(),
+    });
+    usePresenceStore.setState({ peers: [], colorsByFile: {} });
+    rowRenders.clear();
+  });
+
+  it("marks a file somebody else is in", () => {
+    render(<TreeStructure />);
+    act(() => {
+      usePresenceStore.setState({ colorsByFile: { "a.ts": "red" } });
+    });
+
+    expect(screen.getByLabelText("Someone else is in this file")).toBeDefined();
+  });
+
+  it("leaves every other row alone when someone moves", () => {
+    render(<TreeStructure />);
+    const before = rowRenders.get("b.ts");
+
+    act(() => {
+      usePresenceStore.setState({ colorsByFile: { "a.ts": "red" } });
+    });
+
+    // The row subscribes to a STRING of its own file's colours, not to the
+    // presence map: an array or an object would hand every row a new identity
+    // on every awareness update and wake the whole tree for one person moving.
+    expect(rowRenders.get("b.ts")).toBe(before);
   });
 });

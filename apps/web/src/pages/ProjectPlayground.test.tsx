@@ -71,7 +71,13 @@ vi.mock("../components/organisms/SourceControlPanel/SourceControlPanel.tsx", () 
 vi.mock("../components/organisms/AiPanel/AiPanel.tsx", () => ({
   AiPanel: () => <div data-testid="ai-panel" />,
 }));
-vi.mock("../lib/collab.ts", () => ({ installCollab: () => () => undefined }));
+vi.mock("../lib/collab.ts", () => ({
+  installCollab: () => () => undefined,
+  // Presence is read from the collab registry, which has no documents here.
+  // The subscription is handed back a teardown so the effect can clean up.
+  peers: () => [],
+  subscribeCollab: () => () => undefined,
+}));
 
 const installProjectSources = vi.hoisted(() => vi.fn());
 const clearProjectSources = vi.hoisted(() => vi.fn());

@@ -8,6 +8,10 @@ import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
+import {
+  selectFileColors,
+  usePresenceStore,
+} from "../../../store/presenceStore.ts";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 import {
   selectOrderedSelection,
@@ -63,6 +67,12 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
         : state.focused === relPath,
   );
   const setFocused = useTreeSelectionStore((state) => state.setFocused);
+  /** Who else is in this file, as a comma-joined list of their colours.
+   *
+   *  A string, so a row re-renders only when the people in ITS file change —
+   *  an array would hand every row a new identity on every awareness update
+   *  and wake the whole tree. */
+  const presence = usePresenceStore(selectFileColors(relPath ?? ""));
 
   if (!node) return null;
 
@@ -200,6 +210,27 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
           >
             {node.name}
           </span>
+
+          {presence && (
+            // One dot per person, in their own colour: the same colour their
+            // cursor already has inside the file.
+            <span
+              aria-label="Someone else is in this file"
+              style={{ display: "flex", gap: 2, marginLeft: "auto", flex: "none" }}
+            >
+              {presence.split(",").map((color, index) => (
+                <span
+                  key={index}
+                  style={{
+                    width: 5,
+                    height: 5,
+                    borderRadius: 999,
+                    background: color,
+                  }}
+                />
+              ))}
+            </span>
+          )}
         </div>
       )}
 

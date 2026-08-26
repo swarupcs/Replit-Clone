@@ -1,6 +1,7 @@
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 import { useRunStore } from "../../../store/runStore.ts";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
+import { PresenceStack } from "../PresenceStack/PresenceStack.tsx";
 import {
   selectVisibleStatus,
   useEditorStatusStore,
@@ -60,6 +61,10 @@ export const StatusBar = () => {
           // stays: it is the app's, not the editor's.
           <span style={{ opacity: 0.7 }}>No file open</span>
         )}
+
+        {/* Beside the cursor rather than at the far end: who else is here is
+            about the project, and this is the end of the bar people read. */}
+        <PresenceStack />
       </span>
 
       <span className="rc-statusbar-group">
