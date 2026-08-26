@@ -7,7 +7,6 @@ import {
   Empty,
   Input,
   Modal,
-  Segmented,
   Select,
   Typography,
   message,
@@ -23,7 +22,7 @@ import {
   PlusOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
-import { VscGithub } from "react-icons/vsc";
+import { VscFolder, VscGithub, VscTerminal } from "react-icons/vsc";
 import type { Project } from "@replit-clone/shared";
 import {
   createProjectApi,
@@ -34,6 +33,7 @@ import {
   projectExportUrl,
   renameProjectApi,
 } from "../apis/projects.ts";
+import { TemplatePicker } from "../components/molecules/TemplatePicker/TemplatePicker.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
 import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx";
 import { GithubConnectionCard } from "../components/organisms/GithubConnectionCard/GithubConnectionCard.tsx";
@@ -539,7 +539,20 @@ export const Dashboard = () => {
 
       <Modal
         open={isCreating}
-        title="New playground"
+        // Two columns of cards need the room; at 520 they would wrap to one.
+        width={680}
+        centered
+        title={
+          <div className="rc-dialog-head">
+            <span className="rc-logo">&lt;/&gt;</span>
+            <span>
+              <div className="rc-dialog-title">New playground</div>
+              <div className="rc-dialog-subtitle">
+                Pick a starting point — the toolchain is already installed.
+              </div>
+            </span>
+          </div>
+        }
         okText="Create"
         confirmLoading={creating}
         onOk={() => void handleCreate()}
@@ -557,29 +570,41 @@ export const Dashboard = () => {
           <Input
             autoFocus
             size="large"
+            prefix={
+              <VscFolder
+                size={15}
+                style={{ color: "var(--rc-text-subtle)", marginRight: 4 }}
+              />
+            }
             placeholder="Project name (optional)"
             value={name}
             onChange={(event) => setName(event.target.value)}
+            // Enter is the whole dialog's confirm, not just the field's.
+            onPressEnter={() => void handleCreate()}
           />
 
           {templates && (
-            <Segmented
-              vertical
-              block
+            <TemplatePicker
+              templates={templates}
               value={selectedTemplate}
-              onChange={(value) => setTemplate(String(value))}
-              options={templates.map((t) => ({ label: t.label, value: t.id }))}
+              onChange={setTemplate}
             />
           )}
 
           {activeTemplate && (
-            <Typography.Text
-              type="secondary"
-              style={{ fontSize: 12, lineHeight: 1.6 }}
-            >
-              Run it with <code>{activeTemplate.startCommand}</code>, then open
-              the preview.
-            </Typography.Text>
+            <div className="rc-run-hint">
+              <VscTerminal
+                size={13}
+                style={{ flex: "none", color: "var(--rc-accent)" }}
+              />
+              <span style={{ flex: "none" }}>Starts with</span>
+              <code>{activeTemplate.startCommand}</code>
+              <span
+                style={{ marginLeft: "auto", flex: "none", whiteSpace: "nowrap" }}
+              >
+                port {activeTemplate.devPort}
+              </span>
+            </div>
           )}
         </div>
       </Modal>
