@@ -188,21 +188,7 @@ export const Dashboard = () => {
     <div className="rc-aurora" style={{ minHeight: "100vh" }}>
       {contextHolder}
 
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 16,
-          padding: "16px 32px",
-          borderBottom: "1px solid var(--rc-border)",
-          background: "rgba(10, 11, 18, 0.6)",
-          backdropFilter: "blur(12px)",
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-        }}
-      >
+      <header className="rc-topbar">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span className="rc-logo">&lt;/&gt;</span>
           <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: -0.2 }}>
@@ -220,7 +206,7 @@ export const Dashboard = () => {
         </div>
       </header>
 
-      <main style={{ maxWidth: 1180, margin: "0 auto", padding: "40px 32px 64px" }}>
+      <main className="rc-page">
         <div
           style={{
             display: "flex",
@@ -285,13 +271,7 @@ export const Dashboard = () => {
             <Spin size="large" />
           </div>
         ) : visibleProjects.length > 0 ? (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-              gap: 18,
-            }}
-          >
+          <div className="rc-project-grid">
             {visibleProjects.map((project) => (
               <div
                 key={project.id}

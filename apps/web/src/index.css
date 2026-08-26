@@ -826,3 +826,106 @@ body {
   font: inherit;
   text-align: left;
 }
+
+/* --- Narrow screens -------------------------------------------------------
+ *
+ * There was not one breakpoint in the app. These are the shells the pages sit
+ * in, expressed as classes so a media query can reach them at all — inline
+ * styles cannot be overridden by one.
+ *
+ * The rule throughout is `min(x, 100%)` rather than a bare minimum: a grid
+ * track with a 340px floor is 340px wide on a 360px phone with padding on
+ * both sides, which overflows the page rather than wrapping. */
+
+/* Sticky page header: logo one side, account the other. */
+.rc-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 32px;
+  border-bottom: 1px solid var(--rc-border);
+  background: rgba(10, 11, 18, 0.6);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.rc-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 32px 64px;
+}
+
+/* Project cards. `auto-fill` keeps the track width honest when there are
+ * fewer projects than fit. */
+.rc-project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  gap: 18px;
+}
+
+/* The auth pages: pitch beside form, collapsing to form alone. */
+.rc-auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.rc-auth-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  gap: 48px;
+  align-items: center;
+  width: 100%;
+  max-width: 940px;
+}
+
+/* The hero line. Scales with the viewport instead of staying at 40px and
+ * pushing a word off the side of a phone. */
+.rc-hero {
+  font-size: clamp(30px, 7vw, 40px);
+  line-height: 1.12;
+  font-weight: 800;
+  letter-spacing: -1.2px;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 640px) {
+  .rc-topbar {
+    padding: 12px 16px;
+  }
+
+  .rc-page {
+    padding: 24px 16px 48px;
+  }
+
+  .rc-auth-shell {
+    padding: 16px;
+    /* A phone keyboard eats the viewport; centring then pushes the form off
+     * the top where it cannot be scrolled back to. */
+    place-items: start center;
+    padding-top: 32px;
+  }
+
+  .rc-auth-grid {
+    gap: 28px;
+  }
+}
+
+/* The card every signed-out page sits in. Padding drops on a phone, where 32px
+ * either side is a tenth of the screen spent on nothing. */
+.rc-auth-card {
+  padding: 32px;
+  width: 100%;
+  max-width: 420px;
+}
+
+@media (max-width: 640px) {
+  .rc-auth-card {
+    padding: 22px 18px;
+  }
+}
