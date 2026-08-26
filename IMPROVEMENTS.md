@@ -95,7 +95,7 @@ Done: `apps/server/README.md` and `apps/web/README.md` — layout, the handful o
 conventions worth knowing before changing anything, how to run each suite, and
 pointers to `CONTRIBUTING.md` and `docs/SECURITY.md`.
 
-### 9. E2E coverage for the new flows ✅ (half done)
+### 9. E2E coverage for the new flows ✅ (done)
 Done: **EDITOR share-link redemption** (`e2e/share-link.spec.ts`) — the owner
 makes an edit link, a second account opens it in the browser, and the grant is
 checked from both sides: the guest can read the tree, is still refused a rename
@@ -106,8 +106,15 @@ everything unless Docker was up, but this flow starts no container — only the
 ones that run a project need a daemon. `global-setup` now decides both
 separately, so the credential-free half runs on a machine without Docker.
 
-Still open: **save → preview reloads**, which does need a container and so
-needs a daemon to write against.
+Also done: **save → preview reloads** (`e2e/preview-reload.spec.ts`). The
+existing flow saves once *before* the dev server is up, so the preview is
+correct because it was never wrong. This is the other half — a second save with
+the dev server running and the preview already on screen, and nothing touched
+afterwards. It carries a different marker per save, so a preview still showing
+the first version cannot be mistaken for one that reloaded.
+
+Checked with a negative control rather than assumed: with the `previewChanged`
+announcement disabled the spec fails, and with it restored it passes.
 - **Where:** `apps/web/e2e/`.
 
 ### 10. Boot-time sweep for orphaned containers ✅ (done)
@@ -122,9 +129,7 @@ garbage, and deleting them would be unrecoverable.
 
 ## Recommended order
 
-Items 1–5, 7, 8 and 10 are done; 6 is done bar a push button it should not
-have (see `docs/SECURITY.md`); 9 is half done. Everything left needs a Docker
-daemon to write against, and a spec that has never passed is a claim rather
-than coverage.
+Items 1–5 and 7–10 are done. 6 is done bar a push button it should not have
+(see `docs/SECURITY.md`).
 
 `docs/REPLIT_CLONE_PLAN.md` supersedes this list and sequences what is left.
