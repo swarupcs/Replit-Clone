@@ -11,6 +11,7 @@ import {
   VscSearch,
   VscSourceControl,
   VscPackage,
+  VscCloudUpload,
   VscSettingsGear,
   VscSparkle,
 } from "react-icons/vsc";
@@ -45,6 +46,7 @@ import { EditorSettingsDialog } from "../components/organisms/EditorSettingsDial
 import { SearchPanel } from "../components/organisms/SearchPanel/SearchPanel.tsx";
 import { SourceControlPanel } from "../components/organisms/SourceControlPanel/SourceControlPanel.tsx";
 import { PackagesPanel } from "../components/organisms/PackagesPanel/PackagesPanel.tsx";
+import { DeployPanel } from "../components/organisms/DeployPanel/DeployPanel.tsx";
 import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
 import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
@@ -114,7 +116,7 @@ export const ProjectPlayground = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** Which sidebar view is showing. */
   const [sidebarView, setSidebarView] = useState<
-    "files" | "search" | "git" | "packages" | "ai"
+    "files" | "search" | "git" | "packages" | "deploy" | "ai"
   >(
     "files",
   );
@@ -772,6 +774,16 @@ export const ProjectPlayground = () => {
                     <VscPackage size={16} />
                   </button>
                 </Tooltip>
+                <Tooltip title="Deploy" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "deploy"}
+                    aria-label="Deploy"
+                    onClick={() => setSidebarView("deploy")}
+                  >
+                    <VscCloudUpload size={16} />
+                  </button>
+                </Tooltip>
                 {aiModel && (
                   <Tooltip title="Assistant" placement="right">
                     <button
@@ -836,6 +848,20 @@ export const ProjectPlayground = () => {
                       <PackagesPanel
                         projectId={projectIdFromUrl}
                         canWrite={canEdit}
+                      />
+                    </ErrorBoundary>
+                  </div>
+                )}
+
+                {/* Mounted only while it is showing, for the same reason the
+                    packages pane is: opening it re-reads the deployment, and
+                    that is the whole point of opening it. */}
+                {sidebarView === "deploy" && projectIdFromUrl && (
+                  <div style={{ height: "100%" }}>
+                    <ErrorBoundary label="Deploy">
+                      <DeployPanel
+                        projectId={projectIdFromUrl}
+                        isOwner={accessLevel === "owner"}
                       />
                     </ErrorBoundary>
                   </div>

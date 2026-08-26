@@ -19,7 +19,11 @@ import {
   installPreviewUpgrade,
   previewGuard,
 } from "./routes/preview.js";
-import { env, isProduction, previewPort } from "./config/env.js";
+import {
+  createDeploySiteServer,
+  listenForSites,
+} from "./deploySite.js";
+import { deployPort, env, isProduction, previewPort } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";
 import { logger } from "./lib/logger.js";
 import { touchProject } from "./service/projectService.js";
@@ -140,6 +144,11 @@ if (previewPort === 0) {
 // Built either way, so shutdown has one thing to close; only bound when
 // previews have an origin of their own.
 const previewServer = createPreviewServer(previewProxy);
+
+// The public origin. Built unconditionally for the same reason, and bound only
+// when deployments are configured -- with DEPLOY_PORT=0 the feature is off and
+// nothing listens, which is what the endpoints then report.
+const deploySiteServer = createDeploySiteServer();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -367,6 +376,7 @@ async function start(): Promise<void> {
   });
 
   if (previewPort !== 0) listenForPreviews(previewServer, previewPort);
+  if (deployPort !== 0) listenForSites(deploySiteServer, deployPort);
 }
 
 /** Reports a fatal startup failure and exits.
@@ -407,6 +417,7 @@ async function shutdown(signal: string): Promise<void> {
   });
   await new Promise<void>((resolve) => {
     previewServer.close();
+    deploySiteServer.close();
 
     server.close(() => {
       resolve();

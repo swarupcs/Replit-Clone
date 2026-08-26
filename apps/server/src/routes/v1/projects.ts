@@ -58,6 +58,11 @@ import {
   listPackagesController,
   removePackageController,
 } from "../../controllers/packageController.js";
+import {
+  deployController,
+  getDeploymentController,
+  undeployController,
+} from "../../controllers/deployController.js";
 
 const router = express.Router();
 
@@ -140,6 +145,29 @@ router.delete(
   installLimiter,
   asyncHandler(removePackageController),
 );
+
+// Deployments. A build runs a full install and a bundler inside the container
+// and then writes to a disk nothing reclaims on its own, so it gets the
+// tightest budget of anything here.
+const deployLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many deploys. Try again later.",
+  },
+});
+
+router.get("/:projectId/deployment", asyncHandler(getDeploymentController));
+router.post(
+  "/:projectId/deployment",
+  deployLimiter,
+  asyncHandler(deployController),
+);
+router.delete("/:projectId/deployment", asyncHandler(undeployController));
 
 router.get("/:projectId/start-command", asyncHandler(getStartCommandController));
 router.put("/:projectId/start-command", asyncHandler(setStartCommandController));

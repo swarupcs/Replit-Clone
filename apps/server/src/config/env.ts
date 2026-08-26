@@ -44,6 +44,48 @@ const envSchema = z.object({
    *  withholds `allow-same-origin` and only server-rendered previews work. */
   PREVIEW_PORT: z.coerce.number().int().min(0).optional(),
 
+  /** Port serving published deployments, on a third origin of its own.
+   *
+   *  It cannot share the API's origin for the reason previews cannot, and it
+   *  cannot share the PREVIEW origin either: a preview is authenticated and a
+   *  deployment is public, so anything served here would be same-origin with a
+   *  page that carries a live preview cookie. Three concerns, three origins.
+   *
+   *  Defaults to the API's port plus two. Set to 0 to turn deployments off
+   *  entirely -- the endpoints then refuse rather than publishing to a listener
+   *  that is not running. */
+  DEPLOY_PORT: z.coerce.number().int().min(0).optional(),
+
+  /** The public origin deployments are addressed under, WITHOUT a subdomain.
+   *
+   *  A site is served at `<subdomain>.<this host>`, so this host needs a
+   *  wildcard DNS record and, over HTTPS, a wildcard certificate. Locally that
+   *  is free: browsers resolve every *.localhost name to the loopback address
+   *  themselves, per RFC 6761, so http://<sub>.localhost:3102 works with no
+   *  hosts-file entry.
+   *
+   *  Defaults to localhost on DEPLOY_PORT. */
+  DEPLOY_ORIGIN: z.string().url().optional(),
+
+  /** Where published output is copied to. Outside PROJECTS_DIR deliberately:
+   *  what is served to the public must not be reachable from a path a project's
+   *  own code can write to. */
+  DEPLOYMENTS_DIR: z.string().default("deployments"),
+
+  /** Ceiling on one published site.
+   *
+   *  A deployment outlives its container, so unlike the project quota this is
+   *  disk nothing reclaims on its own. A build that exceeds it is refused
+   *  before anything is copied. */
+  DEPLOY_MAX_MB: z.coerce.number().int().positive().default(100),
+
+  /** Longest a deploy build may run before it is abandoned.
+   *
+   *  A build is an unattended `npm install` plus a bundler, which is minutes
+   *  rather than seconds -- but it holds a container and a request, so it
+   *  cannot be unbounded. */
+  DEPLOY_BUILD_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(10),
+
   WEB_ORIGIN: z.string().url().default("http://localhost:5273"),
 
   /** This server's own public origin. Needed because an OAuth redirect_uri has
@@ -202,6 +244,28 @@ export const isProduction = env.NODE_ENV === "production";
 
 /** Where previews are served, or 0 to keep them on the API's own origin. */
 export const previewPort: number = env.PREVIEW_PORT ?? env.PORT + 1;
+
+/** Where published deployments are served, or 0 when the feature is off. */
+export const deployPort: number = env.DEPLOY_PORT ?? env.PORT + 2;
+
+/** Absolute root holding every published site.
+ *
+ *  Resolved at startup for the same reason PROJECTS_ROOT is: path confinement
+ *  needs an anchor that a later `process.chdir` cannot move.
+ */
+export const DEPLOYMENTS_ROOT: string = path.resolve(env.DEPLOYMENTS_DIR);
+
+/** The public origin deployments hang off, as a parsed URL.
+ *
+ *  Falls back to localhost on the deploy port, which is what makes the feature
+ *  work out of the box: browsers resolve *.localhost themselves.
+ */
+export const deployOrigin: URL = new URL(
+  env.DEPLOY_ORIGIN ?? `http://localhost:${String(deployPort)}`,
+);
+
+/** True when deployments are configured at all. */
+export const deploymentsEnabled: boolean = deployPort !== 0;
 
 /** True when this process is itself running inside a container. */
 const runningInContainer = existsSync("/.dockerenv");

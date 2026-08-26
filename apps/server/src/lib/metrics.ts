@@ -25,7 +25,16 @@ export type CounterName =
   | "ai_requests"
   | "ai_tool_calls"
   | "ai_proposals"
-  | "ai_errors";
+  | "ai_errors"
+  // Deployments. `deploys_failed` against `deploys_succeeded` is the ratio
+  // worth watching: a build that fails is a user who published nothing.
+  | "deploys_succeeded"
+  | "deploys_failed"
+  | "deploys_removed"
+  // A request to the public origin whose path tried to leave one site's
+  // directory. Never zero-and-forgotten: this counting up at all says
+  // somebody is probing the one origin that needs no account.
+  | "deploy_site_traversal_blocked";
 
 const counters = new Map<CounterName, number>();
 

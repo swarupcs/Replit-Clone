@@ -8,6 +8,8 @@ build/
 .DS_Store
 .migration-src/
 projects/
+# Published deployment output. Real files served to the public; never source.
+deployments/
 .turbo/
 coverage/
 

@@ -20,6 +20,8 @@ import {
   assertCanCreateProject,
   forgetUserQuota,
 } from "./userQuotaService.js";
+import { unpublish } from "./deployService.js";
+import { logger } from "../lib/logger.js";
 
 export function projectDir(projectId: string): string {
   return projectRoot(projectId);
@@ -93,6 +95,12 @@ export async function deleteProjectService(
   await removeContainer(projectId);
   // The cache volume outlives a restart deliberately, but not the project.
   await removeCacheVolume(projectId);
+  // Before the row goes: the cascade would take the deployment record with it
+  // and leave the published FILES behind, still being served to the public
+  // from an address nothing in the database points at any more.
+  await unpublish(projectId).catch((error: unknown) => {
+    logger.error("could not take the deployment offline", error);
+  });
   // Otherwise a recreated project with the same id would inherit stale run
   // state and a log from the deleted one.
   forgetRun(projectId);
