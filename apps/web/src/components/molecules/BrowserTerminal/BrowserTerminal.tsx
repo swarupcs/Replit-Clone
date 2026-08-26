@@ -5,6 +5,8 @@ import { Tooltip } from "antd";
 import { useAuthStore } from "../../../store/authStore.ts";
 import { refreshAccessToken } from "../../../config/axiosConfig.ts";
 import { VscClearAll, VscDebugRestart } from "react-icons/vsc";
+import { useThemeMode } from "../../../hooks/useThemeMode.ts";
+import { TERMINAL_THEME } from "../../../lib/terminalTheme.ts";
 import "@xterm/xterm/css/xterm.css";
 
 interface BrowserTerminalProps {
@@ -41,6 +43,7 @@ function terminalWsUrl(projectId: string): string {
  *  attaches the listener in the same tick.
  */
 export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
+  const mode = useThemeMode();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
 
@@ -89,29 +92,7 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
         cursorBlink: true,
         // xterm paints to its own surface and cannot read CSS custom
         // properties, so these mirror the --rc-* tokens in index.css.
-        theme: {
-          background: "#0a0b12",
-          foreground: "#e6e8f0",
-          cursor: "#a78bfa",
-          cursorAccent: "#0a0b12",
-          selectionBackground: "#2a2e42",
-          black: "#0a0b12",
-          red: "#f87171",
-          green: "#4ade80",
-          yellow: "#fbbf24",
-          blue: "#60a5fa",
-          magenta: "#a78bfa",
-          cyan: "#22d3ee",
-          white: "#e6e8f0",
-          brightBlack: "#6b7192",
-          brightRed: "#fca5a5",
-          brightGreen: "#86efac",
-          brightYellow: "#fcd34d",
-          brightBlue: "#93c5fd",
-          brightMagenta: "#c4b5fd",
-          brightCyan: "#67e8f9",
-          brightWhite: "#ffffff",
-        },
+        theme: TERMINAL_THEME[mode],
         fontSize: 13,
         fontFamily: '"JetBrains Mono", "Fira Code", monospace',
         lineHeight: 1.35,
@@ -268,7 +249,18 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
       }
       teardown?.();
     };
+    // `mode` is deliberately NOT a dependency. Re-running this rebuilds the
+    // terminal AND its socket, which would drop the PTY and the scrollback
+    // with it — switching theme must not cost anyone their shell. The effect
+    // below repaints the terminal that already exists instead.
   }, [projectId, hasSession, reconnectNonce]);
+
+  // Repaints a live terminal when the theme changes. xterm takes a whole
+  // palette at once and redraws from it, so there is nothing to reconnect.
+  useEffect(() => {
+    const term = termRef.current;
+    if (term) term.options.theme = TERMINAL_THEME[mode];
+  }, [mode]);
 
   const handleClear = useCallback(() => {
     termRef.current?.clear();

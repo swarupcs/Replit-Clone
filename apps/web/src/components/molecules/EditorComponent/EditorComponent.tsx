@@ -20,6 +20,7 @@ import {
   type PaneId,
 } from "../../../store/openTabsStore.ts";
 import { useEditorStatusStore } from "../../../store/editorStatusStore.ts";
+import { useThemeMode } from "../../../hooks/useThemeMode.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
 import { useAiChatStore } from "../../../store/aiChatStore.ts";
@@ -114,6 +115,11 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const [collabTick, setCollabTick] = useState(0);
   useEffect(() => subscribeCollab(() => setCollabTick((value) => value + 1)), []);
   const settings = useEditorSettingsStore();
+  /** Dracula in the dark, Monaco's own "vs" in the light. Dracula is a dark
+   *  scheme by construction — lightening its ground leaves the syntax colours
+   *  unreadable — so the light theme is a different scheme rather than a
+   *  recoloured one. */
+  const monacoTheme = useThemeMode() === "light" ? "vs" : "dracula";
   /** The whole store: both actions are stable, so this never re-renders. */
   const publishStatus = useEditorStatusStore.getState();
 
@@ -325,7 +331,6 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     // Imported rather than fetched from '/Dracula.json', which 404'd and left
     // the editor permanently unmounted.
     monaco.editor.defineTheme("dracula", draculaTheme as editor.IStandaloneThemeData);
-    monaco.editor.setTheme("dracula");
 
     // Feeds the status bar. Monaco owns the cursor, so this is the only way to
     // observe it; the listener is disposed with the editor.
@@ -525,28 +530,37 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         vertical
         align="center"
         justify="center"
-        gap={10}
+        gap={18}
         style={{ height: "100%", backgroundColor: "var(--rc-editor-bg)" }}
       >
         <span className="rc-logo" style={{ opacity: 0.55 }}>
           &lt;/&gt;
         </span>
+
         <Typography.Text style={{ color: "var(--rc-text-muted)", fontSize: 14 }}>
-          Select a file to start editing
+          Nothing open
         </Typography.Text>
-        <Typography.Text style={{ color: "var(--rc-text-subtle)", fontSize: 12 }}>
-          Changes save automatically — or press{" "}
-          <kbd
-            style={{
-              fontFamily: "var(--rc-mono)",
-              background: "var(--rc-selection)",
-              padding: "1px 5px",
-              borderRadius: 4,
-            }}
-          >
-            Ctrl+S
-          </kbd>
-        </Typography.Text>
+
+        {/* The routes in, with their keys. This was a dimmed logo and one line
+            about autosaving -- true, and useless to someone who has just
+            arrived and cannot see how to get anywhere. The bindings are
+            written here rather than derived from the registry because this
+            pane has no access to it; `useHotkeys` in the playground is where
+            they are actually bound. */}
+        <div className="rc-onramp">
+          {[
+            ["Open a file", "Ctrl+P"],
+            ["Find a command", "Ctrl+Shift+P"],
+            ["Search the project", "Ctrl+Shift+F"],
+            ["Show the terminal", "Ctrl+`"],
+            ["Save (it also autosaves)", "Ctrl+S"],
+          ].map(([what, keys]) => (
+            <div key={what} className="rc-onramp-row">
+              <span>{what}</span>
+              <kbd className="rc-kbd">{keys}</kbd>
+            </div>
+          ))}
+        </div>
       </Flex>
     );
   }
@@ -677,7 +691,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         <DiffEditor
           height="100%"
           width="100%"
-          theme="dracula"
+          theme={monacoTheme}
           language={language}
           // Left is the buffer as it stands; right is what the assistant would
           // have instead.
@@ -705,7 +719,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         <DiffEditor
           height="100%"
           width="100%"
-          theme="dracula"
+          theme={monacoTheme}
           language={language}
           // Left is the file as saved; right is what is in the buffer now.
           original={activeTab.value}
@@ -736,7 +750,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         <Editor
           height="100%"
           width="100%"
-          theme="dracula"
+          theme={monacoTheme}
           options={{
             // Read-only access is presented as read-only rather than letting
             // every keystroke be rejected one at a time.

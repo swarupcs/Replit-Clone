@@ -215,4 +215,38 @@ piece of work and the one that changes who can use the product at all.
   kills its PTY and its scrollback. Resizing a window across the breakpoint
   must not cost anyone their shell.
 
-Still open: all of Tier 3.
+### Tier 3
+
+- [x] **Light theme.** A `:root[data-theme="light"]` block, a three-way choice
+  (System / Light / Dark) in the editor settings and a palette command, and the
+  antd `ConfigProvider` re-derived per mode. Not quite the "whole cost" the
+  plan estimated, for three reasons worth recording:
+
+  - Several washes were literals, not tokens — `rgba(255,255,255,0.06)` reads
+    as a hover over near-black and as nothing at all over white. Those are
+    tokens now, along with the aurora blooms, the scrollbar, the sticky
+    header's ground, and the status letters and folder glyph that components
+    set as inline colours.
+  - Monaco and xterm paint their own surfaces and cannot read a custom
+    property. Dracula is a dark scheme by construction, so light uses Monaco's
+    own `vs` rather than a recoloured Dracula; the terminals get a second
+    palette, shared between the shell and the run output so the two cannot
+    drift. Neither is rebuilt on a theme change — that would drop the PTY and
+    the run's output — they are repainted in place.
+  - A token added to the dark block and forgotten in the light one does not
+    error; it inherits the dark value and shows up as one unreadable thing on
+    a light page. There is a test that reads `index.css` and fails on exactly
+    that.
+
+- [x] **Skeletons over spinners.** Card-shaped placeholders in the grid, so
+  the page keeps its shape instead of jumping when the projects land.
+- [x] **The editor empty state as an on-ramp.** The routes in, with their
+  keys, in place of a dimmed logo and a line about autosaving. Without the
+  "recent files" the plan suggests: nothing records file-open history, and a
+  store for it is a feature rather than the polish this item is.
+- [x] **Labels on the icon-only buttons.** A tooltip is not a label — it never
+  reaches a screen reader, and a touch device never shows one. Four in the
+  source-control panel had only a tooltip; there is now a test that reads the
+  source and fails on any icon button without an accessible name.
+
+Still open in Tier 3: a dashboard list view for large accounts.

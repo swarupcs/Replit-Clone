@@ -1,8 +1,9 @@
-import { Button, InputNumber, Modal, Switch, Typography } from "antd";
+import { Button, InputNumber, Modal, Segmented, Switch, Typography } from "antd";
 import {
   EDITOR_SETTING_LIMITS,
   useEditorSettingsStore,
 } from "../../../store/editorSettingsStore.ts";
+import { useThemeStore, type ThemeChoice } from "../../../store/themeStore.ts";
 
 interface EditorSettingsDialogProps {
   open: boolean;
@@ -48,6 +49,8 @@ const Row = ({
  */
 export const EditorSettingsDialog = ({ open, onClose }: EditorSettingsDialogProps) => {
   const settings = useEditorSettingsStore();
+  const themeChoice = useThemeStore((state) => state.choice);
+  const setThemeChoice = useThemeStore((state) => state.setChoice);
 
   return (
     <Modal
@@ -69,6 +72,22 @@ export const EditorSettingsDialog = ({ open, onClose }: EditorSettingsDialogProp
       <Typography.Paragraph style={{ color: "var(--rc-text-subtle)", fontSize: 13 }}>
         Changes apply immediately and are remembered on this device.
       </Typography.Paragraph>
+
+      <Row
+        label="Theme"
+        hint="System follows your operating system"
+        control={
+          <Segmented<ThemeChoice>
+            value={themeChoice}
+            onChange={setThemeChoice}
+            options={[
+              { label: "System", value: "system" },
+              { label: "Light", value: "light" },
+              { label: "Dark", value: "dark" },
+            ]}
+          />
+        }
+      />
 
       <Row
         label="Font size"

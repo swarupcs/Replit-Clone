@@ -190,9 +190,9 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
                 data-expanded={isExpanded}
               />
               {isExpanded ? (
-                <FaFolderOpen color="#7c88b8" size={14} style={{ flex: "none" }} />
+                <FaFolderOpen color="var(--rc-folder)" size={14} style={{ flex: "none" }} />
               ) : (
-                <FaFolder color="#7c88b8" size={14} style={{ flex: "none" }} />
+                <FaFolder color="var(--rc-folder)" size={14} style={{ flex: "none" }} />
               )}
             </>
           ) : (

@@ -9,7 +9,6 @@ import {
   Modal,
   Segmented,
   Select,
-  Spin,
   Typography,
   message,
 } from "antd";
@@ -267,8 +266,18 @@ export const Dashboard = () => {
         </div>
 
         {isLoading ? (
-          <div style={{ display: "grid", placeItems: "center", padding: 80 }}>
-            <Spin size="large" />
+          // Card-shaped placeholders rather than a centred spinner: the grid
+          // keeps the shape it is about to have, so the page does not jump
+          // when the projects land. Six is a plausible first screen; fewer
+          // would jump the other way.
+          <div className="rc-project-grid" aria-label="Loading projects">
+            {Array.from({ length: 6 }, (_, index) => (
+              <div key={index} className="rc-skeleton-card" aria-hidden="true">
+                <span className="rc-skeleton" style={{ width: "58%", height: 15 }} />
+                <span className="rc-skeleton" style={{ width: "84%", height: 11 }} />
+                <span className="rc-skeleton" style={{ width: "40%", height: 11 }} />
+              </div>
+            ))}
           </div>
         ) : visibleProjects.length > 0 ? (
           <div className="rc-project-grid">

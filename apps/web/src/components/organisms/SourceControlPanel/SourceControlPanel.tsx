@@ -50,11 +50,11 @@ import {
 /** One letter per state, the way every git UI abbreviates them. */
 const BADGE: Record<string, { letter: string; colour: string; title: string }> =
   {
-    added: { letter: "A", colour: "#4ade80", title: "Added" },
-    modified: { letter: "M", colour: "#fbbf24", title: "Modified" },
-    deleted: { letter: "D", colour: "#f87171", title: "Deleted" },
-    renamed: { letter: "R", colour: "#a78bfa", title: "Renamed" },
-    untracked: { letter: "U", colour: "#60a5fa", title: "Untracked" },
+    added: { letter: "A", colour: "var(--rc-green)", title: "Added" },
+    modified: { letter: "M", colour: "var(--rc-yellow)", title: "Modified" },
+    deleted: { letter: "D", colour: "var(--rc-red)", title: "Deleted" },
+    renamed: { letter: "R", colour: "var(--rc-accent)", title: "Renamed" },
+    untracked: { letter: "U", colour: "var(--rc-info, #2563eb)", title: "Untracked" },
   };
 
 interface Props {
@@ -438,6 +438,9 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
             <button
               type="button"
               className="rc-icon-button"
+              // A tooltip is not a label: it never reaches a screen reader,
+              // and a touch device never shows one at all.
+              aria-label={`${isStaged ? "Unstage" : "Stage"} ${change.path}`}
               disabled={busy}
               onClick={() => {
                 void act(
@@ -512,6 +515,7 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
               <button
                 type="button"
                 className="rc-icon-button"
+                aria-label={action.title}
                 disabled={busy}
                 onClick={action.run}
               >
@@ -616,6 +620,7 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
           <button
             type="button"
             className="rc-icon-button"
+            aria-label="History"
             data-on={showHistory}
             onClick={() => {
               setShowHistory((value) => !value);
@@ -628,6 +633,7 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
           <button
             type="button"
             className="rc-icon-button"
+            aria-label="Refresh"
             onClick={() => void refresh()}
           >
             <VscRefresh size={14} />

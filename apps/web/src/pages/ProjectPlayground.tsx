@@ -47,6 +47,7 @@ import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
 import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
+import { useThemeStore } from "../store/themeStore.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.ts";
 import { installCollab, peers, subscribeCollab } from "../lib/collab.ts";
@@ -362,6 +363,23 @@ export const ProjectPlayground = () => {
         run: () => {
           setSidebarView("git");
           openView("sidebar");
+        },
+      },
+      {
+        id: "view.theme",
+        category: "View",
+        title: "Switch between the light and dark theme",
+        run: () => {
+          // From what is on screen, not from the stored choice: with "system"
+          // selected, the useful thing to do is leave it — which means picking
+          // the opposite of what the OS is currently giving.
+          const current =
+            document.documentElement.dataset["theme"] === "light"
+              ? "light"
+              : "dark";
+          useThemeStore
+            .getState()
+            .setChoice(current === "light" ? "dark" : "light");
         },
       },
       {

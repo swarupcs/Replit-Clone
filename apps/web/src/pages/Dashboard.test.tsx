@@ -132,6 +132,27 @@ describe("Dashboard listing", () => {
     expect(screen.getByText("Apple")).toBeDefined();
   });
 
+  /** The grid used to show a centred spinner and then swap in cards, so the
+   *  whole page jumped the moment the projects landed. */
+  it("holds the grid's shape while the projects load", () => {
+    // A promise that never settles: the loading state is the subject, and a
+    // resolved mock is already past it by the first assertion.
+    api.listProjectsApi.mockReturnValue(new Promise(() => undefined));
+    renderDashboard();
+
+    expect(document.querySelectorAll(".rc-skeleton-card").length).toBeGreaterThan(
+      0,
+    );
+    expect(document.querySelector(".ant-spin")).toBeNull();
+  });
+
+  it("puts the skeletons away once the projects arrive", async () => {
+    renderDashboard();
+    await screen.findByText("Zebra");
+
+    expect(document.querySelectorAll(".rc-skeleton-card")).toHaveLength(0);
+  });
+
   it("opens a project when its card is clicked", async () => {
     renderDashboard();
     fireEvent.click(await screen.findByText("Zebra"));

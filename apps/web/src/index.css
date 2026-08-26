@@ -54,6 +54,87 @@
     monospace;
 
   --rc-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Interaction washes. Literals until now, which is why they only worked on
+   * a dark ground: white at 6% over near-black reads as a hover, and over
+   * white reads as nothing at all. */
+  --rc-hover: rgba(255, 255, 255, 0.06);
+  --rc-hover-strong: rgba(255, 255, 255, 0.1);
+  --rc-tint: rgba(255, 255, 255, 0.035);
+  --rc-tint-faint: rgba(255, 255, 255, 0.012);
+  --rc-hairline: rgba(255, 255, 255, 0.02);
+  --rc-inset-edge: rgba(0, 0, 0, 0.25);
+  --rc-scrim: rgba(0, 0, 0, 0.45);
+  --rc-scrollbar-hover: #3d4257;
+  /* The two soft blooms behind a full-page backdrop, and the translucent
+   * ground the sticky header sits on. */
+  --rc-bloom-a: rgba(139, 92, 246, 0.16);
+  --rc-bloom-b: rgba(34, 211, 238, 0.1);
+  --rc-topbar-bg: rgba(10, 11, 18, 0.6);
+  /* Named because they are read from components as well as from here: an SVG
+   * `color` and a status letter cannot use a class. */
+  --rc-folder: #7c88b8;
+  --rc-info: #60a5fa;
+}
+
+/* --- Light -----------------------------------------------------------------
+ *
+ * Only the tokens change; not one component reads a colour of its own, which
+ * is what makes this a block of values rather than a second stylesheet.
+ *
+ * The ground order inverts rather than lightening uniformly: on dark, deeper
+ * is further back, so on light, deeper must be *darker*. The editor plane
+ * keeps its role — the surface you read sits above the surface you operate —
+ * which on light means the editor is the white one and the chrome is tinted.
+ */
+:root[data-theme="light"] {
+  --rc-bg: #f4f6fb;
+  --rc-surface: #eef1f8;
+  --rc-surface-sunken: #e6eaf3;
+  --rc-surface-raised: #ffffff;
+  --rc-surface-overlay: #ffffff;
+
+  --rc-editor-bg: #ffffff;
+
+  --rc-border: #dbe0ec;
+  --rc-border-strong: #c2c9db;
+  --rc-selection: #dbe4fa;
+
+  --rc-text: #131623;
+  --rc-text-muted: #4a5169;
+  --rc-text-subtle: #6f778f;
+
+  /* Darker than the dark theme's accent: #a78bfa on white fails contrast for
+   * text, and this colour is used for text as well as for fills. */
+  --rc-accent: #6d28d9;
+  --rc-accent-strong: #5b21b6;
+  --rc-accent-soft: rgba(109, 40, 217, 0.1);
+  --rc-gradient: linear-gradient(135deg, #7c3aed 0%, #2563eb 50%, #0891b2 100%);
+
+  --rc-green: #15803d;
+  --rc-yellow: #b45309;
+  --rc-red: #dc2626;
+  --rc-cyan: #0e7490;
+
+  --rc-shadow-sm: 0 1px 2px rgba(19, 22, 35, 0.08);
+  --rc-shadow-md: 0 4px 16px rgba(19, 22, 35, 0.1);
+  --rc-shadow-lg: 0 16px 48px rgba(19, 22, 35, 0.14);
+  --rc-glow: 0 0 0 1px rgba(109, 40, 217, 0.35), 0 8px 32px rgba(109, 40, 217, 0.16);
+
+  /* Black washes, not white: the whole point of the tokens. */
+  --rc-hover: rgba(19, 22, 35, 0.05);
+  --rc-hover-strong: rgba(19, 22, 35, 0.09);
+  --rc-tint: rgba(255, 255, 255, 0.7);
+  --rc-tint-faint: rgba(255, 255, 255, 0.4);
+  --rc-hairline: rgba(19, 22, 35, 0.035);
+  --rc-inset-edge: rgba(19, 22, 35, 0.08);
+  --rc-scrim: rgba(19, 22, 35, 0.35);
+  --rc-scrollbar-hover: #aeb6cb;
+  --rc-bloom-a: rgba(124, 58, 237, 0.1);
+  --rc-bloom-b: rgba(8, 145, 178, 0.07);
+  --rc-topbar-bg: rgba(244, 246, 251, 0.72);
+  --rc-folder: #5a6486;
+  --rc-info: #2563eb;
 }
 
 * {
@@ -95,7 +176,7 @@ body {
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: #3d4257;
+  background-color: var(--rc-scrollbar-hover);
   background-clip: content-box;
 }
 
@@ -124,12 +205,12 @@ body {
   background:
     radial-gradient(
       60rem 40rem at 15% -10%,
-      rgba(139, 92, 246, 0.16),
+      var(--rc-bloom-a),
       transparent 60%
     ),
     radial-gradient(
       50rem 35rem at 100% 0%,
-      rgba(34, 211, 238, 0.1),
+      var(--rc-bloom-b),
       transparent 55%
     );
   pointer-events: none;
@@ -142,8 +223,8 @@ body {
   inset: 0;
   z-index: -1;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    linear-gradient(var(--rc-hairline) 1px, transparent 1px),
+    linear-gradient(90deg, var(--rc-hairline) 1px, transparent 1px);
   background-size: 56px 56px;
   mask-image: radial-gradient(60rem 40rem at 50% 0%, #000, transparent 75%);
   pointer-events: none;
@@ -160,8 +241,8 @@ body {
 .rc-panel {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.035),
-    rgba(255, 255, 255, 0.012)
+    var(--rc-tint),
+    var(--rc-tint-faint)
   );
   border: 1px solid var(--rc-border);
   border-radius: var(--rc-radius-lg);
@@ -322,7 +403,7 @@ body {
 }
 
 .rc-tree-row:hover {
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: var(--rc-hover);
   color: var(--rc-text);
 }
 
@@ -389,11 +470,11 @@ body {
 
 .rc-icon-button:hover {
   color: var(--rc-text);
-  background-color: rgba(255, 255, 255, 0.06);
+  background-color: var(--rc-hover);
 }
 
 .rc-icon-button:active {
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--rc-hover-strong);
 }
 
 /* Toggle-style icon button that stays lit while its pane is visible. */
@@ -422,7 +503,7 @@ body {
   font-size: 11.5px;
   color: var(--rc-text-subtle);
   background: var(--rc-editor-bg);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+  border-bottom: 1px solid var(--rc-inset-edge);
   overflow-x: auto;
   white-space: nowrap;
   scrollbar-width: none;
@@ -490,10 +571,10 @@ body {
 .rc-preview-stage {
   background-color: var(--rc-surface-sunken);
   background-image:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.02) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(255, 255, 255, 0.02) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.02) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.02) 75%);
+    linear-gradient(45deg, var(--rc-hairline) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--rc-hairline) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--rc-hairline) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--rc-hairline) 75%);
   background-size: 16px 16px;
   background-position:
     0 0,
@@ -512,7 +593,7 @@ body {
   height: 2px;
   z-index: 1;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--rc-hover);
 }
 
 .rc-preview-progress::after {
@@ -740,7 +821,7 @@ body {
 }
 
 .rc-review-button:hover:not(:disabled) {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: var(--rc-hover-strong);
 }
 
 .rc-review-button[data-primary] {
@@ -846,7 +927,7 @@ body {
   flex-wrap: wrap;
   padding: 16px 32px;
   border-bottom: 1px solid var(--rc-border);
-  background: rgba(10, 11, 18, 0.6);
+  background: var(--rc-topbar-bg);
   backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
@@ -987,7 +1068,78 @@ body {
     z-index: 30;
     border: none;
     padding: 0;
-    background: rgba(0, 0, 0, 0.45);
+    background: var(--rc-scrim);
     cursor: pointer;
   }
+}
+
+/* --- Loading --------------------------------------------------------------
+ * A skeleton in the shape of what is coming, rather than a spinner in the
+ * middle of an empty page: the grid keeps its layout, so nothing jumps when
+ * the content arrives. */
+.rc-skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-radius);
+  background: var(--rc-surface-raised);
+}
+
+.rc-skeleton {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--rc-hover) 25%,
+    var(--rc-hover-strong) 37%,
+    var(--rc-hover) 63%
+  );
+  background-size: 400% 100%;
+  animation: rc-shimmer 1.4s ease infinite;
+}
+
+@keyframes rc-shimmer {
+  from {
+    background-position: 100% 50%;
+  }
+  to {
+    background-position: 0 50%;
+  }
+}
+
+/* --- The editor's empty state ---------------------------------------------
+ * The routes in, rather than a decorative logo: this is the first thing
+ * someone sees in a new project. */
+.rc-onramp {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: min(300px, 80%);
+  font-size: 12.5px;
+  color: var(--rc-text-subtle);
+}
+
+.rc-onramp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 5px 8px;
+  border-radius: var(--rc-radius-sm);
+}
+
+.rc-onramp-row:hover {
+  background: var(--rc-hover);
+}
+
+.rc-kbd {
+  font-family: var(--rc-mono);
+  font-size: 11px;
+  background: var(--rc-selection);
+  color: var(--rc-text-muted);
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
