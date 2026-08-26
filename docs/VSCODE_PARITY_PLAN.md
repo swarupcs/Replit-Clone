@@ -96,6 +96,58 @@ from Monaco.
 
 Everything below assumes Route B.
 
+### 0.3 Decisions taken
+
+_Recorded 2026-08-26. Both were open questions in the draft of this document
+and are now settled. They are written here rather than left implicit in the
+sections that depend on them, so that a later reader can tell a decision from a
+suggestion._
+
+**Decision 1 — keep building on Monaco (Route B).**
+
+> Keep building on Monaco. Those four things — the multiplayer layer, the
+> assistant, the run control and the preview — are the reasons to use this over
+> VS Code, and Route A puts every one of them behind a rewrite.
+
+The revisit trigger is named and narrow, and it is **debugging** (§4): months of
+work on Monaco, and free on Route A because VS Code already has it. If
+debugging becomes the reason people choose something else, that is the argument
+for openvscode-server — not for hand-building a debug adapter client, a
+breakpoint gutter and four panes.
+
+The second trigger, stated in §0.2, stands alongside it: if running the user's
+*own* extensions becomes a requirement, Monaco cannot get there at all.
+
+Anything that would be thrown away by a later move to Route A should be weighed
+against these two triggers before it is built. Most of this document is not in
+that category — the icon table, the git decorations, the database client and the
+theme work are all product surface that Route A would not supply either.
+
+**Decision 2 — the query editor ships before any database infrastructure.**
+
+> A query editor + table browser is UI over a connection. It needs no
+> infrastructure — point it at a Neon or Atlas database the user already has.
+> Ships first, useful alone.
+
+This settles the split argued in §7.1 in favour of the smaller half. Concretely:
+
+- §7.2 (the SSRF guard and sealed storage) and §7.5–7.6 (the query editor,
+  schema tree and table grid) are the **first** database work, against a
+  user-supplied connection string.
+- §7.3–7.4 (a managed per-project Postgres or MongoDB in a sidecar container)
+  and §7.7 (the templates that would depend on it) come **after**, and are not
+  a prerequisite for any of the above.
+- The memory and quota question in §7.3 — that a managed database makes every
+  database-backed project cost two of the three default container slots — is
+  therefore deferred rather than answered, and gets decided with a working
+  client in hand to justify the cost.
+
+The one thing this ordering does **not** relax is the guard. §7.2 comes first
+inside the first slice, not alongside it: an external connection string is a
+host the server dials, and the platform's own Postgres is on loopback on the
+same machine with its credentials in the same `.env`. If the guard is not in
+the first commit, external connections are not in the first commit either.
+
 ---
 
 ## 1. File icons and language identity
@@ -334,9 +386,10 @@ shape as §3.2), a breakpoint gutter and decoration layer in Monaco, and four ne
 panels. It is the one item where **Route A pays for itself outright**, because
 VS Code has all of it and building it is months.
 
-**Recommendation:** do not build this. Revisit only if debugging becomes the
-reason people are choosing something else — and if it does, that is the argument
-for Route A, not for building a debugger.
+**Decided:** do not build this — §0.3, Decision 1, which names debugging as
+*the* trigger for revisiting Route A. If debugging becomes the reason people are
+choosing something else, the answer is openvscode-server, not a hand-built debug
+adapter client, breakpoint gutter and four panes.
 
 **Interim:** `console.log` and the terminal already work, and `debugpy --wait`
 attached from the user's own local VS Code over a forwarded port is a real
@@ -434,7 +487,8 @@ user already has — is a perfectly good thing to point it at, and is what most
 people will actually use.
 
 So half two can ship first, alone, and be useful. That ordering is the whole
-recommendation of this section.
+recommendation of this section — and it is **decided**, not proposed: see
+§0.3, Decision 2.
 
 ### 7.2 The security decision that comes before any code
 
@@ -665,6 +719,10 @@ running a database per project on a VM sized for three containers — gets decid
 with a working client already in hand to justify it, rather than up front on
 faith.
 
+**Settled** — §0.3, Decision 2. The first two rows of the table above are the
+next database work; the managed sidecar is deferred behind them, and the memory
+question in §7.3 is deferred with it.
+
 ---
 
 ## 8. Replit and CodeSandbox, beyond the editor
@@ -704,7 +762,7 @@ Two further items from the same section that belong in an *editor* plan:
 ## 9. Order
 
 By visible value per unit of work, and by how little each depends on a decision
-nobody has made:
+nobody has made. Items 7, 10 and 14 are fixed by §0.3; the rest is orderable.
 
 1. **§2.1 — Monaco options.** An afternoon. Bracket colourisation, sticky
    scroll, inlay hints, linked editing. Nothing feels more like VS Code for
