@@ -540,6 +540,10 @@ app can talk to, no object storage, no runtime state that survives the reaper.
   reachable from a container running untrusted code, so this means either a
   per-project database with generated credentials injected as env vars, or a
   small KV service on the sandbox network with per-project tokens.
+- **Designed in full** in `VSCODE_PARITY_PLAN.md` §7, which works the above
+  through to a sidecar container per project, adds Postgres and MongoDB
+  templates, and splits off the in-editor query editor and table browser as a
+  feature that ships first and needs none of this infrastructure.
 
 ### 8.4 Package management UI
 
