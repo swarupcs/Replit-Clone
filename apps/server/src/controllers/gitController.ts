@@ -7,6 +7,12 @@ import { BadRequestError } from "../utils/errors.js";
 import { prisma } from "../lib/prisma.js";
 import * as git from "../service/gitService.js";
 import { dropDoc, forgetProject } from "../service/collabService.js";
+import {
+  createPullRequest,
+  githubToken,
+  listPullRequests,
+  parseGithubRemote,
+} from "../service/githubService.js";
 
 /** Paths come from the client, so they are constrained the same way the editor
  *  constrains them: relative, and unable to climb out of the project.
@@ -82,8 +88,10 @@ const pullSchema = z.object({
  *  The token is never persisted or echoed, so nothing here validates its shape
  *  beyond a length bound — every forge issues a different one, and guessing at
  *  formats would only reject valid credentials. */
+/** The token is optional now: a connected GitHub account supplies one, and
+ *  pasting a personal access token remains the way to push anywhere else. */
 const pushSchema = pullSchema.extend({
-  token: z.string().min(1).max(1024),
+  token: z.string().min(1).max(1024).optional(),
 });
 
 const branchSchema = z.object({
@@ -421,6 +429,44 @@ async function isSoleOccupant(projectId: string): Promise<boolean> {
   return collaborators === 0 && !project?.shareToken;
 }
 
+/** The stored GitHub token, but only for a remote that is actually GitHub.
+ *
+ *  git's credential helper answers whatever host git asks it about — it is
+ *  handed the request on stdin and prints a password regardless. So spending
+ *  the connection on a remote pointing anywhere else hands somebody's GitHub
+ *  token to that host.
+ *
+ *  Remotes are added at *editor* level and may name any https host, while
+ *  pushing is the owner's. Those do not overlap today — a project with an
+ *  editor has a collaborator, and a project with a collaborator cannot be
+ *  pushed from here at all — but they only have to overlap once: a
+ *  collaborator adds a mirror, is removed, and the next owner push sends the
+ *  token to them. A README saying "add this remote and push" needs no
+ *  collaborator at all.
+ *
+ *  A pasted token is unaffected: choosing to give a credential to a particular
+ *  remote is exactly what typing one in means.
+ */
+async function githubForRemote(
+  projectId: string,
+  name: string,
+  userId: string,
+): Promise<string> {
+  const remote = (await git.remotes(projectId)).find(
+    (entry) => entry.name === name,
+  );
+
+  if (!remote || !parseGithubRemote(remote.url)) {
+    throw new BadRequestError(
+      `${name} is not a GitHub remote, so your connected GitHub account ` +
+        "cannot be used for it. Supply an access token for this push instead.",
+      "REMOTE_NOT_GITHUB",
+    );
+  }
+
+  return githubToken(userId);
+}
+
 /** Pushes a branch, with a token supplied for this one call.
  *
  *  The owner's alone — not because an editor could not be trusted with the
@@ -435,6 +481,7 @@ export async function gitPushController(
   res: Response,
 ): Promise<void> {
   const projectId = await authorise(req, "owner");
+  const { userId } = getAuthContext(req);
   const { name, branch, token } = pushSchema.parse(req.body ?? {});
 
   if (!(await isSoleOccupant(projectId))) {
@@ -445,11 +492,125 @@ export async function gitPushController(
     );
   }
 
-  await git.pushRemote(projectId, name, branch, token);
+  // A token in the request wins: someone pasting one is pushing to a forge
+  // this server knows nothing about, and their explicit choice should not be
+  // overridden by a connection meant for GitHub.
+  const credential = token ?? (await githubForRemote(projectId, name, userId));
+
+  await git.pushRemote(projectId, name, branch, credential);
 
   res.json({
     success: true,
     message: "Pushed",
     data: await git.status(projectId),
+  });
+}
+
+/** Where this project's code lives on GitHub, from its own remotes.
+ *
+ *  Derived rather than asked for: the browser knowing which repository a
+ *  project belongs to would be a thing to get wrong or to lie about, and the
+ *  remote is the authority anyway.
+ *
+ *  `origin` first, then any other GitHub remote — a fork's `origin` is the
+ *  fork, which is exactly where a pull request should come from.
+ */
+async function githubRepoForProject(
+  projectId: string,
+): Promise<{ owner: string; repo: string }> {
+  const remotes = await git.remotes(projectId);
+  const ordered = [
+    ...remotes.filter((remote) => remote.name === "origin"),
+    ...remotes.filter((remote) => remote.name !== "origin"),
+  ];
+
+  for (const remote of ordered) {
+    const parsed = parseGithubRemote(remote.url);
+    if (parsed) return parsed;
+  }
+
+  throw new BadRequestError(
+    "This project has no GitHub remote, so there is nowhere to open a pull " +
+      "request. Add one first.",
+    "NO_GITHUB_REMOTE",
+  );
+}
+
+export async function githubPullsController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  const { userId } = getAuthContext(req);
+
+  const head = typeof req.query["head"] === "string" ? req.query["head"] : undefined;
+  const { owner, repo } = await githubRepoForProject(projectId);
+
+  res.json({
+    success: true,
+    message: "Pull requests",
+    data: await listPullRequests(userId, owner, repo, head),
+  });
+}
+
+const pullRequestSchema = z.object({
+  title: z.string().trim().min(1).max(255),
+  head: z.string().trim().min(1).max(255),
+  base: z.string().trim().min(1).max(255),
+  body: z.string().max(60_000).optional(),
+  draft: z.boolean().optional(),
+});
+
+/** Opens a pull request.
+ *
+ *  The owner's, like pushing, and for the same reason: it spends their
+ *  credential and speaks in their name on a repository that is theirs.
+ */
+export async function githubCreatePullController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "owner");
+  const { userId } = getAuthContext(req);
+  const input = pullRequestSchema.parse(req.body ?? {});
+
+  const { owner, repo } = await githubRepoForProject(projectId);
+
+  res.status(201).json({
+    success: true,
+    message: "Pull request opened",
+    data: await createPullRequest(userId, { owner, repo, ...input }),
+  });
+}
+
+
+/** Which GitHub repository this project points at, if any.
+ *
+ *  Lets the panel offer a pull request and an "open on GitHub" link only when
+ *  there is somewhere for them to go — better than offering both and failing on
+ *  a project whose remote is a GitLab one or a path on disk.
+ */
+export async function githubRepoController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+
+  const remotes = await git.remotes(projectId);
+  const ordered = [
+    ...remotes.filter((remote) => remote.name === "origin"),
+    ...remotes.filter((remote) => remote.name !== "origin"),
+  ];
+
+  const found = ordered
+    .map((remote) => parseGithubRemote(remote.url))
+    .find((parsed) => parsed !== null);
+
+  res.json({
+    success: true,
+    message: "GitHub repository",
+    data: found
+      ? { ...found, url: `https://github.com/${found.owner}/${found.repo}` }
+      : null,
   });
 }

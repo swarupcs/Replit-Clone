@@ -4,6 +4,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Tooltip } from "antd";
 import { VscClearAll } from "react-icons/vsc";
 import { useRunStore } from "../../../store/runStore.ts";
+import { useThemeMode } from "../../../hooks/useThemeMode.ts";
+import { TERMINAL_THEME } from "../../../lib/terminalTheme.ts";
 import "@xterm/xterm/css/xterm.css";
 
 /** Read-only view of the dev server's output.
@@ -13,6 +15,7 @@ import "@xterm/xterm/css/xterm.css";
  *  garbage.
  */
 export const RunOutput = () => {
+  const mode = useThemeMode();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   /** How many chunks have been written, so re-renders append rather than
@@ -31,27 +34,8 @@ export const RunOutput = () => {
       disableStdin: true,
       cursorStyle: "bar",
       cursorBlink: false,
-      theme: {
-        background: "#0a0b12",
-        foreground: "#e6e8f0",
-        selectionBackground: "#2a2e42",
-        black: "#0a0b12",
-        red: "#f87171",
-        green: "#4ade80",
-        yellow: "#fbbf24",
-        blue: "#60a5fa",
-        magenta: "#a78bfa",
-        cyan: "#22d3ee",
-        white: "#e6e8f0",
-        brightBlack: "#6b7192",
-        brightRed: "#fca5a5",
-        brightGreen: "#86efac",
-        brightYellow: "#fcd34d",
-        brightBlue: "#93c5fd",
-        brightMagenta: "#c4b5fd",
-        brightCyan: "#67e8f9",
-        brightWhite: "#ffffff",
-      },
+      // The same palettes the shell uses; a second copy would drift.
+      theme: TERMINAL_THEME[mode],
       fontSize: 12.5,
       fontFamily: '"JetBrains Mono", "Fira Code", monospace',
       lineHeight: 1.4,
@@ -85,7 +69,15 @@ export const RunOutput = () => {
       term.dispose();
       termRef.current = null;
     };
+    // `mode` is not a dependency: rebuilding the terminal would throw away the
+    // run's output, which is the one thing this pane exists to keep. The
+    // effect below repaints the one that is already there.
   }, []);
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (term) term.options.theme = TERMINAL_THEME[mode];
+  }, [mode]);
 
   // Append only what is new. Rewriting the whole buffer on every chunk would
   // reset the user's scroll position on every frame of a progress bar.

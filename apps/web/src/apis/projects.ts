@@ -20,6 +20,11 @@ import type {
   ProjectPortsResponse,
   ProjectTreeResponse,
   TreeNodeData,
+  GithubPullRequest,
+  GithubPullsResponse,
+  GithubPullResponse,
+  GithubProjectRepoResponse,
+  StartCommandResponse,
 } from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
@@ -394,19 +399,83 @@ export const gitPullApi = async (
   return response.data.data;
 };
 
-/** Pushes a branch, authenticating with a value supplied for this one call.
+/** Pushes a branch.
  *
- *  Never stored anywhere on the client: not in a store, not in localStorage,
- *  not in the URL. It is read from an input, sent, and dropped. */
+ *  The token is optional: without one the server uses the caller's connected
+ *  GitHub account. When there is one it is never stored anywhere on the client
+ *  — not in a store, not in localStorage, not in the URL. It is read from an
+ *  input, sent, and dropped.
+ */
 export const gitPushApi = async (
   projectId: string,
   name: string,
   branch: string,
-  token: string,
+  token?: string,
 ): Promise<GitStatus> => {
   const response = await axios.post<GitStatusResponse>(
     `/api/v1/projects/${projectId}/git/push`,
-    { name, branch, token },
+    { name, branch, ...(token ? { token } : {}) },
+  );
+  return response.data.data;
+};
+
+/** Open pull requests for a branch, so the panel can point at an existing one
+ *  rather than failing on a second attempt to create it. */
+export const getGithubPullsApi = async (
+  projectId: string,
+  head?: string,
+): Promise<GithubPullRequest[]> => {
+  const response = await axios.get<GithubPullsResponse>(
+    `/api/v1/projects/${projectId}/github/pulls`,
+    { params: head ? { head } : {} },
+  );
+  return response.data.data;
+};
+
+export const createGithubPullApi = async (
+  projectId: string,
+  body: { title: string; head: string; base: string; description?: string },
+): Promise<GithubPullRequest> => {
+  const response = await axios.post<GithubPullResponse>(
+    `/api/v1/projects/${projectId}/github/pulls`,
+    {
+      title: body.title,
+      head: body.head,
+      base: body.base,
+      ...(body.description ? { body: body.description } : {}),
+    },
+  );
+  return response.data.data;
+};
+
+/** Which GitHub repository this project points at, or null. */
+export const getGithubProjectRepoApi = async (
+  projectId: string,
+): Promise<{ owner: string; repo: string; url: string } | null> => {
+  const response = await axios.get<GithubProjectRepoResponse>(
+    `/api/v1/projects/${projectId}/github/repo`,
+  );
+  return response.data.data;
+};
+
+export const getStartCommandApi = async (
+  projectId: string,
+): Promise<{ command: string | null; templateDefault: string }> => {
+  const response = await axios.get<StartCommandResponse>(
+    `/api/v1/projects/${projectId}/start-command`,
+  );
+  return response.data.data;
+};
+
+/** An empty string means "go back to the template's default", which is the
+ *  only way to undo a bad edit without knowing what the default was. */
+export const setStartCommandApi = async (
+  projectId: string,
+  command: string,
+): Promise<{ command: string | null; templateDefault: string }> => {
+  const response = await axios.put<StartCommandResponse>(
+    `/api/v1/projects/${projectId}/start-command`,
+    { command },
   );
   return response.data.data;
 };

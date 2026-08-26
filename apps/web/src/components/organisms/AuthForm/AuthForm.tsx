@@ -85,26 +85,12 @@ export const AuthForm = ({
   }
 
   return (
-    <div
-      className="rc-aurora"
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: 24,
-      }}
-    >
-      <div
-        style={{
-          display: "grid",
-          // Collapses to a single column below ~900px, dropping the pitch panel.
-          gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-          gap: 48,
-          alignItems: "center",
-          width: "100%",
-          maxWidth: 940,
-        }}
-      >
+    <div className="rc-aurora rc-auth-shell">
+      {/* Collapses to a single column below ~900px, dropping the pitch panel.
+          The track floor is `min(340px, 100%)`, because a 340px column on a
+          360px phone with padding either side overflows the page instead of
+          wrapping. */}
+      <div className="rc-auth-grid">
         <div style={{ minWidth: 0 }}>
           <div
             style={{
@@ -120,15 +106,7 @@ export const AuthForm = ({
             </span>
           </div>
 
-          <h1
-            style={{
-              fontSize: 40,
-              lineHeight: 1.12,
-              fontWeight: 800,
-              letterSpacing: -1.2,
-              marginBottom: 14,
-            }}
-          >
+          <h1 className="rc-hero">
             Code anything,
             <br />
             <span className="rc-gradient-text">right in the browser.</span>

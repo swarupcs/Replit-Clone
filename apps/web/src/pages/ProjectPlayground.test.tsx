@@ -71,7 +71,13 @@ vi.mock("../components/organisms/SourceControlPanel/SourceControlPanel.tsx", () 
 vi.mock("../components/organisms/AiPanel/AiPanel.tsx", () => ({
   AiPanel: () => <div data-testid="ai-panel" />,
 }));
-vi.mock("../lib/collab.ts", () => ({ installCollab: () => () => undefined }));
+vi.mock("../lib/collab.ts", () => ({
+  installCollab: () => () => undefined,
+  // Presence is read from the collab registry, which has no documents here.
+  // The subscription is handed back a teardown so the effect can clean up.
+  peers: () => [],
+  subscribeCollab: () => () => undefined,
+}));
 
 const installProjectSources = vi.hoisted(() => vi.fn());
 const clearProjectSources = vi.hoisted(() => vi.fn());
@@ -139,6 +145,29 @@ describe("ProjectPlayground layout", () => {
     expect(screen.getByTestId("editor")).toBeDefined();
     expect(screen.getByTestId("tree")).toBeDefined();
     expect(screen.getByTestId("bottom-panel")).toBeDefined();
+  });
+
+  /** The bar was rendered by `EditorComponent`, so a split produced two of
+   *  them and closing every tab left none. It belongs to the page now — which
+   *  is what these assert: the editor is mocked here, so a bar that had moved
+   *  back inside it would not be found at all. */
+  it("owns one status bar, whatever the editor is doing", () => {
+    renderPlayground();
+
+    expect(document.querySelectorAll(".rc-statusbar")).toHaveLength(1);
+
+    // Not nested inside a pane — one bar for the app, not one per editor.
+    const bar = document.querySelector(".rc-statusbar");
+    expect(bar?.closest("[data-testid='editor']")).toBeNull();
+  });
+
+  it("keeps the status bar when the editor splits in two", () => {
+    renderPlayground();
+    act(() => {
+      useOpenTabsStore.setState({ splitOpen: true });
+    });
+
+    expect(document.querySelectorAll(".rc-statusbar")).toHaveLength(1);
   });
 
   it("hides the preview until it is asked for", () => {
@@ -283,30 +312,49 @@ describe("ProjectPlayground commands", () => {
   });
 });
 
-describe("ProjectPlayground banners", () => {
-  it("reports a socket error, and lets it be dismissed", () => {
+/** Both used to be `Alert banner`s stacked at the top of the page, which
+ *  pushed every pane down and made Monaco and xterm re-measure. They are split
+ *  by what they are: an error is transient news and goes to a toast; a file
+ *  changed on disk is a fact about the project right now and goes to a chip in
+ *  the status bar, which resizes nothing. */
+describe("ProjectPlayground notifications", () => {
+  it("reports a socket error without moving the layout", () => {
     renderPlayground();
 
     act(() => {
       useEditorSocketStore.setState({ lastError: "Could not write the file" });
     });
-    expect(screen.getByText("Could not write the file")).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    expect(screen.getByText("Could not write the file")).toBeDefined();
+    // No banner: the message is a toast, so nothing in the page shifted to
+    // make room for it.
+    expect(document.querySelector(".ant-alert-banner")).toBeNull();
+  });
+
+  it("takes the error back off the store, so it is shown once", () => {
+    renderPlayground();
+
+    act(() => {
+      useEditorSocketStore.setState({ lastError: "Could not write the file" });
+    });
+
+    // A toast dismisses itself; leaving the error set would show it again on
+    // the next render that happened to read it.
     expect(useEditorSocketStore.getState().lastError).toBeNull();
   });
 
-  it("warns that an open file changed on disk", () => {
+  it("keeps a file changed on disk in the status bar, not in a banner", () => {
     renderPlayground();
 
     act(() => {
       useEditorSocketStore.setState({ externallyChanged: ["src/App.tsx"] });
     });
 
-    expect(screen.getByText(/src\/App\.tsx.*changed on disk/)).toBeDefined();
+    const chip = screen.getByText(/changed on disk/);
+    expect(chip.closest(".rc-statusbar")).not.toBeNull();
   });
 
-  it("summarises rather than listing every externally changed file", () => {
+  it("counts the changed files rather than listing them in the bar", () => {
     renderPlayground();
 
     act(() => {
@@ -315,7 +363,25 @@ describe("ProjectPlayground banners", () => {
       });
     });
 
-    expect(screen.getByText(/and 2 more/)).toBeDefined();
+    // The bar has room for a number; the names are in the tooltip.
+    expect(screen.getByText(/5 changed on disk/)).toBeDefined();
+  });
+
+  it("lets the changed-on-disk notice be dismissed on its own", () => {
+    renderPlayground();
+
+    act(() => {
+      useEditorSocketStore.setState({
+        lastError: null,
+        externallyChanged: ["a.ts"],
+      });
+    });
+
+    fireEvent.click(
+      screen.getByLabelText("Dismiss the changed-on-disk notice"),
+    );
+
+    expect(useEditorSocketStore.getState().externallyChanged).toEqual([]);
   });
 });
 
@@ -345,5 +411,92 @@ describe("ProjectPlayground language service", () => {
 
     // Otherwise a lookup could land in a file from the previous project.
     expect(clearProjectSources).toHaveBeenCalled();
+  });
+});
+
+
+/** Below 900px the sidebar, the panel and the preview stop being split
+ *  children and become drawers over the editor. jsdom has no `matchMedia`, so
+ *  the breakpoint is installed per test — which is also the only way to check
+ *  both sides of it. */
+describe("the narrow layout", () => {
+  /** Answers `matches` for every query, so the component sees the breakpoint
+   *  it asked about however it is phrased. */
+  function viewport(narrow: boolean) {
+    const listeners = new Set<() => void>();
+
+    window.matchMedia = ((query: string) => ({
+      media: query,
+      matches: narrow,
+      addEventListener: (_: string, handler: () => void) => {
+        listeners.add(handler);
+      },
+      removeEventListener: (_: string, handler: () => void) => {
+        listeners.delete(handler);
+      },
+      // Unused by the hook, present because the type has them.
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      onchange: null,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  }
+
+  afterEach(() => {
+    // @ts-expect-error -- putting jsdom back the way it was found.
+    delete window.matchMedia;
+  });
+
+  it("lifts the panes into drawers", () => {
+    viewport(true);
+    renderPlayground();
+
+    // The classes are what the stylesheet's media query reaches; SplitPane
+    // sets each pane's flex inline, which a stylesheet cannot otherwise touch.
+    expect(document.querySelector(".rc-drawer-left")).not.toBeNull();
+    expect(document.querySelector(".rc-drawer-bottom")).not.toBeNull();
+  });
+
+  it("closes the others when one is opened", () => {
+    viewport(true);
+    renderPlayground();
+
+    // Both start open; on a narrow screen they would cover each other, leaving
+    // the one underneath unreachable with its toggle still lit.
+    fireEvent.click(screen.getByLabelText("Toggle preview"));
+
+    expect(screen.getByTestId("preview")).toBeDefined();
+    expect(screen.queryByTestId("tree")).toBeNull();
+    expect(screen.queryByTestId("bottom-panel")).toBeNull();
+  });
+
+  it("offers a scrim that closes whatever is open", () => {
+    viewport(true);
+    renderPlayground();
+
+    fireEvent.click(screen.getByLabelText("Close the open panel"));
+
+    expect(screen.queryByTestId("tree")).toBeNull();
+    expect(screen.queryByTestId("bottom-panel")).toBeNull();
+    expect(screen.queryByTestId("preview")).toBeNull();
+  });
+
+  it("leaves the panes side by side on a wide screen", () => {
+    viewport(false);
+    renderPlayground();
+
+    fireEvent.click(screen.getByLabelText("Toggle preview"));
+
+    // Nothing covers anything, so opening one closes none of the others.
+    expect(screen.getByTestId("preview")).toBeDefined();
+    expect(screen.getByTestId("tree")).toBeDefined();
+    expect(screen.getByTestId("bottom-panel")).toBeDefined();
+  });
+
+  it("has no scrim on a wide screen, where there is nothing to dismiss", () => {
+    viewport(false);
+    renderPlayground();
+
+    expect(screen.queryByLabelText("Close the open panel")).toBeNull();
   });
 });

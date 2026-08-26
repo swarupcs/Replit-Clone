@@ -132,6 +132,9 @@ describe("installTerminalGateway", () => {
         "node",
         expect.any(Function),
         expect.any(Number),
+        // The project's own run command, so a shell's $START_COMMAND names the
+        // same thing the Run button runs. Undefined when it has none.
+        undefined,
       ),
     );
     expect(projectService.assertProjectAccess).toHaveBeenCalledWith(

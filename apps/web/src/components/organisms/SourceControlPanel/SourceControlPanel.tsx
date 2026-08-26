@@ -15,6 +15,7 @@ import {
   VscHistory,
   VscRefresh,
   VscCloud,
+  VscGithub,
   VscDiscard,
   VscRemove,
   VscSourceControl,
@@ -30,6 +31,8 @@ import { fileExtension } from "@replit-clone/shared";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { DiffView } from "./DiffView.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
+import { getGithubStatusApi } from "../../../apis/github.ts";
+import type { GithubPullRequest } from "@replit-clone/shared";
 import {
   getGitBranchesApi,
   getGitLogApi,
@@ -40,6 +43,9 @@ import {
   gitHunksApi,
   gitPullApi,
   gitPushApi,
+  getGithubPullsApi,
+  createGithubPullApi,
+  getGithubProjectRepoApi,
   getGitRemotesApi,
   gitCommitApi,
   gitInitApi,
@@ -50,11 +56,11 @@ import {
 /** One letter per state, the way every git UI abbreviates them. */
 const BADGE: Record<string, { letter: string; colour: string; title: string }> =
   {
-    added: { letter: "A", colour: "#4ade80", title: "Added" },
-    modified: { letter: "M", colour: "#fbbf24", title: "Modified" },
-    deleted: { letter: "D", colour: "#f87171", title: "Deleted" },
-    renamed: { letter: "R", colour: "#a78bfa", title: "Renamed" },
-    untracked: { letter: "U", colour: "#60a5fa", title: "Untracked" },
+    added: { letter: "A", colour: "var(--rc-green)", title: "Added" },
+    modified: { letter: "M", colour: "var(--rc-yellow)", title: "Modified" },
+    deleted: { letter: "D", colour: "var(--rc-red)", title: "Deleted" },
+    renamed: { letter: "R", colour: "var(--rc-accent)", title: "Renamed" },
+    untracked: { letter: "U", colour: "var(--rc-info, #2563eb)", title: "Untracked" },
   };
 
 interface Props {
@@ -105,6 +111,24 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
    *  moment it closes -- never put in a store, localStorage or a URL. */
   const [pushingTo, setPushingTo] = useState<string | null>(null);
   const [pushToken, setPushToken] = useState("");
+  /** Whether a connected GitHub account can supply the credential, so the
+   *  dialog can stop asking for one. Null until the answer is in — the dialog
+   *  must not offer to push with a connection it does not yet know about. */
+  const [canUseConnection, setCanUseConnection] = useState<boolean | null>(null);
+  /** Open, when the pull request dialog is up. */
+  const [openingPull, setOpeningPull] = useState(false);
+  const [pullTitle, setPullTitle] = useState("");
+  const [pullBody, setPullBody] = useState("");
+  const [pullBase, setPullBase] = useState("");
+  /** A pull request that already exists for this branch, so the panel offers
+   *  the link instead of a second attempt that GitHub would refuse. */
+  const [existingPull, setExistingPull] = useState<GithubPullRequest | null>(null);
+  /** The GitHub repository this project's remotes point at, or null when they
+   *  point somewhere else — which is how the panel knows not to offer a pull
+   *  request rather than offering one that cannot work. */
+  const [githubRepo, setGithubRepo] = useState<
+    { owner: string; repo: string; url: string } | null
+  >(null);
 
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
@@ -133,6 +157,47 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Re-asked whenever the remotes change, since adding one is what turns a
+  // local project into a GitHub one.
+  useEffect(() => {
+    let cancelled = false;
+
+    void getGithubProjectRepoApi(projectId)
+      .then((found) => {
+        if (!cancelled) setGithubRepo(found);
+      })
+      .catch(() => {
+        if (!cancelled) setGithubRepo(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, remotes]);
+
+  // Asked once, and only by the owner: nobody else is offered pushing, so
+  // nobody else needs to know whether a credential could be supplied.
+  useEffect(() => {
+    if (!isOwner) return;
+    let cancelled = false;
+
+    void getGithubStatusApi()
+      .then((github) => {
+        if (!cancelled) {
+          setCanUseConnection(Boolean(github.connection?.canUseRepos));
+        }
+      })
+      // A deployment without GitHub configured answers this with an error, and
+      // that is not a failure worth reporting — it just means the box stays.
+      .catch(() => {
+        if (!cancelled) setCanUseConnection(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwner]);
 
   // The tree already broadcasts when files change on disk, and every one of
   // those is a change git would report differently. Reusing it keeps the panel
@@ -252,19 +317,76 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
     }
   };
 
-  /** Pushes the current branch, with a token supplied for this one call. */
+  /** Pushes the current branch.
+   *
+   *  The credential comes from the connected GitHub account when there is one,
+   *  and from the box otherwise — a pasted token is someone pushing to a forge
+   *  this server knows nothing about, and it stays possible. */
   const push = async () => {
     const name = pushingTo;
     const branch = status?.branch;
-    if (!name || !branch || !pushToken) return;
+    const typed = pushToken.trim();
+    if (!name || !branch || (!typed && !canUseConnection)) return;
 
     setBusy(true);
     try {
-      setStatus(await gitPushApi(projectId, name, branch, pushToken));
+      setStatus(await gitPushApi(projectId, name, branch, typed || undefined));
       void message.success(`Pushed ${branch} to ${name}.`);
       closePush();
     } catch (error) {
       void message.error(reasonFrom(error, "Could not push"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Opens the pull request dialog, having first asked whether one is already
+   *  open for this branch — GitHub's "a pull request already exists" is true,
+   *  unhelpful, and not where anyone would look for the link. */
+  const startPullRequest = async () => {
+    const branch = status?.branch;
+    if (!branch) return;
+
+    setBusy(true);
+    try {
+      const [existing] = await getGithubPullsApi(projectId, branch);
+      setExistingPull(existing ?? null);
+      setPullTitle(existing?.title ?? branch.replace(/[-_/]+/g, " ").trim());
+      setPullBody("");
+      // The default branch is the usual target and is not knowable from here,
+      // so the repository's own answer arrives with the existing request when
+      // there is one; otherwise "main" is the overwhelmingly common case and
+      // the field is editable.
+      setPullBase(existing?.base ?? "main");
+      setOpeningPull(true);
+    } catch (error) {
+      void message.error(reasonFrom(error, "Could not reach GitHub"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitPullRequest = async () => {
+    const branch = status?.branch;
+    const title = pullTitle.trim();
+    const base = pullBase.trim();
+    if (!branch || !title || !base) return;
+
+    setBusy(true);
+    try {
+      const created = await createGithubPullApi(projectId, {
+        title,
+        head: branch,
+        base,
+        description: pullBody.trim(),
+      });
+
+      setOpeningPull(false);
+      void message.success(`Opened pull request #${String(created.number)}.`);
+      // The next thing anyone does is look at it.
+      window.open(created.url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      void message.error(reasonFrom(error, "Could not open the pull request"));
     } finally {
       setBusy(false);
     }
@@ -349,53 +471,73 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
 
     return (
       <div key={key}>
+      {/* The row holds buttons of its own — discard, stage — so it cannot be
+          one. Its two actions are buttons instead: the icon opens the file,
+          the label shows the change. That is also what retires the
+          stopPropagation on every button in here: with no handler on the row,
+          there is no longer a parent click to stop. */}
       <div
         className="rc-tree-row"
         data-active={isOpen}
-        onClick={() => {
-          // The row shows the change; opening the file for editing is what the
-          // icon is for. Clicking an open row closes it again.
-          setExpanded(isOpen ? null : key);
-        }}
         title={change.from ? `${change.from} → ${change.path}` : change.path}
       >
-        <span
-          role="button"
-          tabIndex={-1}
-          title={`Open ${name}`}
-          style={{ display: "flex", alignItems: "center" }}
-          onClick={(event) => {
-            event.stopPropagation();
+        <button
+          type="button"
+          className="rc-icon-button"
+          aria-label={`Open ${name}`}
+          onClick={() => {
             openFile(change.path);
           }}
         >
           <FileIcon extension={fileExtension(change.path)} name={name} />
-        </span>
-        <span
+        </button>
+        <button
+          type="button"
+          className="rc-row-button"
+          // Announces that the row expands, and into what state — the diff
+          // appears below it rather than somewhere else on the page.
+          aria-expanded={isOpen}
+          onClick={() => {
+            // Clicking an open row closes it again.
+            setExpanded(isOpen ? null : key);
+          }}
           style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
             flex: 1,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            fontSize: 13,
+            minWidth: 0,
+            padding: 0,
+            cursor: "pointer",
+            color: "inherit",
           }}
         >
-          {name}
-        </span>
-        <span
-          style={{
-            fontSize: 11,
-            opacity: 0.5,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            maxWidth: 90,
-          }}
-        >
-          {change.path.includes("/")
-            ? change.path.slice(0, change.path.lastIndexOf("/"))
-            : ""}
-        </span>
+          <span
+            style={{
+              flex: 1,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontSize: 13,
+            }}
+          >
+            {name}
+          </span>
+          <span
+            style={{
+              fontSize: 11,
+              opacity: 0.5,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              maxWidth: 90,
+            }}
+          >
+            {change.path.includes("/")
+              ? change.path.slice(0, change.path.lastIndexOf("/"))
+              : ""}
+          </span>
+        </button>
 
         {canWrite && !isStaged && (
           <Tooltip title="Discard changes">
@@ -404,8 +546,7 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
               className="rc-icon-button"
               aria-label={`Discard changes to ${change.path}`}
               disabled={busy}
-              onClick={(event) => {
-                event.stopPropagation();
+              onClick={() => {
                 setDiscarding(change);
               }}
             >
@@ -419,11 +560,11 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
             <button
               type="button"
               className="rc-icon-button"
+              // A tooltip is not a label: it never reaches a screen reader,
+              // and a touch device never shows one at all.
+              aria-label={`${isStaged ? "Unstage" : "Stage"} ${change.path}`}
               disabled={busy}
-              onClick={(event) => {
-                // The row itself opens the file, which is not what a click on
-                // this button means.
-                event.stopPropagation();
+              onClick={() => {
                 void act(
                   () =>
                     isStaged
@@ -496,6 +637,7 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
               <button
                 type="button"
                 className="rc-icon-button"
+                aria-label={action.title}
                 disabled={busy}
                 onClick={action.run}
               >
@@ -558,6 +700,40 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
             {status.unborn ? " · no commits yet" : ""}
           </span>
         )}
+
+        {/* git has been computing these all along and the panel showed
+            neither, so "am I ahead of the remote" was a question only the
+            terminal could answer. */}
+        {(status.ahead ?? 0) > 0 && (
+          <span
+            title={`${String(status.ahead)} commit(s) to push`}
+            style={{ fontSize: 11, color: "var(--rc-text-subtle)", flex: "none" }}
+          >
+            ↑{status.ahead}
+          </span>
+        )}
+        {(status.behind ?? 0) > 0 && (
+          <span
+            title={`${String(status.behind)} commit(s) to pull`}
+            style={{ fontSize: 11, color: "var(--rc-text-subtle)", flex: "none" }}
+          >
+            ↓{status.behind}
+          </span>
+        )}
+
+        {githubRepo && (
+          <Tooltip title={`Open ${githubRepo.owner}/${githubRepo.repo} on GitHub`}>
+            <a
+              className="rc-icon-button"
+              aria-label="Open on GitHub"
+              href={githubRepo.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <VscGithub size={14} />
+            </a>
+          </Tooltip>
+        )}
         {canWrite && remotes.length > 0 && (
           <Dropdown
             trigger={["click"]}
@@ -582,7 +758,20 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
                       },
                     ]
                   : []),
-              ]),
+              ]).concat(
+                // One entry, not one per remote: a pull request belongs to the
+                // repository, and which one that is comes from the remotes
+                // themselves rather than from a choice made here.
+                isOwner && status?.branch && githubRepo
+                  ? [
+                      {
+                        key: "pull-request",
+                        label: "Open a pull request…",
+                        onClick: () => void startPullRequest(),
+                      },
+                    ]
+                  : [],
+              ),
             }}
           >
             <button
@@ -600,6 +789,7 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
           <button
             type="button"
             className="rc-icon-button"
+            aria-label="History"
             data-on={showHistory}
             onClick={() => {
               setShowHistory((value) => !value);
@@ -612,6 +802,7 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
           <button
             type="button"
             className="rc-icon-button"
+            aria-label="Refresh"
             onClick={() => void refresh()}
           >
             <VscRefresh size={14} />
@@ -727,28 +918,105 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
       </div>
 
       <Modal
+        open={openingPull}
+        title="Open a pull request"
+        okText={existingPull ? "View it on GitHub" : "Open pull request"}
+        okButtonProps={{ disabled: !pullTitle.trim() || !pullBase.trim() }}
+        confirmLoading={busy}
+        onOk={() => {
+          if (existingPull) {
+            window.open(existingPull.url, "_blank", "noopener,noreferrer");
+            setOpeningPull(false);
+            return;
+          }
+          void submitPullRequest();
+        }}
+        onCancel={() => setOpeningPull(false)}
+        destroyOnHidden
+      >
+        {existingPull ? (
+          // GitHub would refuse a second one anyway, and its message is not
+          // where anyone would look for the link.
+          <div style={{ fontSize: 13 }}>
+            <b>#{existingPull.number}</b> is already open for{" "}
+            <b>{existingPull.head}</b> into <b>{existingPull.base}</b>.
+            <div
+              style={{ marginTop: 6, color: "var(--rc-text-subtle)", fontSize: 12 }}
+            >
+              {existingPull.title}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12, color: "var(--rc-text-subtle)", marginBottom: 10 }}>
+              From <b>{status?.branch}</b> into the branch below. Push first if
+              this branch is not on GitHub yet.
+            </div>
+
+            <Input
+              autoFocus
+              placeholder="Title"
+              value={pullTitle}
+              onChange={(event) => setPullTitle(event.target.value)}
+              style={{ marginBottom: 8 }}
+            />
+            <Input
+              placeholder="Base branch"
+              value={pullBase}
+              onChange={(event) => setPullBase(event.target.value)}
+              style={{ marginBottom: 8 }}
+            />
+            <Input.TextArea
+              placeholder="Description (optional)"
+              value={pullBody}
+              onChange={(event) => setPullBody(event.target.value)}
+              autoSize={{ minRows: 3, maxRows: 8 }}
+            />
+          </>
+        )}
+      </Modal>
+
+      <Modal
         open={pushingTo !== null}
         title={`Push ${status?.branch ?? "HEAD"} to ${pushingTo ?? ""}`}
         okText="Push"
-        okButtonProps={{ disabled: !pushToken.trim() }}
+        okButtonProps={{ disabled: !pushToken.trim() && !canUseConnection }}
         confirmLoading={busy}
         onOk={() => void push()}
         onCancel={closePush}
         destroyOnHidden
       >
-        <Input.Password
-          autoFocus
-          placeholder="Access token"
-          value={pushToken}
-          onChange={(event) => setPushToken(event.target.value)}
-          onPressEnter={() => void push()}
-        />
-        <div style={{ marginTop: 8, fontSize: 12, color: "var(--rc-text-subtle)" }}>
-          Used for this push only — it is not saved here, in the repository, or
-          on the server. Sharing this project disables pushing from the editor,
-          because everyone with access shares its container; push from the
-          terminal instead.
-        </div>
+        {canUseConnection ? (
+          <div style={{ fontSize: 13 }}>
+            Pushing as your connected GitHub account.
+            <div
+              style={{ marginTop: 8, fontSize: 12, color: "var(--rc-text-subtle)" }}
+            >
+              Sharing this project disables pushing from the editor, because
+              everyone with access shares its container; push from the terminal
+              instead.
+            </div>
+          </div>
+        ) : (
+          <>
+            <Input.Password
+              autoFocus
+              placeholder="Access token"
+              value={pushToken}
+              onChange={(event) => setPushToken(event.target.value)}
+              onPressEnter={() => void push()}
+            />
+            <div
+              style={{ marginTop: 8, fontSize: 12, color: "var(--rc-text-subtle)" }}
+            >
+              Used for this push only — it is not saved here, in the repository,
+              or on the server. Connect GitHub from the dashboard to stop being
+              asked. Sharing this project disables pushing from the editor,
+              because everyone with access shares its container; push from the
+              terminal instead.
+            </div>
+          </>
+        )}
       </Modal>
 
       <Modal

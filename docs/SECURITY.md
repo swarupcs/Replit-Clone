@@ -78,16 +78,54 @@ user's own session and never passes through this server. An unredeemed link
 counts as sharing: it is an invitation that can be accepted while a push is in
 flight (`isSoleOccupant`, `controllers/gitController.ts`).
 
-The token itself is never written down: not to the database, not to the
-repository's config, not to a credential store, and not into a remote's URL. It
-is supplied for one call, travels to git in the **exec's environment rather
-than its arguments** — process arguments are world-readable through `/proc`,
-a process's environment is not — and is redacted from anything git says on the
-way back (`pushRemote`, `redactToken`, `service/gitService.ts`).
+The token travels to git in the **exec's environment rather than its
+arguments** — process arguments are world-readable through `/proc`, a process's
+environment is not — is never written into the repository's config or a remote's
+URL, and is redacted from anything git says on the way back (`pushRemote`,
+`redactToken`, `service/gitService.ts`).
+
+It reaches the server one of two ways. **Pasted for one call**, in which case it
+is held nowhere at all. Or from a **connected GitHub account**, in which case it
+is encrypted at rest with AES-256-GCM under `SECRET_ENCRYPTION_KEY`
+(`lib/secretBox.ts`) — a token cannot be hashed the way a password is, because
+the point is to spend it later, so a leaked dump must hand over ciphertext and
+nothing more. Connecting is a **separate consent from signing in**: signing in
+asks for `read:user user:email`, and nobody is made to grant write access to
+their private repositories in order to log in. Disconnecting deletes the row
+rather than flagging it, and a row that can no longer be decrypted — after a key
+rotation — is dropped rather than left to fail on every later call. The token is
+never sent to a browser: `githubConnection` describes a connection and
+`githubToken` hands over the credential, deliberately two functions so a caller
+that only needs the login cannot reach the secret by accident.
+
+The sole-occupant rule is what governs spending it either way. A stored token
+makes pushing less tedious; it does not make a shared container private.
+
+**A stored token is only ever offered to GitHub.** git's credential helper
+answers whatever host git asks it about — it is handed the request on stdin and
+prints a password regardless — so a push to a remote pointing elsewhere would
+hand somebody's GitHub token to that host. Remotes are added at *editor* level
+and may name any https host, while pushing is the owner's; those do not overlap
+today, but they only have to once (a collaborator adds a mirror and is removed;
+a README says "add this remote and push"). So the fallback checks the named
+remote is a GitHub one first, and refuses otherwise. A **pasted** token is
+unaffected: choosing to give a credential to a particular remote is exactly what
+typing one in means.
 
 Pushing is also the owner's alone at the access-control layer, not merely by
 the sharing check: it spends the owner's credential, so an editor cannot ask
 for it.
+
+**Importing a repository** clones inside the project's own container, through
+the same exec path every other git call uses — never on the host. A URL from a
+browser driving a network fetch on the host is what that boundary exists to
+prevent. The URL is built server-side from a name the GitHub API returned rather
+than taken as a string from the request, which removes the transport question
+below instead of answering it; submodules are not fetched, since they can point
+anywhere including at a local path; and a repository too large for the disk
+quota is refused before anything is downloaded (`service/repoImportService.ts`).
+A newly imported project has no collaborators and no share link, so the rule
+above holds by construction.
 
 Remote URLs are checked against an allow-list of transports rather than a
 deny-list, because `ext::` runs the rest of the string as a **command** —

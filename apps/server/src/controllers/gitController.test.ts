@@ -32,6 +32,18 @@ vi.mock("../service/gitService.js", () => git);
 const collaboratorCount = vi.hoisted(() => vi.fn());
 const projectFindUnique = vi.hoisted(() => vi.fn());
 
+const githubToken = vi.hoisted(() => vi.fn());
+
+/** Only the credential is stubbed. `parseGithubRemote` is a pure function the
+ *  controller's behaviour is defined in terms of, so replacing it would leave
+ *  these tests asserting against a stand-in rather than the real rules. */
+vi.mock("../service/githubService.js", async () => ({
+  ...(await vi.importActual<typeof import("../service/githubService.js")>(
+    "../service/githubService.js",
+  )),
+  githubToken,
+}));
+
 vi.mock("../lib/prisma.js", () => ({
   prisma: {
     user: { findUnique },
@@ -58,9 +70,10 @@ import {
   gitStageController,
   gitStatusController,
   gitUnstageController,
+  githubRepoController,
 } from "./gitController.js";
 import { apiApp, bearer, TEST_PROJECT, TEST_USER } from "../test/apiHarness.js";
-import { ForbiddenError } from "../utils/errors.js";
+import { BadRequestError, ForbiddenError } from "../utils/errors.js";
 
 const app = apiApp([
   { method: "get", path: "/p/:projectId/git/status", handler: gitStatusController },
@@ -79,6 +92,11 @@ const app = apiApp([
   { method: "post", path: "/p/:projectId/git/fetch", handler: gitFetchController },
   { method: "post", path: "/p/:projectId/git/pull", handler: gitPullController },
   { method: "post", path: "/p/:projectId/git/push", handler: gitPushController },
+  {
+    method: "get",
+    path: "/p/:projectId/github/repo",
+    handler: githubRepoController,
+  },
 ]);
 
 const STATUS = { branch: "main", staged: [], unstaged: [] };
@@ -856,7 +874,96 @@ describe("push", () => {
     expect(response.body.message).toMatch(/terminal/i);
   });
 
-  it("refuses without a token rather than pushing unauthenticated", async () => {
+  it("falls back to the connected GitHub account when no token is sent", async () => {
+    githubToken.mockResolvedValue("from-the-connection");
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://github.com/a/b.git" },
+    ]);
+
+    const response = await post({ token: undefined });
+
+    expect(response.status).toBe(200);
+    expect(git.pushRemote).toHaveBeenCalledWith(
+      expect.any(String),
+      "origin",
+      "main",
+      "from-the-connection",
+    );
+  });
+
+  it("prefers a token that was sent over the stored connection", async () => {
+    // Someone pasting one is pushing to a forge this server knows nothing
+    // about; their explicit choice must not be overridden.
+    githubToken.mockResolvedValue("from-the-connection");
+
+    await post({ token: "typed-in" });
+
+    expect(git.pushRemote).toHaveBeenCalledWith(
+      expect.any(String),
+      "origin",
+      "main",
+      "typed-in",
+    );
+    expect(githubToken).not.toHaveBeenCalled();
+  });
+
+  /** git's credential helper answers whatever host git asks it about, so
+   *  spending the stored GitHub token on a remote that is not GitHub hands
+   *  somebody's token to that host. Remotes are added at editor level and may
+   *  name any https host. */
+  it("refuses to spend the stored token on a remote that is not GitHub", async () => {
+    githubToken.mockResolvedValue("from-the-connection");
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://evil.test/mirror.git" },
+    ]);
+
+    const response = await post({ token: undefined });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("REMOTE_NOT_GITHUB");
+    expect(git.pushRemote).not.toHaveBeenCalled();
+    // And the credential is never even read.
+    expect(githubToken).not.toHaveBeenCalled();
+  });
+
+  it("still lets a pasted token reach a non-GitHub remote", async () => {
+    // Choosing to give a credential to a particular remote is exactly what
+    // typing one in means.
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://gitlab.com/a/b.git" },
+    ]);
+
+    const response = await post({ token: "typed-in" });
+
+    expect(response.status).toBe(200);
+    expect(git.pushRemote).toHaveBeenCalledWith(
+      expect.any(String),
+      "origin",
+      "main",
+      "typed-in",
+    );
+  });
+
+  it("refuses when the named remote does not exist at all", async () => {
+    githubToken.mockResolvedValue("from-the-connection");
+    git.remotes.mockResolvedValue([]);
+
+    expect((await post({ token: undefined })).body.code).toBe("REMOTE_NOT_GITHUB");
+  });
+
+  it("refuses with neither a token nor a connection", async () => {
+    // The real service throws this when there is nothing stored; the error
+    // handler maps it by type, so a look-alike would come back a 500.
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://github.com/a/b.git" },
+    ]);
+    githubToken.mockRejectedValue(
+      new BadRequestError(
+        "Connect your GitHub account first.",
+        "GITHUB_NOT_CONNECTED",
+      ),
+    );
+
     const response = await post({ token: undefined });
 
     expect(response.status).toBe(400);
@@ -882,5 +989,59 @@ describe("push", () => {
     const response = await post();
 
     expect(JSON.stringify(response.body)).not.toContain("secret-value");
+  });
+});
+
+
+describe("which GitHub repository a project belongs to", () => {
+  const get = () =>
+    request(app).get(`/p/${TEST_PROJECT}/github/repo`).set(auth());
+
+  it("derives it from the project's own remotes", async () => {
+    // Never from the request: a browser naming the repository is a thing to
+    // get wrong or to lie about.
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "git@github.com:octocat/hello.git" },
+    ]);
+
+    const response = await get();
+
+    expect(response.body.data).toEqual({
+      owner: "octocat",
+      repo: "hello",
+      url: "https://github.com/octocat/hello",
+    });
+  });
+
+  it("prefers origin over any other remote", async () => {
+    // A fork's origin is the fork, which is where a pull request comes from.
+    git.remotes.mockResolvedValue([
+      { name: "upstream", url: "https://github.com/original/hello.git" },
+      { name: "origin", url: "https://github.com/me/hello.git" },
+    ]);
+
+    expect((await get()).body.data.owner).toBe("me");
+  });
+
+  it("falls back to another GitHub remote when origin is not one", async () => {
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "/srv/repos/hello.git" },
+      { name: "github", url: "https://github.com/octocat/hello.git" },
+    ]);
+
+    expect((await get()).body.data.owner).toBe("octocat");
+  });
+
+  it("is null when nothing points at GitHub", async () => {
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://gitlab.com/octocat/hello.git" },
+    ]);
+
+    expect((await get()).body.data).toBeNull();
+  });
+
+  it("is null with no remotes at all", async () => {
+    git.remotes.mockResolvedValue([]);
+    expect((await get()).body.data).toBeNull();
   });
 });

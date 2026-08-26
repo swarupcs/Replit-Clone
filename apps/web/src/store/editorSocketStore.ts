@@ -20,7 +20,12 @@ interface EditorSocketStore {
    *  Reported rather than merged, so nobody's in-progress work vanishes. */
   externallyChanged: string[];
   setEditorSocket: (socket: EditorSocket | null) => void;
+  /** Clears the last error only. It and the externally-changed list used to be
+   *  cleared together, which was fine while both were banners closed by one
+   *  button; they are a transient toast and a persistent chip now, and each is
+   *  dismissed on its own terms. */
   clearError: () => void;
+  clearExternallyChanged: () => void;
 }
 
 export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
@@ -28,7 +33,8 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
   lastError: null,
   accessLevel: null,
   externallyChanged: [],
-  clearError: () => set({ lastError: null, externallyChanged: [] }),
+  clearError: () => set({ lastError: null }),
+  clearExternallyChanged: () => set({ externallyChanged: [] }),
 
   setEditorSocket: (incomingSocket) => {
     if (!incomingSocket) {

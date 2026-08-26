@@ -9,7 +9,6 @@ import {
   Modal,
   Segmented,
   Select,
-  Spin,
   Typography,
   message,
 } from "antd";
@@ -24,6 +23,7 @@ import {
   PlusOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
+import { VscGithub } from "react-icons/vsc";
 import type { Project } from "@replit-clone/shared";
 import {
   createProjectApi,
@@ -36,6 +36,8 @@ import {
 } from "../apis/projects.ts";
 import { useAuth } from "../hooks/useAuth.ts";
 import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx";
+import { GithubConnectionCard } from "../components/organisms/GithubConnectionCard/GithubConnectionCard.tsx";
+import { ImportRepoDialog } from "../components/organisms/ImportRepoDialog/ImportRepoDialog.tsx";
 
 /** Relative time for the card footer -- "3 days ago" reads better than a date
  *  when you're scanning a list of things you made recently. */
@@ -107,6 +109,8 @@ export const Dashboard = () => {
   const [renaming, setRenaming] = useState<Project | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleting, setDeleting] = useState<Project | null>(null);
+  const [githubOpen, setGithubOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [sharing, setSharing] = useState<Project | null>(null);
 
   const { data: projects, isLoading } = useQuery({
@@ -188,21 +192,7 @@ export const Dashboard = () => {
     <div className="rc-aurora" style={{ minHeight: "100vh" }}>
       {contextHolder}
 
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 16,
-          padding: "16px 32px",
-          borderBottom: "1px solid var(--rc-border)",
-          background: "rgba(10, 11, 18, 0.6)",
-          backdropFilter: "blur(12px)",
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-        }}
-      >
+      <header className="rc-topbar">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span className="rc-logo">&lt;/&gt;</span>
           <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: -0.2 }}>
@@ -216,11 +206,17 @@ export const Dashboard = () => {
           >
             {user?.email}
           </Typography.Text>
+          <Button
+            icon={<VscGithub />}
+            onClick={() => setGithubOpen(true)}
+          >
+            GitHub
+          </Button>
           <Button onClick={() => void logout()}>Sign out</Button>
         </div>
       </header>
 
-      <main style={{ maxWidth: 1180, margin: "0 auto", padding: "40px 32px 64px" }}>
+      <main className="rc-page">
         <div
           style={{
             display: "flex",
@@ -270,6 +266,14 @@ export const Dashboard = () => {
             />
 
             <Button
+              size="large"
+              icon={<VscGithub />}
+              onClick={() => setImportOpen(true)}
+            >
+              Import repo
+            </Button>
+
+            <Button
               type="primary"
               size="large"
               icon={<PlusOutlined />}
@@ -281,17 +285,21 @@ export const Dashboard = () => {
         </div>
 
         {isLoading ? (
-          <div style={{ display: "grid", placeItems: "center", padding: 80 }}>
-            <Spin size="large" />
+          // Card-shaped placeholders rather than a centred spinner: the grid
+          // keeps the shape it is about to have, so the page does not jump
+          // when the projects land. Six is a plausible first screen; fewer
+          // would jump the other way.
+          <div className="rc-project-grid" aria-label="Loading projects">
+            {Array.from({ length: 6 }, (_, index) => (
+              <div key={index} className="rc-skeleton-card" aria-hidden="true">
+                <span className="rc-skeleton" style={{ width: "58%", height: 15 }} />
+                <span className="rc-skeleton" style={{ width: "84%", height: 11 }} />
+                <span className="rc-skeleton" style={{ width: "40%", height: 11 }} />
+              </div>
+            ))}
           </div>
         ) : visibleProjects.length > 0 ? (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-              gap: 18,
-            }}
-          >
+          <div className="rc-project-grid">
             {visibleProjects.map((project) => (
               <div
                 key={project.id}
@@ -454,6 +462,26 @@ export const Dashboard = () => {
           </div>
         )}
       </main>
+
+      <GithubConnectionCard
+        open={githubOpen}
+        onClose={() => setGithubOpen(false)}
+      />
+
+      <ImportRepoDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        // Straight into the imported project: importing is not something
+        // anyone does in order to look at a dashboard.
+        onImported={(project) => {
+          setImportOpen(false);
+          void navigate(`/project/${project.id}`);
+        }}
+        onConnect={() => {
+          setImportOpen(false);
+          setGithubOpen(true);
+        }}
+      />
 
       {sharing && (
         <ShareDialog

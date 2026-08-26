@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { io } from "socket.io-client";
 import { loader } from "@monaco-editor/react";
-import { Alert, Button, Flex, Tooltip, Typography } from "antd";
+import { Button, Flex, Tooltip, Typography, message } from "antd";
 import {
   VscFiles,
   VscLayoutPanel,
@@ -21,6 +21,7 @@ import {
 import { SplitPane } from "../components/layout/SplitPane.tsx";
 import { EditorComponent } from "../components/molecules/EditorComponent/EditorComponent.tsx";
 import { EditorTabs } from "../components/molecules/EditorTabs/EditorTabs.tsx";
+import { StatusBar } from "../components/molecules/StatusBar/StatusBar.tsx";
 import { BottomPanel } from "../components/organisms/BottomPanel/BottomPanel.tsx";
 import { TreeStructure } from "../components/organisms/TreeStructure/TreeStructure.tsx";
 import { Browser } from "../components/organisms/Browser/Browser.tsx";
@@ -45,13 +46,18 @@ import { SourceControlPanel } from "../components/organisms/SourceControlPanel/S
 import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
 import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
+import { useMediaQuery } from "../hooks/useMediaQuery.ts";
+import { useThemeStore } from "../store/themeStore.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.ts";
-import { installCollab } from "../lib/collab.ts";
+import { installCollab, peers, subscribeCollab } from "../lib/collab.ts";
+import { usePresenceStore } from "../store/presenceStore.ts";
 import {
   clearProjectSources,
   installProjectSources,
 } from "../lib/projectSources.ts";
+import { installProblems } from "../lib/problems.ts";
+import { useProblemsStore } from "../store/problemsStore.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 export const ProjectPlayground = () => {
@@ -70,7 +76,7 @@ export const ProjectPlayground = () => {
   const setEditorSocket = useEditorSocketStore((state) => state.setEditorSocket);
   const lastError = useEditorSocketStore((state) => state.lastError);
   const clearError = useEditorSocketStore((state) => state.clearError);
-  const externallyChanged = useEditorSocketStore((state) => state.externallyChanged);
+  const [messageApi, messageHolder] = message.useMessage();
   const activeTab = useOpenTabsStore(selectActiveTab);
   const closeAllTabs = useOpenTabsStore((state) => state.closeAll);
   const splitOpen = useOpenTabsStore((state) => state.splitOpen);
@@ -85,9 +91,21 @@ export const ProjectPlayground = () => {
 
   // Seeded from the remembered arrangement, so a reload comes back to the
   // layout the user left rather than the defaults.
-  const [showPreview, setShowPreview] = useState(restored?.showPreview ?? false);
-  const [showSidebar, setShowSidebar] = useState(restored?.showSidebar ?? true);
-  const [showPanel, setShowPanel] = useState(restored?.showPanel ?? true);
+  //
+  // One piece of state rather than three, because on a narrow screen a toggle
+  // reads all three to decide what to close, and three separate updaters
+  // cannot do that without one of them reaching into another -- which an
+  // updater, being required to be pure, must not.
+  const [views, setViews] = useState({
+    preview: restored?.showPreview ?? false,
+    sidebar: restored?.showSidebar ?? true,
+    panel: restored?.showPanel ?? true,
+  });
+  const {
+    preview: showPreview,
+    sidebar: showSidebar,
+    panel: showPanel,
+  } = views;
   const [quickOpen, setQuickOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
@@ -107,6 +125,51 @@ export const ProjectPlayground = () => {
   const openedProjectRef = useRef<string | undefined>(undefined);
 
   useUnsavedWorkGuard();
+
+  // Who else is here. The awareness transport has been running all along; the
+  // registry is read in one place and published to a store, so the tree and the
+  // tab strip can each ask about their own file without every row subscribing
+  // to every collaboration event.
+  useEffect(() => {
+    const publish = () => {
+      usePresenceStore.getState().setPresence(peers());
+    };
+
+    publish();
+    return subscribeCollab(publish);
+  }, []);
+
+  // A failed operation is transient news: it happened, it is over, and it does
+  // not describe the project's current state. It used to be a banner at the
+  // top of the page, which pushed every pane down and made Monaco and xterm
+  // re-measure mid-keystroke -- a worse interruption than the thing it was
+  // reporting. Persistent state goes to the status bar instead; see the
+  // externally-changed chip there.
+  useEffect(() => {
+    if (!lastError) return;
+    void messageApi.error(lastError);
+    clearError();
+  }, [lastError, messageApi, clearError]);
+
+  // Monaco has been computing diagnostics all along and nothing looked at
+  // them. Installed once for the page rather than per editor pane: markers are
+  // global to Monaco, and two panes would report the same problem twice.
+  useEffect(() => {
+    let dispose: (() => void) | undefined;
+    let cancelled = false;
+
+    void loader.init().then((monaco) => {
+      if (cancelled) return;
+      dispose = installProblems(monaco, useProblemsStore.getState().setProblems);
+    });
+
+    return () => {
+      cancelled = true;
+      dispose?.();
+      // Leaving a project must not leave its problems on screen in the next.
+      useProblemsStore.getState().setProblems([]);
+    };
+  }, []);
 
   // Asked once per session. A deployment with no API key configured gets no
   // assistant button at all, rather than one that fails on the first question.
@@ -129,26 +192,82 @@ export const ProjectPlayground = () => {
   }, [hasSession]);
 
   // Each toggle records its new state, so the arrangement survives a reload.
-  const toggleSidebar = useCallback(() => {
-    setShowSidebar((value) => {
-      remember({ showSidebar: !value });
-      return !value;
+  /** Below this the panes stop being split children and become drawers over
+   *  the editor. A layout branch, not a device test: four panes with pixel
+   *  floors do not fit, whatever is holding the screen. */
+  const narrow = useMediaQuery("(max-width: 900px)");
+
+  /** On a narrow screen the drawers cover each other, so opening one closes
+   *  the rest — two stacked drawers would leave the one underneath unreachable
+   *  with its toggle still lit. On a wide screen the panes sit side by side
+   *  and there is nothing to close. */
+  const toggleView = useCallback(
+    (which: "sidebar" | "panel" | "preview") => {
+      setViews((current) => {
+        const next = { ...current, [which]: !current[which] };
+        if (!narrow || !next[which]) return next;
+
+        return {
+          sidebar: which === "sidebar",
+          panel: which === "panel",
+          preview: which === "preview",
+        };
+      });
+    },
+    [narrow],
+  );
+
+  /** Shows one, without hiding it if it is already up — what a command like
+   *  "Search across the project" means, as against toggling. */
+  const openView = useCallback(
+    (which: "sidebar" | "panel" | "preview") => {
+      setViews((current) =>
+        narrow
+          ? {
+              sidebar: which === "sidebar",
+              panel: which === "panel",
+              preview: which === "preview",
+            }
+          : { ...current, [which]: true },
+      );
+    },
+    [narrow],
+  );
+
+  /** Persists the arrangement whenever it changes.
+   *
+   *  An effect rather than a call inside each toggle, because the toggles are
+   *  pure updaters now and writing to storage from one is exactly the kind of
+   *  side effect that makes an updater unsafe to run twice.
+   *
+   *  Skips the first run: `views` is seeded from what was restored, and the
+   *  session may not have arrived yet — writing on mount would overwrite a
+   *  stored arrangement with the defaults. */
+  const persistedOnce = useRef(false);
+  useEffect(() => {
+    if (!persistedOnce.current) {
+      persistedOnce.current = true;
+      return;
+    }
+
+    remember({
+      showSidebar: views.sidebar,
+      showPanel: views.panel,
+      showPreview: views.preview,
     });
-  }, [remember]);
+  }, [views, remember]);
+
+  const toggleSidebar = useCallback(() => {
+    toggleView("sidebar");
+  }, [toggleView]);
 
   const togglePanel = useCallback(() => {
-    setShowPanel((value) => {
-      remember({ showPanel: !value });
-      return !value;
-    });
-  }, [remember]);
+    toggleView("panel");
+  }, [toggleView]);
 
   const togglePreview = useCallback(() => {
-    setShowPreview((value) => {
-      remember({ showPreview: !value });
-      return !value;
-    });
-  }, [remember]);
+    toggleView("preview");
+  }, [toggleView]);
 
   /** Show the preview the moment the dev server answers.
    *
@@ -180,8 +299,8 @@ export const ProjectPlayground = () => {
       ?.showPreview;
     if (remembered !== undefined) return;
 
-    setShowPreview(true);
-  }, [readyNonce, projectIdFromUrl]);
+    openView("preview");
+  }, [readyNonce, projectIdFromUrl, openView]);
 
   /** What the command palette offers.
    *
@@ -225,7 +344,7 @@ export const ProjectPlayground = () => {
         keys: "Ctrl+Shift+F",
         run: () => {
           setSidebarView("search");
-          setShowSidebar(true);
+          openView("sidebar");
         },
       },
       {
@@ -234,7 +353,7 @@ export const ProjectPlayground = () => {
         title: "Show the file tree",
         run: () => {
           setSidebarView("files");
-          setShowSidebar(true);
+          openView("sidebar");
         },
       },
       {
@@ -243,7 +362,24 @@ export const ProjectPlayground = () => {
         title: "Show source control",
         run: () => {
           setSidebarView("git");
-          setShowSidebar(true);
+          openView("sidebar");
+        },
+      },
+      {
+        id: "view.theme",
+        category: "View",
+        title: "Switch between the light and dark theme",
+        run: () => {
+          // From what is on screen, not from the stored choice: with "system"
+          // selected, the useful thing to do is leave it — which means picking
+          // the opposite of what the OS is currently giving.
+          const current =
+            document.documentElement.dataset["theme"] === "light"
+              ? "light"
+              : "dark";
+          useThemeStore
+            .getState()
+            .setChoice(current === "light" ? "dark" : "light");
         },
       },
       {
@@ -280,7 +416,7 @@ export const ProjectPlayground = () => {
       {
         id: "project.env",
         category: "Project",
-        title: "Environment variables…",
+        title: "Project settings — run command and variables…",
         run: () => setEnvOpen(true),
       },
       {
@@ -318,7 +454,7 @@ export const ProjectPlayground = () => {
           shift: true,
           handler: () => {
             setSidebarView("search");
-            setShowSidebar(true);
+            openView("sidebar");
           },
         },
         { key: "b", mod: true, handler: () => toggleSidebar() },
@@ -490,10 +626,10 @@ export const ProjectPlayground = () => {
                 <VscSettingsGear size={15} />
               </button>
             </Tooltip>
-            <Tooltip title="Environment variables">
+            <Tooltip title="Project settings">
               <button
                 className="rc-icon-button"
-                aria-label="Environment variables"
+                aria-label="Project settings"
                 onClick={() => setEnvOpen(true)}
               >
                 <VscKey size={15} />
@@ -537,40 +673,30 @@ export const ProjectPlayground = () => {
         </Flex>
       </Flex>
 
-      {lastError && (
-        <Alert
-          type="error"
-          banner
-          closable
-          message={lastError}
-          onClose={clearError}
-        />
-      )}
 
-      {externallyChanged.length > 0 && (
-        <Alert
-          type="warning"
-          banner
-          closable
-          message={
-            `${externallyChanged.slice(0, 3).join(", ")}` +
-            (externallyChanged.length > 3
-              ? ` and ${String(externallyChanged.length - 3)} more`
-              : "") +
-            " changed on disk while open. Your version is still what will be saved — " +
-            "close and reopen the file to take the version on disk instead."
-          }
-          onClose={clearError}
-        />
-      )}
+      {/* The containing block for the drawers: everything between the topbar
+          and the status bar, so a drawer covers the workspace and leaves the
+          app's own chrome reachable. */}
+      <div className="rc-playground-body" style={{ flex: 1, minHeight: 0 }}>
+        {/* Only below the breakpoint, and only with something to dismiss. */}
+        {narrow && (showSidebar || showPanel || showPreview) && (
+          <button
+            type="button"
+            className="rc-scrim"
+            aria-label="Close the open panel"
+            onClick={() => {
+              setViews({ sidebar: false, panel: false, preview: false });
+            }}
+          />
+        )}
 
-      <div style={{ flex: 1, minHeight: 0 }}>
         <SplitPane
           direction="horizontal"
           defaultSize={restored?.sidebarWidth ?? 260}
           minSize={180}
           maxSize={520}
           showFirst={showSidebar}
+          firstClassName="rc-drawer rc-drawer-left"
           onResizeEnd={(size) => remember({ sidebarWidth: size })}
           first={
             <div
@@ -701,6 +827,7 @@ export const ProjectPlayground = () => {
               defaultSize={restored?.previewWidth ?? 700}
               minSize={320}
               showSecond={showPreview}
+              secondClassName="rc-drawer rc-drawer-full"
               onResizeEnd={(size) => remember({ previewWidth: size })}
               first={
                 <SplitPane
@@ -708,6 +835,7 @@ export const ProjectPlayground = () => {
                   defaultSize={restored?.panelHeight ?? 420}
                   minSize={120}
                   showSecond={showPanel}
+                  secondClassName="rc-drawer rc-drawer-bottom"
                   onResizeEnd={(size) => remember({ panelHeight: size })}
                   first={
                     <div
@@ -763,6 +891,13 @@ export const ProjectPlayground = () => {
           }
         />
       </div>
+
+      {messageHolder}
+
+      {/* One bar, spanning the app, below every pane. It used to be rendered
+          inside the editor, which gave a split two of them and left a project
+          with no open file with none. */}
+      <StatusBar />
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
 

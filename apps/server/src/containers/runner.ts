@@ -258,9 +258,21 @@ function probeUntilReady(projectId: string): void {
   current.readyTimer.unref();
 }
 
+/** The template a project runs under, with its start command replaced by the
+ *  project's own when it has one.
+ *
+ *  A template's command is right for a project scaffolded from it and often
+ *  wrong for an imported repository, whose real `npm run dev` is not in a fixed
+ *  registry. Overriding here rather than at each of the six call sites means
+ *  the run, the log line, the state and the terminal's $START_COMMAND cannot
+ *  disagree about what is being run.
+ */
 async function templateForProject(projectId: string) {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
-  return getTemplate(project?.template ?? "react-vite");
+  const template = getTemplate(project?.template ?? "react-vite");
+
+  const override = project?.startCommand?.trim();
+  return override ? { ...template, startCommand: override } : template;
 }
 
 /** Runs the template's start command inside the project's container.

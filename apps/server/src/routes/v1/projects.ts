@@ -7,6 +7,8 @@ import {
   duplicateProjectController,
   exportProjectController,
   getProjectEnvController,
+  getStartCommandController,
+  setStartCommandController,
   getProjectPorts,
   getProjectTree,
   listProjectsController,
@@ -34,6 +36,9 @@ import {
   gitBranchController,
   gitBranchesController,
   gitCommitController,
+  githubCreatePullController,
+  githubPullsController,
+  githubRepoController,
   gitDiscardController,
   gitFetchController,
   gitHunksController,
@@ -99,6 +104,18 @@ router.post("/:projectId/git/fetch", asyncHandler(gitFetchController));
 router.post("/:projectId/git/pull", asyncHandler(gitPullController));
 router.post("/:projectId/git/push", asyncHandler(gitPushController));
 router.post("/:projectId/git/commit", asyncHandler(gitCommitController));
+
+// Pull requests. Project-scoped because which repository they belong to comes
+// from the project's own remotes, not from the request.
+router.get("/:projectId/start-command", asyncHandler(getStartCommandController));
+router.put("/:projectId/start-command", asyncHandler(setStartCommandController));
+
+router.get("/:projectId/github/repo", asyncHandler(githubRepoController));
+router.get("/:projectId/github/pulls", asyncHandler(githubPullsController));
+router.post(
+  "/:projectId/github/pulls",
+  asyncHandler(githubCreatePullController),
+);
 router.patch("/:projectId", asyncHandler(renameProjectController));
 router.post("/:projectId/duplicate", createLimiter, asyncHandler(duplicateProjectController));
 router.get("/:projectId/export", asyncHandler(exportProjectController));

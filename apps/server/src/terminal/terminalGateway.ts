@@ -136,7 +136,14 @@ export function installTerminalGateway(server: Server): void {
 
           ws.on("close", releaseAccessWatch);
 
-          void startTerminal(ws, projectId, project.template, attachInput, terminalId);
+          void startTerminal(
+            ws,
+            projectId,
+            project.template,
+            attachInput,
+            terminalId,
+            project.startCommand ?? undefined,
+          );
         });
       } catch (error) {
         logger.warn("terminal upgrade rejected", {
@@ -155,6 +162,7 @@ async function startTerminal(
   templateId: string,
   attachInput: AttachInput,
   terminalId: number,
+  startCommand?: string,
 ): Promise<void> {
   attach(projectId);
 
@@ -191,7 +199,14 @@ async function startTerminal(
     // and not "sockets seen". It read 11 for a project that never had more
     // than a couple of shells in it.
     increment("terminal_sessions");
-    handleTerminalCreation(container, ws, templateId, attachInput, terminalId);
+    handleTerminalCreation(
+      container,
+      ws,
+      templateId,
+      attachInput,
+      terminalId,
+      startCommand,
+    );
   } catch (error) {
     logger.error("could not start terminal", error, { projectId });
     releaseAttachment();

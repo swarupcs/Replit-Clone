@@ -8,6 +8,10 @@ import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
+import {
+  selectFileColors,
+  usePresenceStore,
+} from "../../../store/presenceStore.ts";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 import {
   selectOrderedSelection,
@@ -49,6 +53,26 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
     relPath === "" || (relPath !== null && state.expandedPaths.has(relPath)),
   );
   const isActive = useOpenTabsStore((state) => state.activeRelPath === relPath);
+  /** Whether THIS row is the tree's single tab stop.
+   *
+   *  A boolean rather than the focused path itself, so a row only re-renders
+   *  when it gains or loses the tab stop — not every time focus moves anywhere
+   *  in the tree. Before anything has been focused the first visible row holds
+   *  it, so the tree is reachable from the keyboard on a fresh page. */
+  const isTabStop = useTreeSelectionStore((state) =>
+    relPath === null
+      ? false
+      : state.focused === null
+        ? state.visibleOrder[0] === relPath
+        : state.focused === relPath,
+  );
+  const setFocused = useTreeSelectionStore((state) => state.setFocused);
+  /** Who else is in this file, as a comma-joined list of their colours.
+   *
+   *  A string, so a row re-renders only when the people in ITS file change —
+   *  an array would hand every row a new identity on every awareness update
+   *  and wake the whole tree. */
+  const presence = usePresenceStore(selectFileColors(relPath ?? ""));
 
   if (!node) return null;
 
@@ -109,6 +133,17 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
       {node.relPath !== "" && (
         <div
           className="rc-tree-row"
+          // Read by the tree's keyboard handler, which navigates by walking
+          // these off the DOM rather than by re-deriving the tree — the row it
+          // needs to know about is always the one that has focus.
+          data-rc-path={node.relPath}
+          data-rc-kind={node.type}
+          role="treeitem"
+          aria-level={depth + 1}
+          aria-selected={isSelected}
+          {...(isFolder ? { "aria-expanded": isExpanded } : {})}
+          tabIndex={isTabStop ? 0 : -1}
+          onFocus={() => setFocused(node.relPath)}
           data-active={isActive}
           data-selected={isSelected}
           data-dropping={dropping}
@@ -155,9 +190,9 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
                 data-expanded={isExpanded}
               />
               {isExpanded ? (
-                <FaFolderOpen color="#7c88b8" size={14} style={{ flex: "none" }} />
+                <FaFolderOpen color="var(--rc-folder)" size={14} style={{ flex: "none" }} />
               ) : (
-                <FaFolder color="#7c88b8" size={14} style={{ flex: "none" }} />
+                <FaFolder color="var(--rc-folder)" size={14} style={{ flex: "none" }} />
               )}
             </>
           ) : (
@@ -175,6 +210,27 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
           >
             {node.name}
           </span>
+
+          {presence && (
+            // One dot per person, in their own colour: the same colour their
+            // cursor already has inside the file.
+            <span
+              aria-label="Someone else is in this file"
+              style={{ display: "flex", gap: 2, marginLeft: "auto", flex: "none" }}
+            >
+              {presence.split(",").map((color, index) => (
+                <span
+                  key={index}
+                  style={{
+                    width: 5,
+                    height: 5,
+                    borderRadius: 999,
+                    background: color,
+                  }}
+                />
+              ))}
+            </span>
+          )}
         </div>
       )}
 
@@ -182,6 +238,7 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
         // Indent guide: a hairline at this level's depth, so a deeply nested
         // file can be traced back to its folder.
         <div
+          role="group"
           className={depth >= 0 && node.relPath !== "" ? "rc-tree-branch" : undefined}
           style={
             node.relPath !== ""

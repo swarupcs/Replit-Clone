@@ -46,6 +46,9 @@ const api = vi.hoisted(() => ({
   gitFetchApi: vi.fn(),
   gitPullApi: vi.fn(),
   gitPushApi: vi.fn(),
+  getGithubPullsApi: vi.fn(),
+  createGithubPullApi: vi.fn(),
+  getGithubProjectRepoApi: vi.fn(),
   gitStageApi: vi.fn(),
   gitUnstageApi: vi.fn(),
   gitCommitApi: vi.fn(),
@@ -53,6 +56,12 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock("../../../apis/projects.ts", () => api);
+
+/** The panel asks whether a connected GitHub account could supply the push
+ *  credential. Mocked so the suite makes no real request, and so both answers
+ *  can be exercised. */
+const getGithubStatusApi = vi.hoisted(() => vi.fn());
+vi.mock("../../../apis/github.ts", () => ({ getGithubStatusApi }));
 
 const {
   getGitStatusApi,
@@ -66,6 +75,9 @@ const {
   gitFetchApi,
   gitPullApi,
   gitPushApi,
+  getGithubPullsApi,
+  createGithubPullApi,
+  getGithubProjectRepoApi,
 } = api;
 
 const BRANCHES = [
@@ -88,6 +100,22 @@ const emitted: { event: string; payload: unknown }[] = [];
 
 beforeEach(() => {
   emitted.length = 0;
+  getGithubStatusApi.mockResolvedValue({ configured: true, connection: null });
+  getGithubPullsApi.mockResolvedValue([]);
+  getGithubProjectRepoApi.mockResolvedValue({
+    owner: "a",
+    repo: "b",
+    url: "https://github.com/a/b",
+  });
+  createGithubPullApi.mockResolvedValue({
+    number: 7,
+    title: "Add a thing",
+    url: "https://github.com/a/b/pull/7",
+    state: "open",
+    draft: false,
+    head: "main",
+    base: "main",
+  });
   getGitStatusApi.mockResolvedValue(STATUS);
   getGitLogApi.mockResolvedValue([]);
   getGitDiffApi.mockResolvedValue(PATCH);
@@ -219,7 +247,7 @@ describe("SourceControlPanel diffs", () => {
 
   it("opens the file from the icon, without expanding the diff", async () => {
     await renderPanel();
-    fireEvent.click(screen.getByTitle("Open App.tsx"));
+    fireEvent.click(screen.getByLabelText("Open App.tsx"));
 
     expect(emitted).toContainEqual({
       event: "readFile",
@@ -227,6 +255,28 @@ describe("SourceControlPanel diffs", () => {
     });
     // The icon is not the row: clicking it must not also open the diff.
     expect(getGitDiffApi).not.toHaveBeenCalled();
+  });
+
+  /** The row holds buttons of its own — stage, discard — so it could not be
+   *  one, and it was a div with a click handler: the diff was mouse-only. Its
+   *  two actions are sibling buttons now. */
+  it("makes the row's two actions real buttons", async () => {
+    await renderPanel();
+
+    // The two are distinct controls, so each is asked for on its own terms:
+    // the icon by its label, the row by the filename it shows.
+    const open = screen.getByLabelText("Open App.tsx");
+    const label = screen.getByText("App.tsx").closest("button");
+
+    expect(open.tagName).toBe("BUTTON");
+    expect(label).not.toBeNull();
+    expect(label).not.toBe(open);
+    // Announces that the row expands, and reflects whether it currently is.
+    expect(label?.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(screen.getByText("App.tsx"));
+    expect(await screen.findByText("is now this")).toBeDefined();
+    expect(label?.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("still lets a viewer read a diff", async () => {
@@ -660,5 +710,204 @@ describe("SourceControlPanel pushing", () => {
         expect.stringContaining("Push from the project's terminal instead."),
       );
     });
+  });
+});
+
+
+/** Pushing used to demand a token typed in every time. A connected GitHub
+ *  account supplies one; pasting remains the way to push anywhere else. */
+describe("SourceControlPanel pushing with a connection", () => {
+  async function openPush() {
+    fireEvent.click(screen.getByLabelText("Remotes"));
+    fireEvent.click(await screen.findByText(/Push to origin/));
+  }
+
+  it("stops asking for a token when one can be supplied", async () => {
+    getGithubStatusApi.mockResolvedValue({
+      configured: true,
+      connection: {
+        login: "octocat",
+        scopes: ["repo"],
+        connectedAt: "2026-01-01T00:00:00.000Z",
+        canUseRepos: true,
+      },
+    });
+    await renderPanel();
+    await openPush();
+
+    expect(
+      await screen.findByText(/Pushing as your connected GitHub account/),
+    ).toBeDefined();
+    expect(screen.queryByPlaceholderText("Access token")).toBeNull();
+  });
+
+  it("pushes with no token at all in that case", async () => {
+    getGithubStatusApi.mockResolvedValue({
+      configured: true,
+      connection: {
+        login: "octocat",
+        scopes: ["repo"],
+        connectedAt: "2026-01-01T00:00:00.000Z",
+        canUseRepos: true,
+      },
+    });
+    await renderPanel();
+    await openPush();
+    await screen.findByText(/Pushing as your connected GitHub account/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Push" }));
+
+    await waitFor(() => {
+      expect(gitPushApi).toHaveBeenCalledWith(PROJECT, "origin", "main", undefined);
+    });
+  });
+
+  it("still asks when there is no connection", async () => {
+    // Pasting a token is how anyone pushes to a forge this server knows
+    // nothing about, and it stays possible.
+    await renderPanel();
+    await openPush();
+
+    expect(await screen.findByPlaceholderText("Access token")).toBeDefined();
+  });
+
+  it("still asks when GitHub granted no repository access", async () => {
+    getGithubStatusApi.mockResolvedValue({
+      configured: true,
+      connection: {
+        login: "octocat",
+        scopes: ["read:user"],
+        connectedAt: "2026-01-01T00:00:00.000Z",
+        canUseRepos: false,
+      },
+    });
+    await renderPanel();
+    await openPush();
+
+    expect(await screen.findByPlaceholderText("Access token")).toBeDefined();
+  });
+});
+
+
+describe("SourceControlPanel pull requests", () => {
+  async function openDialog() {
+    fireEvent.click(screen.getByLabelText("Remotes"));
+    fireEvent.click(await screen.findByText(/Open a pull request/));
+  }
+
+  it("asks whether one is already open before offering to create it", async () => {
+    await renderPanel();
+    await openDialog();
+
+    await waitFor(() => {
+      expect(getGithubPullsApi).toHaveBeenCalledWith(PROJECT, "main");
+    });
+  });
+
+  it("opens one from the current branch", async () => {
+    await renderPanel();
+    await openDialog();
+
+    const title = await screen.findByPlaceholderText("Title");
+    fireEvent.change(title, { target: { value: "Add a thing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open pull request" }));
+
+    await waitFor(() => {
+      expect(createGithubPullApi).toHaveBeenCalledWith(PROJECT, {
+        title: "Add a thing",
+        head: "main",
+        base: "main",
+        description: "",
+      });
+    });
+  });
+
+  it("points at the existing one rather than trying again", async () => {
+    // GitHub would refuse the second attempt, and its message is not where
+    // anyone would look for the link.
+    getGithubPullsApi.mockResolvedValue([
+      {
+        number: 3,
+        title: "Already going",
+        url: "https://github.com/a/b/pull/3",
+        state: "open",
+        draft: false,
+        head: "main",
+        base: "develop",
+      },
+    ]);
+    await renderPanel();
+    await openDialog();
+
+    expect(await screen.findByText("Already going")).toBeDefined();
+    expect(screen.getByRole("button", { name: "View it on GitHub" })).toBeDefined();
+    expect(screen.queryByPlaceholderText("Title")).toBeNull();
+  });
+
+  it("reports GitHub's own refusal", async () => {
+    createGithubPullApi.mockRejectedValue({
+      response: { data: { message: "No commits between main and main" } },
+    });
+    await renderPanel();
+    await openDialog();
+
+    fireEvent.change(await screen.findByPlaceholderText("Title"), {
+      target: { value: "Add a thing" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open pull request" }));
+
+    await waitFor(() => {
+      expect(messageError).toHaveBeenCalledWith("No commits between main and main");
+    });
+  });
+
+  it("is not offered to an editor, since it spends the owner's credential", async () => {
+    await renderPanel(true, false);
+    fireEvent.click(screen.getByLabelText("Remotes"));
+
+    expect(screen.queryByText(/Open a pull request/)).toBeNull();
+  });
+});
+
+
+/** git computes both of these on every status and the panel showed neither, so
+ *  "am I ahead of the remote" was a question only the terminal could answer. */
+describe("SourceControlPanel upstream state", () => {
+  it("shows how far ahead and behind the branch is", async () => {
+    getGitStatusApi.mockResolvedValue({ ...STATUS, ahead: 2, behind: 3 });
+    await renderPanel();
+
+    expect(await screen.findByText("↑2")).toBeDefined();
+    expect(screen.getByText("↓3")).toBeDefined();
+  });
+
+  it("says nothing when the branch is level with its upstream", async () => {
+    await renderPanel();
+
+    expect(screen.queryByText(/↑/)).toBeNull();
+    expect(screen.queryByText(/↓/)).toBeNull();
+  });
+
+  it("links out to the repository on GitHub", async () => {
+    await renderPanel();
+
+    const link = await screen.findByLabelText("Open on GitHub");
+    expect(link.getAttribute("href")).toBe("https://github.com/a/b");
+    // A new tab, and never handing the opener to it.
+    expect(link.getAttribute("rel")).toContain("noopener");
+  });
+
+  it("offers neither the link nor a pull request off GitHub", async () => {
+    // A GitLab remote, or a path on disk. Offering both and failing is worse
+    // than offering neither.
+    getGithubProjectRepoApi.mockResolvedValue(null);
+    await renderPanel();
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Open on GitHub")).toBeNull();
+    });
+
+    fireEvent.click(screen.getByLabelText("Remotes"));
+    expect(screen.queryByText(/Open a pull request/)).toBeNull();
   });
 });

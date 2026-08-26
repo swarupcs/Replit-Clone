@@ -11,6 +11,9 @@ process.env["DATABASE_URL"] ??= "postgresql://test:test@127.0.0.1:5432/test";
 process.env["JWT_ACCESS_SECRET"] ??= "a".repeat(48);
 process.env["JWT_REFRESH_SECRET"] ??= "b".repeat(48);
 process.env["NODE_ENV"] = "test";
+// A throwaway 32-byte key, so anything that stores a secret is exercised
+// rather than skipped. Tests that care about the unconfigured path delete it.
+process.env["SECRET_ENCRYPTION_KEY"] ??= Buffer.alloc(32, 7).toString("base64");
 
 // Path confinement resolves against this, so it must not be the real projects
 // directory. Each suite creates and removes its own subdirectory beneath it.

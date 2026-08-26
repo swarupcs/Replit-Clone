@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { Modal } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 import { VscSplitHorizontal } from "react-icons/vsc";
 import { Tooltip } from "antd";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
+import { usePresenceStore } from "../../../store/presenceStore.ts";
 
 /** The open-file tab strip.
  *
@@ -15,6 +17,9 @@ export const EditorTabs = () => {
   const { tabs, activeRelPath, secondaryRelPath, splitOpen, setActive, closeTab } =
     useOpenTabsStore();
   const openToSide = useOpenTabsStore((state) => state.openToSide);
+  /** The whole map: the strip holds a handful of tabs, so one subscription for
+   *  the lot is cheaper than one per tab. */
+  const colorsByFile = usePresenceStore((state) => state.colorsByFile);
   const closeSplit = useOpenTabsStore((state) => state.closeSplit);
 
   /** A tab whose close is waiting on confirmation, because it still has edits
@@ -32,12 +37,57 @@ export const EditorTabs = () => {
     closeTab(relPath);
   }
 
+  /** The strip, so a key press can move focus to a sibling tab. */
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  /** Arrow keys walk the strip and switch as they go — `role="tab"` sets the
+   *  expectation that moving to a tab selects it, and every tab here is
+   *  already open, so switching costs nothing. Delete closes, which is the one
+   *  gesture a keyboard user otherwise had no way to reach: the close button
+   *  was a `span` with a click handler. */
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const index = tabs.findIndex((tab) => tab.relPath === activeRelPath);
+    if (index === -1) return;
+
+    const step =
+      event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+
+    let target: number | null = null;
+    if (step !== 0) target = index + step;
+    else if (event.key === "Home") target = 0;
+    else if (event.key === "End") target = tabs.length - 1;
+    else if (event.key === "Delete") {
+      event.preventDefault();
+      requestClose(tabs[index]?.relPath ?? "");
+      return;
+    }
+
+    // Clamped rather than wrapped, so holding an arrow rests at the end of the
+    // strip instead of cycling.
+    if (target === null || target < 0 || target >= tabs.length) return;
+
+    const next = tabs[target];
+    if (!next) return;
+
+    event.preventDefault();
+    setActive(next.relPath);
+
+    // Focus follows selection, otherwise the next arrow key would still be
+    // measured from the tab the user has visibly left.
+    const nodes = stripRef.current?.querySelectorAll<HTMLElement>('[role="tab"]');
+    nodes?.[target]?.focus();
+  }
+
   if (tabs.length === 0) return null;
 
   const confirmingName = confirming?.split("/").pop() ?? "";
 
   return (
     <div
+      ref={stripRef}
+      role="tablist"
+      aria-label="Open files"
+      onKeyDown={handleKeyDown}
       style={{
         display: "flex",
         overflowX: "auto",
@@ -56,6 +106,12 @@ export const EditorTabs = () => {
           <div
             key={tab.relPath}
             className="rc-tab"
+            role="tab"
+            aria-selected={isActive}
+            // One tab stop for the whole strip: Tab reaches the current file
+            // and the arrows move within it, rather than Tab walking through
+            // every open file to get past the strip.
+            tabIndex={tab.relPath === activeRelPath ? 0 : -1}
             data-active={isActive}
             onClick={() => setActive(tab.relPath)}
             onAuxClick={(event) => {
@@ -68,8 +124,34 @@ export const EditorTabs = () => {
             <FileIcon extension={tab.extension} />
             <span>{tab.name}</span>
 
-            <span
+            {colorsByFile[tab.relPath] && (
+              <span
+                aria-label="Someone else is in this file"
+                style={{ display: "flex", gap: 2, flex: "none" }}
+              >
+                {colorsByFile[tab.relPath]?.split(",").map((color, index) => (
+                  <span
+                    key={index}
+                    style={{
+                      width: 5,
+                      height: 5,
+                      borderRadius: 999,
+                      background: color,
+                    }}
+                  />
+                ))}
+              </span>
+            )}
+
+            {/* A real button: it was a `span`, so closing a file was a
+                mouse-only gesture and screen readers were told nothing about
+                it. Kept out of the tab order — Delete on the tab does this
+                without adding a second stop per open file. */}
+            <button
+              type="button"
               className="rc-tab-close"
+              tabIndex={-1}
+              aria-label={`Close ${tab.name}`}
               data-dirty={tab.isDirty}
               onClick={(event) => {
                 event.stopPropagation();
@@ -89,7 +171,7 @@ export const EditorTabs = () => {
               ) : (
                 <CloseOutlined style={{ fontSize: 10 }} />
               )}
-            </span>
+            </button>
           </div>
         );
       })}

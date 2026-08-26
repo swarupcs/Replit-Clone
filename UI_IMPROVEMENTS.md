@@ -164,3 +164,89 @@ Monaco produces markers and nothing surfaces them.
 **#2 (focus states)** and **#5 (global status bar)** first: both are small and
 self-contained, and #5 unblocks #3 and #7. Then #1, which is the largest single
 piece of work and the one that changes who can use the product at all.
+
+---
+
+## Progress
+
+- [x] **#2 — focus states and keyboard reach.** A `:focus-visible` ring on the
+  custom controls; the explorer is a `role="tree"` with one roving tab stop and
+  the WAI-ARIA key rules (pure, in `lib/treeKeys.ts`); the tab strip is a
+  `role="tablist"` with arrows and Delete. Two things the plan did not know
+  about turned up on the way: the panel's shell tabs held a
+  `<span role="button">` *inside* a `<button>` — invalid markup, and the close
+  was mouse-only however a browser resolved it — and the search and
+  source-control rows were divs with click handlers, so every result was
+  visible and none was reachable. Both fixed.
+- [x] **#4 — command palette.** Already shipped, before this plan was written:
+  `Ctrl+Shift+P` over `lib/commands.ts`, with disabled entries greyed and
+  carrying their reason. The plan was composed against an earlier tree.
+- [x] **#5 — global status bar.** Promoted out of `EditorComponent` into the
+  playground, which retires both bugs the plan names. The dev server's state
+  moved into it, being the first thing to take up the room that freed.
+
+- [x] **#7 — Problems view.** A third bottom-panel tab, a badge on it, and
+  the counts in the status bar #5 created. One thing the plan could not have
+  known: semantic validation is off for TS/JS by design, so this is syntax and
+  schema only, and the empty state says so rather than letting a clean list
+  read as "this project type checks".
+
+- [x] **#3 — presence.** A stack in the status bar, and a dot per person on
+  the tree row and tab for a file they have open. Not click-to-follow: that
+  needs cursor positions and scroll sync, which is a new feature rather than a
+  display of what already exists. Presence is per document, so it shows people
+  who have a file open — someone sitting in the project with nothing open is
+  connected but in no document.
+- [x] **#6 — one notification system per kind.** A socket error is transient
+  and became a toast; a file changed on disk is persistent state and became a
+  chip in the status bar. No more banners resizing the editor mid-keystroke.
+
+- [x] **#1 — responsive.** Both stages. (a) The signed-out pages and the
+  dashboard: the shells moved from inline styles onto classes, because a media
+  query cannot reach an inline style — which is most of why there were none.
+  The bug behind "untested below ~700px" was a bare `minmax(340px, 1fr)`, which
+  is 340px wide on a 360px phone with padding either side and overflows rather
+  than wrapping; every floor is `min(x, 100%)` now. (b) Below 900px the
+  sidebar, panel and preview become drawers over the editor, driven by the
+  toggles that already existed, with a scrim and one drawer at a time.
+
+  The drawers are CSS over the existing tree rather than a second tree: moving
+  a pane elsewhere in the React tree unmounts it, and unmounting the terminal
+  kills its PTY and its scrollback. Resizing a window across the breakpoint
+  must not cost anyone their shell.
+
+### Tier 3
+
+- [x] **Light theme.** A `:root[data-theme="light"]` block, a three-way choice
+  (System / Light / Dark) in the editor settings and a palette command, and the
+  antd `ConfigProvider` re-derived per mode. Not quite the "whole cost" the
+  plan estimated, for three reasons worth recording:
+
+  - Several washes were literals, not tokens — `rgba(255,255,255,0.06)` reads
+    as a hover over near-black and as nothing at all over white. Those are
+    tokens now, along with the aurora blooms, the scrollbar, the sticky
+    header's ground, and the status letters and folder glyph that components
+    set as inline colours.
+  - Monaco and xterm paint their own surfaces and cannot read a custom
+    property. Dracula is a dark scheme by construction, so light uses Monaco's
+    own `vs` rather than a recoloured Dracula; the terminals get a second
+    palette, shared between the shell and the run output so the two cannot
+    drift. Neither is rebuilt on a theme change — that would drop the PTY and
+    the run's output — they are repainted in place.
+  - A token added to the dark block and forgotten in the light one does not
+    error; it inherits the dark value and shows up as one unreadable thing on
+    a light page. There is a test that reads `index.css` and fails on exactly
+    that.
+
+- [x] **Skeletons over spinners.** Card-shaped placeholders in the grid, so
+  the page keeps its shape instead of jumping when the projects land.
+- [x] **The editor empty state as an on-ramp.** The routes in, with their
+  keys, in place of a dimmed logo and a line about autosaving. Without the
+  "recent files" the plan suggests: nothing records file-open history, and a
+  store for it is a feature rather than the polish this item is.
+- [x] **Labels on the icon-only buttons.** A tooltip is not a label — it never
+  reaches a screen reader, and a touch device never shows one. Four in the
+  source-control panel had only a tooltip; there is now a test that reads the
+  source and fails on any icon button without an accessible name.
+
+Still open in Tier 3: a dashboard list view for large accounts.

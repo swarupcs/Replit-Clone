@@ -54,6 +54,87 @@
     monospace;
 
   --rc-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Interaction washes. Literals until now, which is why they only worked on
+   * a dark ground: white at 6% over near-black reads as a hover, and over
+   * white reads as nothing at all. */
+  --rc-hover: rgba(255, 255, 255, 0.06);
+  --rc-hover-strong: rgba(255, 255, 255, 0.1);
+  --rc-tint: rgba(255, 255, 255, 0.035);
+  --rc-tint-faint: rgba(255, 255, 255, 0.012);
+  --rc-hairline: rgba(255, 255, 255, 0.02);
+  --rc-inset-edge: rgba(0, 0, 0, 0.25);
+  --rc-scrim: rgba(0, 0, 0, 0.45);
+  --rc-scrollbar-hover: #3d4257;
+  /* The two soft blooms behind a full-page backdrop, and the translucent
+   * ground the sticky header sits on. */
+  --rc-bloom-a: rgba(139, 92, 246, 0.16);
+  --rc-bloom-b: rgba(34, 211, 238, 0.1);
+  --rc-topbar-bg: rgba(10, 11, 18, 0.6);
+  /* Named because they are read from components as well as from here: an SVG
+   * `color` and a status letter cannot use a class. */
+  --rc-folder: #7c88b8;
+  --rc-info: #60a5fa;
+}
+
+/* --- Light -----------------------------------------------------------------
+ *
+ * Only the tokens change; not one component reads a colour of its own, which
+ * is what makes this a block of values rather than a second stylesheet.
+ *
+ * The ground order inverts rather than lightening uniformly: on dark, deeper
+ * is further back, so on light, deeper must be *darker*. The editor plane
+ * keeps its role — the surface you read sits above the surface you operate —
+ * which on light means the editor is the white one and the chrome is tinted.
+ */
+:root[data-theme="light"] {
+  --rc-bg: #f4f6fb;
+  --rc-surface: #eef1f8;
+  --rc-surface-sunken: #e6eaf3;
+  --rc-surface-raised: #ffffff;
+  --rc-surface-overlay: #ffffff;
+
+  --rc-editor-bg: #ffffff;
+
+  --rc-border: #dbe0ec;
+  --rc-border-strong: #c2c9db;
+  --rc-selection: #dbe4fa;
+
+  --rc-text: #131623;
+  --rc-text-muted: #4a5169;
+  --rc-text-subtle: #6f778f;
+
+  /* Darker than the dark theme's accent: #a78bfa on white fails contrast for
+   * text, and this colour is used for text as well as for fills. */
+  --rc-accent: #6d28d9;
+  --rc-accent-strong: #5b21b6;
+  --rc-accent-soft: rgba(109, 40, 217, 0.1);
+  --rc-gradient: linear-gradient(135deg, #7c3aed 0%, #2563eb 50%, #0891b2 100%);
+
+  --rc-green: #15803d;
+  --rc-yellow: #b45309;
+  --rc-red: #dc2626;
+  --rc-cyan: #0e7490;
+
+  --rc-shadow-sm: 0 1px 2px rgba(19, 22, 35, 0.08);
+  --rc-shadow-md: 0 4px 16px rgba(19, 22, 35, 0.1);
+  --rc-shadow-lg: 0 16px 48px rgba(19, 22, 35, 0.14);
+  --rc-glow: 0 0 0 1px rgba(109, 40, 217, 0.35), 0 8px 32px rgba(109, 40, 217, 0.16);
+
+  /* Black washes, not white: the whole point of the tokens. */
+  --rc-hover: rgba(19, 22, 35, 0.05);
+  --rc-hover-strong: rgba(19, 22, 35, 0.09);
+  --rc-tint: rgba(255, 255, 255, 0.7);
+  --rc-tint-faint: rgba(255, 255, 255, 0.4);
+  --rc-hairline: rgba(19, 22, 35, 0.035);
+  --rc-inset-edge: rgba(19, 22, 35, 0.08);
+  --rc-scrim: rgba(19, 22, 35, 0.35);
+  --rc-scrollbar-hover: #aeb6cb;
+  --rc-bloom-a: rgba(124, 58, 237, 0.1);
+  --rc-bloom-b: rgba(8, 145, 178, 0.07);
+  --rc-topbar-bg: rgba(244, 246, 251, 0.72);
+  --rc-folder: #5a6486;
+  --rc-info: #2563eb;
 }
 
 * {
@@ -95,7 +176,7 @@ body {
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: #3d4257;
+  background-color: var(--rc-scrollbar-hover);
   background-clip: content-box;
 }
 
@@ -124,12 +205,12 @@ body {
   background:
     radial-gradient(
       60rem 40rem at 15% -10%,
-      rgba(139, 92, 246, 0.16),
+      var(--rc-bloom-a),
       transparent 60%
     ),
     radial-gradient(
       50rem 35rem at 100% 0%,
-      rgba(34, 211, 238, 0.1),
+      var(--rc-bloom-b),
       transparent 55%
     );
   pointer-events: none;
@@ -142,8 +223,8 @@ body {
   inset: 0;
   z-index: -1;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    linear-gradient(var(--rc-hairline) 1px, transparent 1px),
+    linear-gradient(90deg, var(--rc-hairline) 1px, transparent 1px);
   background-size: 56px 56px;
   mask-image: radial-gradient(60rem 40rem at 50% 0%, #000, transparent 75%);
   pointer-events: none;
@@ -160,8 +241,8 @@ body {
 .rc-panel {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.035),
-    rgba(255, 255, 255, 0.012)
+    var(--rc-tint),
+    var(--rc-tint-faint)
   );
   border: 1px solid var(--rc-border);
   border-radius: var(--rc-radius-lg);
@@ -322,7 +403,7 @@ body {
 }
 
 .rc-tree-row:hover {
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: var(--rc-hover);
   color: var(--rc-text);
 }
 
@@ -389,11 +470,11 @@ body {
 
 .rc-icon-button:hover {
   color: var(--rc-text);
-  background-color: rgba(255, 255, 255, 0.06);
+  background-color: var(--rc-hover);
 }
 
 .rc-icon-button:active {
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--rc-hover-strong);
 }
 
 /* Toggle-style icon button that stays lit while its pane is visible. */
@@ -422,7 +503,7 @@ body {
   font-size: 11.5px;
   color: var(--rc-text-subtle);
   background: var(--rc-editor-bg);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+  border-bottom: 1px solid var(--rc-inset-edge);
   overflow-x: auto;
   white-space: nowrap;
   scrollbar-width: none;
@@ -490,10 +571,10 @@ body {
 .rc-preview-stage {
   background-color: var(--rc-surface-sunken);
   background-image:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.02) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(255, 255, 255, 0.02) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.02) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.02) 75%);
+    linear-gradient(45deg, var(--rc-hairline) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--rc-hairline) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--rc-hairline) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--rc-hairline) 75%);
   background-size: 16px 16px;
   background-position:
     0 0,
@@ -512,7 +593,7 @@ body {
   height: 2px;
   z-index: 1;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--rc-hover);
 }
 
 .rc-preview-progress::after {
@@ -740,7 +821,7 @@ body {
 }
 
 .rc-review-button:hover:not(:disabled) {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: var(--rc-hover-strong);
 }
 
 .rc-review-button[data-primary] {
@@ -779,5 +860,286 @@ body {
   color: var(--rc-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Focus ---------------------------------------------------------------
+ * Nothing in the custom chrome had a focus style, so tabbing through the app
+ * moved an invisible cursor. `:focus-visible` rather than `:focus` so a mouse
+ * click does not leave a ring behind — the browser decides, which is exactly
+ * the distinction the pseudo-class exists to make.
+ *
+ * An inset ring, because most of these sit flush against a pane edge where an
+ * outset one would be clipped. */
+.rc-tree-row:focus-visible,
+.rc-tab:focus-visible,
+.rc-tab-close:focus-visible,
+.rc-panel-tab:focus-visible,
+.rc-panel-tab-close:focus-visible,
+.rc-icon-button:focus-visible,
+.rc-quickopen-row:focus-visible,
+.rc-review-button:focus-visible,
+.rc-card:focus-visible {
+  outline: 2px solid var(--rc-accent);
+  outline-offset: -2px;
+  border-radius: var(--rc-radius-sm);
+}
+
+/* The close affordance is invisible until its tab is hovered or active — which
+ * would hide the focus ring from the keyboard user who just reached it. */
+.rc-tab-close:focus-visible,
+.rc-panel-tab-close:focus-visible {
+  opacity: 1;
+}
+
+/* A row that is genuinely a button.
+ *
+ * Several rows in the panels are `.rc-tree-row` divs with a click handler,
+ * which makes them mouse-only. Composed with `.rc-tree-row` on a real
+ * `<button>` this gets Enter, Space, the tab order and the focus ring from the
+ * element itself rather than from a hand-written handler that has to be got
+ * right in each place. */
+.rc-row-button {
+  appearance: none;
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+/* --- Narrow screens -------------------------------------------------------
+ *
+ * There was not one breakpoint in the app. These are the shells the pages sit
+ * in, expressed as classes so a media query can reach them at all — inline
+ * styles cannot be overridden by one.
+ *
+ * The rule throughout is `min(x, 100%)` rather than a bare minimum: a grid
+ * track with a 340px floor is 340px wide on a 360px phone with padding on
+ * both sides, which overflows the page rather than wrapping. */
+
+/* Sticky page header: logo one side, account the other. */
+.rc-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 32px;
+  border-bottom: 1px solid var(--rc-border);
+  background: var(--rc-topbar-bg);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.rc-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 32px 64px;
+}
+
+/* Project cards. `auto-fill` keeps the track width honest when there are
+ * fewer projects than fit. */
+.rc-project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  gap: 18px;
+}
+
+/* The auth pages: pitch beside form, collapsing to form alone. */
+.rc-auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.rc-auth-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  gap: 48px;
+  align-items: center;
+  width: 100%;
+  max-width: 940px;
+}
+
+/* The hero line. Scales with the viewport instead of staying at 40px and
+ * pushing a word off the side of a phone. */
+.rc-hero {
+  font-size: clamp(30px, 7vw, 40px);
+  line-height: 1.12;
+  font-weight: 800;
+  letter-spacing: -1.2px;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 640px) {
+  .rc-topbar {
+    padding: 12px 16px;
+  }
+
+  .rc-page {
+    padding: 24px 16px 48px;
+  }
+
+  .rc-auth-shell {
+    padding: 16px;
+    /* A phone keyboard eats the viewport; centring then pushes the form off
+     * the top where it cannot be scrolled back to. */
+    place-items: start center;
+    padding-top: 32px;
+  }
+
+  .rc-auth-grid {
+    gap: 28px;
+  }
+}
+
+/* The card every signed-out page sits in. Padding drops on a phone, where 32px
+ * either side is a tenth of the screen spent on nothing. */
+.rc-auth-card {
+  padding: 32px;
+  width: 100%;
+  max-width: 420px;
+}
+
+@media (max-width: 640px) {
+  .rc-auth-card {
+    padding: 22px 18px;
+  }
+}
+
+/* --- The playground below 900px -------------------------------------------
+ *
+ * Four nested split panes with pixel floors -- sidebar 180, editor 240,
+ * preview 320, panel 120, plus the activity rail -- crush at about 1100px. So
+ * below 900 the sidebar, the panel and the preview stop being split children
+ * and become drawers over the editor.
+ *
+ * Done in CSS over the existing tree rather than by rendering a second one:
+ * moving a pane to a different place in the React tree unmounts it, and
+ * unmounting the terminal kills its PTY and its scrollback. Resizing a window
+ * across the breakpoint must not cost anyone their shell.
+ *
+ * `!important` because `SplitPane` sets each pane's flex inline, and an inline
+ * style is otherwise unreachable from a stylesheet. */
+.rc-playground-body {
+  position: relative;
+}
+
+@media (max-width: 900px) {
+  /* Absolute, not fixed: the containing block is the area between the topbar
+   * and the status bar, so a drawer covers the workspace and leaves the app's
+   * own chrome reachable. */
+  .rc-drawer {
+    position: absolute !important;
+    z-index: 40;
+    flex: none !important;
+    box-shadow: var(--rc-shadow-lg);
+    background: var(--rc-surface);
+  }
+
+  .rc-drawer-left {
+    inset: 0 auto 0 0 !important;
+    width: min(320px, 85vw) !important;
+  }
+
+  .rc-drawer-bottom {
+    inset: auto 0 0 0 !important;
+    height: min(60vh, 420px) !important;
+  }
+
+  .rc-drawer-full {
+    inset: 0 !important;
+  }
+
+  /* A 5px drag handle is not a touch target, and there is nothing left to
+   * resize once the panes are drawers. */
+  .rc-divider {
+    display: none !important;
+  }
+
+  /* Dismisses whichever drawer is open. Below the drawers, above the editor. */
+  .rc-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    border: none;
+    padding: 0;
+    background: var(--rc-scrim);
+    cursor: pointer;
+  }
+}
+
+/* --- Loading --------------------------------------------------------------
+ * A skeleton in the shape of what is coming, rather than a spinner in the
+ * middle of an empty page: the grid keeps its layout, so nothing jumps when
+ * the content arrives. */
+.rc-skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-radius);
+  background: var(--rc-surface-raised);
+}
+
+.rc-skeleton {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--rc-hover) 25%,
+    var(--rc-hover-strong) 37%,
+    var(--rc-hover) 63%
+  );
+  background-size: 400% 100%;
+  animation: rc-shimmer 1.4s ease infinite;
+}
+
+@keyframes rc-shimmer {
+  from {
+    background-position: 100% 50%;
+  }
+  to {
+    background-position: 0 50%;
+  }
+}
+
+/* --- The editor's empty state ---------------------------------------------
+ * The routes in, rather than a decorative logo: this is the first thing
+ * someone sees in a new project. */
+.rc-onramp {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: min(300px, 80%);
+  font-size: 12.5px;
+  color: var(--rc-text-subtle);
+}
+
+.rc-onramp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 5px 8px;
+  border-radius: var(--rc-radius-sm);
+}
+
+.rc-onramp-row:hover {
+  background: var(--rc-hover);
+}
+
+.rc-kbd {
+  font-family: var(--rc-mono);
+  font-size: 11px;
+  background: var(--rc-selection);
+  color: var(--rc-text-muted);
+  padding: 1px 6px;
+  border-radius: 4px;
   white-space: nowrap;
 }

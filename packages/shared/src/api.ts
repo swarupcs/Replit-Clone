@@ -145,3 +145,93 @@ export type GitCommitResponse = ApiSuccess<{
   status: GitStatus;
   commits: GitCommit[];
 }>;
+
+// --- GitHub ---------------------------------------------------------------
+
+/** What the app is told about the caller's GitHub authorisation.
+ *
+ *  Never the token. This is the description of a connection, not the
+ *  credential: the token is spent server-side and does not reach a browser.
+ */
+export interface GithubConnectionInfo {
+  login: string;
+  scopes: string[];
+  connectedAt: string;
+  /** Whether GitHub actually granted `repo`. An organisation can withhold it,
+   *  and the app should say which operation is unavailable and why rather than
+   *  failing later at an API call. */
+  canUseRepos: boolean;
+}
+
+/** GET /api/v1/github/status
+ *
+ *  `configured` and `connection` answer different questions: whether this
+ *  deployment offers the feature at all, and whether this user has said yes. */
+export type GithubStatusResponse = ApiSuccess<{
+  configured: boolean;
+  connection: GithubConnectionInfo | null;
+}>;
+
+/** POST /api/v1/github/connect — where to send the browser to authorise. */
+export type GithubConnectResponse = ApiSuccess<{ url: string }>;
+
+/** One of the caller's GitHub repositories, reduced to what a picker needs. */
+export interface GithubRepo {
+  id: number;
+  /** "owner/name", which is how people refer to one. */
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  description: string | null;
+  defaultBranch: string;
+  /** Kilobytes, as GitHub reports it — enough to refuse an import that cannot
+   *  fit before it is attempted. */
+  sizeKb: number;
+  language: string | null;
+  pushedAt: string | null;
+}
+
+/** GET /api/v1/github/repos?query=&page= */
+export type GithubReposResponse = ApiSuccess<{
+  repos: GithubRepo[];
+  hasMore: boolean;
+}>;
+
+/** POST /api/v1/github/import */
+export type GithubImportResponse = ApiSuccess<{ project: Project }>;
+
+/** A pull request, reduced to what the source-control panel shows. */
+export interface GithubPullRequest {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  draft: boolean;
+  head: string;
+  base: string;
+}
+
+/** GET /api/v1/projects/:projectId/github/pulls?head= */
+export type GithubPullsResponse = ApiSuccess<GithubPullRequest[]>;
+
+/** POST /api/v1/projects/:projectId/github/pulls */
+export type GithubPullResponse = ApiSuccess<GithubPullRequest>;
+
+/** GET /api/v1/projects/:projectId/github/repo — null when the project's
+ *  remotes point somewhere that is not GitHub. */
+export type GithubProjectRepoResponse = ApiSuccess<{
+  owner: string;
+  repo: string;
+  url: string;
+} | null>;
+
+/** GET / PUT /api/v1/projects/:projectId/start-command
+ *
+ *  Both values, because "npm run dev" alone does not say whether it is the
+ *  project's own choice or the template's — and which it is decides whether
+ *  clearing the field would help. */
+export type StartCommandResponse = ApiSuccess<{
+  command: string | null;
+  templateDefault: string;
+}>;

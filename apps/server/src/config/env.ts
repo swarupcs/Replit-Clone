@@ -54,6 +54,15 @@ const envSchema = z.object({
   GITHUB_CLIENT_ID: z.string().optional(),
   GITHUB_CLIENT_SECRET: z.string().optional(),
 
+  /** 32 bytes, base64, for secrets the server has to keep and later spend --
+   *  today the GitHub token that makes importing and pushing possible without
+   *  retyping one.
+   *
+   *  Optional, and its absence turns those features off rather than taking the
+   *  process down: a deployment that does not use them should not have to
+   *  invent a key. Generate one with `openssl rand -base64 32`. */
+  SECRET_ENCRYPTION_KEY: z.string().optional(),
+
   /** The AI assistant. No key means the feature is simply off, exactly like
    *  GitHub sign-in above: the panel is not offered rather than being offered
    *  and then failing. */

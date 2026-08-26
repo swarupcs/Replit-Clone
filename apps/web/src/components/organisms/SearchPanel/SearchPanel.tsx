@@ -327,9 +327,12 @@ export const SearchPanel = () => {
                 </div>
 
                 {group.matches.map((match) => (
-                  <div
+                  // A real button rather than a div with a click handler: a
+                  // result you cannot reach without a mouse is not a result.
+                  <button
                     key={`${match.relPath}:${String(match.line)}:${String(match.column)}`}
-                    className="rc-tree-row"
+                    type="button"
+                    className="rc-tree-row rc-row-button"
                     style={{ paddingLeft: 32 }}
                     onClick={() => openMatch(match)}
                     title={`${match.relPath}:${String(match.line)}`}
@@ -357,7 +360,7 @@ export const SearchPanel = () => {
                     >
                       {match.preview.trim()}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
             ))}

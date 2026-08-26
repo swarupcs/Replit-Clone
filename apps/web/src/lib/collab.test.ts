@@ -30,9 +30,12 @@ import {
   bindDoc,
   installCollab,
   isCollaborative,
+  peers,
+  peersIn,
   releaseDoc,
   retainDoc,
   saveDoc,
+  subscribeCollab,
 } from "./collab.ts";
 import {
   pendingPaths,
@@ -284,5 +287,102 @@ describe("saving a shared document", () => {
     harness.deliver("docSync", { relPath: PATH, state: serverState(FILE) });
 
     expect(pendingPaths()).toContain("other/file.ts");
+  });
+});
+
+
+/** Presence was crossing the wire the whole time and had nowhere to go: the
+ *  only place a collaborator was ever visible was the Share dialog's member
+ *  list. These cover the reading of it. */
+describe("who else is here", () => {
+  /** Delivers another person's awareness for a file, the way the server does.
+   *
+   *  A real `Awareness` over its own `Y.Doc`, so it carries a client id of its
+   *  own — which is the whole reason the same person in two files has to be
+   *  folded back into one. */
+  async function joins(relPath: string, name: string, color: string) {
+    const { Awareness, encodeAwarenessUpdate } = await import(
+      "y-protocols/awareness"
+    );
+
+    const theirs = new Awareness(new Y.Doc());
+    theirs.setLocalStateField("user", { name, color });
+
+    const update = encodeAwarenessUpdate(theirs, [theirs.clientID]);
+    harness.deliver("docAwareness", {
+      relPath,
+      update: update.buffer.slice(
+        update.byteOffset,
+        update.byteOffset + update.byteLength,
+      ),
+    });
+
+    // The module imports the awareness codec dynamically, so the update is
+    // applied a turn or more later. Waited on by its effect rather than by a
+    // sleep: a fixed delay is long enough until the machine is busy, and then
+    // it is not.
+    await vi.waitFor(() => {
+      expect(peersIn(relPath).some((peer) => peer.name === name)).toBe(true);
+    });
+  }
+
+  it("reports nobody while we are alone in a file", () => {
+    retainDoc(harness.socket, PATH, IDENTITY);
+
+    // Our own entry is in the awareness map and must never be counted: the
+    // point of the stack is who ELSE is here.
+    expect(peers()).toEqual([]);
+    expect(peersIn(PATH)).toEqual([]);
+  });
+
+  it("reports someone who has the file open", async () => {
+    retainDoc(harness.socket, PATH, IDENTITY);
+    await joins(PATH, "ana@example.com", "hsl(200 70% 62%)");
+
+    expect(peers()).toEqual([
+      {
+        key: "ana@example.com",
+        name: "ana@example.com",
+        color: "hsl(200 70% 62%)",
+        files: [PATH],
+      },
+    ]);
+  });
+
+  it("folds one person across the files they have open", async () => {
+    retainDoc(harness.socket, PATH, IDENTITY);
+    retainDoc(harness.socket, "src/api.ts", IDENTITY);
+
+    await joins(PATH, "ana@example.com", "hsl(200 70% 62%)");
+    await joins("src/api.ts", "ana@example.com", "hsl(200 70% 62%)");
+
+    // Two documents, two client ids, one person.
+    const found = peers();
+    expect(found).toHaveLength(1);
+    expect(found[0]?.files.sort()).toEqual(["src/api.ts", PATH].sort());
+  });
+
+  it("answers for one file on its own", async () => {
+    retainDoc(harness.socket, PATH, IDENTITY);
+    retainDoc(harness.socket, "src/api.ts", IDENTITY);
+    await joins(PATH, "ana@example.com", "hsl(200 70% 62%)");
+
+    expect(peersIn(PATH).map((peer) => peer.name)).toEqual([
+      "ana@example.com",
+    ]);
+    expect(peersIn("src/api.ts")).toEqual([]);
+  });
+
+  it("announces an arrival, not only a change of count", async () => {
+    // Only the peer COUNT used to notify, so anything reading awareness for
+    // names and colours never heard about someone arriving.
+    const heard = vi.fn();
+    retainDoc(harness.socket, PATH, IDENTITY);
+    const stop = subscribeCollab(heard);
+
+    await joins(PATH, "ana@example.com", "hsl(200 70% 62%)");
+    stop();
+
+    expect(heard).toHaveBeenCalled();
   });
 });

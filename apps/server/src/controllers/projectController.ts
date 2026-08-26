@@ -13,6 +13,7 @@ import {
 import { getEnvVars, setEnvVars } from "../service/projectEnvService.js";
 import { listAccessibleProjects } from "../service/projectAccessService.js";
 import { logger } from "../lib/logger.js";
+import { prisma } from "../lib/prisma.js";
 import { buildFileTree } from "../service/fileTreeService.js";
 import { getAuthContext } from "../middlewares/requireAuth.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
@@ -250,5 +251,67 @@ export async function setProjectEnvController(
     // Restart is the shortest path to that.
     message: "Saved. Restart the dev server to pick them up.",
     data: saved,
+  });
+}
+
+/** What `Run` executes for this project, and the template's default beside it.
+ *
+ *  Both, because "npm run dev" alone does not tell you whether it is the
+ *  project's own choice or the template's — and knowing which is what tells you
+ *  whether clearing the field will help.
+ */
+export async function getStartCommandController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const projectId = assertValidProjectId(req.params.projectId);
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "viewer");
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { template: true, startCommand: true },
+  });
+
+  res.json({
+    success: true,
+    message: "Start command",
+    data: {
+      command: project?.startCommand ?? null,
+      templateDefault: getTemplate(project?.template ?? "react-vite").startCommand,
+    },
+  });
+}
+
+const startCommandSchema = z.object({
+  /** Empty means "go back to the template's", which is the only way to undo a
+   *  bad edit without knowing what the default was. */
+  command: z.string().max(2000),
+});
+
+export async function setStartCommandController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const projectId = assertValidProjectId(req.params.projectId);
+  // Editor: it decides what runs inside the container, which is the same
+  // authority as writing the files that run.
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "editor");
+
+  const { command } = startCommandSchema.parse(req.body ?? {});
+  const trimmed = command.trim();
+
+  const project = await prisma.project.update({
+    where: { id: projectId },
+    data: { startCommand: trimmed || null },
+    select: { template: true, startCommand: true },
+  });
+
+  res.json({
+    success: true,
+    message: "Saved. Restart the dev server to use it.",
+    data: {
+      command: project.startCommand,
+      templateDefault: getTemplate(project.template).startCommand,
+    },
   });
 }

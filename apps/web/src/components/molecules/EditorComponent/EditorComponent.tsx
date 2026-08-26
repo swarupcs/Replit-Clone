@@ -19,6 +19,8 @@ import {
   selectPaneTab,
   type PaneId,
 } from "../../../store/openTabsStore.ts";
+import { useEditorStatusStore } from "../../../store/editorStatusStore.ts";
+import { useThemeMode } from "../../../hooks/useThemeMode.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
 import { useAiChatStore } from "../../../store/aiChatStore.ts";
@@ -113,6 +115,13 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const [collabTick, setCollabTick] = useState(0);
   useEffect(() => subscribeCollab(() => setCollabTick((value) => value + 1)), []);
   const settings = useEditorSettingsStore();
+  /** Dracula in the dark, Monaco's own "vs" in the light. Dracula is a dark
+   *  scheme by construction — lightening its ground leaves the syntax colours
+   *  unreadable — so the light theme is a different scheme rather than a
+   *  recoloured one. */
+  const monacoTheme = useThemeMode() === "light" ? "vs" : "dracula";
+  /** The whole store: both actions are stable, so this never re-renders. */
+  const publishStatus = useEditorStatusStore.getState();
 
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
   const [selectionCount, setSelectionCount] = useState(0);
@@ -322,7 +331,6 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     // Imported rather than fetched from '/Dracula.json', which 404'd and left
     // the editor permanently unmounted.
     monaco.editor.defineTheme("dracula", draculaTheme as editor.IStandaloneThemeData);
-    monaco.editor.setTheme("dracula");
 
     // Feeds the status bar. Monaco owns the cursor, so this is the only way to
     // observe it; the listener is disposed with the editor.
@@ -473,34 +481,86 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     queueIfAllowed(relPath, value, WRITE_DEBOUNCE_MS);
   }
 
+  /** Publish what this pane is showing, for the app's one status bar.
+   *
+   *  An effect rather than a render, because the bar is no longer here: it is
+   *  owned by the playground, so that a split does not produce two of them and
+   *  closing every tab does not take it away with the editor. */
+  useEffect(() => {
+    if (!activeTab) {
+      publishStatus.clear(pane);
+      return;
+    }
+
+    // Read inside the effect so the values are the ones at publish time; both
+    // live outside React and are re-read when `collabTick` moves.
+    void collabTick;
+
+    publishStatus.publish(pane, {
+      relPath: activeTab.relPath,
+      line: cursor.line,
+      column: cursor.column,
+      selectionCount,
+      language: extensionToFileType(activeTab.extension, activeTab.name),
+      tabSize: settings.tabSize,
+      isDirty: activeTab.isDirty,
+      writeError,
+      canEdit,
+      shared: isCollaborative(activeTab.relPath),
+    });
+  }, [
+    activeTab,
+    pane,
+    cursor,
+    selectionCount,
+    settings.tabSize,
+    writeError,
+    canEdit,
+    collabTick,
+    publishStatus,
+  ]);
+
+  // A pane that goes away takes its entry with it, or the bar would keep
+  // reporting a file that is no longer on screen.
+  useEffect(() => () => { publishStatus.clear(pane); }, [pane, publishStatus]);
+
   if (!activeTab) {
     return (
       <Flex
         vertical
         align="center"
         justify="center"
-        gap={10}
+        gap={18}
         style={{ height: "100%", backgroundColor: "var(--rc-editor-bg)" }}
       >
         <span className="rc-logo" style={{ opacity: 0.55 }}>
           &lt;/&gt;
         </span>
+
         <Typography.Text style={{ color: "var(--rc-text-muted)", fontSize: 14 }}>
-          Select a file to start editing
+          Nothing open
         </Typography.Text>
-        <Typography.Text style={{ color: "var(--rc-text-subtle)", fontSize: 12 }}>
-          Changes save automatically — or press{" "}
-          <kbd
-            style={{
-              fontFamily: "var(--rc-mono)",
-              background: "var(--rc-selection)",
-              padding: "1px 5px",
-              borderRadius: 4,
-            }}
-          >
-            Ctrl+S
-          </kbd>
-        </Typography.Text>
+
+        {/* The routes in, with their keys. This was a dimmed logo and one line
+            about autosaving -- true, and useless to someone who has just
+            arrived and cannot see how to get anywhere. The bindings are
+            written here rather than derived from the registry because this
+            pane has no access to it; `useHotkeys` in the playground is where
+            they are actually bound. */}
+        <div className="rc-onramp">
+          {[
+            ["Open a file", "Ctrl+P"],
+            ["Find a command", "Ctrl+Shift+P"],
+            ["Search the project", "Ctrl+Shift+F"],
+            ["Show the terminal", "Ctrl+`"],
+            ["Save (it also autosaves)", "Ctrl+S"],
+          ].map(([what, keys]) => (
+            <div key={what} className="rc-onramp-row">
+              <span>{what}</span>
+              <kbd className="rc-kbd">{keys}</kbd>
+            </div>
+          ))}
+        </div>
       </Flex>
     );
   }
@@ -508,10 +568,9 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const segments = activeTab.relPath.split("/");
   const language = extensionToFileType(activeTab.extension, activeTab.name);
 
-  // `collabTick` is what makes these re-read after a sync; the values live
+  // `collabTick` is what makes this re-read after a sync; the value lives
   // outside React so nothing else would.
   void collabTick;
-  const shared = isCollaborative(activeTab.relPath);
   const others = Math.max(0, peerCount(activeTab.relPath) - 1);
 
   return (
@@ -632,7 +691,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         <DiffEditor
           height="100%"
           width="100%"
-          theme="dracula"
+          theme={monacoTheme}
           language={language}
           // Left is the buffer as it stands; right is what the assistant would
           // have instead.
@@ -660,7 +719,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         <DiffEditor
           height="100%"
           width="100%"
-          theme="dracula"
+          theme={monacoTheme}
           language={language}
           // Left is the file as saved; right is what is in the buffer now.
           original={activeTab.value}
@@ -691,7 +750,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         <Editor
           height="100%"
           width="100%"
-          theme="dracula"
+          theme={monacoTheme}
           options={{
             // Read-only access is presented as read-only rather than letting
             // every keystroke be rejected one at a time.
@@ -718,43 +777,6 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
           onChange={handleChange}
           onMount={handleMount}
         />
-      </div>
-
-      {/* Status bar. Mirrors what an editor is expected to report: where the
-          cursor is, what the file is, and whether it still has unsaved edits. */}
-      <div className="rc-statusbar">
-        <span className="rc-statusbar-group">
-          <span title="Line and column">
-            Ln {cursor.line}, Col {cursor.column}
-          </span>
-          {selectionCount > 0 && <span>({selectionCount} selected)</span>}
-        </span>
-
-        <span className="rc-statusbar-group">
-          <span>Spaces: {settings.tabSize}</span>
-          <span>UTF-8</span>
-          <span style={{ textTransform: "capitalize" }}>{language}</span>
-          <span
-            data-dirty={activeTab.isDirty || writeError !== null}
-            className="rc-statusbar-save"
-            title={
-              writeError ??
-              (activeTab.isDirty
-                ? "Unsaved changes — autosaves shortly, or press Ctrl+S"
-                : "All changes saved")
-            }
-          >
-            {!canEdit
-              ? "Read-only"
-              : writeError
-                ? "Too large"
-                : shared
-                  ? "Shared"
-                  : activeTab.isDirty
-                    ? "Unsaved"
-                    : "Saved"}
-          </span>
-        </span>
       </div>
     </div>
   );

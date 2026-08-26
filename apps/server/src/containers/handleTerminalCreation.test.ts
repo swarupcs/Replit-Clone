@@ -42,6 +42,8 @@ function fakeSocket(readyState = 1) {
 }
 
 interface ExecCall {
+  /** The exec's environment, which is where $START_COMMAND is handed over. */
+  env: string[];
   cmd: string[];
   started: boolean;
 }
@@ -56,10 +58,14 @@ function fakeContainer() {
 
   const container = {
     exec(
-      opts: { Cmd: string[] },
+      opts: { Cmd: string[]; Env?: string[] },
       cb?: (err: Error | null, exec?: unknown) => void,
     ) {
-      const call: ExecCall = { cmd: opts.Cmd, started: false };
+      const call: ExecCall = {
+        cmd: opts.Cmd,
+        env: opts.Env ?? [],
+        started: false,
+      };
       calls.push(call);
 
       const exec = {
@@ -206,5 +212,43 @@ describe("handleTerminalCreation", () => {
     docker.stream.write("a prompt nobody asked for");
 
     expect(raw.send).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("the run command a shell is told about", () => {
+  /** `$START_COMMAND` is a hint the shell prints. A hint naming a command the
+   *  Run button does not run is worse than none. */
+  function startCommandIn(override?: string): string | undefined {
+    const { ws } = fakeSocket();
+    const docker = fakeContainer();
+
+    handleTerminalCreation(
+      docker.container,
+      ws,
+      "node",
+      attachInput,
+      TERMINAL_ID,
+      override,
+    );
+
+    return docker.calls[0]?.env
+      .find((entry) => entry.startsWith("START_COMMAND="))
+      ?.slice("START_COMMAND=".length);
+  }
+
+  it("uses the template's when the project has none", () => {
+    const command = startCommandIn();
+    expect(command).toBeTruthy();
+    expect(command).not.toBe("pnpm dev --host");
+  });
+
+  it("uses the project's own when it has one", () => {
+    expect(startCommandIn("pnpm dev --host")).toBe("pnpm dev --host");
+  });
+
+  it("ignores an override that is only whitespace", () => {
+    // Which would otherwise leave the shell printing an empty command.
+    expect(startCommandIn("   ")?.trim()).toBeTruthy();
   });
 });
