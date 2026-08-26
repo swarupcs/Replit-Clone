@@ -21,6 +21,7 @@ import {
 import { SplitPane } from "../components/layout/SplitPane.tsx";
 import { EditorComponent } from "../components/molecules/EditorComponent/EditorComponent.tsx";
 import { EditorTabs } from "../components/molecules/EditorTabs/EditorTabs.tsx";
+import { StatusBar } from "../components/molecules/StatusBar/StatusBar.tsx";
 import { BottomPanel } from "../components/organisms/BottomPanel/BottomPanel.tsx";
 import { TreeStructure } from "../components/organisms/TreeStructure/TreeStructure.tsx";
 import { Browser } from "../components/organisms/Browser/Browser.tsx";
@@ -763,6 +764,11 @@ export const ProjectPlayground = () => {
           }
         />
       </div>
+
+      {/* One bar, spanning the app, below every pane. It used to be rendered
+          inside the editor, which gave a split two of them and left a project
+          with no open file with none. */}
+      <StatusBar />
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
 

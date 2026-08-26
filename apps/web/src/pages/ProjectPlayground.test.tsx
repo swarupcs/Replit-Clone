@@ -141,6 +141,29 @@ describe("ProjectPlayground layout", () => {
     expect(screen.getByTestId("bottom-panel")).toBeDefined();
   });
 
+  /** The bar was rendered by `EditorComponent`, so a split produced two of
+   *  them and closing every tab left none. It belongs to the page now — which
+   *  is what these assert: the editor is mocked here, so a bar that had moved
+   *  back inside it would not be found at all. */
+  it("owns one status bar, whatever the editor is doing", () => {
+    renderPlayground();
+
+    expect(document.querySelectorAll(".rc-statusbar")).toHaveLength(1);
+
+    // Not nested inside a pane — one bar for the app, not one per editor.
+    const bar = document.querySelector(".rc-statusbar");
+    expect(bar?.closest("[data-testid='editor']")).toBeNull();
+  });
+
+  it("keeps the status bar when the editor splits in two", () => {
+    renderPlayground();
+    act(() => {
+      useOpenTabsStore.setState({ splitOpen: true });
+    });
+
+    expect(document.querySelectorAll(".rc-statusbar")).toHaveLength(1);
+  });
+
   it("hides the preview until it is asked for", () => {
     renderPlayground();
     expect(screen.queryByTestId("preview")).toBeNull();
