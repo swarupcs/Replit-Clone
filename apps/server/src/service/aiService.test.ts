@@ -38,10 +38,17 @@ import {
   aiStatus,
   assertWithinAiBudget,
   isAiConfigured,
+  prepareTranscript,
   resetAiBudgets,
   streamAssistantReply,
 } from "./aiService.js";
-import { AI_MAX_PROPOSAL_BYTES, type AiProposal } from "@replit-clone/shared";
+import {
+  AI_MAX_MESSAGE_CHARS,
+  AI_MAX_TRANSCRIPT_CHARS,
+  AI_MAX_PROPOSAL_BYTES,
+  type AiMessage,
+  type AiProposal,
+} from "@replit-clone/shared";
 import { projectRoot } from "../utils/projectPaths.js";
 import { AppError } from "../utils/errors.js";
 
@@ -761,5 +768,84 @@ describe("assertWithinAiBudget", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/** The history count was bounded and the message size was not, so one question
+ *  could carry as many tokens as the client cared to send. */
+describe("transcript limits", () => {
+  const long = (chars: number) => "x".repeat(chars);
+
+  it("refuses a question over the per-message ceiling", () => {
+    expect(() =>
+      prepareTranscript([{ role: "user", content: long(AI_MAX_MESSAGE_CHARS + 1) }]),
+    ).toThrow(/too long/i);
+  });
+
+  it("keeps a question that just fits", () => {
+    const messages: AiMessage[] = [
+      { role: "user", content: long(AI_MAX_MESSAGE_CHARS) },
+    ];
+
+    expect(prepareTranscript(messages)).toEqual(messages);
+  });
+
+  /** Refusing the whole thread over something already answered would strand
+   *  the user; the newest turn is the only one they can still edit. */
+  it("truncates an oversized earlier turn instead of refusing", () => {
+    const kept = prepareTranscript([
+      { role: "user", content: long(AI_MAX_MESSAGE_CHARS + 500) },
+      { role: "assistant", content: "sure" },
+      { role: "user", content: "and now?" },
+    ]);
+
+    expect(kept[0]?.content).toContain("[earlier message truncated]");
+    expect(kept[0]?.content.length).toBeLessThan(AI_MAX_MESSAGE_CHARS + 100);
+  });
+
+  it("drops the oldest turns to fit the whole-transcript budget", () => {
+    const each = AI_MAX_MESSAGE_CHARS;
+    const turns = Math.ceil(AI_MAX_TRANSCRIPT_CHARS / each) + 3;
+
+    const kept = prepareTranscript(
+      Array.from({ length: turns }, (_, index) => ({
+        role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        content: `${String(index)}${long(each - 1)}`,
+      })),
+    );
+
+    const total = kept.reduce((sum, message) => sum + message.content.length, 0);
+    expect(total).toBeLessThanOrEqual(AI_MAX_TRANSCRIPT_CHARS);
+    // The newest survives: it is the question being asked.
+    expect(kept.at(-1)?.content.startsWith(String(turns - 1))).toBe(true);
+    expect(kept.length).toBeLessThan(turns);
+  });
+
+  /** Everything here arrives over a socket, so the shape is not a given. */
+  it("refuses a conversation that is not messages at all", () => {
+    expect(() =>
+      prepareTranscript([{ role: "user", content: 42 } as unknown as AiMessage]),
+    ).toThrow(/shape/i);
+    expect(() =>
+      prepareTranscript([{ role: "system", content: "x" } as unknown as AiMessage]),
+    ).toThrow(/shape/i);
+  });
+
+  it("stops an oversized question before the model is called", async () => {
+    streamMock.mockClear();
+
+    await expect(
+      streamAssistantReply({
+        projectId: PROJECT,
+        messages: [{ role: "user", content: long(AI_MAX_MESSAGE_CHARS + 1) }],
+        signal: new AbortController().signal,
+        canEdit: true,
+        onDelta: () => undefined,
+        onActivity: () => undefined,
+        onProposal: () => undefined,
+      }),
+    ).rejects.toThrow(AppError);
+
+    expect(streamMock).not.toHaveBeenCalled();
   });
 });
