@@ -53,6 +53,11 @@ import {
   gitStatusController,
   gitUnstageController,
 } from "../../controllers/gitController.js";
+import {
+  addPackageController,
+  listPackagesController,
+  removePackageController,
+} from "../../controllers/packageController.js";
 
 const router = express.Router();
 
@@ -67,6 +72,21 @@ const createLimiter = rateLimit({
     success: false,
     code: "RATE_LIMITED",
     message: "Too many projects created. Try again later.",
+  },
+});
+
+// Installing reaches a registry from inside the sandbox and can run for a
+// long time, so it gets a budget separate from ordinary reads. Generous enough
+// that adding a handful of dependencies in a sitting never trips it.
+const installLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many install requests. Try again in a few minutes.",
   },
 });
 
@@ -107,6 +127,20 @@ router.post("/:projectId/git/commit", asyncHandler(gitCommitController));
 
 // Pull requests. Project-scoped because which repository they belong to comes
 // from the project's own remotes, not from the request.
+// Dependencies. Reading the manifest does not need a container; adding and
+// removing run the project's own package manager inside one.
+router.get("/:projectId/packages", asyncHandler(listPackagesController));
+router.post(
+  "/:projectId/packages",
+  installLimiter,
+  asyncHandler(addPackageController),
+);
+router.delete(
+  "/:projectId/packages",
+  installLimiter,
+  asyncHandler(removePackageController),
+);
+
 router.get("/:projectId/start-command", asyncHandler(getStartCommandController));
 router.put("/:projectId/start-command", asyncHandler(setStartCommandController));
 

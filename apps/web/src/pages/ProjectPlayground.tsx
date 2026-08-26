@@ -10,6 +10,7 @@ import {
   VscKey,
   VscSearch,
   VscSourceControl,
+  VscPackage,
   VscSettingsGear,
   VscSparkle,
 } from "react-icons/vsc";
@@ -43,6 +44,7 @@ import { EnvVarsDialog } from "../components/organisms/EnvVarsDialog/EnvVarsDial
 import { EditorSettingsDialog } from "../components/organisms/EditorSettingsDialog/EditorSettingsDialog.tsx";
 import { SearchPanel } from "../components/organisms/SearchPanel/SearchPanel.tsx";
 import { SourceControlPanel } from "../components/organisms/SourceControlPanel/SourceControlPanel.tsx";
+import { PackagesPanel } from "../components/organisms/PackagesPanel/PackagesPanel.tsx";
 import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
 import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
@@ -111,7 +113,9 @@ export const ProjectPlayground = () => {
   const [envOpen, setEnvOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** Which sidebar view is showing. */
-  const [sidebarView, setSidebarView] = useState<"files" | "search" | "git" | "ai">(
+  const [sidebarView, setSidebarView] = useState<
+    "files" | "search" | "git" | "packages" | "ai"
+  >(
     "files",
   );
 
@@ -362,6 +366,15 @@ export const ProjectPlayground = () => {
         title: "Show source control",
         run: () => {
           setSidebarView("git");
+          openView("sidebar");
+        },
+      },
+      {
+        id: "view.packages",
+        category: "Packages",
+        title: "Show dependencies",
+        run: () => {
+          setSidebarView("packages");
           openView("sidebar");
         },
       },
@@ -749,6 +762,16 @@ export const ProjectPlayground = () => {
                     <VscSourceControl size={16} />
                   </button>
                 </Tooltip>
+                <Tooltip title="Packages" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "packages"}
+                    aria-label="Packages"
+                    onClick={() => setSidebarView("packages")}
+                  >
+                    <VscPackage size={16} />
+                  </button>
+                </Tooltip>
                 {aiModel && (
                   <Tooltip title="Assistant" placement="right">
                     <button
@@ -804,7 +827,21 @@ export const ProjectPlayground = () => {
                   </ErrorBoundary>
                 </div>
 
-                {/* Kept mounted alongside the others so a glance at the file
+{/* Mounted only while it is showing, unlike search and the
+                    assistant: it holds nothing worth keeping across a glance
+                    at another view, and mounting it re-reads the manifest. */}
+                {sidebarView === "packages" && projectIdFromUrl && (
+                  <div style={{ height: "100%" }}>
+                    <ErrorBoundary label="Packages">
+                      <PackagesPanel
+                        projectId={projectIdFromUrl}
+                        canWrite={canEdit}
+                      />
+                    </ErrorBoundary>
+                  </div>
+                )}
+
+                                {/* Kept mounted alongside the others so a glance at the file
                     tree does not throw away the conversation. */}
                 <div
                   style={{

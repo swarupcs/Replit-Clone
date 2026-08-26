@@ -1143,3 +1143,85 @@ body {
   border-radius: 4px;
   white-space: nowrap;
 }
+
+/* --- Packages panel ------------------------------------------------------
+ * A dependency row: name, an optional dev marker, the range, and a remove
+ * affordance that stays out of the way until the row is hovered. */
+
+.rc-package-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  margin: 1px 0;
+  border-radius: var(--rc-radius-sm);
+  font-size: 12.5px;
+  color: var(--rc-text-muted);
+  transition: background-color 0.12s var(--rc-ease);
+}
+
+.rc-package-row:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+  color: var(--rc-text);
+}
+
+.rc-package-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rc-package-dev {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--rc-border-strong);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--rc-text-subtle);
+}
+
+.rc-package-version {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--rc-mono);
+  font-size: 11px;
+  color: var(--rc-text-subtle);
+}
+
+/* Quiet until the row is hovered or the button itself is focused, so a list of
+ * thirty dependencies is not a list of thirty delete buttons. */
+.rc-package-remove {
+  flex: none;
+  opacity: 0;
+  transition: opacity 0.12s var(--rc-ease);
+}
+
+.rc-package-row:hover .rc-package-remove,
+.rc-package-remove:focus-visible {
+  opacity: 1;
+}
+
+/* The manager's own words, when something failed. Bounded, because an npm
+ * error is long and this pane is narrow. */
+.rc-package-output {
+  flex: none;
+  max-height: 30%;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font-family: var(--rc-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--rc-red);
+  background: var(--rc-surface-sunken);
+  border-top: 1px solid var(--rc-border);
+}
