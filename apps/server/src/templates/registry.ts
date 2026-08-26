@@ -27,6 +27,23 @@ export interface TemplateDefinition {
   expectsPreviewBase: boolean;
   /** Directory under `templates/files` copied into a new project. */
   filesDir: string;
+  /** How this template produces a directory of files that can be served by a
+   *  plain static host, or absent when it cannot.
+   *
+   *  Absent is the honest answer for anything that needs a process at request
+   *  time -- Express, Flask, FastAPI, Go. There is nothing to build there and
+   *  no way to serve the result without running the app, which is a different
+   *  product from this one. */
+  staticBuild?: StaticBuild;
+}
+
+export interface StaticBuild {
+  /** Run inside the project's container. Empty for a template that IS its own
+   *  output and has nothing to build. */
+  command: string;
+  /** Read afterwards, relative to the project root. "." means the tree
+   *  itself. */
+  outputDir: string;
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -45,6 +62,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     extraPorts: [3000, 8080],
     startCommand: "npm install && npm run dev",
     filesDir: "react-vite",
+    staticBuild: { command: "npm install && npm run build", outputDir: "dist" },
     expectsPreviewBase: true,
   },
   "react-vite-ts": {
@@ -55,6 +73,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     extraPorts: [3000, 8080],
     startCommand: "npm install && npm run dev",
     filesDir: "react-vite-ts",
+    staticBuild: { command: "npm install && npm run build", outputDir: "dist" },
     expectsPreviewBase: true,
   },
   "node-express": {
@@ -87,6 +106,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     extraPorts: [3000, 5173],
     startCommand: "serve -l 8080 .",
     filesDir: "static-html",
+    staticBuild: { command: "", outputDir: "." },
     expectsPreviewBase: false,
   },
   "nextjs": {
@@ -97,6 +117,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     extraPorts: [5173, 8080],
     startCommand: "npm install && npm run dev",
     filesDir: "nextjs",
+    staticBuild: { command: "npm install && npm run build", outputDir: "out" },
     // Next emits absolute /_next/... asset URLs, so it is told the prefix
     // through basePath rather than having it stripped.
     expectsPreviewBase: true,
@@ -109,6 +130,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     extraPorts: [5173, 8080],
     startCommand: "npm install && npm run dev",
     filesDir: "nextjs-ts",
+    staticBuild: { command: "npm install && npm run build", outputDir: "out" },
     // Same reason as the JavaScript template: absolute /_next/... URLs mean
     // the prefix has to be configured, not stripped.
     expectsPreviewBase: true,
@@ -121,6 +143,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     extraPorts: [3000, 8080],
     startCommand: "npm install && npm run dev",
     filesDir: "vue-vite",
+    staticBuild: { command: "npm install && npm run build", outputDir: "dist" },
     expectsPreviewBase: true,
   },
   "svelte-vite": {
@@ -131,6 +154,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     extraPorts: [3000, 8080],
     startCommand: "npm install && npm run dev",
     filesDir: "svelte-vite",
+    staticBuild: { command: "npm install && npm run build", outputDir: "dist" },
     expectsPreviewBase: true,
   },
   "python-flask": {

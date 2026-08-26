@@ -163,6 +163,7 @@ model Project {
   shareRole ProjectRole @default(VIEWER)
 
   collaborators ProjectCollaborator[]
+  deployment    Deployment?
 
   @@index([ownerId])
   @@map("projects")
@@ -199,4 +200,57 @@ model GithubConnection {
   updatedAt DateTime @updatedAt
 
   @@map("github_connections")
+}
+
+/// A project's build output, published to a public origin.
+///
+/// One row per project, replaced in place on each deploy: this is the
+/// *current* state of a published site, not a build history. A history would
+/// mean keeping every build's files, which is a disk budget nobody has agreed
+/// to yet.
+model Deployment {
+  id String @id @default(uuid())
+
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// The DNS label the site is served at. Generated, never chosen: a
+  /// user-supplied one is a namespace to fight over and a phishing surface
+  /// ("stripe-login"). Unique across the deployment, because it is the whole
+  /// address.
+  subdomain String @unique
+
+  status DeploymentStatus @default(BUILDING)
+
+  /// What actually ran, and what was read afterwards. Recorded rather than
+  /// looked up, so changing a template's defaults does not rewrite what a
+  /// published site claims about itself.
+  buildCommand String
+  outputDir    String
+
+  /// Bytes published, so a quota has something to count.
+  sizeBytes Int @default(0)
+
+  /// Tail of the build's own output. Bounded before it is written -- a webpack
+  /// build can emit megabytes, and this column is read on every panel open.
+  log String @default("")
+
+  /// Why the last attempt failed, or null.
+  error String?
+
+  /// When a build last went live. Null until one has: a row exists from the
+  /// moment the first build starts, so that the subdomain is reserved before
+  /// anything is published to it.
+  deployedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("deployments")
+}
+
+enum DeploymentStatus {
+  BUILDING
+  LIVE
+  FAILED
 }

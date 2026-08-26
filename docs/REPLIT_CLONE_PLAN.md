@@ -155,10 +155,10 @@ Honest scoring of what a user would notice.
 | AI assistant | ✅ | ✅ panel + apply-change | none |
 | Env vars / secrets | ✅ | ✅ injected, rebuild on change | none |
 | Package caching | ✅ | ✅ named cache volume | none |
-| Deployment of user apps | ✅ | ❌ | the largest gap — see §8.1 |
+| Deployment of user apps | ✅ | ◐ static sites | build + publish to a public subdomain; nothing always-on — §8.1 |
 | Warm resume / snapshots | ✅ | ◐ | installs are skipped when unchanged; the dev server still reboots — §8.2 |
 | Persistent data for user apps | ✅ | ❌ | no DB or KV a project can reach; see §8.3 |
-| Package management UI | ✅ | ❌ | terminal only; see §8.4 |
+| Package management UI | ✅ | ✅ panel per ecosystem | none |
 | Fork / public projects | ✅ | ❌ | no visibility model; see §8.5 |
 
 **Inside the editor, everything a user touches daily is built** — the entry
@@ -451,27 +451,57 @@ where the remaining distance to both competitors actually is. None of these is
 an afternoon; each is listed with the decision it is blocked on rather than
 being written up as though it were ready to start._
 
-### 8.1 Deployment of user apps — the largest single gap
+### 8.1 Deployment of user apps — static deployments done
+
+_Updated 2026-08-26. The entry below is kept because the framing still holds:
+this is the line between an editor and a product, and only the first slice of it
+is built._
 
 Replit sells Deployments (autoscale, reserved VM, static, scheduled) with a
 custom domain on each. CodeSandbox gives every branch a live preview URL.
 
-Here, the only way to see a running project is the preview proxy: it requires a
-session, it serves a *dev* server, and the container behind it is reaped after
-`CONTAINER_IDLE_MINUTES`. Nothing built here can be shown to somebody without
-an account. That is the line between an editor and a product, and it is the one
-capability §2 still scores ❌.
+The preview proxy was the only way to see a running project: it requires a
+session, it serves a *dev* server, and the container behind it is stopped after
+`CONTAINER_IDLE_MINUTES`. Nothing built here could be shown to somebody without
+an account.
 
-- **Blocked on:** where a deployment runs and who pays for it. A static build
-  dropped on object storage, a long-lived container on this same host, and a
-  handoff to a third party (Fly, Railway, Cloudflare) are three different
-  products with three different cost models. Also needs a domain and wildcard
-  TLS story, which the preview proxy currently sidesteps by being
-  authenticated.
-- **Smallest honest first step:** static deployments only — run the template's
-  build command, publish the output directory to a public, unauthenticated
-  origin at a generated subdomain. That covers the Vite, Next-export and
-  Static-HTML templates without needing any always-on compute.
+**Done — static deployments.** `service/deployService.ts` runs the template's
+build inside the project's container, copies the output tree out to
+`DEPLOYMENTS_DIR`, and `deploySite.ts` serves it from a third origin at a
+generated subdomain — `quiet-fern-84f1.<DEPLOY_ORIGIN host>` — with no session,
+no cookie parser, and no container behind it. It covers the Vite templates, the
+Next templates (which the deploy build switches into `output: 'export'` mode),
+and Static HTML. The address is stable across redeploys, so a link already
+handed out keeps working.
+
+Three things carry the weight and are worth naming, because each is a way this
+could have been quietly wrong:
+
+- **A third origin, not the preview's.** A published site is arbitrary user code
+  and must not be same-origin with the API. Less obviously it must not share the
+  *preview* origin either: a preview is authenticated by a cookie scoped to that
+  origin, so a public site beside it would be same-origin with a page carrying a
+  live preview credential.
+- **The copy is the security boundary.** `copyTree` is hand-written rather than
+  `fs.cp` because it has to refuse symlinks outright — a link to `/etc/passwd`
+  in a build output, copied verbatim into a directory served publicly and
+  unauthenticated, is a file disclosure with no further steps — enforce a byte
+  budget as it goes, and confine every destination path.
+- **The build environment is corrected, not inherited.** `PREVIEW_BASE` is what
+  makes a dev server serve under `/preview/<id>/`, and Vite bakes it into every
+  asset URL at build time. A build that inherited it would produce a site whose
+  scripts all point at a path that does not exist on the deploy origin.
+
+**Still open:** everything that needs a process at request time. Express, Flask,
+FastAPI and Go projects are told plainly that there is nothing static to
+publish. Always-on compute, autoscale, and scheduled jobs are a different
+product with a different cost model — a long-lived container on this host, or a
+handoff to Fly/Railway/Cloudflare — and that decision has not been made.
+
+**Also open:** custom domains. A deployment host needs a wildcard DNS record
+and, over HTTPS, a wildcard certificate. Locally that costs nothing, because
+browsers resolve every `*.localhost` name to loopback themselves; a real
+deployment has to arrange both, and `.env.example` says so.
 
 ### 8.2 Warm containers / snapshots — partly done
 
@@ -560,5 +590,6 @@ made yet:
 1. ~~**8.4 packages**~~ — done.
 2. ~~**8.2 warm containers**~~ — done as far as the install step goes; process
    snapshots remain.
-3. **8.1 static deployments** — the smallest version of the biggest gap.
+3. ~~**8.1 static deployments**~~ — done. Always-on compute and custom domains
+   remain, and both are blocked on a cost decision rather than on work.
 4. **8.3 persistent data**, then **8.5 fork** — both need a design round first.
