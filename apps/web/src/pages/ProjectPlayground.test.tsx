@@ -413,3 +413,90 @@ describe("ProjectPlayground language service", () => {
     expect(clearProjectSources).toHaveBeenCalled();
   });
 });
+
+
+/** Below 900px the sidebar, the panel and the preview stop being split
+ *  children and become drawers over the editor. jsdom has no `matchMedia`, so
+ *  the breakpoint is installed per test — which is also the only way to check
+ *  both sides of it. */
+describe("the narrow layout", () => {
+  /** Answers `matches` for every query, so the component sees the breakpoint
+   *  it asked about however it is phrased. */
+  function viewport(narrow: boolean) {
+    const listeners = new Set<() => void>();
+
+    window.matchMedia = ((query: string) => ({
+      media: query,
+      matches: narrow,
+      addEventListener: (_: string, handler: () => void) => {
+        listeners.add(handler);
+      },
+      removeEventListener: (_: string, handler: () => void) => {
+        listeners.delete(handler);
+      },
+      // Unused by the hook, present because the type has them.
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      onchange: null,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  }
+
+  afterEach(() => {
+    // @ts-expect-error -- putting jsdom back the way it was found.
+    delete window.matchMedia;
+  });
+
+  it("lifts the panes into drawers", () => {
+    viewport(true);
+    renderPlayground();
+
+    // The classes are what the stylesheet's media query reaches; SplitPane
+    // sets each pane's flex inline, which a stylesheet cannot otherwise touch.
+    expect(document.querySelector(".rc-drawer-left")).not.toBeNull();
+    expect(document.querySelector(".rc-drawer-bottom")).not.toBeNull();
+  });
+
+  it("closes the others when one is opened", () => {
+    viewport(true);
+    renderPlayground();
+
+    // Both start open; on a narrow screen they would cover each other, leaving
+    // the one underneath unreachable with its toggle still lit.
+    fireEvent.click(screen.getByLabelText("Toggle preview"));
+
+    expect(screen.getByTestId("preview")).toBeDefined();
+    expect(screen.queryByTestId("tree")).toBeNull();
+    expect(screen.queryByTestId("bottom-panel")).toBeNull();
+  });
+
+  it("offers a scrim that closes whatever is open", () => {
+    viewport(true);
+    renderPlayground();
+
+    fireEvent.click(screen.getByLabelText("Close the open panel"));
+
+    expect(screen.queryByTestId("tree")).toBeNull();
+    expect(screen.queryByTestId("bottom-panel")).toBeNull();
+    expect(screen.queryByTestId("preview")).toBeNull();
+  });
+
+  it("leaves the panes side by side on a wide screen", () => {
+    viewport(false);
+    renderPlayground();
+
+    fireEvent.click(screen.getByLabelText("Toggle preview"));
+
+    // Nothing covers anything, so opening one closes none of the others.
+    expect(screen.getByTestId("preview")).toBeDefined();
+    expect(screen.getByTestId("tree")).toBeDefined();
+    expect(screen.getByTestId("bottom-panel")).toBeDefined();
+  });
+
+  it("has no scrim on a wide screen, where there is nothing to dismiss", () => {
+    viewport(false);
+    renderPlayground();
+
+    expect(screen.queryByLabelText("Close the open panel")).toBeNull();
+  });
+});

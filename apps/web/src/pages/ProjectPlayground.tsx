@@ -46,6 +46,7 @@ import { SourceControlPanel } from "../components/organisms/SourceControlPanel/S
 import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
 import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
+import { useMediaQuery } from "../hooks/useMediaQuery.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.ts";
 import { installCollab, peers, subscribeCollab } from "../lib/collab.ts";
@@ -89,9 +90,21 @@ export const ProjectPlayground = () => {
 
   // Seeded from the remembered arrangement, so a reload comes back to the
   // layout the user left rather than the defaults.
-  const [showPreview, setShowPreview] = useState(restored?.showPreview ?? false);
-  const [showSidebar, setShowSidebar] = useState(restored?.showSidebar ?? true);
-  const [showPanel, setShowPanel] = useState(restored?.showPanel ?? true);
+  //
+  // One piece of state rather than three, because on a narrow screen a toggle
+  // reads all three to decide what to close, and three separate updaters
+  // cannot do that without one of them reaching into another -- which an
+  // updater, being required to be pure, must not.
+  const [views, setViews] = useState({
+    preview: restored?.showPreview ?? false,
+    sidebar: restored?.showSidebar ?? true,
+    panel: restored?.showPanel ?? true,
+  });
+  const {
+    preview: showPreview,
+    sidebar: showSidebar,
+    panel: showPanel,
+  } = views;
   const [quickOpen, setQuickOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
@@ -178,26 +191,82 @@ export const ProjectPlayground = () => {
   }, [hasSession]);
 
   // Each toggle records its new state, so the arrangement survives a reload.
-  const toggleSidebar = useCallback(() => {
-    setShowSidebar((value) => {
-      remember({ showSidebar: !value });
-      return !value;
+  /** Below this the panes stop being split children and become drawers over
+   *  the editor. A layout branch, not a device test: four panes with pixel
+   *  floors do not fit, whatever is holding the screen. */
+  const narrow = useMediaQuery("(max-width: 900px)");
+
+  /** On a narrow screen the drawers cover each other, so opening one closes
+   *  the rest — two stacked drawers would leave the one underneath unreachable
+   *  with its toggle still lit. On a wide screen the panes sit side by side
+   *  and there is nothing to close. */
+  const toggleView = useCallback(
+    (which: "sidebar" | "panel" | "preview") => {
+      setViews((current) => {
+        const next = { ...current, [which]: !current[which] };
+        if (!narrow || !next[which]) return next;
+
+        return {
+          sidebar: which === "sidebar",
+          panel: which === "panel",
+          preview: which === "preview",
+        };
+      });
+    },
+    [narrow],
+  );
+
+  /** Shows one, without hiding it if it is already up — what a command like
+   *  "Search across the project" means, as against toggling. */
+  const openView = useCallback(
+    (which: "sidebar" | "panel" | "preview") => {
+      setViews((current) =>
+        narrow
+          ? {
+              sidebar: which === "sidebar",
+              panel: which === "panel",
+              preview: which === "preview",
+            }
+          : { ...current, [which]: true },
+      );
+    },
+    [narrow],
+  );
+
+  /** Persists the arrangement whenever it changes.
+   *
+   *  An effect rather than a call inside each toggle, because the toggles are
+   *  pure updaters now and writing to storage from one is exactly the kind of
+   *  side effect that makes an updater unsafe to run twice.
+   *
+   *  Skips the first run: `views` is seeded from what was restored, and the
+   *  session may not have arrived yet — writing on mount would overwrite a
+   *  stored arrangement with the defaults. */
+  const persistedOnce = useRef(false);
+  useEffect(() => {
+    if (!persistedOnce.current) {
+      persistedOnce.current = true;
+      return;
+    }
+
+    remember({
+      showSidebar: views.sidebar,
+      showPanel: views.panel,
+      showPreview: views.preview,
     });
-  }, [remember]);
+  }, [views, remember]);
+
+  const toggleSidebar = useCallback(() => {
+    toggleView("sidebar");
+  }, [toggleView]);
 
   const togglePanel = useCallback(() => {
-    setShowPanel((value) => {
-      remember({ showPanel: !value });
-      return !value;
-    });
-  }, [remember]);
+    toggleView("panel");
+  }, [toggleView]);
 
   const togglePreview = useCallback(() => {
-    setShowPreview((value) => {
-      remember({ showPreview: !value });
-      return !value;
-    });
-  }, [remember]);
+    toggleView("preview");
+  }, [toggleView]);
 
   /** Show the preview the moment the dev server answers.
    *
@@ -229,8 +298,8 @@ export const ProjectPlayground = () => {
       ?.showPreview;
     if (remembered !== undefined) return;
 
-    setShowPreview(true);
-  }, [readyNonce, projectIdFromUrl]);
+    openView("preview");
+  }, [readyNonce, projectIdFromUrl, openView]);
 
   /** What the command palette offers.
    *
@@ -274,7 +343,7 @@ export const ProjectPlayground = () => {
         keys: "Ctrl+Shift+F",
         run: () => {
           setSidebarView("search");
-          setShowSidebar(true);
+          openView("sidebar");
         },
       },
       {
@@ -283,7 +352,7 @@ export const ProjectPlayground = () => {
         title: "Show the file tree",
         run: () => {
           setSidebarView("files");
-          setShowSidebar(true);
+          openView("sidebar");
         },
       },
       {
@@ -292,7 +361,7 @@ export const ProjectPlayground = () => {
         title: "Show source control",
         run: () => {
           setSidebarView("git");
-          setShowSidebar(true);
+          openView("sidebar");
         },
       },
       {
@@ -367,7 +436,7 @@ export const ProjectPlayground = () => {
           shift: true,
           handler: () => {
             setSidebarView("search");
-            setShowSidebar(true);
+            openView("sidebar");
           },
         },
         { key: "b", mod: true, handler: () => toggleSidebar() },
@@ -587,13 +656,29 @@ export const ProjectPlayground = () => {
       </Flex>
 
 
-      <div style={{ flex: 1, minHeight: 0 }}>
+      {/* The containing block for the drawers: everything between the topbar
+          and the status bar, so a drawer covers the workspace and leaves the
+          app's own chrome reachable. */}
+      <div className="rc-playground-body" style={{ flex: 1, minHeight: 0 }}>
+        {/* Only below the breakpoint, and only with something to dismiss. */}
+        {narrow && (showSidebar || showPanel || showPreview) && (
+          <button
+            type="button"
+            className="rc-scrim"
+            aria-label="Close the open panel"
+            onClick={() => {
+              setViews({ sidebar: false, panel: false, preview: false });
+            }}
+          />
+        )}
+
         <SplitPane
           direction="horizontal"
           defaultSize={restored?.sidebarWidth ?? 260}
           minSize={180}
           maxSize={520}
           showFirst={showSidebar}
+          firstClassName="rc-drawer rc-drawer-left"
           onResizeEnd={(size) => remember({ sidebarWidth: size })}
           first={
             <div
@@ -724,6 +809,7 @@ export const ProjectPlayground = () => {
               defaultSize={restored?.previewWidth ?? 700}
               minSize={320}
               showSecond={showPreview}
+              secondClassName="rc-drawer rc-drawer-full"
               onResizeEnd={(size) => remember({ previewWidth: size })}
               first={
                 <SplitPane
@@ -731,6 +817,7 @@ export const ProjectPlayground = () => {
                   defaultSize={restored?.panelHeight ?? 420}
                   minSize={120}
                   showSecond={showPanel}
+                  secondClassName="rc-drawer rc-drawer-bottom"
                   onResizeEnd={(size) => remember({ panelHeight: size })}
                   first={
                     <div

@@ -201,4 +201,18 @@ piece of work and the one that changes who can use the product at all.
   and became a toast; a file changed on disk is persistent state and became a
   chip in the status bar. No more banners resizing the editor mid-keystroke.
 
-Still open: **#1** (responsive) and all of Tier 3.
+- [x] **#1 — responsive.** Both stages. (a) The signed-out pages and the
+  dashboard: the shells moved from inline styles onto classes, because a media
+  query cannot reach an inline style — which is most of why there were none.
+  The bug behind "untested below ~700px" was a bare `minmax(340px, 1fr)`, which
+  is 340px wide on a 360px phone with padding either side and overflows rather
+  than wrapping; every floor is `min(x, 100%)` now. (b) Below 900px the
+  sidebar, panel and preview become drawers over the editor, driven by the
+  toggles that already existed, with a scrim and one drawer at a time.
+
+  The drawers are CSS over the existing tree rather than a second tree: moving
+  a pane elsewhere in the React tree unmounts it, and unmounting the terminal
+  kills its PTY and its scrollback. Resizing a window across the breakpoint
+  must not cost anyone their shell.
+
+Still open: all of Tier 3.

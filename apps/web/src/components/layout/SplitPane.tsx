@@ -13,6 +13,14 @@ interface SplitPaneProps {
   showSecond?: boolean;
   first: ReactNode;
   second: ReactNode;
+  /** Classes for the pane wrappers.
+   *
+   *  The wrappers carry inline flex sizes, so a stylesheet can only reach them
+   *  through a class it is given — which is how the narrow layout lifts a pane
+   *  out of the split and into a drawer without any of this component knowing
+   *  about breakpoints. */
+  firstClassName?: string;
+  secondClassName?: string;
   /** Called when the user finishes a drag, so the size can be remembered.
    *  Fired on release rather than per pointer move: persisting during a drag
    *  would write to storage dozens of times a second. */
@@ -37,6 +45,8 @@ export const SplitPane = ({
   showSecond = true,
   first,
   second,
+  firstClassName,
+  secondClassName,
   onResizeEnd,
 }: SplitPaneProps) => {
   const isHorizontal = direction === "horizontal";
@@ -127,6 +137,7 @@ export const SplitPane = ({
     >
       {showFirst && (
         <div
+          className={firstClassName}
           style={{
             // When it is the only pane it takes everything; otherwise it is
             // fixed at `size` and the second pane absorbs the remainder.
@@ -174,7 +185,10 @@ export const SplitPane = ({
       )}
 
       {showSecond && (
-        <div style={{ flex: "1 1 0", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+        <div
+          className={secondClassName}
+          style={{ flex: "1 1 0", minWidth: 0, minHeight: 0, overflow: "hidden" }}
+        >
           {second}
         </div>
       )}

@@ -929,3 +929,65 @@ body {
     padding: 22px 18px;
   }
 }
+
+/* --- The playground below 900px -------------------------------------------
+ *
+ * Four nested split panes with pixel floors -- sidebar 180, editor 240,
+ * preview 320, panel 120, plus the activity rail -- crush at about 1100px. So
+ * below 900 the sidebar, the panel and the preview stop being split children
+ * and become drawers over the editor.
+ *
+ * Done in CSS over the existing tree rather than by rendering a second one:
+ * moving a pane to a different place in the React tree unmounts it, and
+ * unmounting the terminal kills its PTY and its scrollback. Resizing a window
+ * across the breakpoint must not cost anyone their shell.
+ *
+ * `!important` because `SplitPane` sets each pane's flex inline, and an inline
+ * style is otherwise unreachable from a stylesheet. */
+.rc-playground-body {
+  position: relative;
+}
+
+@media (max-width: 900px) {
+  /* Absolute, not fixed: the containing block is the area between the topbar
+   * and the status bar, so a drawer covers the workspace and leaves the app's
+   * own chrome reachable. */
+  .rc-drawer {
+    position: absolute !important;
+    z-index: 40;
+    flex: none !important;
+    box-shadow: var(--rc-shadow-lg);
+    background: var(--rc-surface);
+  }
+
+  .rc-drawer-left {
+    inset: 0 auto 0 0 !important;
+    width: min(320px, 85vw) !important;
+  }
+
+  .rc-drawer-bottom {
+    inset: auto 0 0 0 !important;
+    height: min(60vh, 420px) !important;
+  }
+
+  .rc-drawer-full {
+    inset: 0 !important;
+  }
+
+  /* A 5px drag handle is not a touch target, and there is nothing left to
+   * resize once the panes are drawers. */
+  .rc-divider {
+    display: none !important;
+  }
+
+  /* Dismisses whichever drawer is open. Below the drawers, above the editor. */
+  .rc-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    border: none;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.45);
+    cursor: pointer;
+  }
+}
