@@ -114,16 +114,25 @@ test.describe.serial("preview reload on save", () => {
       await previewToggle.click();
     }
 
-    const previewFrame = () =>
-      page
+    /** The preview's heading, or undefined while it is mid-reload.
+     *
+     *  A reload detaches the frame, and querying a detached one throws rather
+     *  than returning a stale value — which would fail the poll on exactly the
+     *  event the poll is waiting for. Swallowed so it simply tries again. */
+    const previewHeading = async (): Promise<string | null | undefined> => {
+      const frame = page
         .frames()
-        .find((frame) => frame.url().includes(`/preview/${projectId}`));
+        .find((entry) => entry.url().includes(`/preview/${projectId}`));
 
-    await expect
-      .poll(async () => previewFrame()?.locator("h1").textContent(), {
-        timeout: 60_000,
-      })
-      .toContain(FIRST);
+      if (!frame) return undefined;
+
+      return frame
+        .locator("h1")
+        .textContent()
+        .catch(() => undefined);
+    };
+
+    await expect.poll(previewHeading, { timeout: 60_000 }).toContain(FIRST);
 
     // --- The part this spec exists for: save again, with the dev server up
     //  and the preview already on screen, and touch nothing else.
@@ -134,10 +143,6 @@ test.describe.serial("preview reload on save", () => {
 
     // No reload, no navigation, no clicking the preview's refresh: if the
     // second marker arrives, the server told the iframe to reload itself.
-    await expect
-      .poll(async () => previewFrame()?.locator("h1").textContent(), {
-        timeout: 60_000,
-      })
-      .toContain(SECOND);
+    await expect.poll(previewHeading, { timeout: 60_000 }).toContain(SECOND);
   });
 });
