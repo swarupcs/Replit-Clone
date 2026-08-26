@@ -11,6 +11,10 @@ export type CounterName =
   | "containers_reaped"
   | "containers_capacity_rejected"
   | "runs_started"
+  // Starts that found the dependencies already installed and left the
+  // install half of the command out. Against `runs_started`, this is how much
+  // of the warm-start path is actually being taken.
+  | "runs_install_skipped"
   | "runs_failed"
   | "preview_errors"
   | "preview_upgrades_rejected"

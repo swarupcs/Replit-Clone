@@ -100,8 +100,14 @@ describe("opening a project starts it", () => {
 
     await runner.autoStartRun(PROJECT);
 
-    expect(commands.at(0)?.join(" ")).toContain("npm install");
-    expect(commands.at(0)?.join(" ")).toContain("npm run dev");
+    // Found by its marker rather than by position: starting also reads the
+    // install stamp, which is an exec of its own and gets there first.
+    const run = commands.find((argv) =>
+      argv.join(" ").includes(runner.PGID_MARKER),
+    );
+
+    expect(run?.join(" ")).toContain("npm install");
+    expect(run?.join(" ")).toContain("npm run dev");
   });
 
   it("starts one dev server when two tabs open the project at once", async () => {

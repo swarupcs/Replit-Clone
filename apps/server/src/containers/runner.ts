@@ -12,6 +12,13 @@ import { getTemplate } from "../templates/registry.js";
 import { env, watchPollingEnv } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
+import {
+  dependencyFingerprint,
+  installArtefactsPresent,
+  planStart,
+  readStamp,
+  writeStamp,
+} from "./warmStart.js";
 import { increment } from "../lib/metrics.js";
 import {
   isResumable,
@@ -57,6 +64,12 @@ export interface RunSession {
    *  death: one that never became ready fails for a reason, and restarting it
    *  would just repeat the failure. */
   everReady?: boolean;
+  /** Fingerprint of the dependency files as they were when this run started.
+   *
+   *  Held here rather than re-read when the run proves itself, so a manifest
+   *  edited while the dev server was booting cannot be stamped as installed by
+   *  an install that never saw it. */
+  installFingerprint?: string | undefined;
   /** When the run exited, so the restart path can keep its distance from a
    *  crash that just happened. */
   exitedAt?: number;
@@ -245,6 +258,17 @@ function probeUntilReady(projectId: string): void {
         live.everReady = true;
         setState(projectId, { status: "running", command: live.state.command });
 
+        // Stamped only now. Readiness is the one signal that proves BOTH that
+        // the install worked and that the app it produced can actually boot,
+        // and a stamp written any earlier would let a broken install excuse
+        // the next start from repairing itself.
+        if (live.installFingerprint) {
+          const fingerprint = live.installFingerprint;
+          void ensureContainer(projectId)
+            .then((container) => writeStamp(container, fingerprint))
+            .catch(() => undefined);
+        }
+
         const template = await templateForProject(projectId).catch(
           () => undefined,
         );
@@ -333,9 +357,36 @@ export async function startRun(
   // flag meaning what its name says, not to fix an observable bug.
   if (!options.auto) current.autoStartSpent = false;
   increment("runs_started");
-  logger.info("run started", { projectId, command: template.startCommand });
-  setState(projectId, { status: "starting", command: template.startCommand });
-  pushOutput(projectId, `$ ${template.startCommand}\r\n`);
+  // What the last install that succeeded was for, against what it would be for
+  // now. Equal, with its artefacts still present, means the install half of the
+  // command has nothing to do and opening the project should not wait for it.
+  const plan = planStart({
+    command: template.startCommand,
+    fingerprint: await dependencyFingerprint(projectId).catch(() => null),
+    stamped: await readStamp(container),
+    installed: await installArtefactsPresent(projectId).catch(() => false),
+  });
+
+  current.installFingerprint = plan.fingerprint ?? undefined;
+  if (plan.skippedInstall) increment("runs_install_skipped");
+
+  logger.info("run started", {
+    projectId,
+    command: plan.command,
+    skippedInstall: plan.skippedInstall,
+  });
+  setState(projectId, { status: "starting", command: plan.command });
+
+  // Said out loud in the run output. A start that quietly does less than the
+  // command shown in the project's settings would be a mystery the first time
+  // a stale dependency bit.
+  if (plan.skippedInstall) {
+    pushOutput(
+      projectId,
+      "[2mDependencies unchanged since the last install — skipping it.[0m\r\n",
+    );
+  }
+  pushOutput(projectId, `$ ${plan.command}\r\n`);
 
   // The run reports its own `$$` as the process group `stopRun` will signal —
   // which is exactly what this run started, including the dev server that
@@ -347,7 +398,7 @@ export async function startRun(
   // runLog.ts — in short, the log has to outlive this process, and it has to
   // come off a terminal or every tool in it stops emitting colour.
   const runScript =
-    `echo "${PGID_MARKER}$$"; echo $$ > ${PGID_FILE}; ${template.startCommand}`;
+    `echo "${PGID_MARKER}$$"; echo $$ > ${PGID_FILE}; ${plan.command}`;
 
   const exec = await container.exec({
     Cmd: recordedRunArgv(runScript),
