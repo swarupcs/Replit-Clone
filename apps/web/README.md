@@ -41,10 +41,19 @@ pnpm --filter '@replit-clone/web' test    # vitest, jsdom
 pnpm --filter '@replit-clone/web' e2e     # Playwright, needs a running stack
 ```
 
-The end-to-end suite drives a real container and skips cleanly when the dev
-stack is not up (`e2e/global-setup.ts` probes web and API health first). Each
-run deletes the project it made, so a failed run does not eat the container
-concurrency cap.
+The end-to-end suite runs against a stack you started yourself and skips
+cleanly when it is not up (`e2e/global-setup.ts` probes web and API health
+first). It gates on two things separately: everything needs the web app and the
+database, and only the flows that actually run a project need Docker — so on a
+machine with no daemon the rest still run. Each run deletes the project it
+made, so a failed run does not eat the container concurrency cap.
+
+Where the image already ships Chromium and forbids Playwright's own download,
+point it at the one that is there:
+
+```bash
+E2E_CHROMIUM=/path/to/chrome pnpm --filter '@replit-clone/web' e2e
+```
 
 ## Bundle
 

@@ -95,9 +95,19 @@ Done: `apps/server/README.md` and `apps/web/README.md` — layout, the handful o
 conventions worth knowing before changing anything, how to run each suite, and
 pointers to `CONTRIBUTING.md` and `docs/SECURITY.md`.
 
-### 9. E2E coverage for the new flows
-Specs for "save → preview reloads" and "EDITOR share-link redemption" would pin
-down the two newest features the way `playground-flow.spec.ts` pins the basics.
+### 9. E2E coverage for the new flows ✅ (half done)
+Done: **EDITOR share-link redemption** (`e2e/share-link.spec.ts`) — the owner
+makes an edit link, a second account opens it in the browser, and the grant is
+checked from both sides: the guest can read the tree, is still refused a rename
+(an edit link is not a handover), and the owner sees them listed as an EDITOR.
+
+Getting it to run at all meant splitting the suite's gate. It skipped
+everything unless Docker was up, but this flow starts no container — only the
+ones that run a project need a daemon. `global-setup` now decides both
+separately, so the credential-free half runs on a machine without Docker.
+
+Still open: **save → preview reloads**, which does need a container and so
+needs a daemon to write against.
 - **Where:** `apps/web/e2e/`.
 
 ### 10. Boot-time sweep for orphaned containers ✅ (done)
@@ -112,9 +122,9 @@ garbage, and deleting them would be unrecoverable.
 
 ## Recommended order
 
-Items 1–5, 7, 8 and 10 are done, and 6 is mostly done — the diff view and
-branches shipped; hunk staging and remotes are what remain. Only 9 is
-untouched: both specs need a live stack and a Docker daemon to run, and a spec
-that has never passed is a claim rather than coverage.
+Items 1–5, 7, 8 and 10 are done; 6 is done bar a push button it should not
+have (see `docs/SECURITY.md`); 9 is half done. Everything left needs a Docker
+daemon to write against, and a spec that has never passed is a claim rather
+than coverage.
 
 `docs/REPLIT_CLONE_PLAN.md` supersedes this list and sequences what is left.
