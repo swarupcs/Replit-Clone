@@ -185,5 +185,11 @@ piece of work and the one that changes who can use the product at all.
   playground, which retires both bugs the plan names. The dev server's state
   moved into it, being the first thing to take up the room that freed.
 
-Still open: **#1** (responsive), **#3** (presence), **#6** (notifications),
-**#7** (problems), and all of Tier 3.
+- [x] **#7 — Problems view.** A third bottom-panel tab, a badge on it, and
+  the counts in the status bar #5 created. One thing the plan could not have
+  known: semantic validation is off for TS/JS by design, so this is syntax and
+  schema only, and the empty state says so rather than letting a clean list
+  read as "this project type checks".
+
+Still open: **#1** (responsive), **#3** (presence), **#6** (notifications), and
+all of Tier 3.
