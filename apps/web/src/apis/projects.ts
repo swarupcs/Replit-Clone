@@ -1,6 +1,9 @@
 import type {
   ApiSuccess,
   GitBranch,
+  GitRemote,
+  GitRemoteResponse,
+  GitRemotesResponse,
   GitBranchResponse,
   GitBranchesResponse,
   GitCommit,
@@ -341,6 +344,52 @@ export const gitHunksApi = async (
   const response = await axios.post<GitStatusResponse>(
     `/api/v1/projects/${projectId}/git/hunks`,
     { path, indexes, reverse },
+  );
+  return response.data.data;
+};
+
+export const getGitRemotesApi = async (
+  projectId: string,
+): Promise<GitRemote[]> => {
+  const response = await axios.get<GitRemotesResponse>(
+    `/api/v1/projects/${projectId}/git/remotes`,
+  );
+  return response.data.data;
+};
+
+/** Adds a remote, or removes it when `remove` is set. */
+export const gitRemoteApi = async (
+  projectId: string,
+  name: string,
+  url?: string,
+  remove = false,
+): Promise<GitRemote[]> => {
+  const response = await axios.post<GitRemoteResponse>(
+    `/api/v1/projects/${projectId}/git/remote`,
+    { name, url, remove },
+  );
+  return response.data.data;
+};
+
+export const gitFetchApi = async (
+  projectId: string,
+  name: string,
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/fetch`,
+    { name },
+  );
+  return response.data.data;
+};
+
+export const gitPullApi = async (
+  projectId: string,
+  name: string,
+  branch: string,
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/pull`,
+    { name, branch },
   );
   return response.data.data;
 };

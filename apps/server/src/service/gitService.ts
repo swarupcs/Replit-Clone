@@ -1,5 +1,6 @@
 import type {
   GitBranch,
+  GitRemote,
   GitChange,
   GitChangeState,
   GitCommit,
@@ -19,6 +20,7 @@ const APP_DIR = "/home/sandbox/app";
  *  and this service cannot drift apart on what a change looks like. */
 export type {
   GitBranch,
+  GitRemote,
   GitChange,
   GitCommit,
   GitStatus,
@@ -534,5 +536,141 @@ export async function applyHunks(
   } finally {
     // Even on failure: a patch left behind would sit in .git forever.
     await fsp.unlink(hostPath).catch(() => undefined);
+  }
+}
+
+/** Parses `git remote -v`, which lists each remote twice -- once for fetch and
+ *  once for push -- as `name<TAB>url (fetch|push)`.
+ *
+ *  Only the fetch URL is kept. They differ only in setups this cannot create,
+ *  and showing one remote as two rows reads as a bug.
+ */
+export function parseRemotes(raw: string): GitRemote[] {
+  const seen = new Map<string, string>();
+
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+
+    const [name = "", rest = ""] = line.split("\t");
+    if (!name || !rest) continue;
+    if (!rest.endsWith("(fetch)")) continue;
+
+    seen.set(name, rest.slice(0, -"(fetch)".length).trim());
+  }
+
+  return [...seen].map(([name, url]) => ({ name, url }));
+}
+
+export async function remotes(projectId: string): Promise<GitRemote[]> {
+  if (!(await isRepo(projectId))) return [];
+
+  const { stdout, exitCode } = await git(projectId, ["remote", "-v"]);
+  if (exitCode !== 0) return [];
+
+  return parseRemotes(stdout);
+}
+
+/** Transports a remote URL may use.
+ *
+ *  An allow-list rather than a deny-list, because git's `ext::` transport runs
+ *  the rest of the string as a COMMAND -- `ext::sh -c ...` is remote code
+ *  execution the moment anything fetches. `file://` is refused too: it would
+ *  reach whatever the server can see rather than anything on the network.
+ */
+const REMOTE_URL = /^(?:https?|ssh|git):\/\/[^\s]+$|^[\w.-]+@[\w.-]+:[^\s]+$/;
+
+export function isUsableRemoteUrl(url: string): boolean {
+  if (!url || url.startsWith("-")) return false;
+  return REMOTE_URL.test(url);
+}
+
+export async function addRemote(
+  projectId: string,
+  name: string,
+  url: string,
+): Promise<void> {
+  await assertValidBranchName(projectId, name);
+
+  if (!isUsableRemoteUrl(url)) {
+    throw new BadRequestError(
+      "A remote needs an http(s), ssh or git URL",
+      "BAD_REMOTE_URL",
+    );
+  }
+
+  const { stderr, stdout, exitCode } = await git(projectId, [
+    "remote",
+    "add",
+    "--",
+    name,
+    url,
+  ]);
+
+  if (exitCode !== 0) {
+    const message = (stderr || stdout).trim().split("\n")[0] ?? "git failed";
+    throw new BadRequestError(message, "GIT_FAILED");
+  }
+}
+
+export async function removeRemote(
+  projectId: string,
+  name: string,
+): Promise<void> {
+  await assertValidBranchName(projectId, name);
+  await gitOrThrow(projectId, ["remote", "remove", "--", name]);
+}
+
+/** Fetches from a remote. Changes no file, so nothing needs dropping. */
+export async function fetchRemote(
+  projectId: string,
+  name: string,
+): Promise<void> {
+  await assertValidBranchName(projectId, name);
+
+  const { stderr, stdout, exitCode } = await git(projectId, [
+    "fetch",
+    "--",
+    name,
+  ]);
+
+  if (exitCode !== 0) {
+    const message = (stderr || stdout).trim().split("\n")[0] ?? "git failed";
+    throw new BadRequestError(message, "GIT_FAILED");
+  }
+}
+
+/** Pulls a branch from a remote, but only into a clean worktree.
+ *
+ *  Same reasoning as switchBranch: a merge into files other people have open
+ *  is not something to do on top of uncommitted work. Rewrites the worktree,
+ *  so the caller drops shared documents afterwards.
+ */
+export async function pullRemote(
+  projectId: string,
+  name: string,
+  branch: string,
+): Promise<void> {
+  await assertValidBranchName(projectId, name);
+  await assertValidBranchName(projectId, branch);
+
+  const current = await status(projectId);
+  if (current.changes.length > 0) {
+    throw new BadRequestError(
+      "Commit or discard your changes before pulling",
+      "WORKTREE_DIRTY",
+    );
+  }
+
+  const { stderr, stdout, exitCode } = await git(projectId, [
+    "pull",
+    "--ff-only",
+    "--",
+    name,
+    branch,
+  ]);
+
+  if (exitCode !== 0) {
+    const message = (stderr || stdout).trim().split("\n")[0] ?? "git failed";
+    throw new BadRequestError(message, "GIT_FAILED");
   }
 }

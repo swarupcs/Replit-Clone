@@ -93,6 +93,12 @@ export interface GitBranch {
   current: boolean;
 }
 
+export interface GitRemote {
+  name: string;
+  /** The fetch URL. Push URLs are not modelled: nothing here can set one. */
+  url: string;
+}
+
 export interface GitCommit {
   hash: string;
   shortHash: string;
@@ -117,6 +123,15 @@ export type GitBranchResponse = ApiSuccess<{
   status: GitStatus;
   branches: GitBranch[];
 }>;
+
+/** GET /api/v1/projects/:projectId/git/remotes */
+export type GitRemotesResponse = ApiSuccess<GitRemote[]>;
+
+/** POST /api/v1/projects/:projectId/git/remote — add or remove one. */
+export type GitRemoteResponse = ApiSuccess<GitRemote[]>;
+
+/** POST /api/v1/projects/:projectId/git/pull — and /git/fetch. */
+export type GitPullResponse = ApiSuccess<GitStatus>;
 
 /** GET /api/v1/projects/:projectId/git/diff */
 export type GitDiffResponse = ApiSuccess<{

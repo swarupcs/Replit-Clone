@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getAuthContext } from "../middlewares/requireAuth.js";
 import { assertProjectAccess } from "../service/projectAccessService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
+import { BadRequestError } from "../utils/errors.js";
 import { prisma } from "../lib/prisma.js";
 import * as git from "../service/gitService.js";
 import { dropDoc, forgetProject } from "../service/collabService.js";
@@ -44,6 +45,36 @@ const hunksSchema = z.object({
   path: relativePath,
   indexes: z.array(z.number().int().nonnegative()).min(1).max(500),
   reverse: z.boolean().optional(),
+});
+
+/** A remote's name and, when adding one, its URL. The URL's transport is
+ *  checked in the service, where the reason it matters lives. */
+const remoteSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .refine((value) => !value.startsWith("-"), {
+      message: "Remote name must not start with a dash",
+    }),
+  url: z.string().trim().min(1).max(2048).optional(),
+  remove: z.boolean().optional(),
+});
+
+const pullSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .refine((value) => !value.startsWith("-")),
+  branch: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .refine((value) => !value.startsWith("-")),
 });
 
 const branchSchema = z.object({
@@ -280,6 +311,79 @@ export async function gitHunksController(
   res.json({
     success: true,
     message: reverse ? "Unstaged" : "Staged",
+    data: await git.status(projectId),
+  });
+}
+
+export async function gitRemotesController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+
+  res.json({
+    success: true,
+    message: "Remotes",
+    data: await git.remotes(projectId),
+  });
+}
+
+/** Adds or removes a remote. */
+export async function gitRemoteController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { name, url, remove } = remoteSchema.parse(req.body ?? {});
+
+  if (remove) {
+    await git.removeRemote(projectId, name);
+  } else {
+    if (!url) throw new BadRequestError("A remote needs a URL");
+    await git.addRemote(projectId, name, url);
+  }
+
+  res.json({
+    success: true,
+    message: remove ? "Remote removed" : "Remote added",
+    data: await git.remotes(projectId),
+  });
+}
+
+/** Fetches from a remote. Touches no file in the worktree. */
+export async function gitFetchController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { name } = remoteSchema.parse(req.body ?? {});
+
+  await git.fetchRemote(projectId, name);
+
+  res.json({
+    success: true,
+    message: "Fetched",
+    data: await git.status(projectId),
+  });
+}
+
+/** Pulls a branch. Rewrites the worktree, so shared documents are dropped
+ *  afterwards -- a live one would write the pre-pull text back over what was
+ *  just merged in. */
+export async function gitPullController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { name, branch } = pullSchema.parse(req.body ?? {});
+
+  await git.pullRemote(projectId, name, branch);
+
+  forgetProject(projectId);
+
+  res.json({
+    success: true,
+    message: "Pulled",
     data: await git.status(projectId),
   });
 }

@@ -51,6 +51,35 @@ in the server joins a client string onto a host path.
   (`service/searchService.ts`).
 - Replacements (search & replace) run under the same worker deadline with caps
   on files rewritten and bytes added.
+- A git argument that a user chose — a branch, a remote, a path — is checked
+  before it is passed, because argv arrays stop a shell but not git's own
+  option parsing. A leading dash is rejected everywhere (`--upload-pack=` is an
+  argument, not a filename), branch names go through git's own
+  `check-ref-format`, and the `--` separator is placed where git reads it as
+  "no pathspecs follow" rather than "what follows is a path".
+
+## Git remotes: no credential ever reaches a container
+
+The panel can add a remote, fetch and pull. It deliberately **cannot push**,
+and this is a security decision rather than an unfinished one.
+
+A project can be shared, and every collaborator works in the **same
+container**. Anything given to git inside it — a token in the environment, in
+a URL, in a credential helper, or on a command line — is readable by any code
+any collaborator runs there. A push credential handed over by this server
+would therefore be a way for someone with edit access to walk off with the
+owner's account.
+
+So no credential is stored, transmitted or injected. Pushing is done from the
+project's own terminal, where the secret is the user's own, typed into their
+own session, and never passes through this server or its database.
+
+Remote URLs are checked against an allow-list of transports rather than a
+deny-list, because `ext::` runs the rest of the string as a **command** —
+`git remote add x "ext::sh -c ..."` is remote code execution the moment
+anything fetches. `file://` is refused too: it would reach whatever the server
+can see rather than anything on the network
+(`isUsableRemoteUrl`, `service/gitService.ts`).
 
 ## Identity: short-lived tokens, checked per action
 

@@ -14,12 +14,14 @@ import {
   VscCheck,
   VscHistory,
   VscRefresh,
+  VscCloud,
   VscDiscard,
   VscRemove,
   VscSourceControl,
 } from "react-icons/vsc";
 import type {
   GitBranch,
+  GitRemote,
   GitChange,
   GitCommit,
   GitStatus,
@@ -34,7 +36,10 @@ import {
   getGitStatusApi,
   gitBranchApi,
   gitDiscardApi,
+  gitFetchApi,
   gitHunksApi,
+  gitPullApi,
+  getGitRemotesApi,
   gitCommitApi,
   gitInitApi,
   gitStageApi,
@@ -89,6 +94,8 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
    *  not changed but the patch it is showing has. */
   const [hunkNonce, setHunkNonce] = useState(0);
 
+  const [remotes, setRemotes] = useState<GitRemote[]>([]);
+
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
   const refresh = useCallback(
@@ -100,6 +107,7 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
         if (next.isRepo) {
           setCommits(await getGitLogApi(projectId, 20));
           setBranches(await getGitBranchesApi(projectId));
+          setRemotes(await getGitRemotesApi(projectId));
         }
       } catch {
         // A project whose container will not start should not spam the panel;
@@ -196,6 +204,38 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
     } catch (error) {
       void message.error(
         reasonFrom(error, isStaged ? "Could not unstage" : "Could not stage"),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Fetches from, or pulls the current branch off, a remote.
+   *
+   *  There is deliberately no push: a project can be shared, and every
+   *  collaborator's code runs in the SAME container, so a credential this
+   *  server handed to git there would be readable by anyone with edit access.
+   *  Pushing belongs in the terminal, where the secret is the user's own and
+   *  never passes through here.
+   */
+  const withRemote = async (name: string, pull: boolean) => {
+    setBusy(true);
+    try {
+      const branch = status?.branch;
+      if (pull && !branch) {
+        void message.error("Nothing to pull onto — this branch has no commits");
+        return;
+      }
+
+      setStatus(
+        pull
+          ? await gitPullApi(projectId, name, branch ?? "")
+          : await gitFetchApi(projectId, name),
+      );
+      if (pull) setCommits(await getGitLogApi(projectId, 20));
+    } catch (error) {
+      void message.error(
+        reasonFrom(error, pull ? "Could not pull" : "Could not fetch"),
       );
     } finally {
       setBusy(false);
@@ -484,6 +524,35 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
             {status.unborn ? " · no commits yet" : ""}
           </span>
         )}
+        {canWrite && remotes.length > 0 && (
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: remotes.flatMap((remote) => [
+                {
+                  key: `fetch:${remote.name}`,
+                  label: `Fetch from ${remote.name}`,
+                  onClick: () => void withRemote(remote.name, false),
+                },
+                {
+                  key: `pull:${remote.name}`,
+                  label: `Pull from ${remote.name}`,
+                  onClick: () => void withRemote(remote.name, true),
+                },
+              ]),
+            }}
+          >
+            <button
+              type="button"
+              className="rc-icon-button"
+              aria-label="Remotes"
+              disabled={busy}
+            >
+              <VscCloud size={14} />
+            </button>
+          </Dropdown>
+        )}
+
         <Tooltip title="History">
           <button
             type="button"

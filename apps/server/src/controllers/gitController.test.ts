@@ -13,6 +13,11 @@ const git = vi.hoisted(() => ({
   branches: vi.fn(),
   discard: vi.fn(),
   applyHunks: vi.fn(),
+  remotes: vi.fn(),
+  addRemote: vi.fn(),
+  removeRemote: vi.fn(),
+  fetchRemote: vi.fn(),
+  pullRemote: vi.fn(),
   createBranch: vi.fn(),
   switchBranch: vi.fn(),
 }));
@@ -28,7 +33,11 @@ vi.mock("../service/collabService.js", () => ({ forgetProject, dropDoc }));
 import {
   gitBranchController,
   gitDiscardController,
+  gitFetchController,
   gitHunksController,
+  gitPullController,
+  gitRemoteController,
+  gitRemotesController,
   gitBranchesController,
   gitCommitController,
   gitDiffController,
@@ -53,6 +62,10 @@ const app = apiApp([
   { method: "post", path: "/p/:projectId/git/branch", handler: gitBranchController },
   { method: "post", path: "/p/:projectId/git/discard", handler: gitDiscardController },
   { method: "post", path: "/p/:projectId/git/hunks", handler: gitHunksController },
+  { method: "get", path: "/p/:projectId/git/remotes", handler: gitRemotesController },
+  { method: "post", path: "/p/:projectId/git/remote", handler: gitRemoteController },
+  { method: "post", path: "/p/:projectId/git/fetch", handler: gitFetchController },
+  { method: "post", path: "/p/:projectId/git/pull", handler: gitPullController },
 ]);
 
 const STATUS = { branch: "main", staged: [], unstaged: [] };
@@ -62,6 +75,9 @@ beforeEach(() => {
   projectAccessService.assertProjectAccess.mockResolvedValue({ id: TEST_PROJECT });
   git.status.mockResolvedValue(STATUS);
   git.branches.mockResolvedValue([{ name: "main", current: true }]);
+  git.remotes.mockResolvedValue([
+    { name: "origin", url: "https://github.com/a/b.git" },
+  ]);
   findUnique.mockResolvedValue({ email: TEST_USER.email });
 });
 
@@ -628,5 +644,136 @@ describe("hunks", () => {
 
     expect(response.status).toBe(400);
     expect(git.applyHunks).not.toHaveBeenCalled();
+  });
+});
+
+describe("remotes", () => {
+  it("lists them for a viewer", async () => {
+    const response = await request(app)
+      .get(`/p/${TEST_PROJECT}/git/remotes`)
+      .set(auth());
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual([
+      { name: "origin", url: "https://github.com/a/b.git" },
+    ]);
+    expect(projectAccessService.assertProjectAccess).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      TEST_USER.sub,
+      "viewer",
+    );
+  });
+
+  it("needs editor access to add one", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/remote`)
+      .set(auth())
+      .send({ name: "origin", url: "https://github.com/a/b.git" });
+
+    expect(projectAccessService.assertProjectAccess).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      TEST_USER.sub,
+      "editor",
+    );
+    expect(git.addRemote).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      "origin",
+      "https://github.com/a/b.git",
+    );
+  });
+
+  it("removes one when asked", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/remote`)
+      .set(auth())
+      .send({ name: "origin", remove: true });
+
+    expect(git.removeRemote).toHaveBeenCalledWith(TEST_PROJECT, "origin");
+    expect(git.addRemote).not.toHaveBeenCalled();
+  });
+
+  it("refuses to add one with no URL", async () => {
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/git/remote`)
+      .set(auth())
+      .send({ name: "origin" });
+
+    expect(response.status).toBe(400);
+    expect(git.addRemote).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name that would be read as a flag", async () => {
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/git/remote`)
+      .set(auth())
+      .send({ name: "--exec=evil", url: "https://h/r.git" });
+
+    expect(response.status).toBe(400);
+    expect(git.addRemote).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetch and pull", () => {
+  it("fetches without touching any shared document", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/fetch`)
+      .set(auth())
+      .send({ name: "origin" });
+
+    expect(git.fetchRemote).toHaveBeenCalledWith(TEST_PROJECT, "origin");
+    // A fetch changes no file, so nothing needs dropping.
+    expect(forgetProject).not.toHaveBeenCalled();
+  });
+
+  it("pulls a named branch", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/pull`)
+      .set(auth())
+      .send({ name: "origin", branch: "main" });
+
+    expect(git.pullRemote).toHaveBeenCalledWith(TEST_PROJECT, "origin", "main");
+  });
+
+  it("drops shared documents after a pull, which rewrote the worktree", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/pull`)
+      .set(auth())
+      .send({ name: "origin", branch: "main" });
+
+    expect(forgetProject).toHaveBeenCalledWith(TEST_PROJECT);
+  });
+
+  it("keeps documents when the pull was refused", async () => {
+    git.pullRemote.mockRejectedValue(new ForbiddenError("dirty"));
+
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/pull`)
+      .set(auth())
+      .send({ name: "origin", branch: "main" });
+
+    expect(forgetProject).not.toHaveBeenCalled();
+  });
+
+  it("refuses a pull with no branch named", async () => {
+    const response = await request(app)
+      .post(`/p/${TEST_PROJECT}/git/pull`)
+      .set(auth())
+      .send({ name: "origin" });
+
+    expect(response.status).toBe(400);
+    expect(git.pullRemote).not.toHaveBeenCalled();
+  });
+
+  it("needs editor access to pull", async () => {
+    await request(app)
+      .post(`/p/${TEST_PROJECT}/git/pull`)
+      .set(auth())
+      .send({ name: "origin", branch: "main" });
+
+    expect(projectAccessService.assertProjectAccess).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      TEST_USER.sub,
+      "editor",
+    );
   });
 });

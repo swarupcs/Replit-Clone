@@ -41,6 +41,10 @@ const api = vi.hoisted(() => ({
   gitBranchApi: vi.fn(),
   gitDiscardApi: vi.fn(),
   gitHunksApi: vi.fn(),
+  getGitRemotesApi: vi.fn(),
+  gitRemoteApi: vi.fn(),
+  gitFetchApi: vi.fn(),
+  gitPullApi: vi.fn(),
   gitStageApi: vi.fn(),
   gitUnstageApi: vi.fn(),
   gitCommitApi: vi.fn(),
@@ -57,6 +61,9 @@ const {
   gitBranchApi,
   gitDiscardApi,
   gitHunksApi,
+  getGitRemotesApi,
+  gitFetchApi,
+  gitPullApi,
 } = api;
 
 const BRANCHES = [
@@ -85,6 +92,11 @@ beforeEach(() => {
   getGitBranchesApi.mockResolvedValue(BRANCHES);
   gitDiscardApi.mockResolvedValue({ ...STATUS, changes: [] });
   gitHunksApi.mockResolvedValue(STATUS);
+  getGitRemotesApi.mockResolvedValue([
+    { name: "origin", url: "https://github.com/a/b.git" },
+  ]);
+  gitFetchApi.mockResolvedValue(STATUS);
+  gitPullApi.mockResolvedValue(STATUS);
   gitBranchApi.mockResolvedValue({
     status: { ...STATUS, branch: "feature" },
     branches: [
@@ -468,5 +480,75 @@ describe("SourceControlPanel hunk staging", () => {
 
     expect(await screen.findByText("is now this")).toBeDefined();
     expect(screen.queryByLabelText("Stage hunk 1 of src/App.tsx")).toBeNull();
+  });
+});
+
+describe("SourceControlPanel remotes", () => {
+  async function openRemotes() {
+    await renderPanel();
+    fireEvent.click(screen.getByLabelText("Remotes"));
+  }
+
+  it("offers fetch and pull per remote", async () => {
+    await openRemotes();
+
+    expect(await screen.findByText("Fetch from origin")).toBeDefined();
+    expect(screen.getByText("Pull from origin")).toBeDefined();
+  });
+
+  it("never offers to push", async () => {
+    // Deliberate: a shared project is one container, so a credential handed to
+    // git there would be readable by every collaborator.
+    await openRemotes();
+
+    expect(screen.queryByText(/Push/)).toBeNull();
+  });
+
+  it("fetches from the chosen remote", async () => {
+    await openRemotes();
+    fireEvent.click(await screen.findByText("Fetch from origin"));
+
+    await waitFor(() => {
+      expect(gitFetchApi).toHaveBeenCalledWith(PROJECT, "origin");
+    });
+  });
+
+  it("pulls the current branch", async () => {
+    await openRemotes();
+    fireEvent.click(await screen.findByText("Pull from origin"));
+
+    await waitFor(() => {
+      expect(gitPullApi).toHaveBeenCalledWith(PROJECT, "origin", "main");
+    });
+  });
+
+  it("reports the server's reason for refusing a pull", async () => {
+    gitPullApi.mockRejectedValue({
+      response: {
+        data: { message: "Commit or discard your changes before pulling" },
+      },
+    });
+
+    await openRemotes();
+    fireEvent.click(await screen.findByText("Pull from origin"));
+
+    await waitFor(() => {
+      expect(messageError).toHaveBeenCalledWith(
+        "Commit or discard your changes before pulling",
+      );
+    });
+  });
+
+  it("shows no remote control when there are none", async () => {
+    getGitRemotesApi.mockResolvedValue([]);
+    await renderPanel();
+
+    expect(screen.queryByLabelText("Remotes")).toBeNull();
+  });
+
+  it("gives a viewer no remote control", async () => {
+    await renderPanel(false);
+
+    expect(screen.queryByLabelText("Remotes")).toBeNull();
   });
 });
