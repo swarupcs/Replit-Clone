@@ -16,6 +16,7 @@ import type { TreeNodeData } from "@replit-clone/shared";
 import { TreeStructure } from "./TreeStructure.tsx";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
 import { useTreeSelectionStore } from "../../../store/treeSelectionStore.ts";
+import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 
 /** A project with `folders` top-level directories, each holding one file.
  *
@@ -172,5 +173,145 @@ describe("what the panel's own state costs the tree", () => {
     });
 
     expect([rowRenders.get("a.ts"), rowRenders.get("b.ts")]).toEqual(before);
+  });
+});
+
+
+/** The tree was reachable only with a mouse: rows were plain `div`s with a
+ *  click handler, so a keyboard user could not open a file from it at all.
+ *
+ *  The rules themselves live in `lib/treeKeys.ts` and are tested there. What
+ *  these cover is the wiring — that a key press moves real DOM focus, and that
+ *  opening from the keyboard does the same thing opening with the mouse does.
+ */
+describe("keyboard navigation", () => {
+  /** One folder holding a file, and a file beside it. */
+  function mixedProject(): TreeNodeData {
+    return {
+      name: "root",
+      relPath: "",
+      type: "directory",
+      children: [
+        {
+          name: "src",
+          relPath: "src",
+          type: "directory",
+          children: [{ name: "a.ts", relPath: "src/a.ts", type: "file" }],
+        },
+        { name: "readme.md", relPath: "readme.md", type: "file" },
+      ],
+    };
+  }
+
+  const emit = vi.fn();
+
+  beforeEach(() => {
+    emit.mockClear();
+    useTreeStructureStore.setState({
+      projectId: "p1",
+      treeStructure: mixedProject(),
+      expandedPaths: new Set<string>(),
+    });
+    useEditorSocketStore.setState({
+      editorSocket: { emit } as unknown as ReturnType<
+        typeof useEditorSocketStore.getState
+      >["editorSocket"],
+    });
+  });
+
+  /** The row for a path, found the way the component's own handler does. */
+  function row(relPath: string): HTMLElement {
+    const found = document.querySelector<HTMLElement>(
+      `[data-rc-path="${relPath}"]`,
+    );
+    if (!found) throw new Error(`no row for ${relPath}`);
+    return found;
+  }
+
+  it("exposes the rows as a tree rather than as anonymous divs", () => {
+    render(<TreeStructure />);
+
+    expect(screen.getByRole("tree", { name: "Files" })).toBeDefined();
+    // The collapsed folder announces that it can be opened; a file has no
+    // expanded state at all, which is the difference `aria-expanded` carries.
+    expect(row("src").getAttribute("aria-expanded")).toBe("false");
+    expect(row("readme.md").hasAttribute("aria-expanded")).toBe(false);
+  });
+
+  it("is a single tab stop, not one per file", () => {
+    render(<TreeStructure />);
+
+    const tabbable = screen
+      .getAllByRole("treeitem")
+      .filter((node) => node.getAttribute("tabindex") === "0");
+
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]?.dataset["rcPath"]).toBe("src");
+  });
+
+  it("moves focus down the rows on screen", () => {
+    render(<TreeStructure />);
+
+    row("src").focus();
+    fireEvent.keyDown(row("src"), { key: "ArrowDown" });
+
+    expect(document.activeElement).toBe(row("readme.md"));
+  });
+
+  it("opens a folder with Right and steps into it with the next Right", () => {
+    render(<TreeStructure />);
+
+    row("src").focus();
+    fireEvent.keyDown(row("src"), { key: "ArrowRight" });
+
+    expect(useTreeStructureStore.getState().expandedPaths.has("src")).toBe(true);
+
+    fireEvent.keyDown(row("src"), { key: "ArrowRight" });
+    expect(document.activeElement).toBe(row("src/a.ts"));
+  });
+
+  it("opens a file with Enter, the same way a click does", () => {
+    render(<TreeStructure />);
+
+    row("readme.md").focus();
+    fireEvent.keyDown(row("readme.md"), { key: "Enter" });
+
+    expect(emit).toHaveBeenCalledWith("readFile", { relPath: "readme.md" });
+    // And selects it, so a follow-up action from the context menu acts on the
+    // row the user is actually on.
+    expect(useTreeSelectionStore.getState().selected.has("readme.md")).toBe(
+      true,
+    );
+  });
+
+  it("keeps the tab stop on the row the user left", () => {
+    render(<TreeStructure />);
+
+    row("readme.md").focus();
+
+    expect(useTreeSelectionStore.getState().focused).toBe("readme.md");
+    expect(row("readme.md").getAttribute("tabindex")).toBe("0");
+    expect(row("src").getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("gives the tab stop back when the focused row leaves the screen", () => {
+    render(<TreeStructure />);
+
+    row("src").focus();
+    fireEvent.keyDown(row("src"), { key: "ArrowRight" });
+    row("src/a.ts").focus();
+    expect(useTreeSelectionStore.getState().focused).toBe("src/a.ts");
+
+    // Collapsing takes the focused row off screen. Left dangling, it would be
+    // the tab stop for a row that no longer exists and the tree would have
+    // none at all.
+    fireEvent.keyDown(row("src"), { key: "ArrowLeft" });
+
+    expect(useTreeSelectionStore.getState().focused).toBeNull();
+    expect(
+      screen
+        .getAllByRole("treeitem")
+        .filter((node) => node.getAttribute("tabindex") === "0"),
+    ).toHaveLength(1);
   });
 });

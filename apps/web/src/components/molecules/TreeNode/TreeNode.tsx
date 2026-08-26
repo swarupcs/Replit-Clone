@@ -49,6 +49,20 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
     relPath === "" || (relPath !== null && state.expandedPaths.has(relPath)),
   );
   const isActive = useOpenTabsStore((state) => state.activeRelPath === relPath);
+  /** Whether THIS row is the tree's single tab stop.
+   *
+   *  A boolean rather than the focused path itself, so a row only re-renders
+   *  when it gains or loses the tab stop — not every time focus moves anywhere
+   *  in the tree. Before anything has been focused the first visible row holds
+   *  it, so the tree is reachable from the keyboard on a fresh page. */
+  const isTabStop = useTreeSelectionStore((state) =>
+    relPath === null
+      ? false
+      : state.focused === null
+        ? state.visibleOrder[0] === relPath
+        : state.focused === relPath,
+  );
+  const setFocused = useTreeSelectionStore((state) => state.setFocused);
 
   if (!node) return null;
 
@@ -109,6 +123,17 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
       {node.relPath !== "" && (
         <div
           className="rc-tree-row"
+          // Read by the tree's keyboard handler, which navigates by walking
+          // these off the DOM rather than by re-deriving the tree — the row it
+          // needs to know about is always the one that has focus.
+          data-rc-path={node.relPath}
+          data-rc-kind={node.type}
+          role="treeitem"
+          aria-level={depth + 1}
+          aria-selected={isSelected}
+          {...(isFolder ? { "aria-expanded": isExpanded } : {})}
+          tabIndex={isTabStop ? 0 : -1}
+          onFocus={() => setFocused(node.relPath)}
           data-active={isActive}
           data-selected={isSelected}
           data-dropping={dropping}
@@ -182,6 +207,7 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
         // Indent guide: a hairline at this level's depth, so a deeply nested
         // file can be traced back to its folder.
         <div
+          role="group"
           className={depth >= 0 && node.relPath !== "" ? "rc-tree-branch" : undefined}
           style={
             node.relPath !== ""

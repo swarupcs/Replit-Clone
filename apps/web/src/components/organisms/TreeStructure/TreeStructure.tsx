@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { Input, Spin, Tooltip, message } from "antd";
 import {
   VscCloudUpload,
@@ -15,6 +16,7 @@ import { FileContextMenu } from "../../molecules/ContextMenu/FileContextMenu.tsx
 import { NewEntryPrompt } from "../../molecules/ContextMenu/NewEntryPrompt.tsx";
 import { uploadFilesApi } from "../../../apis/projects.ts";
 import { useTreeSelectionStore } from "../../../store/treeSelectionStore.ts";
+import { treeKeyAction } from "../../../lib/treeKeys.ts";
 
 /** Prunes the tree to nodes whose path matches `query`, keeping the folders
  *  that lead to a match so the result still reads as a tree rather than a flat
@@ -74,6 +76,7 @@ export const TreeStructure = () => {
   const refreshTree = useTreeStructureStore((state) => state.refreshTree);
   const collapseAll = useTreeStructureStore((state) => state.collapseAll);
   const revealPaths = useTreeStructureStore((state) => state.revealPaths);
+  const toggleExpanded = useTreeStructureStore((state) => state.toggleExpanded);
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
   const [query, setQuery] = useState("");
@@ -147,6 +150,70 @@ export const TreeStructure = () => {
       await refreshTree();
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  /** The scrolling list of rows. Keyboard navigation is handled here rather
+   *  than on each row: the rules need the whole visible order, and a row is
+   *  memoised precisely so it does not re-render when focus moves. */
+  const rowsRef = useRef<HTMLDivElement>(null);
+
+  /** Moves real DOM focus, which is what makes the roving tab stop work — the
+   *  store follows via the row's own `onFocus`.
+   *
+   *  Matched by walking the rows rather than with a selector, because a path is
+   *  a filename and may contain anything a filename may. */
+  function focusRow(relPath: string) {
+    const rows = rowsRef.current?.querySelectorAll<HTMLElement>("[data-rc-path]");
+    for (const row of rows ?? []) {
+      if (row.dataset["rcPath"] === relPath) {
+        row.focus();
+        return;
+      }
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const row = (event.target as HTMLElement).closest<HTMLElement>(
+      "[data-rc-path]",
+    );
+    if (!row) return;
+
+    const from = row.dataset["rcPath"];
+    const kind = row.dataset["rcKind"];
+    if (!from || (kind !== "file" && kind !== "directory")) return;
+
+    const selection = useTreeSelectionStore.getState();
+    const action = treeKeyAction({
+      key: event.key,
+      from,
+      kind,
+      isExpanded: expandedPaths.has(from),
+      visibleOrder: selection.visibleOrder,
+    });
+
+    if (!action) return;
+    // Only once a key is known to mean something here: Space scrolls the pane
+    // and the arrows move the scroll box, both of which would fight the tree.
+    event.preventDefault();
+
+    switch (action.kind) {
+      case "focus":
+        focusRow(action.relPath);
+        break;
+
+      case "expand":
+      case "collapse":
+        toggleExpanded(action.relPath);
+        break;
+
+      case "activate":
+        // The same two calls the click handler makes, so a keyboard open and a
+        // mouse open cannot mean different things.
+        selection.click(from, { meta: false, shift: false });
+        if (kind === "directory") toggleExpanded(from);
+        else editorSocket?.emit("readFile", { relPath: from });
+        break;
     }
   }
 
@@ -236,7 +303,14 @@ export const TreeStructure = () => {
         />
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto", paddingBottom: 12 }}>
+      <div
+        ref={rowsRef}
+        role="tree"
+        aria-label="Files"
+        aria-multiselectable
+        onKeyDown={handleKeyDown}
+        style={{ flex: 1, minHeight: 0, overflow: "auto", paddingBottom: 12 }}
+      >
         {!treeStructure ? (
           <div style={{ display: "grid", placeItems: "center", padding: 24 }}>
             <Spin size="small" />

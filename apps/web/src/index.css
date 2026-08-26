@@ -781,3 +781,32 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* --- Focus ---------------------------------------------------------------
+ * Nothing in the custom chrome had a focus style, so tabbing through the app
+ * moved an invisible cursor. `:focus-visible` rather than `:focus` so a mouse
+ * click does not leave a ring behind — the browser decides, which is exactly
+ * the distinction the pseudo-class exists to make.
+ *
+ * An inset ring, because most of these sit flush against a pane edge where an
+ * outset one would be clipped. */
+.rc-tree-row:focus-visible,
+.rc-tab:focus-visible,
+.rc-tab-close:focus-visible,
+.rc-panel-tab:focus-visible,
+.rc-panel-tab-close:focus-visible,
+.rc-icon-button:focus-visible,
+.rc-quickopen-row:focus-visible,
+.rc-review-button:focus-visible,
+.rc-card:focus-visible {
+  outline: 2px solid var(--rc-accent);
+  outline-offset: -2px;
+  border-radius: var(--rc-radius-sm);
+}
+
+/* The close affordance is invisible until its tab is hovered or active — which
+ * would hide the focus ring from the keyboard user who just reached it. */
+.rc-tab-close:focus-visible,
+.rc-panel-tab-close:focus-visible {
+  opacity: 1;
+}
