@@ -156,7 +156,7 @@ Honest scoring of what a user would notice.
 | Env vars / secrets | ✅ | ✅ injected, rebuild on change | none |
 | Package caching | ✅ | ✅ named cache volume | none |
 | Deployment of user apps | ✅ | ❌ | the largest gap — see §8.1 |
-| Warm resume / snapshots | ✅ | ❌ | container is removed when idle; see §8.2 |
+| Warm resume / snapshots | ✅ | ◐ | installs are skipped when unchanged; the dev server still reboots — §8.2 |
 | Persistent data for user apps | ✅ | ❌ | no DB or KV a project can reach; see §8.3 |
 | Package management UI | ✅ | ❌ | terminal only; see §8.4 |
 | Fork / public projects | ✅ | ❌ | no visibility model; see §8.5 |
@@ -473,24 +473,32 @@ capability §2 still scores ❌.
   origin at a generated subdomain. That covers the Vite, Next-export and
   Static-HTML templates without needing any always-on compute.
 
-### 8.2 Warm containers / snapshots
+### 8.2 Warm containers / snapshots — partly done
 
-CodeSandbox's headline feature is a memory snapshot: a VM resumes in about a
-second with its processes still running. Replit persists the filesystem,
-`node_modules` included.
+_Corrected 2026-08-26. The first version of this entry said the reaper removes
+an idle container and the next open therefore re-runs `npm install`. Half of
+that was wrong: `startIdleReaper` calls `stop`, not `remove`, and
+`startContainer` has always reused a stopped container. `node_modules` lives in
+the bind mount and outlives the container altogether. The waiting was real; the
+explanation was not._
 
-Here the reaper removes the container after twenty idle minutes and the next
-open re-runs the template's start command — which begins with `npm install`.
-Coming back to a Next.js project therefore costs a minute of waiting, every
-time, and `AUTO_START_ON_OPEN` means the user is charged that delay simply for
-looking at a file.
+What actually cost the time: every template's start command begins with its
+install step, so opening a project re-ran a full dependency resolution against
+dependencies that were already installed — and with `AUTO_START_ON_OPEN` on,
+that was the price of merely looking at a project.
 
-- **Blocked on:** nothing conceptual — the named package-cache volume already
-  exists. The decision is how much disk a stopped-but-restorable project may
-  hold, and whether to stop containers rather than remove them (`docker stop`
-  keeps the writable layer; the current `force-remove` does not).
-- **Worth noting:** this is probably the highest ratio of felt improvement to
-  work on the whole list.
+**Done:** `containers/warmStart.ts` fingerprints the manifests and lockfiles,
+stamps the fingerprint inside the container once a run reaches `running`, and
+skips the install half of the start command when the two match and the
+artefacts are still present. Every uncertainty resolves towards installing; a
+command that cannot be split with certainty — including any run command a user
+wrote — runs whole. `runs_install_skipped` counts the skips.
+
+**Still open,** and this is the part that is genuinely CodeSandbox's feature:
+the dev server process itself still dies with the container and has to boot
+again. A memory snapshot that resumes a running process is a different
+mechanism from anything here, and needs a decision about how much disk a
+suspended project may hold.
 
 ### 8.3 Persistent data for user apps
 
@@ -549,7 +557,8 @@ is what makes a template gallery or a shared tutorial link work at all.
 By leverage, and by how little each depends on a decision that has not been
 made yet:
 
-1. **8.4 packages** — self-contained, needs no new infrastructure, felt daily.
-2. **8.2 warm containers** — largest felt speed-up, and the plumbing exists.
+1. ~~**8.4 packages**~~ — done.
+2. ~~**8.2 warm containers**~~ — done as far as the install step goes; process
+   snapshots remain.
 3. **8.1 static deployments** — the smallest version of the biggest gap.
 4. **8.3 persistent data**, then **8.5 fork** — both need a design round first.
