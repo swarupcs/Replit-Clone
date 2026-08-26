@@ -6,6 +6,7 @@ import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { aiStatusController } from "../../controllers/aiController.js";
 import authRouter from "./auth.js";
 import projectRouter from "./projects.js";
+import githubRouter from "./github.js";
 
 const router = express.Router();
 
@@ -22,5 +23,6 @@ router.get("/ai/status", requireAuth, asyncHandler(aiStatusController));
 
 router.use("/auth", authRouter);
 router.use("/projects", projectRouter);
+router.use("/github", githubRouter);
 
 export default router;

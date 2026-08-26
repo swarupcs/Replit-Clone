@@ -145,3 +145,32 @@ export type GitCommitResponse = ApiSuccess<{
   status: GitStatus;
   commits: GitCommit[];
 }>;
+
+// --- GitHub ---------------------------------------------------------------
+
+/** What the app is told about the caller's GitHub authorisation.
+ *
+ *  Never the token. This is the description of a connection, not the
+ *  credential: the token is spent server-side and does not reach a browser.
+ */
+export interface GithubConnectionInfo {
+  login: string;
+  scopes: string[];
+  connectedAt: string;
+  /** Whether GitHub actually granted `repo`. An organisation can withhold it,
+   *  and the app should say which operation is unavailable and why rather than
+   *  failing later at an API call. */
+  canUseRepos: boolean;
+}
+
+/** GET /api/v1/github/status
+ *
+ *  `configured` and `connection` answer different questions: whether this
+ *  deployment offers the feature at all, and whether this user has said yes. */
+export type GithubStatusResponse = ApiSuccess<{
+  configured: boolean;
+  connection: GithubConnectionInfo | null;
+}>;
+
+/** POST /api/v1/github/connect — where to send the browser to authorise. */
+export type GithubConnectResponse = ApiSuccess<{ url: string }>;

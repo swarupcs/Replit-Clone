@@ -23,6 +23,7 @@ import {
   PlusOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
+import { VscGithub } from "react-icons/vsc";
 import type { Project } from "@replit-clone/shared";
 import {
   createProjectApi,
@@ -35,6 +36,7 @@ import {
 } from "../apis/projects.ts";
 import { useAuth } from "../hooks/useAuth.ts";
 import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx";
+import { GithubConnectionCard } from "../components/organisms/GithubConnectionCard/GithubConnectionCard.tsx";
 
 /** Relative time for the card footer -- "3 days ago" reads better than a date
  *  when you're scanning a list of things you made recently. */
@@ -106,6 +108,7 @@ export const Dashboard = () => {
   const [renaming, setRenaming] = useState<Project | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleting, setDeleting] = useState<Project | null>(null);
+  const [githubOpen, setGithubOpen] = useState(false);
   const [sharing, setSharing] = useState<Project | null>(null);
 
   const { data: projects, isLoading } = useQuery({
@@ -201,6 +204,12 @@ export const Dashboard = () => {
           >
             {user?.email}
           </Typography.Text>
+          <Button
+            icon={<VscGithub />}
+            onClick={() => setGithubOpen(true)}
+          >
+            GitHub
+          </Button>
           <Button onClick={() => void logout()}>Sign out</Button>
         </div>
       </header>
@@ -443,6 +452,11 @@ export const Dashboard = () => {
           </div>
         )}
       </main>
+
+      <GithubConnectionCard
+        open={githubOpen}
+        onClose={() => setGithubOpen(false)}
+      />
 
       {sharing && (
         <ShareDialog
