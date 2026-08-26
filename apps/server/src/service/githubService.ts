@@ -269,3 +269,116 @@ export async function githubToken(userId: string): Promise<string> {
 export async function disconnectGithub(userId: string): Promise<void> {
   await prisma.githubConnection.deleteMany({ where: { userId } });
 }
+
+/** A repository, reduced to what a picker needs.
+ *
+ *  GitHub's own object is about a hundred fields; passing it through would put
+ *  a great deal of somebody's account into a response for no reason.
+ */
+export interface GithubRepo {
+  id: number;
+  /** "owner/name", which is how people refer to one. */
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  description: string | null;
+  defaultBranch: string;
+  /** Kilobytes, as GitHub reports it. Used to refuse an import that cannot fit
+   *  before it is attempted rather than after. */
+  sizeKb: number;
+  language: string | null;
+  pushedAt: string | null;
+}
+
+interface RawRepo {
+  id: number;
+  full_name: string;
+  name: string;
+  owner: { login: string };
+  private: boolean;
+  description: string | null;
+  default_branch: string;
+  size: number;
+  language: string | null;
+  pushed_at: string | null;
+}
+
+function toRepo(raw: RawRepo): GithubRepo {
+  return {
+    id: raw.id,
+    fullName: raw.full_name,
+    owner: raw.owner.login,
+    name: raw.name,
+    private: raw.private,
+    description: raw.description,
+    defaultBranch: raw.default_branch,
+    sizeKb: raw.size,
+    language: raw.language,
+    pushedAt: raw.pushed_at,
+  };
+}
+
+/** How many repositories one page asks GitHub for. */
+const PAGE_SIZE = 30;
+
+/** The caller's repositories, most recently pushed first.
+ *
+ *  Two different endpoints, because GitHub has no way to search *your* private
+ *  repositories through `/user/repos`, and no way to list them all through the
+ *  search API without a query:
+ *
+ *  - no query: `/user/repos`, which includes every repository the user can push
+ *    to, private ones included, ordered by push date.
+ *  - a query: the search API, scoped to the user with `user:@me`, which is the
+ *    only thing that filters server-side. Filtering a page client-side would
+ *    search the thirty repositories that happened to load, which looks like
+ *    search and is not.
+ */
+export async function listRepos(
+  userId: string,
+  { query, page = 1 }: { query?: string; page?: number } = {},
+): Promise<{ repos: GithubRepo[]; hasMore: boolean }> {
+  const token = await githubToken(userId);
+  const trimmed = query?.trim();
+
+  if (trimmed) {
+    const search = new URLSearchParams({
+      q: `${trimmed} user:@me fork:true`,
+      per_page: String(PAGE_SIZE),
+      page: String(page),
+    });
+
+    const { data } = await githubApi<{ items: RawRepo[]; total_count: number }>(
+      token,
+      `/search/repositories?${search.toString()}`,
+    );
+
+    return {
+      repos: data.items.map(toRepo),
+      hasMore: data.total_count > page * PAGE_SIZE,
+    };
+  }
+
+  const params = new URLSearchParams({
+    sort: "pushed",
+    // `affiliation` rather than the default: the default includes repositories
+    // the user can only read, which cannot be pushed to and would be a
+    // frustrating thing to import.
+    affiliation: "owner,collaborator,organization_member",
+    per_page: String(PAGE_SIZE),
+    page: String(page),
+  });
+
+  const { data } = await githubApi<RawRepo[]>(
+    token,
+    `/user/repos?${params.toString()}`,
+  );
+
+  return {
+    // A full page might be the last one; the picker asks for the next and gets
+    // an empty answer, which is cheaper than a count GitHub does not give here.
+    repos: data.map(toRepo),
+    hasMore: data.length === PAGE_SIZE,
+  };
+}

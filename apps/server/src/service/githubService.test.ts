@@ -17,6 +17,7 @@ import {
   githubConnection,
   githubToken,
   isGithubReposConfigured,
+  listRepos,
 } from "./githubService.js";
 import { env } from "../config/env.js";
 import { seal } from "../lib/secretBox.js";
@@ -231,5 +232,96 @@ describe("disconnectGithub", () => {
     expect(prisma.githubConnection.deleteMany).toHaveBeenCalledWith({
       where: { userId: USER },
     });
+  });
+});
+
+
+describe("listRepos", () => {
+  /** GitHub's shape, of which the service keeps a fraction. */
+  function raw(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: 1,
+      full_name: "octocat/hello",
+      name: "hello",
+      owner: { login: "octocat" },
+      private: false,
+      description: "greeting",
+      default_branch: "main",
+      size: 120,
+      language: "TypeScript",
+      pushed_at: "2026-01-02T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    prisma.githubConnection.findUnique.mockResolvedValue(stored());
+  });
+
+  it("keeps only what a picker needs", async () => {
+    // GitHub's own object is about a hundred fields; passing it through would
+    // put a great deal of somebody's account into a response for no reason.
+    respondWith({ status: 200, body: [raw()] });
+
+    const { repos } = await listRepos(USER);
+
+    expect(repos[0]).toEqual({
+      id: 1,
+      fullName: "octocat/hello",
+      owner: "octocat",
+      name: "hello",
+      private: false,
+      description: "greeting",
+      defaultBranch: "main",
+      sizeKb: 120,
+      language: "TypeScript",
+      pushedAt: "2026-01-02T00:00:00Z",
+    });
+  });
+
+  it("asks only for repositories the user can push to", async () => {
+    // The default affiliation includes read-only repositories, which cannot be
+    // pushed to and would be a frustrating thing to import.
+    const calls = respondWith({ status: 200, body: [] });
+
+    await listRepos(USER);
+
+    expect(calls[0]?.url).toContain("affiliation=owner%2Ccollaborator%2Corganization_member");
+    expect(calls[0]?.url).toContain("sort=pushed");
+  });
+
+  it("searches server-side rather than filtering a page", async () => {
+    // Filtering the thirty repositories that happened to load looks like search
+    // and is not.
+    const calls = respondWith({
+      status: 200,
+      body: { items: [raw()], total_count: 1 },
+    });
+
+    await listRepos(USER, { query: "hello" });
+
+    expect(calls[0]?.url).toContain("/search/repositories");
+    expect(decodeURIComponent(calls[0]?.url ?? "")).toContain("user:@me");
+  });
+
+  it("reports more pages from the total when searching", async () => {
+    respondWith({ status: 200, body: { items: [raw()], total_count: 90 } });
+
+    expect((await listRepos(USER, { query: "a" })).hasMore).toBe(true);
+  });
+
+  it("treats a full page as possibly-not-the-last when listing", async () => {
+    // /user/repos gives no count, so a full page means "ask again"; the next
+    // request answering empty is cheaper than a count GitHub does not provide.
+    respondWith({ status: 200, body: Array.from({ length: 30 }, () => raw()) });
+    expect((await listRepos(USER)).hasMore).toBe(true);
+
+    respondWith({ status: 200, body: [raw()] });
+    expect((await listRepos(USER)).hasMore).toBe(false);
+  });
+
+  it("refuses when nothing is connected", async () => {
+    prisma.githubConnection.findUnique.mockResolvedValue(null);
+    await expect(listRepos(USER)).rejects.toThrow(/Connect your GitHub/);
   });
 });

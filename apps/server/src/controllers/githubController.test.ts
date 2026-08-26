@@ -7,6 +7,7 @@ const service = vi.hoisted(() => ({
   disconnectGithub: vi.fn(),
   githubConnection: vi.fn(),
   isGithubReposConfigured: vi.fn(() => true),
+  listRepos: vi.fn(),
 }));
 
 vi.mock("../service/githubService.js", () => service);
@@ -20,6 +21,7 @@ import {
   githubConnectStart,
   githubConnectionStatus,
   githubDisconnect,
+  githubReposController,
 } from "./githubController.js";
 import { apiApp, bearer, TEST_USER } from "../test/apiHarness.js";
 import { requireAuth } from "../middlewares/requireAuth.js";
@@ -47,6 +49,12 @@ const app = apiApp(
       method: "delete",
       path: "/github/connection",
       handler: githubDisconnect,
+      before: [requireAuth],
+    },
+    {
+      method: "get",
+      path: "/github/repos",
+      handler: githubReposController,
       before: [requireAuth],
     },
   ],
@@ -83,6 +91,7 @@ beforeEach(() => {
   service.githubConnection.mockResolvedValue(null);
   service.connectGithub.mockResolvedValue(CONNECTION);
   service.disconnectGithub.mockResolvedValue(undefined);
+  service.listRepos.mockResolvedValue({ repos: [], hasMore: false });
 });
 
 describe("GET /github/status", () => {
@@ -234,6 +243,42 @@ describe("DELETE /github/connection", () => {
 
   it("needs a session", async () => {
     const response = await request(app).delete("/github/connection");
+    expect(response.status).toBe(401);
+  });
+});
+
+
+describe("GET /github/repos", () => {
+  it("passes the query and page through", async () => {
+    await request(app)
+      .get("/github/repos?query=hello&page=3")
+      .set("Authorization", bearer());
+
+    expect(service.listRepos).toHaveBeenCalledWith(TEST_USER.sub, {
+      query: "hello",
+      page: 3,
+    });
+  });
+
+  it("defaults to the first page, with no query", async () => {
+    await request(app).get("/github/repos").set("Authorization", bearer());
+
+    expect(service.listRepos).toHaveBeenCalledWith(TEST_USER.sub, { page: 1 });
+  });
+
+  it("caps the page, which is forwarded to GitHub", async () => {
+    // Unbounded, it is a way to make this server issue arbitrarily many
+    // requests on somebody's behalf.
+    const response = await request(app)
+      .get("/github/repos?page=100000")
+      .set("Authorization", bearer());
+
+    expect(response.status).toBe(400);
+    expect(service.listRepos).not.toHaveBeenCalled();
+  });
+
+  it("needs a session", async () => {
+    const response = await request(app).get("/github/repos");
     expect(response.status).toBe(401);
   });
 });

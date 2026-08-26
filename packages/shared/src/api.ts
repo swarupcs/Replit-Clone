@@ -174,3 +174,26 @@ export type GithubStatusResponse = ApiSuccess<{
 
 /** POST /api/v1/github/connect — where to send the browser to authorise. */
 export type GithubConnectResponse = ApiSuccess<{ url: string }>;
+
+/** One of the caller's GitHub repositories, reduced to what a picker needs. */
+export interface GithubRepo {
+  id: number;
+  /** "owner/name", which is how people refer to one. */
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  description: string | null;
+  defaultBranch: string;
+  /** Kilobytes, as GitHub reports it — enough to refuse an import that cannot
+   *  fit before it is attempted. */
+  sizeKb: number;
+  language: string | null;
+  pushedAt: string | null;
+}
+
+/** GET /api/v1/github/repos?query=&page= */
+export type GithubReposResponse = ApiSuccess<{
+  repos: GithubRepo[];
+  hasMore: boolean;
+}>;

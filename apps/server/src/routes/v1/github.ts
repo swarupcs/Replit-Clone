@@ -6,6 +6,7 @@ import {
   githubConnectStart,
   githubConnectionStatus,
   githubDisconnect,
+  githubReposController,
 } from "../../controllers/githubController.js";
 
 const router = express.Router();
@@ -20,5 +21,7 @@ router.post("/connect", requireAuth, asyncHandler(githubConnectStart));
 router.get("/callback", asyncHandler(githubConnectCallback));
 
 router.delete("/connection", requireAuth, asyncHandler(githubDisconnect));
+
+router.get("/repos", requireAuth, asyncHandler(githubReposController));
 
 export default router;

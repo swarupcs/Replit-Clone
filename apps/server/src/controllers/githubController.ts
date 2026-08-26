@@ -10,7 +10,9 @@ import {
   disconnectGithub,
   githubConnection,
   isGithubReposConfigured,
+  listRepos,
 } from "../service/githubService.js";
+import { z } from "zod";
 import { BadRequestError, UnauthorizedError } from "../utils/errors.js";
 
 /** The connect round trip is a browser redirect, not an API call, so the
@@ -160,4 +162,31 @@ export async function githubDisconnect(
   logger.info("github disconnected", { userId });
 
   res.json({ success: true, message: "GitHub disconnected", data: null });
+}
+
+
+/** Page and query, validated rather than trusted.
+ *
+ *  The page is capped: it is forwarded to GitHub, and an unbounded number is a
+ *  way to make this server issue arbitrarily many requests on someone's behalf.
+ */
+const listQuerySchema = z.object({
+  query: z.string().trim().max(200).optional(),
+  page: z.coerce.number().int().min(1).max(100).default(1),
+});
+
+export async function githubReposController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const { userId } = getAuthContext(req);
+  const { query, page } = listQuerySchema.parse(req.query);
+
+  const result = await listRepos(userId, { ...(query ? { query } : {}), page });
+
+  res.json({
+    success: true,
+    message: "GitHub repositories",
+    data: result,
+  });
 }
