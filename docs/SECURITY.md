@@ -51,6 +51,50 @@ in the server joins a client string onto a host path.
   (`service/searchService.ts`).
 - Replacements (search & replace) run under the same worker deadline with caps
   on files rewritten and bytes added.
+- A git argument that a user chose — a branch, a remote, a path — is checked
+  before it is passed, because argv arrays stop a shell but not git's own
+  option parsing. A leading dash is rejected everywhere (`--upload-pack=` is an
+  argument, not a filename), branch names go through git's own
+  `check-ref-format`, and the `--` separator is placed where git reads it as
+  "no pathspecs follow" rather than "what follows is a path".
+
+## Git remotes: a credential only ever reaches its owner's own container
+
+Listing remotes, adding and removing one, fetching and pulling need no
+credential at all, and are open to any editor.
+
+**Pushing does**, and a credential is only ever as private as the container it
+is spent in. Every collaborator on a project works in the **same container**,
+so anything given to git inside a shared one — in the environment, in a URL, in
+a credential helper, or on a command line — is readable by whatever code anyone
+with access runs there. Handing a push token to a shared container would be a
+way for a collaborator to walk off with the owner's account.
+
+So pushing from the editor is allowed on exactly one condition: the project has
+no collaborators **and** no outstanding share link, which makes the container
+the owner's alone. Anything else is refused, and the refusal says where pushing
+still works — the project's own terminal, where the secret is typed into the
+user's own session and never passes through this server. An unredeemed link
+counts as sharing: it is an invitation that can be accepted while a push is in
+flight (`isSoleOccupant`, `controllers/gitController.ts`).
+
+The token itself is never written down: not to the database, not to the
+repository's config, not to a credential store, and not into a remote's URL. It
+is supplied for one call, travels to git in the **exec's environment rather
+than its arguments** — process arguments are world-readable through `/proc`,
+a process's environment is not — and is redacted from anything git says on the
+way back (`pushRemote`, `redactToken`, `service/gitService.ts`).
+
+Pushing is also the owner's alone at the access-control layer, not merely by
+the sharing check: it spends the owner's credential, so an editor cannot ask
+for it.
+
+Remote URLs are checked against an allow-list of transports rather than a
+deny-list, because `ext::` runs the rest of the string as a **command** —
+`git remote add x "ext::sh -c ..."` is remote code execution the moment
+anything fetches. `file://` is refused too: it would reach whatever the server
+can see rather than anything on the network
+(`isUsableRemoteUrl`, `service/gitService.ts`).
 
 ## Identity: short-lived tokens, checked per action
 

@@ -1,5 +1,11 @@
 import type {
   ApiSuccess,
+  GitBranch,
+  GitRemote,
+  GitRemoteResponse,
+  GitRemotesResponse,
+  GitBranchResponse,
+  GitBranchesResponse,
   GitCommit,
   GitCommitResponse,
   GitDiffResponse,
@@ -283,6 +289,124 @@ export const getGitLogApi = async (
   const response = await axios.get<GitLogResponse>(
     `/api/v1/projects/${projectId}/git/log`,
     { params: { limit } },
+  );
+  return response.data.data;
+};
+
+export const getGitBranchesApi = async (
+  projectId: string,
+): Promise<GitBranch[]> => {
+  const response = await axios.get<GitBranchesResponse>(
+    `/api/v1/projects/${projectId}/git/branches`,
+  );
+  return response.data.data;
+};
+
+/** Switches to `name`, or creates it at HEAD when `create` is set. Answers with
+ *  both the new status and the new branch list, so the panel redraws from one
+ *  round trip. */
+export const gitBranchApi = async (
+  projectId: string,
+  name: string,
+  create = false,
+): Promise<{ status: GitStatus; branches: GitBranch[] }> => {
+  const response = await axios.post<GitBranchResponse>(
+    `/api/v1/projects/${projectId}/git/branch`,
+    { name, create },
+  );
+  return response.data.data;
+};
+
+/** Throws away local changes to these paths. Destructive and not undoable —
+ *  the caller confirms first. */
+export const gitDiscardApi = async (
+  projectId: string,
+  paths: string[],
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/discard`,
+    { paths },
+  );
+  return response.data.data;
+};
+
+/** Stages, or unstages, individual hunks of one file.
+ *
+ *  Hunks are named by INDEX into the diff the server just produced, never by
+ *  patch text — the server rebuilds the patch from its own diff, so a client
+ *  cannot stage something nobody chose. */
+export const gitHunksApi = async (
+  projectId: string,
+  path: string,
+  indexes: number[],
+  reverse = false,
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/hunks`,
+    { path, indexes, reverse },
+  );
+  return response.data.data;
+};
+
+export const getGitRemotesApi = async (
+  projectId: string,
+): Promise<GitRemote[]> => {
+  const response = await axios.get<GitRemotesResponse>(
+    `/api/v1/projects/${projectId}/git/remotes`,
+  );
+  return response.data.data;
+};
+
+/** Adds a remote, or removes it when `remove` is set. */
+export const gitRemoteApi = async (
+  projectId: string,
+  name: string,
+  url?: string,
+  remove = false,
+): Promise<GitRemote[]> => {
+  const response = await axios.post<GitRemoteResponse>(
+    `/api/v1/projects/${projectId}/git/remote`,
+    { name, url, remove },
+  );
+  return response.data.data;
+};
+
+export const gitFetchApi = async (
+  projectId: string,
+  name: string,
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/fetch`,
+    { name },
+  );
+  return response.data.data;
+};
+
+export const gitPullApi = async (
+  projectId: string,
+  name: string,
+  branch: string,
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/pull`,
+    { name, branch },
+  );
+  return response.data.data;
+};
+
+/** Pushes a branch, authenticating with a value supplied for this one call.
+ *
+ *  Never stored anywhere on the client: not in a store, not in localStorage,
+ *  not in the URL. It is read from an input, sent, and dropped. */
+export const gitPushApi = async (
+  projectId: string,
+  name: string,
+  branch: string,
+  token: string,
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/push`,
+    { name, branch, token },
   );
   return response.data.data;
 };

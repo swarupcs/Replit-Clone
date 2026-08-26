@@ -33,3 +33,16 @@ class MemoryStorage implements Storage {
 }
 
 globalThis.localStorage = new MemoryStorage();
+
+/** jsdom implements no layout, so it ships no `scrollIntoView` at all.
+ *
+ *  Any list that keeps its highlighted row in view -- QuickOpen, the command
+ *  palette -- calls it from an effect on every render, which throws before a
+ *  test can assert anything. A no-op is the honest stand-in: there is no
+ *  viewport to scroll, and nothing under test depends on having scrolled.
+ */
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function scrollIntoView() {
+    // Nothing to do without layout.
+  };
+}

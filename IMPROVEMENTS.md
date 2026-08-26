@@ -60,36 +60,76 @@ redirecting every relative URL to an attacker's host, and plugin-embed
 payloads. The dev server's own CSP/X-Frame-Options are dropped as before.
 - **Where:** `apps/server/src/routes/preview.ts`.
 
-### 6. Git panel upgrades
-Currently commit/status only. Add a diff view, branch visualization, and
-staging individual hunks.
+### 6. Git panel upgrades ✅ (mostly done)
+Done: a **diff view** — clicking a changed file expands its patch in place,
+add/delete coloured with both files' line numbers; the server had computed
+these all along and nothing ever asked for them. And **branches** — list,
+create and switch, with a switch refused unless the worktree is clean and the
+project's shared documents dropped afterwards so none writes the old branch's
+text back. Failures now report git's own message rather than the status code.
+
+Still open: staging individual **hunks**, which needs a patch editor to be
+worth anything, and **remotes** (push/pull/clone), which needs a design for
+storing credentials reachable from a container running untrusted code.
 - **Where:** `apps/web/src/components/organisms/SourceControlPanel/`,
   `apps/server/src/service/gitService.ts`.
 
-### 7. Terminal UX
-Persistent scrollback across reconnects, split terminals, restart-shell button.
-- **Where:** `apps/web/src/components/molecules/BrowserTerminal/`,
-  `apps/server/src/terminal/terminalGateway.ts`.
+### 7. Terminal UX ✅ (mostly done, before this entry was written)
+This item was stale on arrival. Multiple terminals shipped with the split-pane
+work: `BottomPanel` runs a tab per shell, each with its own socket and PTY, and
+panes are hidden rather than unmounted so switching tabs cannot kill a shell.
+The gateway already gave every terminal its own id so two on one project are
+watched and released separately. `BrowserTerminal` keeps 5000 lines of
+scrollback and reconnects on its own with backoff, which is what the
+"restart-shell button" was for.
+
+What is genuinely left: scrollback that survives a *reload* (it survives a
+reconnect today), and side-by-side terminals rather than tabbed ones.
+- **Where:** `apps/web/src/components/organisms/BottomPanel/`,
+  `apps/web/src/components/molecules/BrowserTerminal/`.
 
 ## Low — nice to have
 
-### 8. Per-app READMEs
-`apps/web` and `apps/server` READMEs pointing at `CONTRIBUTING.md` and
-`docs/SECURITY.md`.
+### 8. Per-app READMEs ✅ (done)
+Done: `apps/server/README.md` and `apps/web/README.md` — layout, the handful of
+conventions worth knowing before changing anything, how to run each suite, and
+pointers to `CONTRIBUTING.md` and `docs/SECURITY.md`.
 
-### 9. E2E coverage for the new flows
-Specs for "save → preview reloads" and "EDITOR share-link redemption" would pin
-down the two newest features the way `playground-flow.spec.ts` pins the basics.
+### 9. E2E coverage for the new flows ✅ (done)
+Done: **EDITOR share-link redemption** (`e2e/share-link.spec.ts`) — the owner
+makes an edit link, a second account opens it in the browser, and the grant is
+checked from both sides: the guest can read the tree, is still refused a rename
+(an edit link is not a handover), and the owner sees them listed as an EDITOR.
+
+Getting it to run at all meant splitting the suite's gate. It skipped
+everything unless Docker was up, but this flow starts no container — only the
+ones that run a project need a daemon. `global-setup` now decides both
+separately, so the credential-free half runs on a machine without Docker.
+
+Also done: **save → preview reloads** (`e2e/preview-reload.spec.ts`). The
+existing flow saves once *before* the dev server is up, so the preview is
+correct because it was never wrong. This is the other half — a second save with
+the dev server running and the preview already on screen, and nothing touched
+afterwards. It carries a different marker per save, so a preview still showing
+the first version cannot be mistaken for one that reloaded.
+
+Checked with a negative control rather than assumed: with the `previewChanged`
+announcement disabled the spec fails, and with it restored it passes.
 - **Where:** `apps/web/e2e/`.
 
-### 10. Boot-time sweep for orphaned containers
-`removeContainer` now stops before removing, but a sweep for `rc-project-*`
-containers with no DB row would clean future strays automatically.
-- **Where:** `apps/server/src/containers/containerManager.ts`
-  (`reconcileOnBoot` is the natural hook).
+### 10. Boot-time sweep for orphaned containers ✅ (done)
+Done: `reconcileOnBoot` in `containers/containerManager.ts` lists every
+`rc-project-*` container against the project ids in the database and
+force-removes the ones no row claims. Project *directories* with no row are
+reported rather than deleted — a row missing at boot more likely means the
+database is not the one this server used last than that the user's files are
+garbage, and deleting them would be unrecoverable.
 
 ---
 
 ## Recommended order
 
-Items 1–5 are done. Next: 6 — close the biggest visible feature gap.
+Items 1–5 and 7–10 are done. 6 is done bar a push button it should not have
+(see `docs/SECURITY.md`).
+
+`docs/REPLIT_CLONE_PLAN.md` supersedes this list and sequences what is left.

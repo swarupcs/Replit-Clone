@@ -87,6 +87,18 @@ export interface GitStatus {
   changes: GitChange[];
 }
 
+export interface GitBranch {
+  name: string;
+  /** True for the branch HEAD is on. */
+  current: boolean;
+}
+
+export interface GitRemote {
+  name: string;
+  /** The fetch URL. Push URLs are not modelled: nothing here can set one. */
+  url: string;
+}
+
 export interface GitCommit {
   hash: string;
   shortHash: string;
@@ -100,6 +112,26 @@ export type GitStatusResponse = ApiSuccess<GitStatus>;
 
 /** GET /api/v1/projects/:projectId/git/log */
 export type GitLogResponse = ApiSuccess<GitCommit[]>;
+
+/** GET /api/v1/projects/:projectId/git/branches */
+export type GitBranchesResponse = ApiSuccess<GitBranch[]>;
+
+/** POST /api/v1/projects/:projectId/git/branch — create, or switch to, a
+ *  branch. Both answer with the resulting status so the panel can redraw from
+ *  one round trip. */
+export type GitBranchResponse = ApiSuccess<{
+  status: GitStatus;
+  branches: GitBranch[];
+}>;
+
+/** GET /api/v1/projects/:projectId/git/remotes */
+export type GitRemotesResponse = ApiSuccess<GitRemote[]>;
+
+/** POST /api/v1/projects/:projectId/git/remote — add or remove one. */
+export type GitRemoteResponse = ApiSuccess<GitRemote[]>;
+
+/** POST /api/v1/projects/:projectId/git/pull — and /git/fetch. */
+export type GitPullResponse = ApiSuccess<GitStatus>;
 
 /** GET /api/v1/projects/:projectId/git/diff */
 export type GitDiffResponse = ApiSuccess<{

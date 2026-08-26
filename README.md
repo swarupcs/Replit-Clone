@@ -97,7 +97,7 @@ revocable sessions, and per-user quotas on projects, disk and containers.
 ```bash
 pnpm typecheck     # all three packages
 pnpm lint
-pnpm test          # 291 tests
+pnpm test          # 1056 tests
 pnpm build
 ```
 
@@ -106,6 +106,13 @@ throwaway Postgres with the migrations applied. CI always sets it:
 
 ```bash
 TEST_DATABASE_URL="postgresql://..." pnpm test
+```
+
+The Playwright end-to-end flow runs separately, against a stack you have
+already started with `pnpm dev`, and skips cleanly when it is not up:
+
+```bash
+pnpm --filter web e2e
 ```
 
 ## How it works

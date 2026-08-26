@@ -31,7 +31,16 @@ import {
   uploadFilesController,
 } from "../../controllers/fileTransferController.js";
 import {
+  gitBranchController,
+  gitBranchesController,
   gitCommitController,
+  gitDiscardController,
+  gitFetchController,
+  gitHunksController,
+  gitPullController,
+  gitPushController,
+  gitRemoteController,
+  gitRemotesController,
   gitDiffController,
   gitInitController,
   gitLogController,
@@ -77,9 +86,18 @@ router.get("/:projectId/ports", asyncHandler(getProjectPorts));
 router.get("/:projectId/git/status", asyncHandler(gitStatusController));
 router.get("/:projectId/git/diff", asyncHandler(gitDiffController));
 router.get("/:projectId/git/log", asyncHandler(gitLogController));
+router.get("/:projectId/git/branches", asyncHandler(gitBranchesController));
+router.post("/:projectId/git/branch", asyncHandler(gitBranchController));
 router.post("/:projectId/git/init", asyncHandler(gitInitController));
 router.post("/:projectId/git/stage", asyncHandler(gitStageController));
 router.post("/:projectId/git/unstage", asyncHandler(gitUnstageController));
+router.post("/:projectId/git/discard", asyncHandler(gitDiscardController));
+router.post("/:projectId/git/hunks", asyncHandler(gitHunksController));
+router.get("/:projectId/git/remotes", asyncHandler(gitRemotesController));
+router.post("/:projectId/git/remote", asyncHandler(gitRemoteController));
+router.post("/:projectId/git/fetch", asyncHandler(gitFetchController));
+router.post("/:projectId/git/pull", asyncHandler(gitPullController));
+router.post("/:projectId/git/push", asyncHandler(gitPushController));
 router.post("/:projectId/git/commit", asyncHandler(gitCommitController));
 router.patch("/:projectId", asyncHandler(renameProjectController));
 router.post("/:projectId/duplicate", createLimiter, asyncHandler(duplicateProjectController));

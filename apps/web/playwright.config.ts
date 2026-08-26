@@ -26,6 +26,13 @@ export default defineConfig({
     actionTimeout: 20_000,
     navigationTimeout: 30_000,
     trace: "retain-on-failure",
+    // Use a browser that is already on the machine instead of one Playwright
+    // downloads into its own cache. Needed wherever the image ships Chromium
+    // and forbids the download (most CI sandboxes), where Playwright otherwise
+    // fails with "Executable doesn't exist" and no test runs at all.
+    ...(process.env["E2E_CHROMIUM"]
+      ? { launchOptions: { executablePath: process.env["E2E_CHROMIUM"] } }
+      : {}),
   },
   outputDir: "./e2e/.artifacts",
   globalSetup: "./e2e/global-setup.ts",

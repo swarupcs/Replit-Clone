@@ -9,7 +9,13 @@ import { expect, test } from "@playwright/test";
  *  container filesystem → dev server → preview proxy → browser.
  */
 
-test.skip(() => process.env["E2E_SKIP"] === "1", "dev stack is not running");
+// This flow runs a real project in a real container, so it needs a daemon.
+test.skip(
+  () =>
+    process.env["E2E_SKIP"] === "1" ||
+    process.env["E2E_SKIP_CONTAINERS"] === "1",
+  "dev stack is not running, or has no Docker daemon",
+);
 
 /** A unique marker per run, so a stale preview can never pass the test. */
 const MARKER = `e2e-${Date.now()}-was-here`;

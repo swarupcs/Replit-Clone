@@ -36,11 +36,18 @@ const STREAM_STDERR = 2;
  *
  *  `argv` is passed as an array, so it is exec'd directly rather than through a
  *  shell: a branch named `;rm -rf /` is then an argument, not a command.
+ *
+ *  `env` exists for values that must NOT appear in `argv`. Process arguments
+ *  are world-readable through /proc, so anything secret handed over that way is
+ *  readable by every process in the container; the environment of a process is
+ *  readable only by its own uid. It is the difference between a push token
+ *  being visible to anything running in the sandbox and being visible to the
+ *  user it belongs to. Never log this.
  */
 export async function execCapture(
   container: Container,
   argv: string[],
-  options: { workingDir?: string } = {},
+  options: { workingDir?: string; env?: Record<string, string> } = {},
 ): Promise<ExecResult> {
   const exec = await container.exec({
     Cmd: argv,
@@ -48,6 +55,9 @@ export async function execCapture(
     AttachStderr: true,
     Tty: false,
     WorkingDir: options.workingDir ?? "/home/sandbox/app",
+    ...(options.env
+      ? { Env: Object.entries(options.env).map(([key, value]) => `${key}=${value}`) }
+      : {}),
   });
 
   const stream = await exec.start({ hijack: true, stdin: false });

@@ -7,7 +7,12 @@ import {
   shouldPollForChanges,
 } from "./fileWatching.js";
 
-dotenv.config();
+// Not under test. `setupEnv.ts` puts a complete, deliberate environment in
+// place before this module loads, and dotenv fills only what is UNSET -- so a
+// developer's own `.env` used to leak straight into the suite. Setting
+// AUTO_START_ON_OPEN=false, which the example file recommends for a small VM,
+// failed six auto-start tests on their machine and nowhere else.
+if (process.env["NODE_ENV"] !== "test") dotenv.config();
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),

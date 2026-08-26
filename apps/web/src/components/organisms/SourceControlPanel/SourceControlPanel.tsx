@@ -1,20 +1,46 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Empty, Input, Spin, Tooltip, message } from "antd";
+import {
+  Button,
+  Dropdown,
+  Empty,
+  Input,
+  Modal,
+  Spin,
+  Tooltip,
+  message,
+} from "antd";
 import {
   VscAdd,
   VscCheck,
   VscHistory,
   VscRefresh,
+  VscCloud,
+  VscDiscard,
   VscRemove,
   VscSourceControl,
 } from "react-icons/vsc";
-import type { GitChange, GitCommit, GitStatus } from "@replit-clone/shared";
+import type {
+  GitBranch,
+  GitRemote,
+  GitChange,
+  GitCommit,
+  GitStatus,
+} from "@replit-clone/shared";
 import { fileExtension } from "@replit-clone/shared";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
+import { DiffView } from "./DiffView.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import {
+  getGitBranchesApi,
   getGitLogApi,
   getGitStatusApi,
+  gitBranchApi,
+  gitDiscardApi,
+  gitFetchApi,
+  gitHunksApi,
+  gitPullApi,
+  gitPushApi,
+  getGitRemotesApi,
   gitCommitApi,
   gitInitApi,
   gitStageApi,
@@ -35,20 +61,50 @@ interface Props {
   projectId: string;
   /** False for a viewer, who may read history but not change the repository. */
   canWrite: boolean;
+  /** Pushing spends the owner's own credential, so only they are offered it. */
+  isOwner: boolean;
 }
 
 /** Source control for the project's own repository.
  *
+ *  Clicking a changed file expands its diff in place; the row's icon still
+ *  opens the file for editing.
+ *
  *  Staging is per file rather than per hunk. Hunk-level staging needs a patch
  *  editor to be worth anything, and half of one is worse than none.
  */
-export function SourceControlPanel({ projectId, canWrite }: Props) {
+export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [commits, setCommits] = useState<GitCommit[]>([]);
   const [messageText, setMessageText] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+
+  /** Which row's diff is open, as `"s"|"u":path` -- the same key the rows use,
+   *  so the staged and unstaged entries for one file expand independently. */
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const [branches, setBranches] = useState<GitBranch[]>([]);
+  /** Non-null while the "new branch" dialog is open, holding the typed name. */
+  const [newBranch, setNewBranch] = useState<string | null>(null);
+
+  /** The change awaiting a discard confirmation. Held rather than acted on,
+   *  because discarding is not undoable. */
+  const [discarding, setDiscarding] = useState<GitChange | null>(null);
+
+  /** Bumped after a hunk moves, so the open diff re-fetches: its props have
+   *  not changed but the patch it is showing has. */
+  const [hunkNonce, setHunkNonce] = useState(0);
+
+  const [remotes, setRemotes] = useState<GitRemote[]>([]);
+
+  /** The remote a push is being set up for, and the token typed for it.
+   *
+   *  Held in component state for the length of the dialog and cleared the
+   *  moment it closes -- never put in a store, localStorage or a URL. */
+  const [pushingTo, setPushingTo] = useState<string | null>(null);
+  const [pushToken, setPushToken] = useState("");
 
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
@@ -58,7 +114,11 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
       try {
         const next = await getGitStatusApi(projectId);
         setStatus(next);
-        if (next.isRepo) setCommits(await getGitLogApi(projectId, 20));
+        if (next.isRepo) {
+          setCommits(await getGitLogApi(projectId, 20));
+          setBranches(await getGitBranchesApi(projectId));
+          setRemotes(await getGitRemotesApi(projectId));
+        }
       } catch {
         // A project whose container will not start should not spam the panel;
         // the empty state below already says the repository is unavailable.
@@ -94,17 +154,126 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
     };
   }, [status]);
 
+  /** The server's own message, when it sent one.
+   *
+   *  Axios turns a 400 into "Request failed with status code 400", which tells
+   *  the user nothing -- and git's refusals are the cases where the reason IS
+   *  the useful part ("commit or discard your changes before switching
+   *  branch"). The API always answers a failure with `{ message }`.
+   */
+  const reasonFrom = (error: unknown, fallback: string): string => {
+    const body = (error as { response?: { data?: { message?: unknown } } })
+      .response?.data;
+
+    if (typeof body?.message === "string" && body.message) return body.message;
+    return error instanceof Error && error.message ? error.message : fallback;
+  };
+
   const act = async (work: () => Promise<GitStatus>, failure: string) => {
     setBusy(true);
     try {
       setStatus(await work());
     } catch (error) {
-      const detail =
-        error instanceof Error && error.message ? error.message : failure;
-      void message.error(detail);
+      void message.error(reasonFrom(error, failure));
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Switches to a branch, or creates one at HEAD.
+   *
+   *  Separate from `act` because this answers with the branch list as well as
+   *  the status, and both have to land together or the picker shows the old
+   *  branch as current.
+   */
+  const changeBranch = async (name: string, create: boolean) => {
+    setBusy(true);
+    try {
+      const result = await gitBranchApi(projectId, name, create);
+      setStatus(result.status);
+      setBranches(result.branches);
+      setNewBranch(null);
+      // Switching rewrote the worktree, so the history belongs to the new
+      // branch now.
+      setCommits(await getGitLogApi(projectId, 20));
+    } catch (error) {
+      void message.error(
+        reasonFrom(error, create ? "Could not create the branch" : "Could not switch branch"),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Stages one hunk, or unstages it when it is a staged row's diff. */
+  const moveHunk = async (relPath: string, index: number, isStaged: boolean) => {
+    setBusy(true);
+    try {
+      setStatus(await gitHunksApi(projectId, relPath, [index], isStaged));
+      setHunkNonce((value) => value + 1);
+    } catch (error) {
+      void message.error(
+        reasonFrom(error, isStaged ? "Could not unstage" : "Could not stage"),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Fetches from, or pulls the current branch off, a remote.
+   *
+   *  There is deliberately no push: a project can be shared, and every
+   *  collaborator's code runs in the SAME container, so a credential this
+   *  server handed to git there would be readable by anyone with edit access.
+   *  Pushing belongs in the terminal, where the secret is the user's own and
+   *  never passes through here.
+   */
+  const withRemote = async (name: string, pull: boolean) => {
+    setBusy(true);
+    try {
+      const branch = status?.branch;
+      if (pull && !branch) {
+        void message.error("Nothing to pull onto — this branch has no commits");
+        return;
+      }
+
+      setStatus(
+        pull
+          ? await gitPullApi(projectId, name, branch ?? "")
+          : await gitFetchApi(projectId, name),
+      );
+      if (pull) setCommits(await getGitLogApi(projectId, 20));
+    } catch (error) {
+      void message.error(
+        reasonFrom(error, pull ? "Could not pull" : "Could not fetch"),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Pushes the current branch, with a token supplied for this one call. */
+  const push = async () => {
+    const name = pushingTo;
+    const branch = status?.branch;
+    if (!name || !branch || !pushToken) return;
+
+    setBusy(true);
+    try {
+      setStatus(await gitPushApi(projectId, name, branch, pushToken));
+      void message.success(`Pushed ${branch} to ${name}.`);
+      closePush();
+    } catch (error) {
+      void message.error(reasonFrom(error, "Could not push"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Clears the token as well as the dialog: it must not survive the close. */
+  const closePush = () => {
+    setPushingTo(null);
+    setPushToken("");
   };
 
   const openFile = (relPath: string) => {
@@ -175,17 +344,33 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
     const state = isStaged ? change.staged : change.unstaged;
     const badge = state ? BADGE[state] : undefined;
     const name = change.path.split("/").pop() ?? change.path;
+    const key = `${isStaged ? "s" : "u"}:${change.path}`;
+    const isOpen = expanded === key;
 
     return (
+      <div key={key}>
       <div
-        key={`${isStaged ? "s" : "u"}:${change.path}`}
         className="rc-tree-row"
+        data-active={isOpen}
         onClick={() => {
-          openFile(change.path);
+          // The row shows the change; opening the file for editing is what the
+          // icon is for. Clicking an open row closes it again.
+          setExpanded(isOpen ? null : key);
         }}
         title={change.from ? `${change.from} → ${change.path}` : change.path}
       >
-        <FileIcon extension={fileExtension(change.path)} name={name} />
+        <span
+          role="button"
+          tabIndex={-1}
+          title={`Open ${name}`}
+          style={{ display: "flex", alignItems: "center" }}
+          onClick={(event) => {
+            event.stopPropagation();
+            openFile(change.path);
+          }}
+        >
+          <FileIcon extension={fileExtension(change.path)} name={name} />
+        </span>
         <span
           style={{
             flex: 1,
@@ -211,6 +396,23 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
             ? change.path.slice(0, change.path.lastIndexOf("/"))
             : ""}
         </span>
+
+        {canWrite && !isStaged && (
+          <Tooltip title="Discard changes">
+            <button
+              type="button"
+              className="rc-icon-button"
+              aria-label={`Discard changes to ${change.path}`}
+              disabled={busy}
+              onClick={(event) => {
+                event.stopPropagation();
+                setDiscarding(change);
+              }}
+            >
+              <VscDiscard size={13} />
+            </button>
+          </Tooltip>
+        )}
 
         {canWrite && (
           <Tooltip title={isStaged ? "Unstage" : "Stage"}>
@@ -250,6 +452,21 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
             {badge.letter}
           </span>
         )}
+      </div>
+
+      {isOpen && (
+        <DiffView
+          projectId={projectId}
+          path={change.path}
+          staged={isStaged}
+          refreshKey={hunkNonce}
+          onHunk={
+            canWrite
+              ? (index) => void moveHunk(change.path, index, isStaged)
+              : undefined
+          }
+        />
+      )}
       </div>
     );
   };
@@ -301,10 +518,84 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
           padding: "6px 8px",
         }}
       >
-        <span style={{ fontSize: 12, opacity: 0.75, flex: 1 }}>
-          {status.branch ?? "HEAD"}
-          {status.unborn ? " · no commits yet" : ""}
-        </span>
+        {canWrite ? (
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: [
+                ...branches
+                  .filter((branch) => !branch.current)
+                  .map((branch) => ({
+                    key: `switch:${branch.name}`,
+                    label: branch.name,
+                    onClick: () => {
+                      void changeBranch(branch.name, false);
+                    },
+                  })),
+                ...(branches.length > 1 ? [{ type: "divider" as const }] : []),
+                {
+                  key: "new",
+                  label: "New branch…",
+                  onClick: () => setNewBranch(""),
+                },
+              ],
+            }}
+          >
+            <button
+              type="button"
+              className="rc-icon-button"
+              style={{ flex: 1, justifyContent: "flex-start", fontSize: 12 }}
+              aria-label="Switch branch"
+              disabled={busy}
+            >
+              {status.branch ?? "HEAD"}
+              {status.unborn ? " · no commits yet" : ""}
+            </button>
+          </Dropdown>
+        ) : (
+          <span style={{ fontSize: 12, opacity: 0.75, flex: 1 }}>
+            {status.branch ?? "HEAD"}
+            {status.unborn ? " · no commits yet" : ""}
+          </span>
+        )}
+        {canWrite && remotes.length > 0 && (
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: remotes.flatMap((remote) => [
+                {
+                  key: `fetch:${remote.name}`,
+                  label: `Fetch from ${remote.name}`,
+                  onClick: () => void withRemote(remote.name, false),
+                },
+                {
+                  key: `pull:${remote.name}`,
+                  label: `Pull from ${remote.name}`,
+                  onClick: () => void withRemote(remote.name, true),
+                },
+                ...(isOwner
+                  ? [
+                      {
+                        key: `push:${remote.name}`,
+                        label: `Push to ${remote.name}…`,
+                        onClick: () => setPushingTo(remote.name),
+                      },
+                    ]
+                  : []),
+              ]),
+            }}
+          >
+            <button
+              type="button"
+              className="rc-icon-button"
+              aria-label="Remotes"
+              disabled={busy}
+            >
+              <VscCloud size={14} />
+            </button>
+          </Dropdown>
+        )}
+
         <Tooltip title="History">
           <button
             type="button"
@@ -434,6 +725,85 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
           </>
         )}
       </div>
+
+      <Modal
+        open={pushingTo !== null}
+        title={`Push ${status?.branch ?? "HEAD"} to ${pushingTo ?? ""}`}
+        okText="Push"
+        okButtonProps={{ disabled: !pushToken.trim() }}
+        confirmLoading={busy}
+        onOk={() => void push()}
+        onCancel={closePush}
+        destroyOnHidden
+      >
+        <Input.Password
+          autoFocus
+          placeholder="Access token"
+          value={pushToken}
+          onChange={(event) => setPushToken(event.target.value)}
+          onPressEnter={() => void push()}
+        />
+        <div style={{ marginTop: 8, fontSize: 12, color: "var(--rc-text-subtle)" }}>
+          Used for this push only — it is not saved here, in the repository, or
+          on the server. Sharing this project disables pushing from the editor,
+          because everyone with access shares its container; push from the
+          terminal instead.
+        </div>
+      </Modal>
+
+      <Modal
+        open={discarding !== null}
+        title="Discard changes?"
+        okText="Discard"
+        okButtonProps={{ danger: true }}
+        confirmLoading={busy}
+        onOk={() => {
+          const path = discarding?.path;
+          if (!path) return;
+          void act(
+            () => gitDiscardApi(projectId, [path]),
+            "Could not discard the changes",
+          ).then(() => setDiscarding(null));
+        }}
+        onCancel={() => setDiscarding(null)}
+        destroyOnHidden
+      >
+        <span style={{ color: "var(--rc-text-muted)" }}>
+          Your changes to <b>{discarding?.path}</b> are thrown away.{" "}
+          {discarding?.unstaged === "untracked"
+            ? "The file is new, so it is deleted."
+            : "The file goes back to the last commit."}{" "}
+          This cannot be undone — the work is in no commit and git keeps no copy.
+        </span>
+      </Modal>
+
+      <Modal
+        open={newBranch !== null}
+        title="New branch"
+        okText="Create"
+        okButtonProps={{ disabled: !newBranch?.trim() }}
+        confirmLoading={busy}
+        onOk={() => {
+          const name = newBranch?.trim();
+          if (name) void changeBranch(name, true);
+        }}
+        onCancel={() => setNewBranch(null)}
+        destroyOnHidden
+      >
+        <Input
+          autoFocus
+          placeholder="feature/what-you-are-doing"
+          value={newBranch ?? ""}
+          onChange={(event) => setNewBranch(event.target.value)}
+          onPressEnter={() => {
+            const name = newBranch?.trim();
+            if (name) void changeBranch(name, true);
+          }}
+        />
+        <div style={{ marginTop: 8, fontSize: 12, color: "var(--rc-text-subtle)" }}>
+          Created at the current commit, and switched to straight away.
+        </div>
+      </Modal>
     </div>
   );
 }
