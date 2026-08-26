@@ -1143,3 +1143,191 @@ body {
   border-radius: 4px;
   white-space: nowrap;
 }
+
+/* --- New playground dialog ----------------------------------------------
+ * The starting-point picker. Twelve options is too many for a list of centred
+ * strings, which is what a vertical `Segmented` renders; these are cards with
+ * a brand mark, a blurb and a selected state, grouped by what they are for. */
+
+.rc-template-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 42vh;
+  overflow-y: auto;
+  /* Room for the scrollbar so it never sits on top of a card border. */
+  padding-right: 4px;
+}
+
+.rc-template-group-label {
+  padding: 0 0 7px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--rc-text-subtle);
+}
+
+.rc-template-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* One card narrows to full width before its text starts wrapping. */
+@media (max-width: 640px) {
+  .rc-template-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.rc-template-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-radius);
+  background: var(--rc-surface-raised);
+  transition:
+    border-color 0.18s var(--rc-ease),
+    background-color 0.18s var(--rc-ease),
+    transform 0.18s var(--rc-ease);
+}
+
+.rc-template-card:hover {
+  border-color: var(--rc-border-strong);
+  transform: translateY(-1px);
+}
+
+.rc-template-card[data-selected="true"] {
+  border-color: var(--rc-accent);
+  background: var(--rc-accent-soft);
+}
+
+/* The same gradient hairline the project cards use on hover, made permanent on
+ * the chosen one -- so the selection is legible without relying on the border
+ * colour alone. */
+.rc-template-card[data-selected="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--rc-gradient);
+}
+
+.rc-template-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+.rc-template-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rc-template-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--rc-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rc-template-blurb {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--rc-text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Always laid out, filled only when chosen, so selecting a card does not shift
+ * the text beside it. */
+.rc-template-check {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 17px;
+  height: 17px;
+  border-radius: 999px;
+  color: #0b0b12;
+  background: transparent;
+  border: 1px solid var(--rc-border-strong);
+  transition: background 0.18s var(--rc-ease);
+}
+
+.rc-template-card[data-selected="true"] .rc-template-check {
+  background: var(--rc-gradient);
+  border-color: transparent;
+}
+
+/* Keyboard selection has to be visible: the picker is a radio group, and arrow
+ * keys move through it. */
+.rc-template-card:focus-visible {
+  outline: none;
+  box-shadow: var(--rc-glow);
+}
+
+/* Dialog header: the app mark, so the dialog belongs to the product rather
+ * than reading as a bare antd modal. */
+.rc-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rc-dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--rc-text);
+  line-height: 1.3;
+}
+
+.rc-dialog-subtitle {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--rc-text-subtle);
+  line-height: 1.4;
+}
+
+/* Footer hint: the command that starts the chosen template. Mono, boxed, and
+ * on its own line so it reads as something you will type. */
+.rc-run-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-radius-sm);
+  background: var(--rc-surface-sunken);
+  font-size: 11.5px;
+  color: var(--rc-text-subtle);
+}
+
+.rc-run-hint code {
+  font-family: var(--rc-mono);
+  font-size: 11px;
+  color: var(--rc-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
