@@ -53,6 +53,8 @@ import {
   clearProjectSources,
   installProjectSources,
 } from "../lib/projectSources.ts";
+import { installProblems } from "../lib/problems.ts";
+import { useProblemsStore } from "../store/problemsStore.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 export const ProjectPlayground = () => {
@@ -108,6 +110,26 @@ export const ProjectPlayground = () => {
   const openedProjectRef = useRef<string | undefined>(undefined);
 
   useUnsavedWorkGuard();
+
+  // Monaco has been computing diagnostics all along and nothing looked at
+  // them. Installed once for the page rather than per editor pane: markers are
+  // global to Monaco, and two panes would report the same problem twice.
+  useEffect(() => {
+    let dispose: (() => void) | undefined;
+    let cancelled = false;
+
+    void loader.init().then((monaco) => {
+      if (cancelled) return;
+      dispose = installProblems(monaco, useProblemsStore.getState().setProblems);
+    });
+
+    return () => {
+      cancelled = true;
+      dispose?.();
+      // Leaving a project must not leave its problems on screen in the next.
+      useProblemsStore.getState().setProblems([]);
+    };
+  }, []);
 
   // Asked once per session. A deployment with no API key configured gets no
   // assistant button at all, rather than one that fails on the first question.

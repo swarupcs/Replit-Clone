@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { Tooltip } from "antd";
-import { VscAdd, VscChromeClose, VscOutput, VscTerminal } from "react-icons/vsc";
+import {
+  VscAdd,
+  VscChromeClose,
+  VscOutput,
+  VscTerminal,
+  VscWarning,
+} from "react-icons/vsc";
 import { BrowserTerminal } from "../../molecules/BrowserTerminal/BrowserTerminal.tsx";
 import { RunOutput } from "../../molecules/RunOutput/RunOutput.tsx";
+import { ProblemsPanel } from "../ProblemsPanel/ProblemsPanel.tsx";
+import {
+  selectErrorCount,
+  selectWarningCount,
+  useProblemsStore,
+} from "../../../store/problemsStore.ts";
 import { useRunStore } from "../../../store/runStore.ts";
 import {
   selectCanEdit,
@@ -15,7 +27,10 @@ interface BottomPanelProps {
 }
 
 /** `output` is the dev server log; every other tab is an independent shell. */
-type ActiveTab = { kind: "output" } | { kind: "terminal"; id: number };
+type ActiveTab =
+  | { kind: "output" }
+  | { kind: "problems" }
+  | { kind: "terminal"; id: number };
 
 /** Terminals and dev-server output as tabs.
  *
@@ -37,6 +52,8 @@ export const BottomPanel = ({ projectId }: BottomPanelProps) => {
   const nextId = useRef(2);
 
   const status = useRunStore((store) => store.state.status);
+  const errors = useProblemsStore(selectErrorCount);
+  const warnings = useProblemsStore(selectWarningCount);
   const canEdit = useEditorSocketStore(selectCanEdit);
 
   // Pull attention to the output when a run starts, since that is where the
@@ -90,6 +107,7 @@ export const BottomPanel = ({ projectId }: BottomPanelProps) => {
     const select = (node: HTMLElement) => {
       const name = node.dataset["rcTab"];
       if (name === "output") setActive({ kind: "output" });
+      else if (name === "problems") setActive({ kind: "problems" });
       else if (name?.startsWith("terminal:")) {
         setActive({ kind: "terminal", id: Number(name.slice("terminal:".length)) });
       }
@@ -214,6 +232,43 @@ export const BottomPanel = ({ projectId }: BottomPanelProps) => {
 
         <span style={{ flex: 1 }} />
 
+        {/* Before Output, because a compile error is what sends you looking
+            at the output in the first place. */}
+        <div
+          className="rc-panel-tab"
+          role="tab"
+          data-rc-tab="problems"
+          aria-selected={active.kind === "problems"}
+          tabIndex={active.kind === "problems" ? 0 : -1}
+          data-active={active.kind === "problems"}
+          onClick={() => {
+            setActive({ kind: "problems" });
+          }}
+        >
+          <VscWarning size={13} />
+          Problems
+          {errors + warnings > 0 && (
+            <span
+              // Counted rather than dotted: "3 errors" is a different decision
+              // from "1 warning", and the dot cannot tell them apart.
+              aria-label={`${String(errors)} errors, ${String(warnings)} warnings`}
+              style={{
+                minWidth: 16,
+                padding: "0 4px",
+                borderRadius: 999,
+                fontSize: 10,
+                lineHeight: "15px",
+                textAlign: "center",
+                fontVariantNumeric: "tabular-nums",
+                color: "var(--rc-bg)",
+                background: errors > 0 ? "var(--rc-red)" : "var(--rc-yellow)",
+              }}
+            >
+              {errors + warnings}
+            </span>
+          )}
+        </div>
+
         <div
           className="rc-panel-tab"
           role="tab"
@@ -267,6 +322,10 @@ export const BottomPanel = ({ projectId }: BottomPanelProps) => {
           </div>
         </Pane>
       )}
+
+      <Pane visible={active.kind === "problems"}>
+        <ProblemsPanel />
+      </Pane>
 
       <Pane visible={active.kind === "output"}>
         <RunOutput />

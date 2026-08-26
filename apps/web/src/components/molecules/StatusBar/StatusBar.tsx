@@ -4,6 +4,11 @@ import {
   selectVisibleStatus,
   useEditorStatusStore,
 } from "../../../store/editorStatusStore.ts";
+import {
+  selectErrorCount,
+  selectWarningCount,
+  useProblemsStore,
+} from "../../../store/problemsStore.ts";
 import type { RunStatus } from "@replit-clone/shared";
 
 /** What the run state should read as, and in what colour. `idle` says nothing:
@@ -26,6 +31,8 @@ export const StatusBar = () => {
   const focusedPane = useOpenTabsStore((state) => state.focusedPane);
   const status = useEditorStatusStore(selectVisibleStatus(focusedPane));
   const runStatus = useRunStore((state) => state.state.status);
+  const errors = useProblemsStore(selectErrorCount);
+  const warnings = useProblemsStore(selectWarningCount);
 
   const run = RUN[runStatus];
 
@@ -49,6 +56,21 @@ export const StatusBar = () => {
       </span>
 
       <span className="rc-statusbar-group">
+        {/* Always shown, zeroes included: "0 problems" is information, and a
+            count that appears only when something is wrong cannot be trusted
+            to be absent for the right reason. */}
+        <span
+          title="Problems — syntax and schema only"
+          style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+        >
+          <span style={{ color: errors > 0 ? "var(--rc-red)" : undefined }}>
+            ⨉ {errors}
+          </span>
+          <span style={{ color: warnings > 0 ? "var(--rc-yellow)" : undefined }}>
+            ⚠ {warnings}
+          </span>
+        </span>
+
         {run && (
           <span
             title={`Dev server: ${run.label.toLowerCase()}`}

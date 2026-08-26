@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { BottomPanel } from "./BottomPanel.tsx";
 import { useRunStore } from "../../../store/runStore.ts";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
+import { useProblemsStore } from "../../../store/problemsStore.ts";
 
 /** A terminal owns a WebSocket and a PTY, neither of which exists here. The
  *  panel's job is which panes exist and which is visible, so the shell itself
@@ -45,6 +46,7 @@ beforeEach(() => {
   mounted = 0;
   useEditorSocketStore.setState({ accessLevel: "editor" });
   useRunStore.setState({ state: { status: "idle" } });
+  useProblemsStore.setState({ problems: [] });
 });
 
 afterEach(() => {
@@ -208,7 +210,7 @@ describe("panel tabs from the keyboard", () => {
     return screen.getAllByRole("tab");
   }
 
-  it("presents the shells and Output as one set of tabs", () => {
+  it("presents the shells, Problems and Output as one set of tabs", () => {
     render(<BottomPanel projectId={PROJECT} />);
     fireEvent.click(screen.getByLabelText("New shell"));
 
@@ -216,6 +218,7 @@ describe("panel tabs from the keyboard", () => {
     expect(tabs().map((tab) => tab.dataset["rcTab"])).toEqual([
       "terminal:1",
       "terminal:2",
+      "problems",
       "output",
     ]);
   });
@@ -298,5 +301,45 @@ describe("panel tabs from the keyboard", () => {
 
     expect(close.tagName).toBe("BUTTON");
     expect(close.getAttribute("tabindex")).toBe("-1");
+  });
+});
+
+
+describe("the Problems tab", () => {
+  function report(severity: "error" | "warning", count: number) {
+    useProblemsStore.setState({
+      problems: Array.from({ length: count }, (_, index) => ({
+        relPath: "a.ts",
+        line: index + 1,
+        column: 1,
+        message: `problem ${String(index)}`,
+        severity,
+        source: undefined,
+      })),
+    });
+  }
+
+  it("carries no badge while there is nothing to report", () => {
+    render(<BottomPanel projectId={PROJECT} />);
+
+    expect(screen.getByText("Problems")).toBeDefined();
+    expect(screen.queryByLabelText(/errors, .* warnings/)).toBeNull();
+  });
+
+  it("badges the total, and says which is which to a screen reader", () => {
+    report("error", 3);
+    render(<BottomPanel projectId={PROJECT} />);
+
+    // The badge is a single number; the colour is the only thing separating
+    // three errors from three warnings, so the label carries the split.
+    expect(screen.getByLabelText("3 errors, 0 warnings")).toBeDefined();
+  });
+
+  it("shows the panel when its tab is selected", () => {
+    report("warning", 1);
+    render(<BottomPanel projectId={PROJECT} />);
+    fireEvent.click(screen.getByText("Problems"));
+
+    expect(screen.getByText("problem 0")).toBeDefined();
   });
 });

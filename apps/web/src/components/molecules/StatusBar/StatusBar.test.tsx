@@ -8,6 +8,7 @@ import {
 } from "../../../store/editorStatusStore.ts";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 import { useRunStore } from "../../../store/runStore.ts";
+import { useProblemsStore } from "../../../store/problemsStore.ts";
 
 /** A clean file open in a pane, overridden per test. */
 function status(overrides: Partial<EditorStatus> = {}): EditorStatus {
@@ -30,6 +31,7 @@ beforeEach(() => {
   useEditorStatusStore.setState({ byPane: {} });
   useOpenTabsStore.setState({ focusedPane: "primary" });
   useRunStore.setState({ state: { status: "idle" } });
+  useProblemsStore.setState({ problems: [] });
 });
 
 afterEach(() => {
@@ -120,6 +122,52 @@ describe("StatusBar", () => {
       expect(screen.getByText("No file open")).toBeDefined();
       expect(screen.getByText("Starting")).toBeDefined();
     });
+  });
+});
+
+describe("the problem counts", () => {
+  it("shows zeroes rather than nothing when the project is clean", () => {
+    render(<StatusBar />);
+
+    // A count that appears only when something is wrong cannot be trusted to
+    // be absent for the right reason.
+    expect(screen.getByText("⨉ 0")).toBeDefined();
+    expect(screen.getByText("⚠ 0")).toBeDefined();
+  });
+
+  it("counts errors and warnings apart", () => {
+    useProblemsStore.setState({
+      problems: [
+        {
+          relPath: "a.ts",
+          line: 1,
+          column: 1,
+          message: "x",
+          severity: "error",
+          source: undefined,
+        },
+        {
+          relPath: "a.ts",
+          line: 2,
+          column: 1,
+          message: "y",
+          severity: "warning",
+          source: undefined,
+        },
+        {
+          relPath: "a.ts",
+          line: 3,
+          column: 1,
+          message: "z",
+          severity: "warning",
+          source: undefined,
+        },
+      ],
+    });
+    render(<StatusBar />);
+
+    expect(screen.getByText("⨉ 1")).toBeDefined();
+    expect(screen.getByText("⚠ 2")).toBeDefined();
   });
 });
 
