@@ -96,15 +96,28 @@ describe("readProjectSources", () => {
     }
   });
 
+  /** Deliberately given room. Proving the 400-file cap needs more than four
+   *  hundred real files, and creating them, walking them and deleting them
+   *  again is genuinely more than five seconds of Windows I/O when the rest of
+   *  the workspace is running in parallel — which is exactly what `pnpm -r
+   *  test` does, and what CI grades. The default timeout made this fail
+   *  intermittently there while passing every time this package was run on its
+   *  own. */
   it("says so when a cap stopped the walk", async () => {
     const many = `${root}/generated`;
     await fs.mkdir(many, { recursive: true });
 
     try {
-      // Past the 400-file cap.
-      for (let i = 0; i < 420; i += 1) {
-        await fs.writeFile(`${many}/f${String(i)}.ts`, "export const x = 1;");
-      }
+      // Past the 400-file cap. Written together rather than one await at a
+      // time: four hundred and twenty sequential writes take longer than the
+      // 5s timeout on a machine already running the rest of the workspace in
+      // parallel, so `pnpm -r test` — which is what CI grades — failed here
+      // intermittently while `pnpm test` in this package alone never did.
+      await Promise.all(
+        Array.from({ length: 420 }, (_, index) =>
+          fs.writeFile(`${many}/f${String(index)}.ts`, "export const x = 1;"),
+        ),
+      );
 
       const { files, truncated } = await readProjectSources(PROJECT);
 
@@ -113,7 +126,7 @@ describe("readProjectSources", () => {
     } finally {
       await fs.rm(many, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("returns nothing for a project that is not there", async () => {
     const { files, truncated } = await readProjectSources(
