@@ -89,6 +89,12 @@ vi.mock("../lib/projectSources.ts", () => ({
 vi.mock("@monaco-editor/react", () => ({
   loader: { init: () => Promise.resolve({ fake: "monaco" }) },
 }));
+// Mocked for the same reason `projectSources` is: the stand-in above is not a
+// Monaco, so the real one reaches for `monaco.editor.onDidChangeMarkers` and
+// rejects. It rejected inside an effect rather than a test, so every case here
+// passed while the RUN failed -- and `pnpm -r test` is what CI grades.
+const installProblems = vi.hoisted(() => vi.fn(() => () => undefined));
+vi.mock("../lib/problems.ts", () => ({ installProblems }));
 
 const getAiStatusApi = vi.hoisted(() => vi.fn());
 vi.mock("../apis/ai.ts", () => ({ getAiStatusApi }));
