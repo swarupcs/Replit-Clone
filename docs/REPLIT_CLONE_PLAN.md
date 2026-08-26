@@ -151,7 +151,7 @@ Honest scoring of what a user would notice.
 | Sharing / permissions | ✅ | ✅ viewer/editor/owner + links | none |
 | Container isolation & limits | ✅ | ✅ 512 MB, 0.5 CPU, 256 PID, caps dropped | none |
 | Quotas | ✅ | ✅ per-user projects/disk/containers | none |
-| Git | ✅ full | ✅ status/stage/commit/log/diff/branches | no remotes, no hunk staging, no discard |
+| Git | ✅ full | ✅ status/stage/commit/log/diff/branches/hunks/discard/remotes | push refused by design (see §8) |
 | AI assistant | ✅ | ✅ panel + apply-change | none |
 | Env vars / secrets | ✅ | ✅ injected, rebuild on change | none |
 | Package caching | ✅ | ✅ named cache volume | none |
@@ -184,8 +184,8 @@ listed changed files without being able to show what changed in them.
    alone.
 6. **Editor** — done bar polish. Monaco, tabs, split panes, dirty state,
    format-on-save, project-wide search **and replace**, quick-open, diff against
-   disk, persisted settings. → **Phase 4** added the command palette;
-   go-to-definition is scoped in §7.
+   disk, persisted settings. → **Phase 4** added the command palette, and
+   **Phase 8** cross-file go-to-definition.
 7. **Terminal** — done. Real PTY, resize, 5000-line scrollback, automatic
    reconnect with backoff, and a tab per shell with several per project.
    → **Phase 3** found this already built and pinned it with tests.
@@ -426,6 +426,7 @@ Each needs a design decision rather than an afternoon.
 - [x] Phase 3 — multiple terminals (already built; pinned with tests)
 - [x] Phase 4 — command palette
 - [x] Phase 5 — page test coverage
-- [x] Phase 6 — remaining polish (E2E specs deferred: no Docker daemon here)
+- [x] Phase 6 — remaining polish (E2E revisited in Phase 8)
 - [x] Phase 7 — git branches
-- [ ] Phase 8 — still deferred (remotes, hunk staging, discard, go-to-definition)
+- [x] Phase 8 — discard, hunk staging, go-to-definition, remotes, E2E
+- [ ] Phase 9 — push (refused by design) and the container-bound E2E flow
