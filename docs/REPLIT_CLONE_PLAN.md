@@ -151,7 +151,7 @@ Honest scoring of what a user would notice.
 | Sharing / permissions | ✅ | ✅ viewer/editor/owner + links | none |
 | Container isolation & limits | ✅ | ✅ 512 MB, 0.5 CPU, 256 PID, caps dropped | none |
 | Quotas | ✅ | ✅ per-user projects/disk/containers | none |
-| Git | ✅ full | ✅ status/stage/commit/log/diff/branches/hunks/discard/remotes | push refused by design (see §8) |
+| Git | ✅ full | ✅ status/stage/commit/log/diff/branches/hunks/discard/remotes/push | push needs an unshared project (see §8) |
 | AI assistant | ✅ | ✅ panel + apply-change | none |
 | Env vars / secrets | ✅ | ✅ injected, rebuild on change | none |
 | Package caching | ✅ | ✅ named cache volume | none |
@@ -230,10 +230,11 @@ Recorded because this roadmap was written without asking.
 - **Deploying user apps to the public internet is out of scope.** It would mean
   running untrusted containers on reachable ports, which contradicts the stated
   security model ("do not expose this to the internet").
-- **Docker is unavailable in the environment this plan was written in** (client
-  present, no daemon). Container-touching code cannot be executed here, so those
-  paths are verified by unit tests with a faked docker client, as the repo
-  already does. Anything needing a live daemon is called out per phase.
+- **Docker looked unavailable when this plan was written** — the client was
+  present and `/var/run/docker.sock` was not. That was mistaken: the daemon was
+  installed and simply not running. Phases 8 and 9 start it, and every
+  container-bound flow is exercised for real. Base images cannot be pulled from
+  Docker Hub (network policy), but a mirror serves them.
 
 ---
 
@@ -359,13 +360,10 @@ correctly read-only.
   anything else grows that large. Monaco is ~4 MB self-hosted and behind the
   lazy playground route; there is nothing further worth doing. The roadmap
   listed this without checking — corrected.
-- **E2E specs** ❌ *not written, deliberately*. Save→preview-reload and EDITOR
-  share-link redemption both need a live stack and a Docker daemon to
-  exercise. This environment has the Docker client but no daemon
-  (`/var/run/docker.sock` absent), so a spec written here could be typechecked
-  but never once run. An end-to-end test that has never passed is not
-  coverage — it is a claim. Left for an environment with a daemon; the two
-  flows and where they belong are recorded in `IMPROVEMENTS.md` #9.
+- **E2E specs** — deferred here, then written and run in Phases 8 and 9. The
+  reasoning at the time ("a test that has never passed is a claim, not
+  coverage") stands; the premise did not. The daemon was not missing, only
+  unstarted. See the correction at the end of Phase 9.
 
 ### Phase 7 — Git branches ✅
 The deferred item whose design question turned out to have a defensible answer,
@@ -429,4 +427,4 @@ Each needs a design decision rather than an afternoon.
 - [x] Phase 6 — remaining polish (E2E revisited in Phase 8)
 - [x] Phase 7 — git branches
 - [x] Phase 8 — discard, hunk staging, go-to-definition, remotes, E2E
-- [ ] Phase 9 — push (refused by design) and the container-bound E2E flow
+- [x] Phase 9 — git push (owner-only, unshared projects) and the container-bound E2E flow

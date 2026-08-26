@@ -135,9 +135,13 @@ export function parseLog(raw: string): GitCommit[] {
 async function git(
   projectId: string,
   argv: string[],
+  env?: Record<string, string>,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const container = await ensureContainer(assertValidProjectId(projectId));
-  return execCapture(container, ["git", ...argv], { workingDir: APP_DIR });
+  return execCapture(container, ["git", ...argv], {
+    workingDir: APP_DIR,
+    ...(env ? { env } : {}),
+  });
 }
 
 /** Runs a git command that is expected to succeed, and turns a non-zero exit
@@ -672,5 +676,80 @@ export async function pullRemote(
   if (exitCode !== 0) {
     const message = (stderr || stdout).trim().split("\n")[0] ?? "git failed";
     throw new BadRequestError(message, "GIT_FAILED");
+  }
+}
+
+/** Reads the secret out of the environment rather than off the command line.
+ *
+ *  This is git's own credential protocol: a helper prints `username=` and
+ *  `password=` and git reads them. The string itself is fixed and authored
+ *  here — nothing a caller supplies reaches it — and the secret arrives in
+ *  `RC_GIT_TOKEN`, which is the whole point. Process arguments are
+ *  world-readable through /proc; a process's environment is readable only by
+ *  its own uid.
+ *
+ *  The username is a constant because every forge that accepts a token over
+ *  HTTPS ignores it and authenticates on the password field alone.
+ */
+const TOKEN_CREDENTIAL_HELPER =
+  '!f() { echo username=token; echo "password=$RC_GIT_TOKEN"; }; f';
+
+/** Removes the secret from anything git said, before it reaches a log, an
+ *  error message or a screen.
+ *
+ *  This implementation never puts it in a URL, so in principle git has nothing
+ *  to echo. The redaction costs nothing and the failure mode it guards against
+ *  is silent, which is the sort worth guarding against. */
+export function redactToken(text: string, token: string): string {
+  if (!token) return text;
+  return text.split(token).join("***");
+}
+
+/** Pushes a branch, authenticating with a value supplied for THIS call only.
+ *
+ *  It is never written down: not to the database, not to the repository's
+ *  config, not to a credential store, and not into the remote's URL. It lives
+ *  in this process for the length of one exec, and in that exec's environment,
+ *  and nowhere else.
+ *
+ *  Whether pushing is allowed at all is decided by the controller, not here.
+ *  The container is shared by everyone with access to the project, so this is
+ *  only safe when there is nobody else — see `docs/SECURITY.md`.
+ */
+export async function pushRemote(
+  projectId: string,
+  name: string,
+  branch: string,
+  token: string,
+): Promise<void> {
+  await assertValidBranchName(projectId, name);
+  await assertValidBranchName(projectId, branch);
+
+  if (!token) throw new BadRequestError("A push needs an access token");
+
+  const { stderr, stdout, exitCode } = await git(
+    projectId,
+    [
+      "-c",
+      `credential.helper=${TOKEN_CREDENTIAL_HELPER}`,
+      "push",
+      "--",
+      name,
+      branch,
+    ],
+    {
+      RC_GIT_TOKEN: token,
+      // Without this git falls back to prompting on a tty it does not have,
+      // and the exec hangs until the output cap rather than failing.
+      GIT_TERMINAL_PROMPT: "0",
+    },
+  );
+
+  if (exitCode !== 0) {
+    const combined = redactToken((stderr || stdout).trim(), token);
+    throw new BadRequestError(
+      combined.split("\n")[0] ?? "git failed",
+      "GIT_FAILED",
+    );
   }
 }

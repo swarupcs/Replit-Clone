@@ -45,6 +45,7 @@ const api = vi.hoisted(() => ({
   gitRemoteApi: vi.fn(),
   gitFetchApi: vi.fn(),
   gitPullApi: vi.fn(),
+  gitPushApi: vi.fn(),
   gitStageApi: vi.fn(),
   gitUnstageApi: vi.fn(),
   gitCommitApi: vi.fn(),
@@ -64,6 +65,7 @@ const {
   getGitRemotesApi,
   gitFetchApi,
   gitPullApi,
+  gitPushApi,
 } = api;
 
 const BRANCHES = [
@@ -97,6 +99,7 @@ beforeEach(() => {
   ]);
   gitFetchApi.mockResolvedValue(STATUS);
   gitPullApi.mockResolvedValue(STATUS);
+  gitPushApi.mockResolvedValue(STATUS);
   gitBranchApi.mockResolvedValue({
     status: { ...STATUS, branch: "feature" },
     branches: [
@@ -122,9 +125,18 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-/** Waits for the initial status load to land. */
-async function renderPanel(canWrite = true) {
-  render(<SourceControlPanel projectId={PROJECT} canWrite={canWrite} />);
+/** Waits for the initial status load to land.
+ *
+ *  Owner by default, since that is the ordinary case; the tests that care
+ *  about the difference pass it explicitly. */
+async function renderPanel(canWrite = true, isOwner = canWrite) {
+  render(
+    <SourceControlPanel
+      projectId={PROJECT}
+      canWrite={canWrite}
+      isOwner={isOwner}
+    />,
+  );
   expect(await screen.findByText("App.tsx")).toBeDefined();
 }
 
@@ -496,12 +508,13 @@ describe("SourceControlPanel remotes", () => {
     expect(screen.getByText("Pull from origin")).toBeDefined();
   });
 
-  it("never offers to push", async () => {
-    // Deliberate: a shared project is one container, so a credential handed to
-    // git there would be readable by every collaborator.
+  it("offers push only to the owner, whose credential it would spend", async () => {
+    // Superseded an earlier "never offers to push": pushing exists now, but
+    // only for a project the owner has to themselves. The server refuses a
+    // shared one outright -- see the pushing suite below.
     await openRemotes();
 
-    expect(screen.queryByText(/Push/)).toBeNull();
+    expect(await screen.findByText("Push to origin…")).toBeDefined();
   });
 
   it("fetches from the chosen remote", async () => {
@@ -550,5 +563,102 @@ describe("SourceControlPanel remotes", () => {
     await renderPanel(false);
 
     expect(screen.queryByLabelText("Remotes")).toBeNull();
+  });
+});
+
+describe("SourceControlPanel pushing", () => {
+  /** Opens the remotes menu as the given role. */
+  async function openRemotesAs(isOwner: boolean) {
+    await renderPanel(true, isOwner);
+    fireEvent.click(screen.getByLabelText("Remotes"));
+  }
+
+  /** Opens the push dialog for origin. */
+  async function openPush() {
+    await openRemotesAs(true);
+    fireEvent.click(await screen.findByText("Push to origin…"));
+    return screen.findByPlaceholderText("Access token");
+  }
+
+  it("offers pushing to the owner", async () => {
+    await openRemotesAs(true);
+    expect(await screen.findByText("Push to origin…")).toBeDefined();
+  });
+
+  it("does not offer it to an editor who is not the owner", async () => {
+    // The credential would be the owner's, not theirs.
+    await openRemotesAs(false);
+
+    expect(await screen.findByText("Fetch from origin")).toBeDefined();
+    expect(screen.queryByText("Push to origin…")).toBeNull();
+  });
+
+  it("asks for a token rather than pushing straight away", async () => {
+    await openPush();
+    expect(gitPushApi).not.toHaveBeenCalled();
+  });
+
+  it("says the token is not saved anywhere", async () => {
+    await openPush();
+    expect(screen.getByText(/not saved here, in the repository, or/)).toBeDefined();
+  });
+
+  it("pushes the current branch with the token given", async () => {
+    const input = await openPush();
+    fireEvent.change(input, { target: { value: "a-token" } });
+    fireEvent.click(screen.getByText("Push"));
+
+    await waitFor(() => {
+      expect(gitPushApi).toHaveBeenCalledWith(
+        PROJECT,
+        "origin",
+        "main",
+        "a-token",
+      );
+    });
+  });
+
+  it("will not push with an empty token", async () => {
+    const input = await openPush();
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.click(screen.getByText("Push"));
+
+    expect(gitPushApi).not.toHaveBeenCalled();
+  });
+
+  it("forgets the token when the dialog is cancelled", async () => {
+    const input = await openPush();
+    fireEvent.change(input, { target: { value: "a-token" } });
+    fireEvent.click(screen.getByText("Cancel"));
+
+    // Reopening must not present the previous one.
+    fireEvent.click(screen.getByLabelText("Remotes"));
+    fireEvent.click(await screen.findByText("Push to origin…"));
+
+    // A controlled input carries its value as a property, not an attribute.
+    const reopened =
+      await screen.findByPlaceholderText<HTMLInputElement>("Access token");
+    expect(reopened.value).toBe("");
+  });
+
+  it("reports the server's reason for refusing a shared project", async () => {
+    gitPushApi.mockRejectedValue({
+      response: {
+        data: {
+          message:
+            "This project is shared, so a token used here would be readable by everyone with access. Push from the project's terminal instead.",
+        },
+      },
+    });
+
+    const input = await openPush();
+    fireEvent.change(input, { target: { value: "a-token" } });
+    fireEvent.click(screen.getByText("Push"));
+
+    await waitFor(() => {
+      expect(messageError).toHaveBeenCalledWith(
+        expect.stringContaining("Push from the project's terminal instead."),
+      );
+    });
   });
 });

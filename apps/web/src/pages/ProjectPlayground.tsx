@@ -78,6 +78,9 @@ export const ProjectPlayground = () => {
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
   // A viewer may read history but not stage or commit.
   const canEdit = useEditorSocketStore(selectCanEdit);
+  /** Owner rather than merely editor: pushing spends the owner's credential,
+   *  so the panel offers it to nobody else. */
+  const accessLevel = useEditorSocketStore((state) => state.accessLevel);
   const { restored, remember } = useWorkspaceSession(projectIdFromUrl, editorSocket);
 
   // Seeded from the remembered arrangement, so a reload comes back to the
@@ -669,6 +672,7 @@ export const ProjectPlayground = () => {
                       <SourceControlPanel
                         projectId={projectIdFromUrl}
                         canWrite={canEdit}
+                        isOwner={accessLevel === "owner"}
                       />
                     )}
                   </ErrorBoundary>

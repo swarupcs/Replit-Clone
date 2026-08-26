@@ -18,6 +18,7 @@ const git = vi.hoisted(() => ({
   removeRemote: vi.fn(),
   fetchRemote: vi.fn(),
   pullRemote: vi.fn(),
+  pushRemote: vi.fn(),
   createBranch: vi.fn(),
   switchBranch: vi.fn(),
 }));
@@ -27,7 +28,17 @@ const findUnique = vi.hoisted(() => vi.fn());
 
 vi.mock("../service/projectAccessService.js", () => projectAccessService);
 vi.mock("../service/gitService.js", () => git);
-vi.mock("../lib/prisma.js", () => ({ prisma: { user: { findUnique } } }));
+/** Whether the project is the owner's alone, which is what gates pushing. */
+const collaboratorCount = vi.hoisted(() => vi.fn());
+const projectFindUnique = vi.hoisted(() => vi.fn());
+
+vi.mock("../lib/prisma.js", () => ({
+  prisma: {
+    user: { findUnique },
+    projectCollaborator: { count: collaboratorCount },
+    project: { findUnique: projectFindUnique },
+  },
+}));
 vi.mock("../service/collabService.js", () => ({ forgetProject, dropDoc }));
 
 import {
@@ -36,6 +47,7 @@ import {
   gitFetchController,
   gitHunksController,
   gitPullController,
+  gitPushController,
   gitRemoteController,
   gitRemotesController,
   gitBranchesController,
@@ -66,6 +78,7 @@ const app = apiApp([
   { method: "post", path: "/p/:projectId/git/remote", handler: gitRemoteController },
   { method: "post", path: "/p/:projectId/git/fetch", handler: gitFetchController },
   { method: "post", path: "/p/:projectId/git/pull", handler: gitPullController },
+  { method: "post", path: "/p/:projectId/git/push", handler: gitPushController },
 ]);
 
 const STATUS = { branch: "main", staged: [], unstaged: [] };
@@ -79,6 +92,9 @@ beforeEach(() => {
     { name: "origin", url: "https://github.com/a/b.git" },
   ]);
   findUnique.mockResolvedValue({ email: TEST_USER.email });
+  // Sole occupant by default: no collaborators, no outstanding share link.
+  collaboratorCount.mockResolvedValue(0);
+  projectFindUnique.mockResolvedValue({ shareToken: null });
 });
 
 const auth = () => ({ Authorization: bearer() });
@@ -775,5 +791,96 @@ describe("fetch and pull", () => {
       TEST_USER.sub,
       "editor",
     );
+  });
+});
+
+describe("push", () => {
+  const body = { name: "origin", branch: "main", token: "secret-value" };
+
+  const post = (over: object = {}) =>
+    request(app)
+      .post(`/p/${TEST_PROJECT}/git/push`)
+      .set(auth())
+      .send({ ...body, ...over });
+
+  it("is the owner's alone, not an editor's", async () => {
+    await post();
+
+    // It spends the OWNER's credential, so an editor cannot ask for it.
+    expect(projectAccessService.assertProjectAccess).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      TEST_USER.sub,
+      "owner",
+    );
+  });
+
+  it("pushes when the project is the owner's alone", async () => {
+    const response = await post();
+
+    expect(response.status).toBe(200);
+    expect(git.pushRemote).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      "origin",
+      "main",
+      "secret-value",
+    );
+  });
+
+  it("refuses when the project has a collaborator", async () => {
+    collaboratorCount.mockResolvedValue(1);
+
+    const response = await post();
+
+    // Everyone works in one container, so the token would be readable by them.
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("PROJECT_IS_SHARED");
+    expect(git.pushRemote).not.toHaveBeenCalled();
+  });
+
+  it("refuses while a share link is outstanding", async () => {
+    projectFindUnique.mockResolvedValue({ shareToken: "an-unredeemed-link" });
+
+    const response = await post();
+
+    // An invitation nobody has taken up yet can be taken up mid-push.
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("PROJECT_IS_SHARED");
+    expect(git.pushRemote).not.toHaveBeenCalled();
+  });
+
+  it("says where pushing does still work", async () => {
+    collaboratorCount.mockResolvedValue(1);
+
+    const response = await post();
+
+    expect(response.body.message).toMatch(/terminal/i);
+  });
+
+  it("refuses without a token rather than pushing unauthenticated", async () => {
+    const response = await post({ token: undefined });
+
+    expect(response.status).toBe(400);
+    expect(git.pushRemote).not.toHaveBeenCalled();
+  });
+
+  it("refuses a remote or branch that would be read as a flag", async () => {
+    expect((await post({ name: "--exec=evil" })).status).toBe(400);
+    expect((await post({ branch: "--upload-pack=evil" })).status).toBe(400);
+    expect(git.pushRemote).not.toHaveBeenCalled();
+  });
+
+  it("never echoes the token back to the caller", async () => {
+    const response = await post();
+
+    expect(JSON.stringify(response.body)).not.toContain("secret-value");
+  });
+
+  it("does not leak the token when git fails", async () => {
+    // A failure message is the likeliest place for one to escape.
+    git.pushRemote.mockRejectedValue(new ForbiddenError("denied"));
+
+    const response = await post();
+
+    expect(JSON.stringify(response.body)).not.toContain("secret-value");
   });
 });

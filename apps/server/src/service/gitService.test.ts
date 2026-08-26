@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isUsableRemoteUrl,
+  redactToken,
   parseBranches,
   parseRemotes,
   parseLog,
@@ -399,5 +400,37 @@ describe("isUsableRemoteUrl", () => {
 
   it("refuses a URL with whitespace, which could carry a second argument", () => {
     expect(isUsableRemoteUrl("https://host/repo --exec=evil")).toBe(false);
+  });
+});
+
+describe("redactToken", () => {
+  it("replaces the value wherever it appears", () => {
+    expect(redactToken("remote: rejected for abc123", "abc123")).toBe(
+      "remote: rejected for ***",
+    );
+  });
+
+  it("replaces every occurrence, not just the first", () => {
+    expect(redactToken("abc123 and again abc123", "abc123")).toBe(
+      "*** and again ***",
+    );
+  });
+
+  it("catches one embedded in a URL", () => {
+    // The shape it would take if it ever reached a remote URL.
+    expect(
+      redactToken("https://token:abc123@github.com/a/b.git", "abc123"),
+    ).toBe("https://token:***@github.com/a/b.git");
+  });
+
+  it("leaves text alone when there is nothing to redact", () => {
+    expect(redactToken("nothing secret here", "abc123")).toBe(
+      "nothing secret here",
+    );
+  });
+
+  it("does nothing for an empty token rather than mangling the text", () => {
+    // Splitting on "" would otherwise insert the mask between every character.
+    expect(redactToken("some output", "")).toBe("some output");
   });
 });

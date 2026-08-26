@@ -39,6 +39,7 @@ import {
   gitFetchApi,
   gitHunksApi,
   gitPullApi,
+  gitPushApi,
   getGitRemotesApi,
   gitCommitApi,
   gitInitApi,
@@ -60,6 +61,8 @@ interface Props {
   projectId: string;
   /** False for a viewer, who may read history but not change the repository. */
   canWrite: boolean;
+  /** Pushing spends the owner's own credential, so only they are offered it. */
+  isOwner: boolean;
 }
 
 /** Source control for the project's own repository.
@@ -70,7 +73,7 @@ interface Props {
  *  Staging is per file rather than per hunk. Hunk-level staging needs a patch
  *  editor to be worth anything, and half of one is worse than none.
  */
-export function SourceControlPanel({ projectId, canWrite }: Props) {
+export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [commits, setCommits] = useState<GitCommit[]>([]);
   const [messageText, setMessageText] = useState("");
@@ -95,6 +98,13 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
   const [hunkNonce, setHunkNonce] = useState(0);
 
   const [remotes, setRemotes] = useState<GitRemote[]>([]);
+
+  /** The remote a push is being set up for, and the token typed for it.
+   *
+   *  Held in component state for the length of the dialog and cleared the
+   *  moment it closes -- never put in a store, localStorage or a URL. */
+  const [pushingTo, setPushingTo] = useState<string | null>(null);
+  const [pushToken, setPushToken] = useState("");
 
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
@@ -240,6 +250,30 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Pushes the current branch, with a token supplied for this one call. */
+  const push = async () => {
+    const name = pushingTo;
+    const branch = status?.branch;
+    if (!name || !branch || !pushToken) return;
+
+    setBusy(true);
+    try {
+      setStatus(await gitPushApi(projectId, name, branch, pushToken));
+      void message.success(`Pushed ${branch} to ${name}.`);
+      closePush();
+    } catch (error) {
+      void message.error(reasonFrom(error, "Could not push"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Clears the token as well as the dialog: it must not survive the close. */
+  const closePush = () => {
+    setPushingTo(null);
+    setPushToken("");
   };
 
   const openFile = (relPath: string) => {
@@ -539,6 +573,15 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
                   label: `Pull from ${remote.name}`,
                   onClick: () => void withRemote(remote.name, true),
                 },
+                ...(isOwner
+                  ? [
+                      {
+                        key: `push:${remote.name}`,
+                        label: `Push to ${remote.name}…`,
+                        onClick: () => setPushingTo(remote.name),
+                      },
+                    ]
+                  : []),
               ]),
             }}
           >
@@ -682,6 +725,31 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
           </>
         )}
       </div>
+
+      <Modal
+        open={pushingTo !== null}
+        title={`Push ${status?.branch ?? "HEAD"} to ${pushingTo ?? ""}`}
+        okText="Push"
+        okButtonProps={{ disabled: !pushToken.trim() }}
+        confirmLoading={busy}
+        onOk={() => void push()}
+        onCancel={closePush}
+        destroyOnHidden
+      >
+        <Input.Password
+          autoFocus
+          placeholder="Access token"
+          value={pushToken}
+          onChange={(event) => setPushToken(event.target.value)}
+          onPressEnter={() => void push()}
+        />
+        <div style={{ marginTop: 8, fontSize: 12, color: "var(--rc-text-subtle)" }}>
+          Used for this push only — it is not saved here, in the repository, or
+          on the server. Sharing this project disables pushing from the editor,
+          because everyone with access shares its container; push from the
+          terminal instead.
+        </div>
+      </Modal>
 
       <Modal
         open={discarding !== null}

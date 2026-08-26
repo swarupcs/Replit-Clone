@@ -38,6 +38,7 @@ import {
   gitFetchController,
   gitHunksController,
   gitPullController,
+  gitPushController,
   gitRemoteController,
   gitRemotesController,
   gitDiffController,
@@ -96,6 +97,7 @@ router.get("/:projectId/git/remotes", asyncHandler(gitRemotesController));
 router.post("/:projectId/git/remote", asyncHandler(gitRemoteController));
 router.post("/:projectId/git/fetch", asyncHandler(gitFetchController));
 router.post("/:projectId/git/pull", asyncHandler(gitPullController));
+router.post("/:projectId/git/push", asyncHandler(gitPushController));
 router.post("/:projectId/git/commit", asyncHandler(gitCommitController));
 router.patch("/:projectId", asyncHandler(renameProjectController));
 router.post("/:projectId/duplicate", createLimiter, asyncHandler(duplicateProjectController));

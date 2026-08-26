@@ -393,3 +393,20 @@ export const gitPullApi = async (
   );
   return response.data.data;
 };
+
+/** Pushes a branch, authenticating with a value supplied for this one call.
+ *
+ *  Never stored anywhere on the client: not in a store, not in localStorage,
+ *  not in the URL. It is read from an input, sent, and dropped. */
+export const gitPushApi = async (
+  projectId: string,
+  name: string,
+  branch: string,
+  token: string,
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/push`,
+    { name, branch, token },
+  );
+  return response.data.data;
+};

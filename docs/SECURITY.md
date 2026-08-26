@@ -58,21 +58,36 @@ in the server joins a client string onto a host path.
   `check-ref-format`, and the `--` separator is placed where git reads it as
   "no pathspecs follow" rather than "what follows is a path".
 
-## Git remotes: no credential ever reaches a container
+## Git remotes: a credential only ever reaches its owner's own container
 
-The panel can add a remote, fetch and pull. It deliberately **cannot push**,
-and this is a security decision rather than an unfinished one.
+Listing remotes, adding and removing one, fetching and pulling need no
+credential at all, and are open to any editor.
 
-A project can be shared, and every collaborator works in the **same
-container**. Anything given to git inside it — a token in the environment, in
-a URL, in a credential helper, or on a command line — is readable by any code
-any collaborator runs there. A push credential handed over by this server
-would therefore be a way for someone with edit access to walk off with the
-owner's account.
+**Pushing does**, and a credential is only ever as private as the container it
+is spent in. Every collaborator on a project works in the **same container**,
+so anything given to git inside a shared one — in the environment, in a URL, in
+a credential helper, or on a command line — is readable by whatever code anyone
+with access runs there. Handing a push token to a shared container would be a
+way for a collaborator to walk off with the owner's account.
 
-So no credential is stored, transmitted or injected. Pushing is done from the
-project's own terminal, where the secret is the user's own, typed into their
-own session, and never passes through this server or its database.
+So pushing from the editor is allowed on exactly one condition: the project has
+no collaborators **and** no outstanding share link, which makes the container
+the owner's alone. Anything else is refused, and the refusal says where pushing
+still works — the project's own terminal, where the secret is typed into the
+user's own session and never passes through this server. An unredeemed link
+counts as sharing: it is an invitation that can be accepted while a push is in
+flight (`isSoleOccupant`, `controllers/gitController.ts`).
+
+The token itself is never written down: not to the database, not to the
+repository's config, not to a credential store, and not into a remote's URL. It
+is supplied for one call, travels to git in the **exec's environment rather
+than its arguments** — process arguments are world-readable through `/proc`,
+a process's environment is not — and is redacted from anything git says on the
+way back (`pushRemote`, `redactToken`, `service/gitService.ts`).
+
+Pushing is also the owner's alone at the access-control layer, not merely by
+the sharing check: it spends the owner's credential, so an editor cannot ask
+for it.
 
 Remote URLs are checked against an allow-list of transports rather than a
 deny-list, because `ext::` runs the rest of the string as a **command** —

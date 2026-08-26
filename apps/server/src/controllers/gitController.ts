@@ -77,6 +77,15 @@ const pullSchema = z.object({
     .refine((value) => !value.startsWith("-")),
 });
 
+/** A push: where to, which branch, and the credential for this one call.
+ *
+ *  The token is never persisted or echoed, so nothing here validates its shape
+ *  beyond a length bound — every forge issues a different one, and guessing at
+ *  formats would only reject valid credentials. */
+const pushSchema = pullSchema.extend({
+  token: z.string().min(1).max(1024),
+});
+
 const branchSchema = z.object({
   name: z
     .string()
@@ -99,10 +108,11 @@ const diffQuerySchema = z.object({
 /** Resolves the project and the caller's right to act on it.
  *
  *  Reading history is a viewer's business; staging and committing change the
- *  repository, so they need write access -- the same line the editor draws. */
+ *  repository, so they need write access -- the same line the editor draws.
+ *  Pushing is the owner's alone, because it spends the owner's credential. */
 async function authorise(
   req: Request,
-  level: "viewer" | "editor",
+  level: "viewer" | "editor" | "owner",
 ): Promise<string> {
   const { userId } = getAuthContext(req);
   const projectId = assertValidProjectId(req.params["projectId"] ?? "");
@@ -384,6 +394,62 @@ export async function gitPullController(
   res.json({
     success: true,
     message: "Pulled",
+    data: await git.status(projectId),
+  });
+}
+
+/** Whether this project's container belongs to one person.
+ *
+ *  A push needs a credential, and a credential is only ever as private as the
+ *  container it is used in. Every collaborator works in the SAME container, so
+ *  on a shared project anything handed to git there is reachable by whatever
+ *  code anyone with access runs — which would make this feature a way to walk
+ *  off with the owner's account.
+ *
+ *  An unredeemed share link counts as sharing: it is an invitation outstanding,
+ *  and it can be redeemed while a push is in flight.
+ */
+async function isSoleOccupant(projectId: string): Promise<boolean> {
+  const [collaborators, project] = await Promise.all([
+    prisma.projectCollaborator.count({ where: { projectId } }),
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: { shareToken: true },
+    }),
+  ]);
+
+  return collaborators === 0 && !project?.shareToken;
+}
+
+/** Pushes a branch, with a token supplied for this one call.
+ *
+ *  The owner's alone — not because an editor could not be trusted with the
+ *  repository, but because the token is the owner's and the container is not
+ *  private to them once anyone else has access. Refused rather than quietly
+ *  weakened, and the message says where pushing does still work: the project's
+ *  own terminal, where the secret is typed into the user's own session and
+ *  never passes through this server.
+ */
+export async function gitPushController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "owner");
+  const { name, branch, token } = pushSchema.parse(req.body ?? {});
+
+  if (!(await isSoleOccupant(projectId))) {
+    throw new BadRequestError(
+      "This project is shared, so a token used here would be readable by " +
+        "everyone with access. Push from the project's terminal instead.",
+      "PROJECT_IS_SHARED",
+    );
+  }
+
+  await git.pushRemote(projectId, name, branch, token);
+
+  res.json({
+    success: true,
+    message: "Pushed",
     data: await git.status(projectId),
   });
 }
