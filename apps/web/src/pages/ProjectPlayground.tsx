@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { io } from "socket.io-client";
+import { loader } from "@monaco-editor/react";
 import { Alert, Button, Flex, Tooltip, Typography } from "antd";
 import {
   VscFiles,
@@ -47,6 +48,10 @@ import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.ts";
 import { installCollab } from "../lib/collab.ts";
+import {
+  clearProjectSources,
+  installProjectSources,
+} from "../lib/projectSources.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 export const ProjectPlayground = () => {
@@ -390,6 +395,16 @@ export const ProjectPlayground = () => {
     editorSocketConn.on("containerStats", (stats) => {
       useRunStore.getState().setStats(stats);
     });
+    // Gives Monaco's language service the project's other source files, so
+    // go-to-definition can reach a symbol defined in a file that has never been
+    // opened -- until now it only knew about files with a tab.
+    editorSocketConn.on("projectSources", ({ files }) => {
+      void loader.init().then((monaco) => {
+        installProjectSources(monaco, files);
+      });
+    });
+    editorSocketConn.emit("projectSources");
+
     editorSocketConn.emit("runSubscribe");
 
     // One sample a few seconds apart. Docker computes CPU from the delta since
@@ -402,6 +417,9 @@ export const ProjectPlayground = () => {
 
     return () => {
       clearInterval(statsTimer);
+      // The next project's files are different ones; keeping these would let a
+      // lookup land in a file that is no longer there.
+      clearProjectSources();
       teardownCollab();
       editorSocketConn.disconnect();
       setEditorSocket(null);

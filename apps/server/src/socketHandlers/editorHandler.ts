@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Namespace, Socket } from "socket.io";
 import { MAX_FILE_BYTES } from "@replit-clone/shared";
+import { readProjectSources } from "../service/projectSourcesService.js";
 import { searchProject, replaceInProject } from "../service/searchService.js";
 import {
   applyDocUpdate,
@@ -614,6 +615,22 @@ export const handleEditorSocketEvents = (
     handle("restart the dev server", async () => {
       await restartRun(projectId);
     }, true)(),
+  );
+
+  socket.on("projectSources", () =>
+    handle("read the project's sources", async () => {
+      // Walks and reads the whole project, so it is metered on the search
+      // budget rather than the per-file read one: it is the same order of cost
+      // as a search, not of opening a tab.
+      if (!searchBudget.take()) {
+        overBudget("read the project's sources");
+        return;
+      }
+
+      // No access check beyond the connection's own: this only ever returns
+      // file contents, which a viewer may already read one at a time.
+      socket.emit("projectSources", await readProjectSources(projectId));
+    })(),
   );
 
   socket.on("search", (options) =>

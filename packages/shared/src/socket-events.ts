@@ -133,6 +133,11 @@ export interface ClientToServerEvents {
   /** Ask for one container stats sample. */
   statsRequest: () => void;
   /** Search the project's file contents. */
+  /** Asks for every source file at once, so the editor's language service can
+   *  resolve a definition in a file the user has never opened. Read-only, so a
+   *  viewer may ask. */
+  projectSources: () => void;
+
   search: (payload: SearchOptions) => void;
   /** Replace every match across the project's files. */
   replaceInProject: (payload: ReplaceOptions) => void;
@@ -245,6 +250,13 @@ export interface ServerToClientEvents {
   containerStats: (payload: ContainerStats) => void;
   /** Results for the most recent `search`. `truncated` means a limit stopped
    *  the scan, so the list is partial rather than complete. */
+  /** Answer to `projectSources`. `truncated` says a cap stopped the walk, so
+   *  navigation covers part of the project rather than all of it. */
+  projectSources: (payload: {
+    files: { relPath: string; contents: string }[];
+    truncated: boolean;
+  }) => void;
+
   searchResults: (payload: {
     query: string;
     matches: SearchMatch[];

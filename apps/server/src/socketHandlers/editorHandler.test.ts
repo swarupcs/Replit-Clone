@@ -67,6 +67,8 @@ vi.mock("../service/searchService.js", () => ({
   searchProject,
   replaceInProject,
 }));
+const readProjectSources = vi.hoisted(() => vi.fn());
+vi.mock("../service/projectSourcesService.js", () => ({ readProjectSources }));
 vi.mock("./aiHandler.js", () => ({ installAiHandler: vi.fn() }));
 vi.mock("../service/diskUsageService.js", () => ({
   assertWithinQuota: vi.fn(() => Promise.resolve(undefined)),
@@ -179,6 +181,7 @@ beforeEach(async () => {
   runner.getRunState.mockReturnValue("idle");
   runner.getRunHistory.mockReturnValue([]);
   searchProject.mockResolvedValue({ matches: [], truncated: false });
+  readProjectSources.mockResolvedValue({ files: [], truncated: false });
   replaceInProject.mockResolvedValue({ files: [], replacements: 0, truncated: false });
 
   await fs.rm(ROOT, { recursive: true, force: true });
@@ -583,6 +586,48 @@ describe("editorHandler: budgets", () => {
     expect(c.emitted.every((e) => e.event === "searchResults")).toBe(true);
 
     await c.send("search", { query: "x" });
+    expect(c.emitted).toContainEqual({
+      event: "error",
+      payload: expect.objectContaining({ code: "TOO_MANY_REQUESTS" }),
+    });
+  });
+});
+
+describe("editorHandler: project sources", () => {
+  it("answers with the project's source files", async () => {
+    readProjectSources.mockResolvedValue({
+      files: [{ relPath: "src/util.ts", contents: "export const one = 1;" }],
+      truncated: false,
+    });
+
+    const c = connect();
+    await c.send("projectSources", undefined);
+
+    expect(c.emitted).toContainEqual({
+      event: "projectSources",
+      payload: {
+        files: [{ relPath: "src/util.ts", contents: "export const one = 1;" }],
+        truncated: false,
+      },
+    });
+  });
+
+  it("lets a viewer ask, since it only returns readable files", async () => {
+    const c = connect("viewer");
+    await c.send("projectSources", undefined);
+
+    expect(readProjectSources).toHaveBeenCalledWith(PROJECT);
+    expect(c.emitted.some((e) => e.event === "projectSources")).toBe(true);
+  });
+
+  it("is metered on the search budget, not the per-file read one", async () => {
+    const c = connect();
+
+    for (let i = 0; i < 30; i += 1) {
+      await c.send("search", { query: "x" });
+    }
+    await c.send("projectSources", undefined);
+
     expect(c.emitted).toContainEqual({
       event: "error",
       payload: expect.objectContaining({ code: "TOO_MANY_REQUESTS" }),

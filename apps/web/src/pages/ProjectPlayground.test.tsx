@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ProjectPlayground } from "./ProjectPlayground.tsx";
@@ -65,6 +72,17 @@ vi.mock("../components/organisms/AiPanel/AiPanel.tsx", () => ({
   AiPanel: () => <div data-testid="ai-panel" />,
 }));
 vi.mock("../lib/collab.ts", () => ({ installCollab: () => () => undefined }));
+
+const installProjectSources = vi.hoisted(() => vi.fn());
+const clearProjectSources = vi.hoisted(() => vi.fn());
+vi.mock("../lib/projectSources.ts", () => ({
+  installProjectSources,
+  clearProjectSources,
+}));
+// The real loader pulls in Monaco, which jsdom cannot run.
+vi.mock("@monaco-editor/react", () => ({
+  loader: { init: () => Promise.resolve({ fake: "monaco" }) },
+}));
 
 const getAiStatusApi = vi.hoisted(() => vi.fn());
 vi.mock("../apis/ai.ts", () => ({ getAiStatusApi }));
@@ -298,5 +316,34 @@ describe("ProjectPlayground banners", () => {
     });
 
     expect(screen.getByText(/and 2 more/)).toBeDefined();
+  });
+});
+
+describe("ProjectPlayground language service", () => {
+  it("asks the server for the project's sources", () => {
+    renderPlayground();
+
+    expect(emitted.some((entry) => entry.event === "projectSources")).toBe(true);
+  });
+
+  it("hands them to Monaco when they arrive", async () => {
+    renderPlayground();
+
+    const files = [{ relPath: "src/util.ts", contents: "export const one = 1;" }];
+    act(() => {
+      handlers.get("projectSources")?.({ files, truncated: false });
+    });
+
+    await waitFor(() => {
+      expect(installProjectSources).toHaveBeenCalledWith({ fake: "monaco" }, files);
+    });
+  });
+
+  it("drops them when the project is left", () => {
+    const { unmount } = renderPlayground();
+    unmount();
+
+    // Otherwise a lookup could land in a file from the previous project.
+    expect(clearProjectSources).toHaveBeenCalled();
   });
 });
