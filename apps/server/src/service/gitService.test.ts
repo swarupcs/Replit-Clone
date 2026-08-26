@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseBranches, parseLog, parseStatus } from "./gitService.js";
+import {
+  parseBranches,
+  parseLog,
+  parseStatus,
+  patchForHunks,
+  splitHunks,
+} from "./gitService.js";
 
 /** Builds a NUL-terminated porcelain payload the way git actually emits it. */
 function porcelain(...entries: string[]): string {
@@ -219,5 +225,110 @@ describe("parseBranches", () => {
   it("marks nothing current when none is", () => {
     const branches = parseBranches(listing(["main", false]));
     expect(branches[0]?.current).toBe(false);
+  });
+});
+
+const TWO_HUNKS = `diff --git a/f.txt b/f.txt
+index 8afd661..60fd8f7 100644
+--- a/f.txt
++++ b/f.txt
+@@ -1,4 +1,4 @@
+-l1
++CHANGED1
+ l2
+ l3
+ l4
+@@ -12,4 +12,4 @@ l11
+ l12
+ l13
+ l14
+-l15
++CHANGED15
+`;
+
+describe("splitHunks", () => {
+  it("separates the header from the hunks", () => {
+    const { header, hunks } = splitHunks(TWO_HUNKS);
+
+    expect(header).toContain("diff --git a/f.txt b/f.txt");
+    expect(header).toContain("+++ b/f.txt");
+    expect(header).not.toContain("@@");
+    expect(hunks).toHaveLength(2);
+  });
+
+  it("starts each hunk at its own @@ line", () => {
+    const { hunks } = splitHunks(TWO_HUNKS);
+
+    expect(hunks[0]?.startsWith("@@ -1,4 +1,4 @@")).toBe(true);
+    expect(hunks[1]?.startsWith("@@ -12,4 +12,4 @@")).toBe(true);
+  });
+
+  it("keeps a hunk's bytes exactly, so the patch still applies", () => {
+    const { hunks } = splitHunks(TWO_HUNKS);
+
+    // Context lines keep their leading space; nothing is trimmed.
+    expect(hunks[0]).toContain("\n l2\n");
+    expect(hunks[0]).toContain("-l1\n");
+    expect(hunks[0]).toContain("+CHANGED1\n");
+  });
+
+  it("finds no hunks in a patch that has none", () => {
+    expect(splitHunks("").hunks).toEqual([]);
+    expect(splitHunks("Binary files differ\n").hunks).toEqual([]);
+  });
+
+  it("does not mistake a removed line beginning @@ for a hunk header", () => {
+    // A hunk header is matched at the start of a line; a removed line starts
+    // with the marker, so "-@@" is content.
+    const { hunks } = splitHunks(`--- a/f
++++ b/f
+@@ -1 +1 @@
+-@@ not a header
++ok
+`);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]).toContain("-@@ not a header");
+  });
+});
+
+describe("patchForHunks", () => {
+  it("keeps the header in front of the chosen hunk", () => {
+    const patch = patchForHunks(TWO_HUNKS, [0]);
+
+    expect(patch).toContain("--- a/f.txt");
+    expect(patch).toContain("+CHANGED1");
+    expect(patch).not.toContain("CHANGED15");
+  });
+
+  it("takes the second hunk alone", () => {
+    const patch = patchForHunks(TWO_HUNKS, [1]);
+
+    expect(patch).toContain("+CHANGED15");
+    expect(patch).not.toContain("+CHANGED1\n");
+  });
+
+  it("takes several, in file order whatever order they were asked for", () => {
+    const patch = patchForHunks(TWO_HUNKS, [1, 0]);
+
+    expect(patch.indexOf("CHANGED1")).toBeLessThan(patch.indexOf("CHANGED15"));
+  });
+
+  it("ignores a repeated index rather than duplicating the hunk", () => {
+    const patch = patchForHunks(TWO_HUNKS, [0, 0, 0]);
+
+    expect(patch.split("+CHANGED1\n")).toHaveLength(2);
+  });
+
+  it("ignores an index past the end", () => {
+    expect(patchForHunks(TWO_HUNKS, [9])).toBe("");
+    expect(patchForHunks(TWO_HUNKS, [0, 9])).toContain("+CHANGED1");
+  });
+
+  it("returns nothing when asked for nothing", () => {
+    expect(patchForHunks(TWO_HUNKS, [])).toBe("");
+  });
+
+  it("returns nothing for a patch with no hunks", () => {
+    expect(patchForHunks("", [0])).toBe("");
   });
 });

@@ -12,6 +12,7 @@ const git = vi.hoisted(() => ({
   history: vi.fn(),
   branches: vi.fn(),
   discard: vi.fn(),
+  applyHunks: vi.fn(),
   createBranch: vi.fn(),
   switchBranch: vi.fn(),
 }));
@@ -27,6 +28,7 @@ vi.mock("../service/collabService.js", () => ({ forgetProject, dropDoc }));
 import {
   gitBranchController,
   gitDiscardController,
+  gitHunksController,
   gitBranchesController,
   gitCommitController,
   gitDiffController,
@@ -50,6 +52,7 @@ const app = apiApp([
   { method: "get", path: "/p/:projectId/git/branches", handler: gitBranchesController },
   { method: "post", path: "/p/:projectId/git/branch", handler: gitBranchController },
   { method: "post", path: "/p/:projectId/git/discard", handler: gitDiscardController },
+  { method: "post", path: "/p/:projectId/git/hunks", handler: gitHunksController },
 ]);
 
 const STATUS = { branch: "main", staged: [], unstaged: [] };
@@ -554,5 +557,76 @@ describe("discard", () => {
       .send({ paths: ["a.txt"] });
 
     expect(dropDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe("hunks", () => {
+  const post = (body: object) =>
+    request(app).post(`/p/${TEST_PROJECT}/git/hunks`).set(auth()).send(body);
+
+  it("needs editor access", async () => {
+    await post({ path: "f.txt", indexes: [0] });
+
+    expect(projectAccessService.assertProjectAccess).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      TEST_USER.sub,
+      "editor",
+    );
+  });
+
+  it("stages the chosen hunks", async () => {
+    await post({ path: "f.txt", indexes: [0, 2] });
+
+    expect(git.applyHunks).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      "f.txt",
+      [0, 2],
+      false,
+    );
+  });
+
+  it("unstages them when reversed", async () => {
+    await post({ path: "f.txt", indexes: [1], reverse: true });
+
+    expect(git.applyHunks).toHaveBeenCalledWith(TEST_PROJECT, "f.txt", [1], true);
+  });
+
+  it("answers with the status afterwards", async () => {
+    const response = await post({ path: "f.txt", indexes: [0] });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual(STATUS);
+  });
+
+  it("refuses patch text in place of indexes", async () => {
+    // The client says WHICH hunks, never what is in them.
+    const response = await post({
+      path: "f.txt",
+      indexes: ["@@ -1 +1 @@\n+evil"],
+    });
+
+    expect(response.status).toBe(400);
+    expect(git.applyHunks).not.toHaveBeenCalled();
+  });
+
+  it("refuses a negative index", async () => {
+    const response = await post({ path: "f.txt", indexes: [-1] });
+
+    expect(response.status).toBe(400);
+    expect(git.applyHunks).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty selection", async () => {
+    const response = await post({ path: "f.txt", indexes: [] });
+
+    expect(response.status).toBe(400);
+    expect(git.applyHunks).not.toHaveBeenCalled();
+  });
+
+  it("refuses a path that climbs out of the project", async () => {
+    const response = await post({ path: "../../etc/passwd", indexes: [0] });
+
+    expect(response.status).toBe(400);
+    expect(git.applyHunks).not.toHaveBeenCalled();
   });
 });

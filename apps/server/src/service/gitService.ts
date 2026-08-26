@@ -5,10 +5,13 @@ import type {
   GitCommit,
   GitStatus,
 } from "@replit-clone/shared";
+import { randomBytes } from "node:crypto";
+import fsp from "node:fs/promises";
+import path from "node:path";
 import { ensureContainer } from "../containers/containerManager.js";
 import { execCapture } from "../containers/execCapture.js";
 import { BadRequestError } from "../utils/errors.js";
-import { assertValidProjectId } from "../utils/projectPaths.js";
+import { assertValidProjectId, projectRoot } from "../utils/projectPaths.js";
 
 const APP_DIR = "/home/sandbox/app";
 
@@ -433,4 +436,103 @@ export async function discard(
   await gitOrThrow(projectId, ["reset", "--", ...paths]);
   await git(projectId, ["checkout", "--", ...paths]);
   await git(projectId, ["clean", "-f", "--", ...paths]);
+}
+
+/** Splits a unified patch into the header and its hunks, as RAW TEXT.
+ *
+ *  Deliberately not the structured parse the editor does: `git apply` is fed
+ *  these bytes back, so anything that reformatted them -- normalising a line
+ *  ending, dropping a trailing space from a context line -- would produce a
+ *  patch that no longer applies. Slicing at the `@@` lines preserves them
+ *  exactly.
+ *
+ *  The header is everything before the first hunk (`diff --git`, `index`,
+ *  `---`, `+++`), which every hunk needs in front of it to say which file it
+ *  belongs to.
+ */
+export function splitHunks(patch: string): { header: string; hunks: string[] } {
+  const lines = patch.split("\n");
+  const header: string[] = [];
+  const hunks: string[][] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      hunks.push([line]);
+    } else if (hunks.length === 0) {
+      header.push(line);
+    } else {
+      hunks[hunks.length - 1]?.push(line);
+    }
+  }
+
+  return {
+    header: header.length > 0 ? `${header.join("\n")}\n` : "",
+    hunks: hunks.map((hunk) => `${hunk.join("\n")}\n`),
+  };
+}
+
+/** Rebuilds a patch containing only the chosen hunks.
+ *
+ *  Indexes rather than patch text, because the CLIENT chooses which hunks and
+ *  must never be able to say what is in them: `git apply` given an
+ *  attacker-authored patch would happily stage a change to a path nobody
+ *  picked. The patch applied here is always one git itself just produced.
+ */
+export function patchForHunks(patch: string, indexes: number[]): string {
+  const { header, hunks } = splitHunks(patch);
+  const wanted = [...new Set(indexes)].sort((a, b) => a - b);
+
+  const chosen = wanted
+    .filter((index) => index >= 0 && index < hunks.length)
+    .map((index) => hunks[index] ?? "");
+
+  if (chosen.length === 0) return "";
+
+  return `${header}${chosen.join("")}`;
+}
+
+/** Stages, or unstages, individual hunks of one file.
+ *
+ *  The patch is written into the project's own `.git` directory rather than
+ *  piped in: the project is bind-mounted into its container, so a file written
+ *  here is readable there, and `execCapture` attaches no stdin. `.git` because
+ *  git never reports its contents as a change, so a patch file cannot show up
+ *  in the user's status even for the moment it exists.
+ */
+export async function applyHunks(
+  projectId: string,
+  relPath: string,
+  indexes: number[],
+  reverse: boolean,
+): Promise<void> {
+  if (indexes.length === 0) return;
+
+  // Reversing works against what is staged; staging works against the worktree.
+  const source = await diff(projectId, relPath, reverse);
+  const patch = patchForHunks(source, indexes);
+
+  if (!patch.trim()) {
+    throw new BadRequestError("Those changes are no longer there", "STALE_HUNK");
+  }
+
+  const name = `.git/rc-hunk-${randomBytes(8).toString("hex")}.patch`;
+  const hostPath = path.join(projectRoot(projectId), name);
+
+  await fsp.writeFile(hostPath, patch, "utf8");
+
+  try {
+    const argv = ["apply", "--cached"];
+    if (reverse) argv.push("--reverse");
+    argv.push("--", name);
+
+    const { stderr, stdout, exitCode } = await git(projectId, argv);
+
+    if (exitCode !== 0) {
+      const message = (stderr || stdout).trim().split("\n")[0] ?? "git failed";
+      throw new BadRequestError(message, "GIT_FAILED");
+    }
+  } finally {
+    // Even on failure: a patch left behind would sit in .git forever.
+    await fsp.unlink(hostPath).catch(() => undefined);
+  }
 }

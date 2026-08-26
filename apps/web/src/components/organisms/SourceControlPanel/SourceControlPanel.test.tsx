@@ -40,6 +40,7 @@ const api = vi.hoisted(() => ({
   getGitBranchesApi: vi.fn(),
   gitBranchApi: vi.fn(),
   gitDiscardApi: vi.fn(),
+  gitHunksApi: vi.fn(),
   gitStageApi: vi.fn(),
   gitUnstageApi: vi.fn(),
   gitCommitApi: vi.fn(),
@@ -55,6 +56,7 @@ const {
   getGitBranchesApi,
   gitBranchApi,
   gitDiscardApi,
+  gitHunksApi,
 } = api;
 
 const BRANCHES = [
@@ -82,6 +84,7 @@ beforeEach(() => {
   getGitDiffApi.mockResolvedValue(PATCH);
   getGitBranchesApi.mockResolvedValue(BRANCHES);
   gitDiscardApi.mockResolvedValue({ ...STATUS, changes: [] });
+  gitHunksApi.mockResolvedValue(STATUS);
   gitBranchApi.mockResolvedValue({
     status: { ...STATUS, branch: "feature" },
     branches: [
@@ -389,5 +392,81 @@ describe("SourceControlPanel discarding", () => {
     fireEvent.click(screen.getByLabelText(DISCARD_LABEL));
 
     expect(getGitDiffApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("SourceControlPanel hunk staging", () => {
+  /** The unstaged file's diff, open. */
+  async function openDiff() {
+    await renderPanel();
+    fireEvent.click(screen.getByText("App.tsx"));
+    return screen.findByText("is now this");
+  }
+
+  it("offers to stage each hunk of an unstaged file", async () => {
+    await openDiff();
+
+    expect(
+      await screen.findByLabelText("Stage hunk 1 of src/App.tsx"),
+    ).toBeDefined();
+  });
+
+  it("stages the hunk it was asked for", async () => {
+    await openDiff();
+    fireEvent.click(await screen.findByLabelText("Stage hunk 1 of src/App.tsx"));
+
+    await waitFor(() => {
+      expect(gitHunksApi).toHaveBeenCalledWith(
+        PROJECT,
+        "src/App.tsx",
+        [0],
+        false,
+      );
+    });
+  });
+
+  it("re-reads the diff afterwards, since the patch has changed", async () => {
+    await openDiff();
+    const before = getGitDiffApi.mock.calls.length;
+
+    fireEvent.click(await screen.findByLabelText("Stage hunk 1 of src/App.tsx"));
+
+    await waitFor(() => {
+      expect(getGitDiffApi.mock.calls.length).toBeGreaterThan(before);
+    });
+  });
+
+  it("unstages from a staged row's diff instead", async () => {
+    await renderPanel();
+    fireEvent.click(screen.getByText("new.ts"));
+
+    fireEvent.click(await screen.findByLabelText("Unstage hunk 1 of src/new.ts"));
+
+    await waitFor(() => {
+      expect(gitHunksApi).toHaveBeenCalledWith(PROJECT, "src/new.ts", [0], true);
+    });
+  });
+
+  it("reports the server's reason when a hunk will not apply", async () => {
+    gitHunksApi.mockRejectedValue({
+      response: { data: { message: "Those changes are no longer there" } },
+    });
+
+    await openDiff();
+    fireEvent.click(await screen.findByLabelText("Stage hunk 1 of src/App.tsx"));
+
+    await waitFor(() => {
+      expect(messageError).toHaveBeenCalledWith(
+        "Those changes are no longer there",
+      );
+    });
+  });
+
+  it("gives a viewer a readable diff with no staging buttons", async () => {
+    await renderPanel(false);
+    fireEvent.click(screen.getByText("App.tsx"));
+
+    expect(await screen.findByText("is now this")).toBeDefined();
+    expect(screen.queryByLabelText("Stage hunk 1 of src/App.tsx")).toBeNull();
   });
 });

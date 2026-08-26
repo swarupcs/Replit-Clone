@@ -35,6 +35,17 @@ const commitSchema = z.object({ message: z.string().trim().min(1).max(2000) });
  *  authority on what a ref may be called, and the service asks it. The leading
  *  dash is rejected at both layers because such a name would be read as an
  *  option by the command asked to validate it. */
+/** Which hunks of one file to stage, and in which direction.
+ *
+ *  Indexes into the diff the SERVER produces, never patch text: a
+ *  client-authored patch handed to `git apply` could stage a change to a path
+ *  nobody chose. */
+const hunksSchema = z.object({
+  path: relativePath,
+  indexes: z.array(z.number().int().nonnegative()).min(1).max(500),
+  reverse: z.boolean().optional(),
+});
+
 const branchSchema = z.object({
   name: z
     .string()
@@ -248,6 +259,27 @@ export async function gitDiscardController(
   res.json({
     success: true,
     message: "Discarded",
+    data: await git.status(projectId),
+  });
+}
+
+/** Stages, or unstages, individual hunks of one file.
+ *
+ *  Only the index moves, so nothing on disk changes and no shared document
+ *  needs dropping -- unlike a branch switch or a discard.
+ */
+export async function gitHunksController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { path, indexes, reverse } = hunksSchema.parse(req.body ?? {});
+
+  await git.applyHunks(projectId, path, indexes, reverse ?? false);
+
+  res.json({
+    success: true,
+    message: reverse ? "Unstaged" : "Staged",
     data: await git.status(projectId),
   });
 }

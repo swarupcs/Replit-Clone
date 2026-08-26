@@ -326,3 +326,21 @@ export const gitDiscardApi = async (
   );
   return response.data.data;
 };
+
+/** Stages, or unstages, individual hunks of one file.
+ *
+ *  Hunks are named by INDEX into the diff the server just produced, never by
+ *  patch text — the server rebuilds the patch from its own diff, so a client
+ *  cannot stage something nobody chose. */
+export const gitHunksApi = async (
+  projectId: string,
+  path: string,
+  indexes: number[],
+  reverse = false,
+): Promise<GitStatus> => {
+  const response = await axios.post<GitStatusResponse>(
+    `/api/v1/projects/${projectId}/git/hunks`,
+    { path, indexes, reverse },
+  );
+  return response.data.data;
+};

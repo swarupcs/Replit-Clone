@@ -34,6 +34,7 @@ import {
   getGitStatusApi,
   gitBranchApi,
   gitDiscardApi,
+  gitHunksApi,
   gitCommitApi,
   gitInitApi,
   gitStageApi,
@@ -83,6 +84,10 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
   /** The change awaiting a discard confirmation. Held rather than acted on,
    *  because discarding is not undoable. */
   const [discarding, setDiscarding] = useState<GitChange | null>(null);
+
+  /** Bumped after a hunk moves, so the open diff re-fetches: its props have
+   *  not changed but the patch it is showing has. */
+  const [hunkNonce, setHunkNonce] = useState(0);
 
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
@@ -176,6 +181,21 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
     } catch (error) {
       void message.error(
         reasonFrom(error, create ? "Could not create the branch" : "Could not switch branch"),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Stages one hunk, or unstages it when it is a staged row's diff. */
+  const moveHunk = async (relPath: string, index: number, isStaged: boolean) => {
+    setBusy(true);
+    try {
+      setStatus(await gitHunksApi(projectId, relPath, [index], isStaged));
+      setHunkNonce((value) => value + 1);
+    } catch (error) {
+      void message.error(
+        reasonFrom(error, isStaged ? "Could not unstage" : "Could not stage"),
       );
     } finally {
       setBusy(false);
@@ -361,7 +381,17 @@ export function SourceControlPanel({ projectId, canWrite }: Props) {
       </div>
 
       {isOpen && (
-        <DiffView projectId={projectId} path={change.path} staged={isStaged} />
+        <DiffView
+          projectId={projectId}
+          path={change.path}
+          staged={isStaged}
+          refreshKey={hunkNonce}
+          onHunk={
+            canWrite
+              ? (index) => void moveHunk(change.path, index, isStaged)
+              : undefined
+          }
+        />
       )}
       </div>
     );

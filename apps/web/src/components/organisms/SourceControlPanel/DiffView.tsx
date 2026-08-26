@@ -9,6 +9,12 @@ interface Props {
   path: string;
   /** Which side of the index to diff: staged-vs-HEAD, or worktree-vs-index. */
   staged: boolean;
+  /** Absent for a viewer, who may read a diff but not stage from it. Called
+   *  with the hunk's index; the panel owns the request and the refresh. */
+  onHunk?: (index: number) => void;
+  /** Nonce that forces a re-fetch: after staging a hunk the patch this pane is
+   *  showing is out of date, and its own props have not changed. */
+  refreshKey?: number;
 }
 
 const COLOUR: Record<DiffLine["kind"], string | undefined> = {
@@ -51,7 +57,13 @@ function gutter(value: number | undefined) {
  *  patch, the sidebar is too narrow for two columns, and reconstructing both
  *  full files just to feed a diff editor would need two more round trips.
  */
-export function DiffView({ projectId, path, staged }: Props) {
+export function DiffView({
+  projectId,
+  path,
+  staged,
+  onHunk,
+  refreshKey = 0,
+}: Props) {
   const [patch, setPatch] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,7 +87,7 @@ export function DiffView({ projectId, path, staged }: Props) {
       // previous file must not overwrite the current one.
       cancelled = true;
     };
-  }, [projectId, path, staged]);
+  }, [projectId, path, staged, refreshKey]);
 
   if (error) {
     return (
@@ -146,16 +158,32 @@ export function DiffView({ projectId, path, staged }: Props) {
         <span style={{ color: "var(--rc-red)" }}>−{parsed.deletions}</span>
       </div>
 
-      {parsed.hunks.map((hunk) => (
-        <div key={hunk.header}>
+      {parsed.hunks.map((hunk, hunkIndex) => (
+        <div key={`${hunk.header}:${String(hunkIndex)}`}>
           <div
             style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
               padding: "3px 12px",
               color: "var(--rc-text-subtle)",
               background: "rgba(167, 139, 250, 0.06)",
             }}
           >
-            {hunk.header}
+            <span style={{ flex: 1 }}>{hunk.header}</span>
+            {onHunk && (
+              <button
+                type="button"
+                className="rc-icon-button"
+                style={{ fontSize: 11, padding: "0 6px" }}
+                aria-label={`${staged ? "Unstage" : "Stage"} hunk ${String(
+                  hunkIndex + 1,
+                )} of ${path}`}
+                onClick={() => onHunk(hunkIndex)}
+              >
+                {staged ? "Unstage" : "Stage"}
+              </button>
+            )}
           </div>
 
           {hunk.lines.map((line, index) => (
