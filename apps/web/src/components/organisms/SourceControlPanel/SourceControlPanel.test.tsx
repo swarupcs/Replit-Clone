@@ -46,6 +46,8 @@ const api = vi.hoisted(() => ({
   gitFetchApi: vi.fn(),
   gitPullApi: vi.fn(),
   gitPushApi: vi.fn(),
+  getGithubPullsApi: vi.fn(),
+  createGithubPullApi: vi.fn(),
   gitStageApi: vi.fn(),
   gitUnstageApi: vi.fn(),
   gitCommitApi: vi.fn(),
@@ -72,6 +74,8 @@ const {
   gitFetchApi,
   gitPullApi,
   gitPushApi,
+  getGithubPullsApi,
+  createGithubPullApi,
 } = api;
 
 const BRANCHES = [
@@ -95,6 +99,16 @@ const emitted: { event: string; payload: unknown }[] = [];
 beforeEach(() => {
   emitted.length = 0;
   getGithubStatusApi.mockResolvedValue({ configured: true, connection: null });
+  getGithubPullsApi.mockResolvedValue([]);
+  createGithubPullApi.mockResolvedValue({
+    number: 7,
+    title: "Add a thing",
+    url: "https://github.com/a/b/pull/7",
+    state: "open",
+    draft: false,
+    head: "main",
+    base: "main",
+  });
   getGitStatusApi.mockResolvedValue(STATUS);
   getGitLogApi.mockResolvedValue([]);
   getGitDiffApi.mockResolvedValue(PATCH);
@@ -764,5 +778,86 @@ describe("SourceControlPanel pushing with a connection", () => {
     await openPush();
 
     expect(await screen.findByPlaceholderText("Access token")).toBeDefined();
+  });
+});
+
+
+describe("SourceControlPanel pull requests", () => {
+  async function openDialog() {
+    fireEvent.click(screen.getByLabelText("Remotes"));
+    fireEvent.click(await screen.findByText(/Open a pull request/));
+  }
+
+  it("asks whether one is already open before offering to create it", async () => {
+    await renderPanel();
+    await openDialog();
+
+    await waitFor(() => {
+      expect(getGithubPullsApi).toHaveBeenCalledWith(PROJECT, "main");
+    });
+  });
+
+  it("opens one from the current branch", async () => {
+    await renderPanel();
+    await openDialog();
+
+    const title = await screen.findByPlaceholderText("Title");
+    fireEvent.change(title, { target: { value: "Add a thing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open pull request" }));
+
+    await waitFor(() => {
+      expect(createGithubPullApi).toHaveBeenCalledWith(PROJECT, {
+        title: "Add a thing",
+        head: "main",
+        base: "main",
+        description: "",
+      });
+    });
+  });
+
+  it("points at the existing one rather than trying again", async () => {
+    // GitHub would refuse the second attempt, and its message is not where
+    // anyone would look for the link.
+    getGithubPullsApi.mockResolvedValue([
+      {
+        number: 3,
+        title: "Already going",
+        url: "https://github.com/a/b/pull/3",
+        state: "open",
+        draft: false,
+        head: "main",
+        base: "develop",
+      },
+    ]);
+    await renderPanel();
+    await openDialog();
+
+    expect(await screen.findByText("Already going")).toBeDefined();
+    expect(screen.getByRole("button", { name: "View it on GitHub" })).toBeDefined();
+    expect(screen.queryByPlaceholderText("Title")).toBeNull();
+  });
+
+  it("reports GitHub's own refusal", async () => {
+    createGithubPullApi.mockRejectedValue({
+      response: { data: { message: "No commits between main and main" } },
+    });
+    await renderPanel();
+    await openDialog();
+
+    fireEvent.change(await screen.findByPlaceholderText("Title"), {
+      target: { value: "Add a thing" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open pull request" }));
+
+    await waitFor(() => {
+      expect(messageError).toHaveBeenCalledWith("No commits between main and main");
+    });
+  });
+
+  it("is not offered to an editor, since it spends the owner's credential", async () => {
+    await renderPanel(true, false);
+    fireEvent.click(screen.getByLabelText("Remotes"));
+
+    expect(screen.queryByText(/Open a pull request/)).toBeNull();
   });
 });

@@ -18,6 +18,9 @@ import {
   githubToken,
   isGithubReposConfigured,
   listRepos,
+  listPullRequests,
+  createPullRequest,
+  parseGithubRemote,
 } from "./githubService.js";
 import { env } from "../config/env.js";
 import { seal } from "../lib/secretBox.js";
@@ -323,5 +326,140 @@ describe("listRepos", () => {
   it("refuses when nothing is connected", async () => {
     prisma.githubConnection.findUnique.mockResolvedValue(null);
     await expect(listRepos(USER)).rejects.toThrow(/Connect your GitHub/);
+  });
+});
+
+
+describe("parseGithubRemote", () => {
+  it("reads the three shapes a remote is actually written in", () => {
+    const expected = { owner: "octocat", repo: "hello" };
+
+    for (const url of [
+      "https://github.com/octocat/hello.git",
+      "https://github.com/octocat/hello",
+      "https://token@github.com/octocat/hello.git",
+      "ssh://git@github.com/octocat/hello.git",
+      "git@github.com:octocat/hello.git",
+      "git@github.com:octocat/hello",
+    ]) {
+      expect(parseGithubRemote(url)).toEqual(expected);
+    }
+  });
+
+  it("tolerates a trailing slash and surrounding space", () => {
+    expect(parseGithubRemote("  https://github.com/octocat/hello/  ")).toEqual({
+      owner: "octocat",
+      repo: "hello",
+    });
+  });
+
+  it("is null for anything that is not GitHub", () => {
+    // Which is how the panel knows not to offer a pull request at all.
+    expect(parseGithubRemote("https://gitlab.com/octocat/hello.git")).toBeNull();
+    expect(parseGithubRemote("git@bitbucket.org:octocat/hello.git")).toBeNull();
+    expect(parseGithubRemote("/srv/repos/hello.git")).toBeNull();
+    expect(parseGithubRemote("")).toBeNull();
+  });
+
+  it("is null for a GitHub URL that names no repository", () => {
+    expect(parseGithubRemote("https://github.com/octocat")).toBeNull();
+    expect(parseGithubRemote("https://github.com/")).toBeNull();
+  });
+
+  it("does not match a host that merely ends in github.com", () => {
+    // `notgithub.com` and `github.com.evil.test` are different hosts.
+    expect(parseGithubRemote("https://github.com.evil.test/a/b.git")).toBeNull();
+    expect(parseGithubRemote("git@evilgithub.com:a/b.git")).toBeNull();
+  });
+});
+
+describe("pull requests", () => {
+  const RAW = {
+    number: 7,
+    title: "Add a thing",
+    html_url: "https://github.com/octocat/hello/pull/7",
+    state: "open",
+    draft: false,
+    head: { ref: "feature" },
+    base: { ref: "main" },
+  };
+
+  beforeEach(() => {
+    prisma.githubConnection.findUnique.mockResolvedValue(stored());
+  });
+
+  it("qualifies the head branch with the owner", async () => {
+    // Unqualified, GitHub silently matches nothing — which would look like
+    // "no pull request exists" for a branch that has one.
+    const calls = respondWith({ status: 200, body: [RAW] });
+
+    await listPullRequests(USER, "octocat", "hello", "feature");
+
+    expect(decodeURIComponent(calls[0]?.url ?? "")).toContain("head=octocat:feature");
+  });
+
+  it("reduces a pull request to what the panel shows", async () => {
+    respondWith({ status: 200, body: [RAW] });
+
+    expect((await listPullRequests(USER, "octocat", "hello"))[0]).toEqual({
+      number: 7,
+      title: "Add a thing",
+      url: "https://github.com/octocat/hello/pull/7",
+      state: "open",
+      draft: false,
+      head: "feature",
+      base: "main",
+    });
+  });
+
+  it("opens one with the branches it was given", async () => {
+    const calls = respondWith({ status: 200, body: RAW });
+
+    await createPullRequest(USER, {
+      owner: "octocat",
+      repo: "hello",
+      title: "Add a thing",
+      head: "feature",
+      base: "main",
+    });
+
+    const body = JSON.parse((calls[0]?.init?.body ?? "{}") as string) as Record<string, unknown>;
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(body).toEqual({ title: "Add a thing", head: "feature", base: "main" });
+  });
+
+  it("omits an empty body and draft rather than sending nulls", async () => {
+    const calls = respondWith({ status: 200, body: RAW });
+
+    await createPullRequest(USER, {
+      owner: "octocat",
+      repo: "hello",
+      title: "t",
+      head: "f",
+      base: "m",
+      body: "",
+      draft: false,
+    });
+
+    const body = JSON.parse((calls[0]?.init?.body ?? "{}") as string) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("body");
+    expect(body).not.toHaveProperty("draft");
+  });
+
+  it("passes GitHub's refusal through, since it is the useful part", async () => {
+    respondWith({
+      status: 422,
+      body: { message: "A pull request already exists for octocat:feature." },
+    });
+
+    await expect(
+      createPullRequest(USER, {
+        owner: "octocat",
+        repo: "hello",
+        title: "t",
+        head: "feature",
+        base: "main",
+      }),
+    ).rejects.toThrow(/already exists/);
   });
 });

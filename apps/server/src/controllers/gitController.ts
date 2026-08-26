@@ -7,7 +7,12 @@ import { BadRequestError } from "../utils/errors.js";
 import { prisma } from "../lib/prisma.js";
 import * as git from "../service/gitService.js";
 import { dropDoc, forgetProject } from "../service/collabService.js";
-import { githubToken } from "../service/githubService.js";
+import {
+  createPullRequest,
+  githubToken,
+  listPullRequests,
+  parseGithubRemote,
+} from "../service/githubService.js";
 
 /** Paths come from the client, so they are constrained the same way the editor
  *  constrains them: relative, and unable to climb out of the project.
@@ -460,5 +465,82 @@ export async function gitPushController(
     success: true,
     message: "Pushed",
     data: await git.status(projectId),
+  });
+}
+
+/** Where this project's code lives on GitHub, from its own remotes.
+ *
+ *  Derived rather than asked for: the browser knowing which repository a
+ *  project belongs to would be a thing to get wrong or to lie about, and the
+ *  remote is the authority anyway.
+ *
+ *  `origin` first, then any other GitHub remote — a fork's `origin` is the
+ *  fork, which is exactly where a pull request should come from.
+ */
+async function githubRepoForProject(
+  projectId: string,
+): Promise<{ owner: string; repo: string }> {
+  const remotes = await git.remotes(projectId);
+  const ordered = [
+    ...remotes.filter((remote) => remote.name === "origin"),
+    ...remotes.filter((remote) => remote.name !== "origin"),
+  ];
+
+  for (const remote of ordered) {
+    const parsed = parseGithubRemote(remote.url);
+    if (parsed) return parsed;
+  }
+
+  throw new BadRequestError(
+    "This project has no GitHub remote, so there is nowhere to open a pull " +
+      "request. Add one first.",
+    "NO_GITHUB_REMOTE",
+  );
+}
+
+export async function githubPullsController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  const { userId } = getAuthContext(req);
+
+  const head = typeof req.query["head"] === "string" ? req.query["head"] : undefined;
+  const { owner, repo } = await githubRepoForProject(projectId);
+
+  res.json({
+    success: true,
+    message: "Pull requests",
+    data: await listPullRequests(userId, owner, repo, head),
+  });
+}
+
+const pullRequestSchema = z.object({
+  title: z.string().trim().min(1).max(255),
+  head: z.string().trim().min(1).max(255),
+  base: z.string().trim().min(1).max(255),
+  body: z.string().max(60_000).optional(),
+  draft: z.boolean().optional(),
+});
+
+/** Opens a pull request.
+ *
+ *  The owner's, like pushing, and for the same reason: it spends their
+ *  credential and speaks in their name on a repository that is theirs.
+ */
+export async function githubCreatePullController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "owner");
+  const { userId } = getAuthContext(req);
+  const input = pullRequestSchema.parse(req.body ?? {});
+
+  const { owner, repo } = await githubRepoForProject(projectId);
+
+  res.status(201).json({
+    success: true,
+    message: "Pull request opened",
+    data: await createPullRequest(userId, { owner, repo, ...input }),
   });
 }

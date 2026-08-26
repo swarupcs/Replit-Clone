@@ -403,3 +403,132 @@ export async function getRepo(
 
   return toRepo(data);
 }
+
+/** A pull request, reduced to what the panel shows. */
+export interface GithubPullRequest {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  draft: boolean;
+  head: string;
+  base: string;
+}
+
+interface RawPull {
+  number: number;
+  title: string;
+  html_url: string;
+  state: string;
+  draft?: boolean;
+  head: { ref: string };
+  base: { ref: string };
+}
+
+function toPull(raw: RawPull): GithubPullRequest {
+  return {
+    number: raw.number,
+    title: raw.title,
+    url: raw.html_url,
+    state: raw.state,
+    draft: raw.draft ?? false,
+    head: raw.head.ref,
+    base: raw.base.ref,
+  };
+}
+
+/** Open pull requests for a branch.
+ *
+ *  Asked before offering to open one, so the panel can point at the existing
+ *  request instead of failing on a second attempt with GitHub's "A pull request
+ *  already exists" — which is true, unhelpful, and not where the user would
+ *  look for the link.
+ */
+export async function listPullRequests(
+  userId: string,
+  owner: string,
+  repo: string,
+  head?: string,
+): Promise<GithubPullRequest[]> {
+  const token = await githubToken(userId);
+
+  const params = new URLSearchParams({ state: "open", per_page: "20" });
+  // GitHub wants the head qualified by owner; unqualified it silently matches
+  // nothing, which would look like "no PR exists" for a branch that has one.
+  if (head) params.set("head", `${owner}:${head}`);
+
+  const { data } = await githubApi<RawPull[]>(
+    token,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls?${params.toString()}`,
+  );
+
+  return data.map(toPull);
+}
+
+/** Opens a pull request. */
+export async function createPullRequest(
+  userId: string,
+  input: {
+    owner: string;
+    repo: string;
+    title: string;
+    head: string;
+    base: string;
+    body?: string;
+    draft?: boolean;
+  },
+): Promise<GithubPullRequest> {
+  const token = await githubToken(userId);
+
+  const { data } = await githubApi<RawPull>(
+    token,
+    `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/pulls`,
+    {
+      method: "POST",
+      body: {
+        title: input.title,
+        head: input.head,
+        base: input.base,
+        ...(input.body ? { body: input.body } : {}),
+        ...(input.draft ? { draft: true } : {}),
+      },
+    },
+  );
+
+  return toPull(data);
+}
+
+/** Pulls "owner/repo" out of a git remote URL, when it is a GitHub one.
+ *
+ *  Pure, and exported for its own sake: the parsing is the part with cases in
+ *  it, and it needs no network to exercise. Null for anything that is not
+ *  GitHub, which is how the panel knows not to offer a pull request at all.
+ *
+ *  Handles the three shapes a remote is written in — https, ssh, and git's
+ *  scp-like syntax — because all three are what people actually have.
+ */
+export function parseGithubRemote(
+  url: string,
+): { owner: string; repo: string } | null {
+  const trimmed = url.trim();
+
+  const patterns = [
+    // https://github.com/owner/repo(.git)
+    /^https?:\/\/(?:[^@/]*@)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i,
+    // ssh://git@github.com/owner/repo(.git)
+    /^ssh:\/\/(?:[^@/]*@)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i,
+    // git@github.com:owner/repo(.git) — scp-like, and the most common by far
+    /^[^@\s]+@github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(trimmed);
+    const owner = match?.[1];
+    const repo = match?.[2];
+
+    // A path of the right shape but empty on either side is not a repository.
+    if (owner && repo) return { owner, repo };
+  }
+
+  return null;
+}

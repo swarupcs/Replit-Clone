@@ -200,3 +200,20 @@ export type GithubReposResponse = ApiSuccess<{
 
 /** POST /api/v1/github/import */
 export type GithubImportResponse = ApiSuccess<{ project: Project }>;
+
+/** A pull request, reduced to what the source-control panel shows. */
+export interface GithubPullRequest {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  draft: boolean;
+  head: string;
+  base: string;
+}
+
+/** GET /api/v1/projects/:projectId/github/pulls?head= */
+export type GithubPullsResponse = ApiSuccess<GithubPullRequest[]>;
+
+/** POST /api/v1/projects/:projectId/github/pulls */
+export type GithubPullResponse = ApiSuccess<GithubPullRequest>;

@@ -20,6 +20,9 @@ import type {
   ProjectPortsResponse,
   ProjectTreeResponse,
   TreeNodeData,
+  GithubPullRequest,
+  GithubPullsResponse,
+  GithubPullResponse,
 } from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
@@ -410,6 +413,35 @@ export const gitPushApi = async (
   const response = await axios.post<GitStatusResponse>(
     `/api/v1/projects/${projectId}/git/push`,
     { name, branch, ...(token ? { token } : {}) },
+  );
+  return response.data.data;
+};
+
+/** Open pull requests for a branch, so the panel can point at an existing one
+ *  rather than failing on a second attempt to create it. */
+export const getGithubPullsApi = async (
+  projectId: string,
+  head?: string,
+): Promise<GithubPullRequest[]> => {
+  const response = await axios.get<GithubPullsResponse>(
+    `/api/v1/projects/${projectId}/github/pulls`,
+    { params: head ? { head } : {} },
+  );
+  return response.data.data;
+};
+
+export const createGithubPullApi = async (
+  projectId: string,
+  body: { title: string; head: string; base: string; description?: string },
+): Promise<GithubPullRequest> => {
+  const response = await axios.post<GithubPullResponse>(
+    `/api/v1/projects/${projectId}/github/pulls`,
+    {
+      title: body.title,
+      head: body.head,
+      base: body.base,
+      ...(body.description ? { body: body.description } : {}),
+    },
   );
   return response.data.data;
 };

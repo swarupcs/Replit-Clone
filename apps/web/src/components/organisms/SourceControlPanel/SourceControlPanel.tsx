@@ -31,6 +31,7 @@ import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { DiffView } from "./DiffView.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { getGithubStatusApi } from "../../../apis/github.ts";
+import type { GithubPullRequest } from "@replit-clone/shared";
 import {
   getGitBranchesApi,
   getGitLogApi,
@@ -41,6 +42,8 @@ import {
   gitHunksApi,
   gitPullApi,
   gitPushApi,
+  getGithubPullsApi,
+  createGithubPullApi,
   getGitRemotesApi,
   gitCommitApi,
   gitInitApi,
@@ -110,6 +113,14 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
    *  dialog can stop asking for one. Null until the answer is in — the dialog
    *  must not offer to push with a connection it does not yet know about. */
   const [canUseConnection, setCanUseConnection] = useState<boolean | null>(null);
+  /** Open, when the pull request dialog is up. */
+  const [openingPull, setOpeningPull] = useState(false);
+  const [pullTitle, setPullTitle] = useState("");
+  const [pullBody, setPullBody] = useState("");
+  const [pullBase, setPullBase] = useState("");
+  /** A pull request that already exists for this branch, so the panel offers
+   *  the link instead of a second attempt that GitHub would refuse. */
+  const [existingPull, setExistingPull] = useState<GithubPullRequest | null>(null);
 
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
@@ -298,6 +309,58 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
       closePush();
     } catch (error) {
       void message.error(reasonFrom(error, "Could not push"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Opens the pull request dialog, having first asked whether one is already
+   *  open for this branch — GitHub's "a pull request already exists" is true,
+   *  unhelpful, and not where anyone would look for the link. */
+  const startPullRequest = async () => {
+    const branch = status?.branch;
+    if (!branch) return;
+
+    setBusy(true);
+    try {
+      const [existing] = await getGithubPullsApi(projectId, branch);
+      setExistingPull(existing ?? null);
+      setPullTitle(existing?.title ?? branch.replace(/[-_/]+/g, " ").trim());
+      setPullBody("");
+      // The default branch is the usual target and is not knowable from here,
+      // so the repository's own answer arrives with the existing request when
+      // there is one; otherwise "main" is the overwhelmingly common case and
+      // the field is editable.
+      setPullBase(existing?.base ?? "main");
+      setOpeningPull(true);
+    } catch (error) {
+      void message.error(reasonFrom(error, "Could not reach GitHub"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitPullRequest = async () => {
+    const branch = status?.branch;
+    const title = pullTitle.trim();
+    const base = pullBase.trim();
+    if (!branch || !title || !base) return;
+
+    setBusy(true);
+    try {
+      const created = await createGithubPullApi(projectId, {
+        title,
+        head: branch,
+        base,
+        description: pullBody.trim(),
+      });
+
+      setOpeningPull(false);
+      void message.success(`Opened pull request #${String(created.number)}.`);
+      // The next thing anyone does is look at it.
+      window.open(created.url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      void message.error(reasonFrom(error, "Could not open the pull request"));
     } finally {
       setBusy(false);
     }
@@ -635,7 +698,20 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
                       },
                     ]
                   : []),
-              ]),
+              ]).concat(
+                // One entry, not one per remote: a pull request belongs to the
+                // repository, and which one that is comes from the remotes
+                // themselves rather than from a choice made here.
+                isOwner && status?.branch
+                  ? [
+                      {
+                        key: "pull-request",
+                        label: "Open a pull request…",
+                        onClick: () => void startPullRequest(),
+                      },
+                    ]
+                  : [],
+              ),
             }}
           >
             <button
@@ -780,6 +856,65 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
           </>
         )}
       </div>
+
+      <Modal
+        open={openingPull}
+        title="Open a pull request"
+        okText={existingPull ? "View it on GitHub" : "Open pull request"}
+        okButtonProps={{ disabled: !pullTitle.trim() || !pullBase.trim() }}
+        confirmLoading={busy}
+        onOk={() => {
+          if (existingPull) {
+            window.open(existingPull.url, "_blank", "noopener,noreferrer");
+            setOpeningPull(false);
+            return;
+          }
+          void submitPullRequest();
+        }}
+        onCancel={() => setOpeningPull(false)}
+        destroyOnHidden
+      >
+        {existingPull ? (
+          // GitHub would refuse a second one anyway, and its message is not
+          // where anyone would look for the link.
+          <div style={{ fontSize: 13 }}>
+            <b>#{existingPull.number}</b> is already open for{" "}
+            <b>{existingPull.head}</b> into <b>{existingPull.base}</b>.
+            <div
+              style={{ marginTop: 6, color: "var(--rc-text-subtle)", fontSize: 12 }}
+            >
+              {existingPull.title}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12, color: "var(--rc-text-subtle)", marginBottom: 10 }}>
+              From <b>{status?.branch}</b> into the branch below. Push first if
+              this branch is not on GitHub yet.
+            </div>
+
+            <Input
+              autoFocus
+              placeholder="Title"
+              value={pullTitle}
+              onChange={(event) => setPullTitle(event.target.value)}
+              style={{ marginBottom: 8 }}
+            />
+            <Input
+              placeholder="Base branch"
+              value={pullBase}
+              onChange={(event) => setPullBase(event.target.value)}
+              style={{ marginBottom: 8 }}
+            />
+            <Input.TextArea
+              placeholder="Description (optional)"
+              value={pullBody}
+              onChange={(event) => setPullBody(event.target.value)}
+              autoSize={{ minRows: 3, maxRows: 8 }}
+            />
+          </>
+        )}
+      </Modal>
 
       <Modal
         open={pushingTo !== null}

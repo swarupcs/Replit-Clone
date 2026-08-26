@@ -156,9 +156,28 @@ Each is a commit, each verified before the next starts.
 
 ## 5. Progress
 
-- [ ] Phase 1 — keep the connection
-- [ ] Phase 2 — see the repositories
-- [ ] Phase 3 — import one
-- [ ] Phase 4 — push without retyping
-- [ ] Phase 5 — pull requests
+- [x] Phase 1 — keep the connection
+- [x] Phase 2 — see the repositories
+- [x] Phase 3 — import one
+- [x] Phase 4 — push without retyping
+- [x] Phase 5 — pull requests
 - [ ] Phase 6 — the rest of the loop
+
+### Notes from building it
+
+- **The clone image problem had a simpler answer than expected.** A template
+  decides what *runs*; it does not have to match to hold files. So the Node
+  image clones, the language is read off what arrived, and the container is
+  removed so the next open starts the right one.
+- **Which repository a project belongs to is derived, never asked for.** It
+  comes from the project's own remotes, parsed server-side. A browser telling
+  the server which repository to open a pull request against is a thing to get
+  wrong or to lie about.
+- **`ext::` never came up.** The import URL is built from a name the GitHub API
+  returned, so there is no user-supplied URL to validate — which removes the
+  question instead of answering it. The existing allow-list still guards
+  remotes a user adds by hand.
+- **What is still missing:** the start command for an imported repository comes
+  from the detected template and will often be wrong for a real project. The
+  template registry has a fixed set, and a repository's actual `npm start` is
+  not in it. Worth reading `package.json` scripts for; not done here.
