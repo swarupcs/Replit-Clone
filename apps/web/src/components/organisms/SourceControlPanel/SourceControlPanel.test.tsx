@@ -219,7 +219,7 @@ describe("SourceControlPanel diffs", () => {
 
   it("opens the file from the icon, without expanding the diff", async () => {
     await renderPanel();
-    fireEvent.click(screen.getByTitle("Open App.tsx"));
+    fireEvent.click(screen.getByLabelText("Open App.tsx"));
 
     expect(emitted).toContainEqual({
       event: "readFile",
@@ -227,6 +227,28 @@ describe("SourceControlPanel diffs", () => {
     });
     // The icon is not the row: clicking it must not also open the diff.
     expect(getGitDiffApi).not.toHaveBeenCalled();
+  });
+
+  /** The row holds buttons of its own — stage, discard — so it could not be
+   *  one, and it was a div with a click handler: the diff was mouse-only. Its
+   *  two actions are sibling buttons now. */
+  it("makes the row's two actions real buttons", async () => {
+    await renderPanel();
+
+    // The two are distinct controls, so each is asked for on its own terms:
+    // the icon by its label, the row by the filename it shows.
+    const open = screen.getByLabelText("Open App.tsx");
+    const label = screen.getByText("App.tsx").closest("button");
+
+    expect(open.tagName).toBe("BUTTON");
+    expect(label).not.toBeNull();
+    expect(label).not.toBe(open);
+    // Announces that the row expands, and reflects whether it currently is.
+    expect(label?.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(screen.getByText("App.tsx"));
+    expect(await screen.findByText("is now this")).toBeDefined();
+    expect(label?.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("still lets a viewer read a diff", async () => {

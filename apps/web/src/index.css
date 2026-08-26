@@ -810,3 +810,19 @@ body {
 .rc-panel-tab-close:focus-visible {
   opacity: 1;
 }
+
+/* A row that is genuinely a button.
+ *
+ * Several rows in the panels are `.rc-tree-row` divs with a click handler,
+ * which makes them mouse-only. Composed with `.rc-tree-row` on a real
+ * `<button>` this gets Enter, Space, the tab order and the focus ring from the
+ * element itself rather than from a hand-written handler that has to be got
+ * right in each place. */
+.rc-row-button {
+  appearance: none;
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}

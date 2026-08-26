@@ -349,53 +349,73 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
 
     return (
       <div key={key}>
+      {/* The row holds buttons of its own — discard, stage — so it cannot be
+          one. Its two actions are buttons instead: the icon opens the file,
+          the label shows the change. That is also what retires the
+          stopPropagation on every button in here: with no handler on the row,
+          there is no longer a parent click to stop. */}
       <div
         className="rc-tree-row"
         data-active={isOpen}
-        onClick={() => {
-          // The row shows the change; opening the file for editing is what the
-          // icon is for. Clicking an open row closes it again.
-          setExpanded(isOpen ? null : key);
-        }}
         title={change.from ? `${change.from} → ${change.path}` : change.path}
       >
-        <span
-          role="button"
-          tabIndex={-1}
-          title={`Open ${name}`}
-          style={{ display: "flex", alignItems: "center" }}
-          onClick={(event) => {
-            event.stopPropagation();
+        <button
+          type="button"
+          className="rc-icon-button"
+          aria-label={`Open ${name}`}
+          onClick={() => {
             openFile(change.path);
           }}
         >
           <FileIcon extension={fileExtension(change.path)} name={name} />
-        </span>
-        <span
+        </button>
+        <button
+          type="button"
+          className="rc-row-button"
+          // Announces that the row expands, and into what state — the diff
+          // appears below it rather than somewhere else on the page.
+          aria-expanded={isOpen}
+          onClick={() => {
+            // Clicking an open row closes it again.
+            setExpanded(isOpen ? null : key);
+          }}
           style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
             flex: 1,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            fontSize: 13,
+            minWidth: 0,
+            padding: 0,
+            cursor: "pointer",
+            color: "inherit",
           }}
         >
-          {name}
-        </span>
-        <span
-          style={{
-            fontSize: 11,
-            opacity: 0.5,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            maxWidth: 90,
-          }}
-        >
-          {change.path.includes("/")
-            ? change.path.slice(0, change.path.lastIndexOf("/"))
-            : ""}
-        </span>
+          <span
+            style={{
+              flex: 1,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontSize: 13,
+            }}
+          >
+            {name}
+          </span>
+          <span
+            style={{
+              fontSize: 11,
+              opacity: 0.5,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              maxWidth: 90,
+            }}
+          >
+            {change.path.includes("/")
+              ? change.path.slice(0, change.path.lastIndexOf("/"))
+              : ""}
+          </span>
+        </button>
 
         {canWrite && !isStaged && (
           <Tooltip title="Discard changes">
@@ -404,8 +424,7 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
               className="rc-icon-button"
               aria-label={`Discard changes to ${change.path}`}
               disabled={busy}
-              onClick={(event) => {
-                event.stopPropagation();
+              onClick={() => {
                 setDiscarding(change);
               }}
             >
@@ -420,10 +439,7 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
               type="button"
               className="rc-icon-button"
               disabled={busy}
-              onClick={(event) => {
-                // The row itself opens the file, which is not what a click on
-                // this button means.
-                event.stopPropagation();
+              onClick={() => {
                 void act(
                   () =>
                     isStaged
