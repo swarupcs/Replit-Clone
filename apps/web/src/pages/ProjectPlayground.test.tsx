@@ -306,30 +306,49 @@ describe("ProjectPlayground commands", () => {
   });
 });
 
-describe("ProjectPlayground banners", () => {
-  it("reports a socket error, and lets it be dismissed", () => {
+/** Both used to be `Alert banner`s stacked at the top of the page, which
+ *  pushed every pane down and made Monaco and xterm re-measure. They are split
+ *  by what they are: an error is transient news and goes to a toast; a file
+ *  changed on disk is a fact about the project right now and goes to a chip in
+ *  the status bar, which resizes nothing. */
+describe("ProjectPlayground notifications", () => {
+  it("reports a socket error without moving the layout", () => {
     renderPlayground();
 
     act(() => {
       useEditorSocketStore.setState({ lastError: "Could not write the file" });
     });
-    expect(screen.getByText("Could not write the file")).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    expect(screen.getByText("Could not write the file")).toBeDefined();
+    // No banner: the message is a toast, so nothing in the page shifted to
+    // make room for it.
+    expect(document.querySelector(".ant-alert-banner")).toBeNull();
+  });
+
+  it("takes the error back off the store, so it is shown once", () => {
+    renderPlayground();
+
+    act(() => {
+      useEditorSocketStore.setState({ lastError: "Could not write the file" });
+    });
+
+    // A toast dismisses itself; leaving the error set would show it again on
+    // the next render that happened to read it.
     expect(useEditorSocketStore.getState().lastError).toBeNull();
   });
 
-  it("warns that an open file changed on disk", () => {
+  it("keeps a file changed on disk in the status bar, not in a banner", () => {
     renderPlayground();
 
     act(() => {
       useEditorSocketStore.setState({ externallyChanged: ["src/App.tsx"] });
     });
 
-    expect(screen.getByText(/src\/App\.tsx.*changed on disk/)).toBeDefined();
+    const chip = screen.getByText(/changed on disk/);
+    expect(chip.closest(".rc-statusbar")).not.toBeNull();
   });
 
-  it("summarises rather than listing every externally changed file", () => {
+  it("counts the changed files rather than listing them in the bar", () => {
     renderPlayground();
 
     act(() => {
@@ -338,7 +357,25 @@ describe("ProjectPlayground banners", () => {
       });
     });
 
-    expect(screen.getByText(/and 2 more/)).toBeDefined();
+    // The bar has room for a number; the names are in the tooltip.
+    expect(screen.getByText(/5 changed on disk/)).toBeDefined();
+  });
+
+  it("lets the changed-on-disk notice be dismissed on its own", () => {
+    renderPlayground();
+
+    act(() => {
+      useEditorSocketStore.setState({
+        lastError: null,
+        externallyChanged: ["a.ts"],
+      });
+    });
+
+    fireEvent.click(
+      screen.getByLabelText("Dismiss the changed-on-disk notice"),
+    );
+
+    expect(useEditorSocketStore.getState().externallyChanged).toEqual([]);
   });
 });
 

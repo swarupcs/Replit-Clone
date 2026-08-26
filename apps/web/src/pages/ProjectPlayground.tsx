@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { io } from "socket.io-client";
 import { loader } from "@monaco-editor/react";
-import { Alert, Button, Flex, Tooltip, Typography } from "antd";
+import { Button, Flex, Tooltip, Typography, message } from "antd";
 import {
   VscFiles,
   VscLayoutPanel,
@@ -73,7 +73,7 @@ export const ProjectPlayground = () => {
   const setEditorSocket = useEditorSocketStore((state) => state.setEditorSocket);
   const lastError = useEditorSocketStore((state) => state.lastError);
   const clearError = useEditorSocketStore((state) => state.clearError);
-  const externallyChanged = useEditorSocketStore((state) => state.externallyChanged);
+  const [messageApi, messageHolder] = message.useMessage();
   const activeTab = useOpenTabsStore(selectActiveTab);
   const closeAllTabs = useOpenTabsStore((state) => state.closeAll);
   const splitOpen = useOpenTabsStore((state) => state.splitOpen);
@@ -110,6 +110,18 @@ export const ProjectPlayground = () => {
   const openedProjectRef = useRef<string | undefined>(undefined);
 
   useUnsavedWorkGuard();
+
+  // A failed operation is transient news: it happened, it is over, and it does
+  // not describe the project's current state. It used to be a banner at the
+  // top of the page, which pushed every pane down and made Monaco and xterm
+  // re-measure mid-keystroke -- a worse interruption than the thing it was
+  // reporting. Persistent state goes to the status bar instead; see the
+  // externally-changed chip there.
+  useEffect(() => {
+    if (!lastError) return;
+    void messageApi.error(lastError);
+    clearError();
+  }, [lastError, messageApi, clearError]);
 
   // Monaco has been computing diagnostics all along and nothing looked at
   // them. Installed once for the page rather than per editor pane: markers are
@@ -560,32 +572,6 @@ export const ProjectPlayground = () => {
         </Flex>
       </Flex>
 
-      {lastError && (
-        <Alert
-          type="error"
-          banner
-          closable
-          message={lastError}
-          onClose={clearError}
-        />
-      )}
-
-      {externallyChanged.length > 0 && (
-        <Alert
-          type="warning"
-          banner
-          closable
-          message={
-            `${externallyChanged.slice(0, 3).join(", ")}` +
-            (externallyChanged.length > 3
-              ? ` and ${String(externallyChanged.length - 3)} more`
-              : "") +
-            " changed on disk while open. Your version is still what will be saved — " +
-            "close and reopen the file to take the version on disk instead."
-          }
-          onClose={clearError}
-        />
-      )}
 
       <div style={{ flex: 1, minHeight: 0 }}>
         <SplitPane
@@ -786,6 +772,8 @@ export const ProjectPlayground = () => {
           }
         />
       </div>
+
+      {messageHolder}
 
       {/* One bar, spanning the app, below every pane. It used to be rendered
           inside the editor, which gave a split two of them and left a project

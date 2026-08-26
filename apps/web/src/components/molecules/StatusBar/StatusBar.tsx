@@ -1,5 +1,6 @@
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 import { useRunStore } from "../../../store/runStore.ts";
+import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import {
   selectVisibleStatus,
   useEditorStatusStore,
@@ -33,6 +34,12 @@ export const StatusBar = () => {
   const runStatus = useRunStore((state) => state.state.status);
   const errors = useProblemsStore(selectErrorCount);
   const warnings = useProblemsStore(selectWarningCount);
+  const externallyChanged = useEditorSocketStore(
+    (state) => state.externallyChanged,
+  );
+  const clearExternallyChanged = useEditorSocketStore(
+    (state) => state.clearExternallyChanged,
+  );
 
   const run = RUN[runStatus];
 
@@ -56,6 +63,36 @@ export const StatusBar = () => {
       </span>
 
       <span className="rc-statusbar-group">
+        {/* Persistent state, so a chip rather than a banner: it describes how
+            the project is right now, it stays until it is not true any more,
+            and it does not resize the editor to say so. */}
+        {externallyChanged.length > 0 && (
+          <span
+            title={
+              `${externallyChanged.join(", ")} changed on disk while open. ` +
+              "Your version is still what will be saved — close and reopen a " +
+              "file to take the version on disk instead."
+            }
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              color: "var(--rc-yellow)",
+            }}
+          >
+            {externallyChanged.length} changed on disk
+            <button
+              type="button"
+              className="rc-icon-button"
+              aria-label="Dismiss the changed-on-disk notice"
+              style={{ width: 14, height: 14, color: "inherit" }}
+              onClick={clearExternallyChanged}
+            >
+              ×
+            </button>
+          </span>
+        )}
+
         {/* Always shown, zeroes included: "0 problems" is information, and a
             count that appears only when something is wrong cannot be trusted
             to be absent for the right reason. */}
