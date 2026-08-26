@@ -155,9 +155,16 @@ Honest scoring of what a user would notice.
 | AI assistant | ✅ | ✅ panel + apply-change | none |
 | Env vars / secrets | ✅ | ✅ injected, rebuild on change | none |
 | Package caching | ✅ | ✅ named cache volume | none |
-| Deployment of user apps | ✅ | ❌ | out of scope (see §6) |
+| Deployment of user apps | ✅ | ❌ | the largest gap — see §8.1 |
+| Warm resume / snapshots | ✅ | ❌ | container is removed when idle; see §8.2 |
+| Persistent data for user apps | ✅ | ❌ | no DB or KV a project can reach; see §8.3 |
+| Package management UI | ✅ | ❌ | terminal only; see §8.4 |
+| Fork / public projects | ✅ | ❌ | no visibility model; see §8.5 |
 
-**The gap is git.** Everything else a user touches daily is built. Diffs went
+**Inside the editor, everything a user touches daily is built** — the entry
+above this paragraph was written when git was the outstanding item, and git is
+now done through push. What remains is the block of rows at the foot of the
+table, none of which lives inside the editor: see §8. Diffs went
 further than expected: the server computes them (`gitService.diff`), the route
 serves them (`GET /:id/git/diff`), the shared response type is declared, and
 `getGitDiffApi` is written in the web client — and **no component ever called
@@ -428,3 +435,121 @@ Each needs a design decision rather than an afternoon.
 - [x] Phase 7 — git branches
 - [x] Phase 8 — discard, hunk staging, go-to-definition, remotes, E2E
 - [x] Phase 9 — git push (owner-only, unshared projects) and the container-bound E2E flow
+
+---
+
+## 8. What is still missing against Replit and CodeSandbox
+
+_Added 2026-08-26. §2 scores the capabilities a user touches inside the editor,
+and by that measure the product is essentially complete: templates, editor,
+shell, run, preview, multiplayer, sharing, isolation, quotas, git through push,
+the assistant, secrets, package caching, cross-file TS intelligence and a
+problems panel are all built._
+
+_This section scores the things that are missing at a level above the editor —
+where the remaining distance to both competitors actually is. None of these is
+an afternoon; each is listed with the decision it is blocked on rather than
+being written up as though it were ready to start._
+
+### 8.1 Deployment of user apps — the largest single gap
+
+Replit sells Deployments (autoscale, reserved VM, static, scheduled) with a
+custom domain on each. CodeSandbox gives every branch a live preview URL.
+
+Here, the only way to see a running project is the preview proxy: it requires a
+session, it serves a *dev* server, and the container behind it is reaped after
+`CONTAINER_IDLE_MINUTES`. Nothing built here can be shown to somebody without
+an account. That is the line between an editor and a product, and it is the one
+capability §2 still scores ❌.
+
+- **Blocked on:** where a deployment runs and who pays for it. A static build
+  dropped on object storage, a long-lived container on this same host, and a
+  handoff to a third party (Fly, Railway, Cloudflare) are three different
+  products with three different cost models. Also needs a domain and wildcard
+  TLS story, which the preview proxy currently sidesteps by being
+  authenticated.
+- **Smallest honest first step:** static deployments only — run the template's
+  build command, publish the output directory to a public, unauthenticated
+  origin at a generated subdomain. That covers the Vite, Next-export and
+  Static-HTML templates without needing any always-on compute.
+
+### 8.2 Warm containers / snapshots
+
+CodeSandbox's headline feature is a memory snapshot: a VM resumes in about a
+second with its processes still running. Replit persists the filesystem,
+`node_modules` included.
+
+Here the reaper removes the container after twenty idle minutes and the next
+open re-runs the template's start command — which begins with `npm install`.
+Coming back to a Next.js project therefore costs a minute of waiting, every
+time, and `AUTO_START_ON_OPEN` means the user is charged that delay simply for
+looking at a file.
+
+- **Blocked on:** nothing conceptual — the named package-cache volume already
+  exists. The decision is how much disk a stopped-but-restorable project may
+  hold, and whether to stop containers rather than remove them (`docker stop`
+  keeps the writable layer; the current `force-remove` does not).
+- **Worth noting:** this is probably the highest ratio of felt improvement to
+  work on the whole list.
+
+### 8.3 Persistent data for user apps
+
+Replit gives every repl a key-value store and a Postgres database. A project
+here gets a bind-mounted working tree and nothing else: no database a user's
+app can talk to, no object storage, no runtime state that survives the reaper.
+
+- **Blocked on:** isolation. The platform's own Postgres must never be
+  reachable from a container running untrusted code, so this means either a
+  per-project database with generated credentials injected as env vars, or a
+  small KV service on the sandbox network with per-project tokens.
+
+### 8.4 Package management UI
+
+Both competitors let a user search for and add a dependency without opening a
+terminal, with version pinning and a visible dependency list. Here it is `npm
+install` typed into a shell, and nothing in the UI knows what the project
+depends on.
+
+- **Blocked on:** nothing. This is the most self-contained item in the section:
+  parse the manifest the template already ships (`package.json`,
+  `requirements.txt`, `go.mod`), render it, and drive add/remove through the
+  package manager inside the container using the run-command plumbing that
+  already exists.
+
+### 8.5 Fork, and the idea of a public project
+
+Neither product's central social mechanic exists here, because the concept it
+rests on does not: there is no such thing as a public project. Duplicate copies
+a project you already own; share invites a named collaborator. Taking a
+stranger's project, getting your own copy, and needing no permission to do it
+is what makes a template gallery or a shared tutorial link work at all.
+
+- **Blocked on:** a visibility model on `Project` and its consequences —
+  abuse (public projects are a spam and malware surface), quota accounting for
+  a fork, and whether secrets and git remotes are stripped on copy. The last
+  one is a security requirement, not a nicety.
+
+### 8.6 Smaller, and each genuinely smaller
+
+- **Language servers beyond TypeScript.** The TS worker now has the project's
+  sources, so go-to-definition works for JS and TS. The Python and Go templates
+  get syntax highlighting and nothing else — no diagnostics from the real
+  toolchain, no completion, no rename.
+- **Always-on workers and scheduled jobs.** Replit runs both. Everything here
+  is tied to an interactive session and dies with it.
+- **A CLI, and local sync.** No way to work against a project from a local
+  editor.
+- **Follow-mode.** Presence shows who is here and which file they are in;
+  it does not let you ride along with their viewport.
+- **Checkpoint history outside git.** Replit's per-keystroke history recovers a
+  file from before the first commit. Here, an uncommitted mistake is gone.
+
+### 8.7 Suggested order
+
+By leverage, and by how little each depends on a decision that has not been
+made yet:
+
+1. **8.4 packages** — self-contained, needs no new infrastructure, felt daily.
+2. **8.2 warm containers** — largest felt speed-up, and the plumbing exists.
+3. **8.1 static deployments** — the smallest version of the biggest gap.
+4. **8.3 persistent data**, then **8.5 fork** — both need a design round first.
