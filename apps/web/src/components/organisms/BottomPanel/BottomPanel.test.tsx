@@ -194,3 +194,109 @@ describe("BottomPanel access", () => {
     expect(screen.getByTestId("run-output")).toBeDefined();
   });
 });
+
+
+/** The shell tabs used to be `button`s holding a `span role="button"` close —
+ *  a button inside a button, which is invalid markup that browsers resolve by
+ *  dropping one of them, and which left the close unreachable by keyboard.
+ *
+ *  They are `div role="tab"` now, so everything a button gave for free has to
+ *  be provided: selection on Enter and Space, and a way to close. */
+describe("panel tabs from the keyboard", () => {
+  /** The tab strip's tabs, in the order they appear. */
+  function tabs() {
+    return screen.getAllByRole("tab");
+  }
+
+  it("presents the shells and Output as one set of tabs", () => {
+    render(<BottomPanel projectId={PROJECT} />);
+    fireEvent.click(screen.getByLabelText("New shell"));
+
+    expect(screen.getByRole("tablist", { name: "Panel" })).toBeDefined();
+    expect(tabs().map((tab) => tab.dataset["rcTab"])).toEqual([
+      "terminal:1",
+      "terminal:2",
+      "output",
+    ]);
+  });
+
+  it("is a single tab stop, on whichever tab is selected", () => {
+    render(<BottomPanel projectId={PROJECT} />);
+    fireEvent.click(screen.getByLabelText("New shell"));
+
+    const tabbable = tabs().filter(
+      (tab) => tab.getAttribute("tabindex") === "0",
+    );
+
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]?.dataset["rcTab"]).toBe("terminal:2");
+  });
+
+  it("selects with Enter and with Space, as the buttons used to", () => {
+    render(<BottomPanel projectId={PROJECT} />);
+    fireEvent.click(screen.getByLabelText("New shell"));
+
+    for (const key of ["Enter", " "]) {
+      fireEvent.click(screen.getByText("Shell 2"));
+      fireEvent.keyDown(screen.getByText("Shell 1"), { key });
+      expect(screen.getByText("Shell 1").getAttribute("aria-selected")).toBe(
+        "true",
+      );
+    }
+  });
+
+  it("moves along the strip with the arrows, selecting as it goes", () => {
+    render(<BottomPanel projectId={PROJECT} />);
+    fireEvent.click(screen.getByLabelText("New shell"));
+    fireEvent.click(screen.getByText("Shell 1"));
+
+    fireEvent.keyDown(screen.getByText("Shell 1"), { key: "ArrowRight" });
+
+    expect(screen.getByText("Shell 2").getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    expect(document.activeElement).toBe(screen.getByText("Shell 2"));
+  });
+
+  it("stops at the ends rather than wrapping round", () => {
+    render(<BottomPanel projectId={PROJECT} />);
+    fireEvent.click(screen.getByText("Shell 1"));
+
+    fireEvent.keyDown(screen.getByText("Shell 1"), { key: "ArrowLeft" });
+
+    expect(screen.getByText("Shell 1").getAttribute("aria-selected")).toBe(
+      "true",
+    );
+  });
+
+  it("closes a shell with Delete", () => {
+    render(<BottomPanel projectId={PROJECT} />);
+    fireEvent.click(screen.getByLabelText("New shell"));
+
+    fireEvent.keyDown(screen.getByText("Shell 2"), { key: "Delete" });
+
+    expect(screen.queryByText("Shell 2")).toBeNull();
+  });
+
+  it("refuses Delete on the last shell and on Output", () => {
+    render(<BottomPanel projectId={PROJECT} />);
+
+    // Closing a lone shell would only immediately spawn a replacement, and
+    // Output is not closable at all.
+    fireEvent.keyDown(screen.getByText("Shell 1"), { key: "Delete" });
+    fireEvent.keyDown(screen.getByText("Output"), { key: "Delete" });
+
+    expect(screen.getByText("Shell 1")).toBeDefined();
+    expect(screen.getByText("Output")).toBeDefined();
+  });
+
+  it("gives the close affordance a real button, out of the tab order", () => {
+    render(<BottomPanel projectId={PROJECT} />);
+    fireEvent.click(screen.getByLabelText("New shell"));
+
+    const close = screen.getByLabelText("Close shell 2");
+
+    expect(close.tagName).toBe("BUTTON");
+    expect(close.getAttribute("tabindex")).toBe("-1");
+  });
+});
