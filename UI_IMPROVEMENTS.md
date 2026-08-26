@@ -164,3 +164,26 @@ Monaco produces markers and nothing surfaces them.
 **#2 (focus states)** and **#5 (global status bar)** first: both are small and
 self-contained, and #5 unblocks #3 and #7. Then #1, which is the largest single
 piece of work and the one that changes who can use the product at all.
+
+---
+
+## Progress
+
+- [x] **#2 — focus states and keyboard reach.** A `:focus-visible` ring on the
+  custom controls; the explorer is a `role="tree"` with one roving tab stop and
+  the WAI-ARIA key rules (pure, in `lib/treeKeys.ts`); the tab strip is a
+  `role="tablist"` with arrows and Delete. Two things the plan did not know
+  about turned up on the way: the panel's shell tabs held a
+  `<span role="button">` *inside* a `<button>` — invalid markup, and the close
+  was mouse-only however a browser resolved it — and the search and
+  source-control rows were divs with click handlers, so every result was
+  visible and none was reachable. Both fixed.
+- [x] **#4 — command palette.** Already shipped, before this plan was written:
+  `Ctrl+Shift+P` over `lib/commands.ts`, with disabled entries greyed and
+  carrying their reason. The plan was composed against an earlier tree.
+- [x] **#5 — global status bar.** Promoted out of `EditorComponent` into the
+  playground, which retires both bugs the plan names. The dev server's state
+  moved into it, being the first thing to take up the room that freed.
+
+Still open: **#1** (responsive), **#3** (presence), **#6** (notifications),
+**#7** (problems), and all of Tier 3.
