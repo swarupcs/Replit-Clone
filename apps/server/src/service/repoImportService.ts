@@ -74,6 +74,38 @@ export function detectTemplate(
   return IMPORT_TEMPLATE;
 }
 
+/** The command that runs an imported repository.
+ *
+ *  A template's start command is right for a project scaffolded from that
+ *  template and usually wrong for somebody's real repository — the registry has
+ *  a fixed dozen templates and a real project's own script is not among them.
+ *  So it is read from `package.json`.
+ *
+ *  Ordered by what a dev server is most often called. `start` is deliberately
+ *  not first: in a Vite or Next project it usually means the *production*
+ *  server, which needs a build that has not happened.
+ *
+ *  Null when there is nothing to go on, which leaves the template's default —
+ *  a wrong guess is worse than the default, because the default is at least
+ *  predictable from the template shown in the UI.
+ */
+export function detectStartCommand(
+  packageJson: { scripts?: Record<string, string> } | null,
+): string | null {
+  const scripts = packageJson?.scripts;
+  if (!scripts) return null;
+
+  const chosen = ["dev", "develop", "start", "serve"].find(
+    (name) => typeof scripts[name] === "string" && scripts[name].trim(),
+  );
+
+  if (!chosen) return null;
+
+  // The install is part of it: a freshly cloned repository has no node_modules,
+  // and a run that fails on a missing dependency looks like a broken import.
+  return `npm install && npm run ${chosen}`;
+}
+
 /** Reads what the clone left behind, for `detectTemplate`. */
 async function inspectClone(dir: string): Promise<{
   files: string[];
@@ -239,12 +271,19 @@ export async function importRepository(
 
     const { files, packageJson } = await inspectClone(dir);
     const template = detectTemplate(files, packageJson);
+    const startCommand = detectStartCommand(packageJson);
 
-    if (template !== IMPORT_TEMPLATE) {
+    if (template !== IMPORT_TEMPLATE || startCommand) {
       await prisma.project.update({
         where: { id: project.id },
-        data: { template },
+        data: {
+          template,
+          ...(startCommand ? { startCommand } : {}),
+        },
       });
+    }
+
+    if (template !== IMPORT_TEMPLATE) {
 
       // The image is chosen when the container starts, so the one that did the
       // cloning is the wrong one for what was cloned. Removed rather than
@@ -262,7 +301,7 @@ export async function importRepository(
       template,
     });
 
-    return { ...project, template };
+    return { ...project, template, startCommand };
   } catch (error) {
     // Never leave a row pointing at a directory that was not populated.
     await removeContainer(project.id).catch(() => {});

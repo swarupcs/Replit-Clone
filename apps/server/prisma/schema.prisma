@@ -140,6 +140,14 @@ model Project {
   /// Last time a socket or terminal attached; drives the idle container reaper.
   lastActiveAt DateTime?
 
+  /// What `Run` executes, when the template's default is not right.
+  ///
+  /// Null means "use the template's". An imported repository is the case this
+  /// exists for: the template is detected from the files, but a real project's
+  /// own `npm run dev` is not in a fixed registry of templates, so it is read
+  /// from its package.json at import and can be corrected afterwards.
+  startCommand String?
+
   /// Environment variables injected into this project's container, as a JSON
   /// object of string values. Stored per project rather than in a file so they
   /// are not committed, exported, or visible in the file tree.

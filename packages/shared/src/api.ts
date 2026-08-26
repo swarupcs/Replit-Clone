@@ -225,3 +225,13 @@ export type GithubProjectRepoResponse = ApiSuccess<{
   repo: string;
   url: string;
 } | null>;
+
+/** GET / PUT /api/v1/projects/:projectId/start-command
+ *
+ *  Both values, because "npm run dev" alone does not say whether it is the
+ *  project's own choice or the template's — and which it is decides whether
+ *  clearing the field would help. */
+export type StartCommandResponse = ApiSuccess<{
+  command: string | null;
+  templateDefault: string;
+}>;

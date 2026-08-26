@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Input, Modal, Typography, message } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { getProjectEnvApi, setProjectEnvApi } from "../../../apis/projects.ts";
+import {
+  getProjectEnvApi,
+  getStartCommandApi,
+  setProjectEnvApi,
+  setStartCommandApi,
+} from "../../../apis/projects.ts";
 
 interface EnvVarsDialogProps {
   projectId: string;
@@ -57,10 +62,18 @@ export const EnvVarsDialog = ({ projectId, open, onClose }: EnvVarsDialogProps) 
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
   const [rows, setRows] = useState<Row[]>([]);
+  /** The run command being edited. Empty means the template's default. */
+  const [commandDraft, setCommandDraft] = useState("");
 
   const { data, isLoading } = useQuery({
     queryKey: ["projectEnv", projectId],
     queryFn: () => getProjectEnvApi(projectId),
+    enabled: open,
+  });
+
+  const startCommand = useQuery({
+    queryKey: ["startCommand", projectId],
+    queryFn: () => getStartCommandApi(projectId),
     enabled: open,
   });
 
@@ -69,6 +82,12 @@ export const EnvVarsDialog = ({ projectId, open, onClose }: EnvVarsDialogProps) 
   useEffect(() => {
     if (open && data) setRows(toRows(data));
   }, [open, data]);
+
+  useEffect(() => {
+    if (open && startCommand.data) {
+      setCommandDraft(startCommand.data.command ?? "");
+    }
+  }, [open, startCommand.data]);
 
   const saveMutation = useMutation({
     mutationFn: (vars: Record<string, string>) => setProjectEnvApi(projectId, vars),
@@ -96,12 +115,25 @@ export const EnvVarsDialog = ({ projectId, open, onClose }: EnvVarsDialogProps) 
     );
   }
 
+  const commandMutation = useMutation({
+    mutationFn: (command: string) => setStartCommandApi(projectId, command),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["startCommand", projectId] }),
+  });
+
   function save() {
     const vars: Record<string, string> = {};
     for (const row of rows) {
       const name = row.name.trim();
       if (name) vars[name] = row.value;
     }
+
+    // Saved only when it actually changed: the endpoint writes a row, and
+    // opening the dialog to edit a variable should not touch the command.
+    if (commandDraft.trim() !== (startCommand.data?.command ?? "")) {
+      commandMutation.mutate(commandDraft);
+    }
+
     saveMutation.mutate(vars);
   }
 
@@ -111,7 +143,7 @@ export const EnvVarsDialog = ({ projectId, open, onClose }: EnvVarsDialogProps) 
 
       <Modal
         open={open}
-        title="Environment variables"
+        title="Project settings"
         okText="Save"
         onOk={save}
         onCancel={onClose}
@@ -120,6 +152,31 @@ export const EnvVarsDialog = ({ projectId, open, onClose }: EnvVarsDialogProps) 
         width={620}
         destroyOnHidden
       >
+        {/* The run command sits above the variables because it is the thing an
+            imported repository most often needs corrected: the template is
+            detected from the files, and a real project's own script is not in
+            the fixed registry of templates. */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 13, marginBottom: 6 }}>Run command</div>
+          <Input
+            placeholder={startCommand.data?.templateDefault ?? ""}
+            value={commandDraft}
+            onChange={(event) => setCommandDraft(event.target.value)}
+            style={{ fontFamily: "var(--rc-mono)" }}
+          />
+          <div
+            style={{ marginTop: 6, fontSize: 12, color: "var(--rc-text-subtle)" }}
+          >
+            {startCommand.data?.command
+              ? "This project's own command."
+              : `Using the template's default: ${
+                  startCommand.data?.templateDefault ?? "…"
+                }`}
+            {" Clear the box to go back to it."}
+          </div>
+        </div>
+
+        <div style={{ fontSize: 13, marginBottom: 6 }}>Environment variables</div>
         <Typography.Paragraph
           style={{ color: "var(--rc-text-subtle)", fontSize: 13 }}
         >

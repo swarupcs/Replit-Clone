@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectTemplate } from "./repoImportService.js";
+import { detectStartCommand, detectTemplate } from "./repoImportService.js";
 
 /** What `inspectClone` hands over: the top-level entries, plus the parsed
  *  package.json when there is one. */
@@ -97,5 +97,49 @@ describe("detectTemplate", () => {
       expect(detectTemplate(["README.md", "LICENSE"], null)).toBe("node-express");
       expect(detectTemplate([], null)).toBe("node-express");
     });
+  });
+});
+
+
+/** A template's start command is right for a project scaffolded from it and
+ *  usually wrong for somebody's real repository, whose own script is not in a
+ *  fixed registry of a dozen templates. */
+describe("detectStartCommand", () => {
+  const scripts = (value: Record<string, string>) => ({ scripts: value });
+
+  it("prefers dev over start", () => {
+    // In a Vite or Next project `start` usually means the PRODUCTION server,
+    // which needs a build that has not happened.
+    expect(detectStartCommand(scripts({ start: "node .", dev: "vite" }))).toBe(
+      "npm install && npm run dev",
+    );
+  });
+
+  it("falls through dev, develop, start, serve in that order", () => {
+    expect(detectStartCommand(scripts({ serve: "x", start: "y" }))).toBe(
+      "npm install && npm run start",
+    );
+    expect(detectStartCommand(scripts({ serve: "x" }))).toBe(
+      "npm install && npm run serve",
+    );
+  });
+
+  it("installs first, since a fresh clone has no node_modules", () => {
+    // A run that fails on a missing dependency looks like a broken import.
+    expect(detectStartCommand(scripts({ dev: "vite" }))).toContain("npm install");
+  });
+
+  it("is null when there is nothing to go on", () => {
+    // A wrong guess is worse than the template's default, which is at least
+    // predictable from what the UI says the project is.
+    expect(detectStartCommand(null)).toBeNull();
+    expect(detectStartCommand({})).toBeNull();
+    expect(detectStartCommand(scripts({ build: "tsc", test: "vitest" }))).toBeNull();
+  });
+
+  it("ignores a script that is present but empty", () => {
+    expect(detectStartCommand(scripts({ dev: "   ", start: "node ." }))).toBe(
+      "npm install && npm run start",
+    );
   });
 });

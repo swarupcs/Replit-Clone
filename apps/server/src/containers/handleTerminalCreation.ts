@@ -48,8 +48,13 @@ export const handleTerminalCreation = (
   templateId: string,
   attachInput: AttachInput,
   terminalId: number,
+  /** The project's own start command, when it has one. `$START_COMMAND` is a
+   *  hint the shell prints, and a hint that names a command the Run button does
+   *  not run is worse than none. */
+  startCommandOverride?: string,
 ): void => {
   const template = getTemplate(templateId);
+  const startCommand = startCommandOverride?.trim() || template.startCommand;
   const pidFile = terminalPidFile(terminalId);
 
   container.exec(
@@ -65,7 +70,7 @@ export const handleTerminalCreation = (
       Env: [
         "TERM=xterm-256color",
         `DEV_PORT=${template.devPort}`,
-        `START_COMMAND=${template.startCommand}`,
+        `START_COMMAND=${startCommand}`,
         // A dev server started by hand from the shell needs the same treatment
         // as one started by the Run button.
         ...watchPollingEnv,

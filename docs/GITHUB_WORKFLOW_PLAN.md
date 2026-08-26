@@ -162,6 +162,7 @@ Each is a commit, each verified before the next starts.
 - [x] Phase 4 — push without retyping
 - [x] Phase 5 — pull requests
 - [x] Phase 6 — the rest of the loop
+- [x] Phase 7 — the run command an imported repository actually needs
 
 ### Notes from building it
 
@@ -177,7 +178,9 @@ Each is a commit, each verified before the next starts.
   returned, so there is no user-supplied URL to validate — which removes the
   question instead of answering it. The existing allow-list still guards
   remotes a user adds by hand.
-- **What is still missing:** the start command for an imported repository comes
-  from the detected template and will often be wrong for a real project. The
-  template registry has a fixed set, and a repository's actual `npm start` is
-  not in it. Worth reading `package.json` scripts for; not done here.
+- **The start command needed its own phase.** An imported repository ran the
+  detected *template's* command, which is right for a project scaffolded from
+  that template and usually wrong for somebody's real repository — the registry
+  has a fixed dozen and a real project's own script is not among them. So a
+  project can now carry its own, read from `package.json` at import and
+  editable afterwards. See Phase 7.

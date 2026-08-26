@@ -416,7 +416,7 @@ export const ProjectPlayground = () => {
       {
         id: "project.env",
         category: "Project",
-        title: "Environment variables…",
+        title: "Project settings — run command and variables…",
         run: () => setEnvOpen(true),
       },
       {
@@ -626,10 +626,10 @@ export const ProjectPlayground = () => {
                 <VscSettingsGear size={15} />
               </button>
             </Tooltip>
-            <Tooltip title="Environment variables">
+            <Tooltip title="Project settings">
               <button
                 className="rc-icon-button"
-                aria-label="Environment variables"
+                aria-label="Project settings"
                 onClick={() => setEnvOpen(true)}
               >
                 <VscKey size={15} />

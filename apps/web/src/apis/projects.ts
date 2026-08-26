@@ -24,6 +24,7 @@ import type {
   GithubPullsResponse,
   GithubPullResponse,
   GithubProjectRepoResponse,
+  StartCommandResponse,
 } from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
@@ -453,6 +454,28 @@ export const getGithubProjectRepoApi = async (
 ): Promise<{ owner: string; repo: string; url: string } | null> => {
   const response = await axios.get<GithubProjectRepoResponse>(
     `/api/v1/projects/${projectId}/github/repo`,
+  );
+  return response.data.data;
+};
+
+export const getStartCommandApi = async (
+  projectId: string,
+): Promise<{ command: string | null; templateDefault: string }> => {
+  const response = await axios.get<StartCommandResponse>(
+    `/api/v1/projects/${projectId}/start-command`,
+  );
+  return response.data.data;
+};
+
+/** An empty string means "go back to the template's default", which is the
+ *  only way to undo a bad edit without knowing what the default was. */
+export const setStartCommandApi = async (
+  projectId: string,
+  command: string,
+): Promise<{ command: string | null; templateDefault: string }> => {
+  const response = await axios.put<StartCommandResponse>(
+    `/api/v1/projects/${projectId}/start-command`,
+    { command },
   );
   return response.data.data;
 };
