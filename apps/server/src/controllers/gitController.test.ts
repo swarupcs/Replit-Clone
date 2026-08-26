@@ -32,6 +32,9 @@ vi.mock("../service/gitService.js", () => git);
 const collaboratorCount = vi.hoisted(() => vi.fn());
 const projectFindUnique = vi.hoisted(() => vi.fn());
 
+const githubToken = vi.hoisted(() => vi.fn());
+vi.mock("../service/githubService.js", () => ({ githubToken }));
+
 vi.mock("../lib/prisma.js", () => ({
   prisma: {
     user: { findUnique },
@@ -60,7 +63,7 @@ import {
   gitUnstageController,
 } from "./gitController.js";
 import { apiApp, bearer, TEST_PROJECT, TEST_USER } from "../test/apiHarness.js";
-import { ForbiddenError } from "../utils/errors.js";
+import { BadRequestError, ForbiddenError } from "../utils/errors.js";
 
 const app = apiApp([
   { method: "get", path: "/p/:projectId/git/status", handler: gitStatusController },
@@ -856,7 +859,46 @@ describe("push", () => {
     expect(response.body.message).toMatch(/terminal/i);
   });
 
-  it("refuses without a token rather than pushing unauthenticated", async () => {
+  it("falls back to the connected GitHub account when no token is sent", async () => {
+    githubToken.mockResolvedValue("from-the-connection");
+
+    const response = await post({ token: undefined });
+
+    expect(response.status).toBe(200);
+    expect(git.pushRemote).toHaveBeenCalledWith(
+      expect.any(String),
+      "origin",
+      "main",
+      "from-the-connection",
+    );
+  });
+
+  it("prefers a token that was sent over the stored connection", async () => {
+    // Someone pasting one is pushing to a forge this server knows nothing
+    // about; their explicit choice must not be overridden.
+    githubToken.mockResolvedValue("from-the-connection");
+
+    await post({ token: "typed-in" });
+
+    expect(git.pushRemote).toHaveBeenCalledWith(
+      expect.any(String),
+      "origin",
+      "main",
+      "typed-in",
+    );
+    expect(githubToken).not.toHaveBeenCalled();
+  });
+
+  it("refuses with neither a token nor a connection", async () => {
+    // The real service throws this when there is nothing stored; the error
+    // handler maps it by type, so a look-alike would come back a 500.
+    githubToken.mockRejectedValue(
+      new BadRequestError(
+        "Connect your GitHub account first.",
+        "GITHUB_NOT_CONNECTED",
+      ),
+    );
+
     const response = await post({ token: undefined });
 
     expect(response.status).toBe(400);

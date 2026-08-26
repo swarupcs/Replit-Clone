@@ -54,6 +54,12 @@ const api = vi.hoisted(() => ({
 
 vi.mock("../../../apis/projects.ts", () => api);
 
+/** The panel asks whether a connected GitHub account could supply the push
+ *  credential. Mocked so the suite makes no real request, and so both answers
+ *  can be exercised. */
+const getGithubStatusApi = vi.hoisted(() => vi.fn());
+vi.mock("../../../apis/github.ts", () => ({ getGithubStatusApi }));
+
 const {
   getGitStatusApi,
   getGitLogApi,
@@ -88,6 +94,7 @@ const emitted: { event: string; payload: unknown }[] = [];
 
 beforeEach(() => {
   emitted.length = 0;
+  getGithubStatusApi.mockResolvedValue({ configured: true, connection: null });
   getGitStatusApi.mockResolvedValue(STATUS);
   getGitLogApi.mockResolvedValue([]);
   getGitDiffApi.mockResolvedValue(PATCH);
@@ -682,5 +689,80 @@ describe("SourceControlPanel pushing", () => {
         expect.stringContaining("Push from the project's terminal instead."),
       );
     });
+  });
+});
+
+
+/** Pushing used to demand a token typed in every time. A connected GitHub
+ *  account supplies one; pasting remains the way to push anywhere else. */
+describe("SourceControlPanel pushing with a connection", () => {
+  async function openPush() {
+    fireEvent.click(screen.getByLabelText("Remotes"));
+    fireEvent.click(await screen.findByText(/Push to origin/));
+  }
+
+  it("stops asking for a token when one can be supplied", async () => {
+    getGithubStatusApi.mockResolvedValue({
+      configured: true,
+      connection: {
+        login: "octocat",
+        scopes: ["repo"],
+        connectedAt: "2026-01-01T00:00:00.000Z",
+        canUseRepos: true,
+      },
+    });
+    await renderPanel();
+    await openPush();
+
+    expect(
+      await screen.findByText(/Pushing as your connected GitHub account/),
+    ).toBeDefined();
+    expect(screen.queryByPlaceholderText("Access token")).toBeNull();
+  });
+
+  it("pushes with no token at all in that case", async () => {
+    getGithubStatusApi.mockResolvedValue({
+      configured: true,
+      connection: {
+        login: "octocat",
+        scopes: ["repo"],
+        connectedAt: "2026-01-01T00:00:00.000Z",
+        canUseRepos: true,
+      },
+    });
+    await renderPanel();
+    await openPush();
+    await screen.findByText(/Pushing as your connected GitHub account/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Push" }));
+
+    await waitFor(() => {
+      expect(gitPushApi).toHaveBeenCalledWith(PROJECT, "origin", "main", undefined);
+    });
+  });
+
+  it("still asks when there is no connection", async () => {
+    // Pasting a token is how anyone pushes to a forge this server knows
+    // nothing about, and it stays possible.
+    await renderPanel();
+    await openPush();
+
+    expect(await screen.findByPlaceholderText("Access token")).toBeDefined();
+  });
+
+  it("still asks when GitHub granted no repository access", async () => {
+    getGithubStatusApi.mockResolvedValue({
+      configured: true,
+      connection: {
+        login: "octocat",
+        scopes: ["read:user"],
+        connectedAt: "2026-01-01T00:00:00.000Z",
+        canUseRepos: false,
+      },
+    });
+    await renderPanel();
+    await openPush();
+
+    expect(await screen.findByPlaceholderText("Access token")).toBeDefined();
   });
 });

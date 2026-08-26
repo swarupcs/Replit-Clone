@@ -394,19 +394,22 @@ export const gitPullApi = async (
   return response.data.data;
 };
 
-/** Pushes a branch, authenticating with a value supplied for this one call.
+/** Pushes a branch.
  *
- *  Never stored anywhere on the client: not in a store, not in localStorage,
- *  not in the URL. It is read from an input, sent, and dropped. */
+ *  The token is optional: without one the server uses the caller's connected
+ *  GitHub account. When there is one it is never stored anywhere on the client
+ *  — not in a store, not in localStorage, not in the URL. It is read from an
+ *  input, sent, and dropped.
+ */
 export const gitPushApi = async (
   projectId: string,
   name: string,
   branch: string,
-  token: string,
+  token?: string,
 ): Promise<GitStatus> => {
   const response = await axios.post<GitStatusResponse>(
     `/api/v1/projects/${projectId}/git/push`,
-    { name, branch, token },
+    { name, branch, ...(token ? { token } : {}) },
   );
   return response.data.data;
 };

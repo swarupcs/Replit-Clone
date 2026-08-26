@@ -30,6 +30,7 @@ import { fileExtension } from "@replit-clone/shared";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { DiffView } from "./DiffView.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
+import { getGithubStatusApi } from "../../../apis/github.ts";
 import {
   getGitBranchesApi,
   getGitLogApi,
@@ -105,6 +106,10 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
    *  moment it closes -- never put in a store, localStorage or a URL. */
   const [pushingTo, setPushingTo] = useState<string | null>(null);
   const [pushToken, setPushToken] = useState("");
+  /** Whether a connected GitHub account can supply the credential, so the
+   *  dialog can stop asking for one. Null until the answer is in — the dialog
+   *  must not offer to push with a connection it does not yet know about. */
+  const [canUseConnection, setCanUseConnection] = useState<boolean | null>(null);
 
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
@@ -133,6 +138,29 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Asked once, and only by the owner: nobody else is offered pushing, so
+  // nobody else needs to know whether a credential could be supplied.
+  useEffect(() => {
+    if (!isOwner) return;
+    let cancelled = false;
+
+    void getGithubStatusApi()
+      .then((github) => {
+        if (!cancelled) {
+          setCanUseConnection(Boolean(github.connection?.canUseRepos));
+        }
+      })
+      // A deployment without GitHub configured answers this with an error, and
+      // that is not a failure worth reporting — it just means the box stays.
+      .catch(() => {
+        if (!cancelled) setCanUseConnection(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwner]);
 
   // The tree already broadcasts when files change on disk, and every one of
   // those is a change git would report differently. Reusing it keeps the panel
@@ -252,15 +280,20 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
     }
   };
 
-  /** Pushes the current branch, with a token supplied for this one call. */
+  /** Pushes the current branch.
+   *
+   *  The credential comes from the connected GitHub account when there is one,
+   *  and from the box otherwise — a pasted token is someone pushing to a forge
+   *  this server knows nothing about, and it stays possible. */
   const push = async () => {
     const name = pushingTo;
     const branch = status?.branch;
-    if (!name || !branch || !pushToken) return;
+    const typed = pushToken.trim();
+    if (!name || !branch || (!typed && !canUseConnection)) return;
 
     setBusy(true);
     try {
-      setStatus(await gitPushApi(projectId, name, branch, pushToken));
+      setStatus(await gitPushApi(projectId, name, branch, typed || undefined));
       void message.success(`Pushed ${branch} to ${name}.`);
       closePush();
     } catch (error) {
@@ -752,25 +785,43 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
         open={pushingTo !== null}
         title={`Push ${status?.branch ?? "HEAD"} to ${pushingTo ?? ""}`}
         okText="Push"
-        okButtonProps={{ disabled: !pushToken.trim() }}
+        okButtonProps={{ disabled: !pushToken.trim() && !canUseConnection }}
         confirmLoading={busy}
         onOk={() => void push()}
         onCancel={closePush}
         destroyOnHidden
       >
-        <Input.Password
-          autoFocus
-          placeholder="Access token"
-          value={pushToken}
-          onChange={(event) => setPushToken(event.target.value)}
-          onPressEnter={() => void push()}
-        />
-        <div style={{ marginTop: 8, fontSize: 12, color: "var(--rc-text-subtle)" }}>
-          Used for this push only — it is not saved here, in the repository, or
-          on the server. Sharing this project disables pushing from the editor,
-          because everyone with access shares its container; push from the
-          terminal instead.
-        </div>
+        {canUseConnection ? (
+          <div style={{ fontSize: 13 }}>
+            Pushing as your connected GitHub account.
+            <div
+              style={{ marginTop: 8, fontSize: 12, color: "var(--rc-text-subtle)" }}
+            >
+              Sharing this project disables pushing from the editor, because
+              everyone with access shares its container; push from the terminal
+              instead.
+            </div>
+          </div>
+        ) : (
+          <>
+            <Input.Password
+              autoFocus
+              placeholder="Access token"
+              value={pushToken}
+              onChange={(event) => setPushToken(event.target.value)}
+              onPressEnter={() => void push()}
+            />
+            <div
+              style={{ marginTop: 8, fontSize: 12, color: "var(--rc-text-subtle)" }}
+            >
+              Used for this push only — it is not saved here, in the repository,
+              or on the server. Connect GitHub from the dashboard to stop being
+              asked. Sharing this project disables pushing from the editor,
+              because everyone with access shares its container; push from the
+              terminal instead.
+            </div>
+          </>
+        )}
       </Modal>
 
       <Modal

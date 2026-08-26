@@ -7,6 +7,7 @@ import { BadRequestError } from "../utils/errors.js";
 import { prisma } from "../lib/prisma.js";
 import * as git from "../service/gitService.js";
 import { dropDoc, forgetProject } from "../service/collabService.js";
+import { githubToken } from "../service/githubService.js";
 
 /** Paths come from the client, so they are constrained the same way the editor
  *  constrains them: relative, and unable to climb out of the project.
@@ -82,8 +83,10 @@ const pullSchema = z.object({
  *  The token is never persisted or echoed, so nothing here validates its shape
  *  beyond a length bound — every forge issues a different one, and guessing at
  *  formats would only reject valid credentials. */
+/** The token is optional now: a connected GitHub account supplies one, and
+ *  pasting a personal access token remains the way to push anywhere else. */
 const pushSchema = pullSchema.extend({
-  token: z.string().min(1).max(1024),
+  token: z.string().min(1).max(1024).optional(),
 });
 
 const branchSchema = z.object({
@@ -435,6 +438,7 @@ export async function gitPushController(
   res: Response,
 ): Promise<void> {
   const projectId = await authorise(req, "owner");
+  const { userId } = getAuthContext(req);
   const { name, branch, token } = pushSchema.parse(req.body ?? {});
 
   if (!(await isSoleOccupant(projectId))) {
@@ -445,7 +449,12 @@ export async function gitPushController(
     );
   }
 
-  await git.pushRemote(projectId, name, branch, token);
+  // A token in the request wins: someone pasting one is pushing to a forge
+  // this server knows nothing about, and their explicit choice should not be
+  // overridden by a connection meant for GitHub.
+  const credential = token ?? (await githubToken(userId));
+
+  await git.pushRemote(projectId, name, branch, credential);
 
   res.json({
     success: true,
