@@ -15,12 +15,19 @@ import { useMediaQuery } from "./useMediaQuery.ts";
  */
 export function useThemeMode(): ThemeMode {
   const choice = useThemeStore((state) => state.choice);
+  // Set only by the embed page, from the URL. See the store for why it wins.
+  const override = useThemeStore((state) => state.override);
   // Subscribed to, not merely read: "system" has to follow the OS changing
   // while the app is open, which is exactly when someone notices it did not.
   const systemIsLight = useMediaQuery("(prefers-color-scheme: light)");
 
   const mode: ThemeMode =
-    choice === "system" ? (systemIsLight ? "light" : "dark") : resolveMode(choice);
+    override ??
+    (choice === "system"
+      ? systemIsLight
+        ? "light"
+        : "dark"
+      : resolveMode(choice));
 
   useEffect(() => {
     document.documentElement.dataset["theme"] = mode;

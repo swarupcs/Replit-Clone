@@ -1610,3 +1610,186 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* --- Embeds -------------------------------------------------------------
+ *
+ * A project inside somebody else's page. Sized in percentages throughout,
+ * because the frame's height is set by the author's snippet and this page has
+ * no say in it — an embed that assumes 100vh is one that renders half a
+ * scrollbar in a 300px iframe.
+ */
+
+.rc-embed {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  background: var(--rc-surface);
+  color: var(--rc-text);
+  overflow: hidden;
+}
+
+.rc-embed-centered {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  width: 100%;
+}
+
+.rc-embed-gone {
+  margin: 0;
+  font-size: 13px;
+  color: var(--rc-text-subtle);
+}
+
+.rc-embed-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  height: 34px;
+  border-bottom: 1px solid var(--rc-border);
+  background: var(--rc-surface-raised);
+  font-size: 12.5px;
+}
+
+.rc-embed-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.rc-embed-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.rc-embed-tab {
+  border: 0;
+  background: transparent;
+  color: var(--rc-text-subtle);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.rc-embed-tab:hover {
+  color: var(--rc-text);
+}
+
+.rc-embed-tab-on {
+  background: var(--rc-surface-overlay);
+  color: var(--rc-text);
+}
+
+.rc-embed-open {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--rc-text-subtle);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.rc-embed-open:hover {
+  color: var(--rc-text);
+  text-decoration: underline;
+}
+
+.rc-embed-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.rc-embed-code,
+.rc-embed-preview {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.rc-embed-code {
+  display: flex;
+  min-height: 0;
+}
+
+/* The published site sits beside our own chrome, so it gets a divider rather
+   than a border of its own — a border would read as part of the site. */
+.rc-embed[data-view="split"] .rc-embed-preview {
+  border-left: 1px solid var(--rc-border);
+}
+
+.rc-embed-preview {
+  border: 0;
+  background: #fff;
+}
+
+.rc-embed-files {
+  flex: 0 0 auto;
+  width: 190px;
+  max-width: 42%;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  overflow: auto;
+  border-right: 1px solid var(--rc-border);
+  background: var(--rc-surface-sunken);
+}
+
+.rc-embed-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--rc-text-subtle);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.rc-embed-file span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* The path is shown from the END: in a 190px column "src/components/…" is
+     every row, and the filename is the part that tells them apart. */
+  direction: rtl;
+  text-align: left;
+}
+
+.rc-embed-file:hover {
+  color: var(--rc-text);
+}
+
+.rc-embed-file-active {
+  background: var(--rc-surface-overlay);
+  color: var(--rc-text);
+}
+
+.rc-embed-editor {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.rc-embed-truncated {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  color: var(--rc-text-subtle);
+  background: var(--rc-surface-sunken);
+  border-bottom: 1px solid var(--rc-border);
+}

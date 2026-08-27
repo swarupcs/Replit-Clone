@@ -164,6 +164,7 @@ model Project {
 
   collaborators ProjectCollaborator[]
   deployment    Deployment?
+  embed         Embed?
 
   @@index([ownerId])
   @@map("projects")
@@ -253,4 +254,41 @@ enum DeploymentStatus {
   BUILDING
   LIVE
   FAILED
+}
+
+/// A read-only, unauthenticated view of a project, for framing in someone
+/// else's page.
+///
+/// One row per project, because the token IS the embed: an owner who wants a
+/// different token has revoked the old one, and rotating in place says that
+/// plainly. Presentation (`view`, `activeFile`) lives here rather than only in
+/// the URL so the owner can change their mind without editing every snippet
+/// they have ever pasted.
+model Embed {
+  id String @id @default(uuid())
+
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// The credential in the iframe's URL. 32 random bytes, base64url. Stored in
+  /// the clear, unlike a refresh token, because it is not a secret the server
+  /// verifies -- it is the address of a public thing, and the whole page it
+  /// grants is meant to be read by strangers.
+  token String @unique
+
+  /// Which halves are shown: "code", "preview", or "split".
+  view String @default("split")
+
+  /// What the preview half frames: "none" or "deployment". Never a running
+  /// container -- an anonymous page view must not be able to start one.
+  preview String @default("deployment")
+
+  /// Project-relative POSIX path of the file that opens first, or null for
+  /// whichever the tree offers.
+  activeFile String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("embeds")
 }

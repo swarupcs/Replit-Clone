@@ -64,6 +64,12 @@ import {
   undeployController,
 } from "../../controllers/deployController.js";
 import { getDevcontainerController } from "../../controllers/devcontainerController.js";
+import {
+  createEmbedController,
+  getEmbedController,
+  revokeEmbedController,
+  updateEmbedController,
+} from "../../controllers/embedController.js";
 
 const router = express.Router();
 
@@ -173,6 +179,13 @@ router.delete("/:projectId/deployment", asyncHandler(undeployController));
 // What the project's own .devcontainer/devcontainer.json asked for, and what
 // this server did with it.
 router.get("/:projectId/devcontainer", asyncHandler(getDevcontainerController));
+
+// Embeds. The OWNER's half only -- what an anonymous reader calls lives on
+// its own router, outside the `requireAuth` above.
+router.get("/:projectId/embed", asyncHandler(getEmbedController));
+router.post("/:projectId/embed", asyncHandler(createEmbedController));
+router.patch("/:projectId/embed", asyncHandler(updateEmbedController));
+router.delete("/:projectId/embed", asyncHandler(revokeEmbedController));
 
 router.get("/:projectId/start-command", asyncHandler(getStartCommandController));
 router.put("/:projectId/start-command", asyncHandler(setStartCommandController));

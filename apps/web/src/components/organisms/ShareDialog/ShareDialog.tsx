@@ -21,6 +21,7 @@ import {
   shareLinkUrl,
   type ProjectRole,
 } from "../../../apis/projects.ts";
+import { EmbedSection } from "./EmbedSection.tsx";
 
 interface ShareDialogProps {
   projectId: string;
@@ -307,6 +308,16 @@ export const ShareDialog = ({
                 their access and can be removed or demoted below.
               </Typography.Text>
             </div>
+
+            {/* Last, and separated, because it is a different decision from
+                everything above it: the two controls above invite named people
+                here, this one publishes the source into somebody else's page. */}
+            <EmbedSection
+              projectId={projectId}
+              projectName={projectName}
+              enabled={open}
+              isOwner={isOwner}
+            />
           </div>
         )}
       </Modal>
