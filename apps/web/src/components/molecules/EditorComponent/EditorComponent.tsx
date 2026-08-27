@@ -23,6 +23,10 @@ import {
 import { useEditorStatusStore } from "../../../store/editorStatusStore.ts";
 import { useThemeMode } from "../../../hooks/useThemeMode.ts";
 import { useMediaQuery } from "../../../hooks/useMediaQuery.ts";
+import {
+  selectRegions,
+  useGitGutterStore,
+} from "../../../store/gitGutterStore.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
 import {
@@ -280,6 +284,47 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     // `mounted` for the same reason as the attach effect above: on the first
     // file, Monaco has not produced an editor yet and this would bind nothing.
   }, [activeTab?.relPath, editorSocket, canEdit, user?.email, user?.id, mountTick]);
+
+  /** The git bars down the left margin.
+   *
+   *  §5.1 calls this the most visible git feature the editor did not have,
+   *  and the data was already here — the source-control panel has been
+   *  reading these diffs all along. What was missing is the decoration layer.
+   *
+   *  Decorations are replaced wholesale on every change rather than diffed
+   *  against the previous set: Monaco's `deltaDecorations` already does that
+   *  work against the ids it is given, and a hand-rolled reconciliation on
+   *  top of it would be two things that can disagree.
+   */
+  const gutterRegionsForFile = useGitGutterStore(selectRegions(activeTab?.relPath ?? null));
+  const gutterDecorations = useRef<string[]>([]);
+
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const codeEditor = editorRef.current;
+    if (!monaco || !codeEditor) return;
+
+    gutterDecorations.current = codeEditor.deltaDecorations(
+      gutterDecorations.current,
+      gutterRegionsForFile.map((region) => ({
+        range: new monaco.Range(region.startLine, 1, region.endLine, 1),
+        options: {
+          // `linesDecorationsClassName` puts the mark in the margin between
+          // the line numbers and the text, which is where VS Code's lives.
+          linesDecorationsClassName: `rc-gutter rc-gutter-${region.kind}`,
+          // Kept when text is inserted at the very start of the range, so
+          // typing at the head of a changed line does not shed the bar.
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      })),
+    );
+  }, [gutterRegionsForFile, mountTick]);
+
+  /** Ask for a fresh diff when the file changes or is opened. */
+  useEffect(() => {
+    const relPath = activeTab?.relPath;
+    if (relPath) useGitGutterStore.getState().refresh(relPath);
+  }, [activeTab?.relPath, activeTab?.value]);
 
   /** Dispose models for files that are no longer open, so a long session does
    *  not accumulate them.

@@ -1570,3 +1570,38 @@ body {
     outline-width: 3px;
   }
 }
+
+/* Git bars down the editor's left margin.
+ *
+ *  The same --rc-green/yellow/red the source-control panel uses for A/M/D,
+ *  so a file's state reads the
+ *  same whichever surface it is seen on. The deletion marker is a triangle
+ *  rather than a bar because there is no line to draw a bar over — the text
+ *  is gone, and the mark belongs at the seam it left behind. */
+.rc-gutter {
+  width: 3px !important;
+  margin-left: 3px;
+}
+
+.rc-gutter-added {
+  background: var(--rc-green);
+}
+
+.rc-gutter-modified {
+  background: var(--rc-yellow);
+}
+
+.rc-gutter-removed {
+  background: transparent;
+  position: relative;
+}
+
+.rc-gutter-removed::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -3px;
+  border-left: 4px solid var(--rc-red);
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+}

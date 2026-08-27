@@ -54,6 +54,7 @@ import { DeployPanel } from "../components/organisms/DeployPanel/DeployPanel.tsx
 import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
 import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
+import { useGitGutterStore } from "../store/gitGutterStore.ts";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
 import { useThemeStore } from "../store/themeStore.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
@@ -531,6 +532,10 @@ export const ProjectPlayground = () => {
     }
 
     setProjectId(projectIdFromUrl);
+    // The editor draws the git bars but has no idea which project it is in,
+    // and threading it down as a prop would touch four components to reach
+    // the one that needs it.
+    useGitGutterStore.getState().setProject(projectIdFromUrl);
 
     const editorSocketConn: EditorSocket = io(
       `${import.meta.env.VITE_BACKEND_URL}/editor`,
