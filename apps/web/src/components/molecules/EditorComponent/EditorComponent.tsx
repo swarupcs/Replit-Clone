@@ -320,6 +320,47 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     );
   }, [gutterRegionsForFile, mountTick]);
 
+  /** Clicking a bar opens the diff, which is what the bar is a summary of.
+   *
+   *  The margin is one strip whether or not a bar is under the pointer, so
+   *  the handler checks the click actually landed on a decoration rather
+   *  than opening the diff on any stray click in the gutter.
+   */
+  useEffect(() => {
+    const codeEditor = editorRef.current;
+    if (!codeEditor) return;
+
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+
+    const subscription = codeEditor.onMouseDown((event) => {
+      // The decorations margin is one strip whether or not a bar is under
+      // the pointer, so the line has to be checked against the regions too —
+      // otherwise any click in the margin would open the diff.
+      if (
+        event.target.type !==
+        monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS
+      ) {
+        return;
+      }
+
+      const line = event.target.position?.lineNumber;
+      if (!line) return;
+
+      const onABar = gutterRegionsForFile.some(
+        (region) => line >= region.startLine && line <= region.endLine,
+      );
+      if (!onABar) return;
+
+      setDiffCurrent(codeEditor.getValue());
+      setShowDiff(true);
+    });
+
+    return () => {
+      subscription.dispose();
+    };
+  }, [gutterRegionsForFile, mountTick]);
+
   /** Ask for a fresh diff when the file changes or is opened. */
   useEffect(() => {
     const relPath = activeTab?.relPath;
