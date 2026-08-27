@@ -57,6 +57,11 @@ import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
 import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { useGitGutterStore } from "../store/gitGutterStore.ts";
+import {
+  selectOverrides,
+  useKeybindingStore,
+} from "../store/keybindingStore.ts";
+import { formatChord, resolveBindings } from "../lib/keybindings.ts";
 import { DatabasePanel } from "../components/organisms/DatabasePanel/DatabasePanel.tsx";
 import { Breadcrumbs } from "../components/molecules/Breadcrumbs/Breadcrumbs.tsx";
 import { SymbolSearch } from "../components/organisms/SymbolSearch/SymbolSearch.tsx";
@@ -333,9 +338,21 @@ export const ProjectPlayground = () => {
    *
    *  Every entry drives the same handler the button or shortcut does, rather
    *  than a second copy of the behaviour -- the palette is another way in, not
-   *  another implementation. `keys` is display only; the shortcut itself is
-   *  registered below.
+   *  another implementation.
+   *
+   *  The shortcut shown against each entry is looked up from the binding
+   *  registry by command id rather than typed here. It used to be free text,
+   *  which meant the palette could say Ctrl+K while the handler listened for
+   *  Ctrl+L and nothing would notice.
    */
+  // Derived rather than selected: a selector that builds the resolved object
+  // returns a new one every call, which renders forever.
+  const bindingOverrides = useKeybindingStore(selectOverrides);
+  const bindings = useMemo(
+    () => resolveBindings(bindingOverrides),
+    [bindingOverrides],
+  );
+
   const commands = useMemo<Command[]>(() => {
     const isLive = runStatus === "running" || runStatus === "starting";
     const viewerReason = "Needs edit access";
@@ -361,14 +378,12 @@ export const ProjectPlayground = () => {
         id: "go.file",
         category: "Go",
         title: "Go to file…",
-        keys: "Ctrl+P",
         run: () => setQuickOpen(true),
       },
       {
         id: "view.search",
         category: "View",
         title: "Search across the project",
-        keys: "Ctrl+Shift+F",
         run: () => {
           setSidebarView("search");
           openView("sidebar");
@@ -422,28 +437,24 @@ export const ProjectPlayground = () => {
         id: "view.sidebar",
         category: "View",
         title: "Toggle the sidebar",
-        keys: "Ctrl+B",
         run: toggleSidebar,
       },
       {
         id: "view.panel",
         category: "View",
         title: "Toggle the terminal panel",
-        keys: "Ctrl+`",
         run: togglePanel,
       },
       {
         id: "view.preview",
         category: "View",
         title: "Toggle the preview",
-        keys: "Ctrl+J",
         run: togglePreview,
       },
       {
         id: "file.closeTab",
         category: "File",
         title: "Close the active editor tab",
-        keys: "Ctrl+Alt+W",
         run: () => {
           const active = useOpenTabsStore.getState().activeRelPath;
           if (active) closeActiveTab(active);
@@ -461,8 +472,12 @@ export const ProjectPlayground = () => {
         title: "Editor settings…",
         run: () => setSettingsOpen(true),
       },
-    ];
+    ].map((command) => {
+      const chord = bindings[command.id];
+      return chord ? { ...command, keys: formatChord(chord) } : command;
+    });
   }, [
+    bindings,
     canEdit,
     closeActiveTab,
     editorSocket,
@@ -472,83 +487,66 @@ export const ProjectPlayground = () => {
     toggleSidebar,
   ]);
 
+  /** What each command's chord does.
+   *
+   *  The chord itself lives in `lib/keybindings.ts`, beside the command it
+   *  belongs to. This is only the handler half, so adding a chord is one
+   *  edit in one place rather than two edits nothing checks are in step.
+   */
+  const handlers = useMemo<Record<string, () => void>>(
+    () => ({
+      "go.file": () => setQuickOpen(true),
+      "go.command": () => setPaletteOpen(true),
+      "go.symbol": () => setSymbolSearchOpen(true),
+      "view.search": () => {
+        setSidebarView("search");
+        openView("sidebar");
+      },
+      "view.files": () => {
+        setSidebarView("files");
+        openView("sidebar");
+      },
+      "view.git": () => {
+        setSidebarView("git");
+        openView("sidebar");
+      },
+      "view.packages": () => {
+        setSidebarView("packages");
+        openView("sidebar");
+      },
+      "view.sidebar": () => toggleSidebar(),
+      "view.panel": () => togglePanel(),
+      "view.preview": () => togglePreview(),
+      "view.zen": () => setZen((value) => !value),
+      "file.closeTab": () => {
+        const active = useOpenTabsStore.getState().activeRelPath;
+        if (active) closeActiveTab(active);
+      },
+      "file.reopenTab": () => {
+        const relPath = useOpenTabsStore.getState().takeClosed();
+        if (relPath) editorSocket?.emit("readFile", { relPath });
+      },
+      "file.nextTab": () => {
+        const next = selectNextMruTab(useOpenTabsStore.getState());
+        if (next) useOpenTabsStore.getState().setActive(next.relPath);
+      },
+    }),
+    [closeActiveTab, editorSocket, openView, toggleSidebar, togglePanel, togglePreview],
+  );
+
   useHotkeys(
     useMemo(
-      () => [
-        { key: "p", mod: true, handler: () => setQuickOpen(true) },
-        {
-          // Distinct from the Ctrl+P above: useHotkeys matches shift exactly,
-          // so the two cannot claim each other's chord whatever the order.
-          key: "p",
-          mod: true,
-          shift: true,
-          handler: () => setPaletteOpen(true),
-        },
-        {
-          key: "f",
-          mod: true,
-          shift: true,
-          handler: () => {
-            setSidebarView("search");
-            openView("sidebar");
-          },
-        },
-        { key: "b", mod: true, handler: () => toggleSidebar() },
-        { key: "`", mod: true, handler: () => togglePanel() },
-        { key: "j", mod: true, handler: () => togglePreview() },
-        {
-          // Ctrl+W is the browser's own close-tab and cannot be reclaimed, so
-          // closing an editor tab uses the Alt variant.
-          key: "w",
-          mod: true,
-          alt: true,
-          handler: () => {
-            const active = useOpenTabsStore.getState().activeRelPath;
-            if (active) closeActiveTab(active);
-          },
-        },
-        {
-          // Reopen the last closed file. The store kept the path, not the
-          // contents — they came from the server and may have moved on — so
-          // this re-reads rather than restoring a stale copy.
-          key: "t",
-          mod: true,
-          shift: true,
-          handler: () => {
-            const relPath = useOpenTabsStore.getState().takeClosed();
-            if (relPath) editorSocket?.emit("readFile", { relPath });
-          },
-        },
-        {
-          // Go to symbol in the open file. VS Code's Ctrl+T is workspace-wide;
-          // this is file-wide, because a workspace index is a different
-          // feature and Quick Open already covers finding the file.
-          key: "t",
-          mod: true,
-          handler: () => setSymbolSearchOpen(true),
-        },
-        {
-          // Zen mode: everything but the editor stands down. Pure layout,
-          // over the panes that already exist.
-          key: "k",
-          mod: true,
-          alt: true,
-          handler: () => setZen((value) => !value),
-        },
-        {
-
-          // Most-recently-used rather than left-to-right, which is what makes
-          // the chord worth having: the file you want next is almost always
-          // the one you were just in, not whichever happens to sit right.
-          key: "Tab",
-          mod: true,
-          handler: () => {
-            const next = selectNextMruTab(useOpenTabsStore.getState());
-            if (next) useOpenTabsStore.getState().setActive(next.relPath);
-          },
-        },
-      ],
-      [closeActiveTab, editorSocket, toggleSidebar, togglePanel, togglePreview],
+      () =>
+        Object.entries(bindings)
+          .map(([commandId, chord]) => {
+            const handler = handlers[commandId];
+            return handler ? { ...chord, handler } : null;
+          })
+          // A binding with no handler is a chord for a command this page does
+          // not own. Dropping it is right; silently binding it to nothing
+          // would look like a broken feature.
+          .filter((hotkey): hotkey is NonNullable<typeof hotkey> => hotkey !== null),
+      [bindings, handlers],
     ),
   );
 

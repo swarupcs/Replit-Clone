@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button, InputNumber, Modal, Segmented, Switch, Typography } from "antd";
 import {
   EDITOR_SETTING_LIMITS,
@@ -5,6 +6,8 @@ import {
   type EditorSettings,
 } from "../../../store/editorSettingsStore.ts";
 import { useThemeStore, type ThemeChoice } from "../../../store/themeStore.ts";
+import { useKeybindingStore } from "../../../store/keybindingStore.ts";
+import { KeybindingsDialog } from "./KeybindingsDialog.tsx";
 
 interface EditorSettingsDialogProps {
   open: boolean;
@@ -50,6 +53,10 @@ const Row = ({
  */
 export const EditorSettingsDialog = ({ open, onClose }: EditorSettingsDialogProps) => {
   const settings = useEditorSettingsStore();
+  const [bindingsOpen, setBindingsOpen] = useState(false);
+  const changedBindings = useKeybindingStore(
+    (state) => Object.keys(state.overrides).length,
+  );
   const themeChoice = useThemeStore((state) => state.choice);
   const setThemeChoice = useThemeStore((state) => state.setChoice);
 
@@ -252,6 +259,20 @@ export const EditorSettingsDialog = ({ open, onClose }: EditorSettingsDialogProp
       />
 
       <Row
+        label="Keyboard shortcuts"
+        hint={
+          changedBindings === 0
+            ? "Using the defaults"
+            : `${changedBindings} changed from the defaults`
+        }
+        control={
+          <Button size="small" onClick={() => setBindingsOpen(true)}>
+            Customise
+          </Button>
+        }
+      />
+
+      <Row
         label="Cursor surrounding lines"
         hint="Lines kept below the cursor while scrolling"
         control={
@@ -263,6 +284,11 @@ export const EditorSettingsDialog = ({ open, onClose }: EditorSettingsDialogProp
             style={{ width: 84 }}
           />
         }
+      />
+
+      <KeybindingsDialog
+        open={bindingsOpen}
+        onClose={() => setBindingsOpen(false)}
       />
     </Modal>
   );

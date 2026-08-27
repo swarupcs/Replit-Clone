@@ -1876,3 +1876,21 @@ body {
   border-color: var(--rc-accent);
   color: var(--rc-accent);
 }
+
+/* The chord recorder in the keybindings dialog. */
+.rc-chord-button {
+  min-width: 108px;
+  border: 1px solid var(--rc-border-strong);
+  border-radius: 5px;
+  background: var(--rc-surface-sunken);
+  color: var(--rc-text);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.rc-chord-button[data-recording="true"] {
+  border-color: var(--rc-accent);
+  color: var(--rc-accent);
+}
