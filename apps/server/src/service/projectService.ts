@@ -17,6 +17,7 @@ import {
   destroy as destroyManagedDatabase,
   provision as provisionManagedDatabase,
 } from "./managedDatabaseService.js";
+import { forgetProject as forgetCheckpoints } from "./checkpointService.js";
 import { forgetRun } from "../containers/runner.js";
 import { forgetUsage } from "./diskUsageService.js";
 import { forgetProject as forgetCollab } from "./collabService.js";
@@ -110,6 +111,8 @@ export async function deleteProjectService(
   // pointed at it is the mistake `deployService.unpublish` learned about
   // published files, with rather more disk attached to it.
   await destroyManagedDatabase(projectId).catch(() => undefined);
+  // Snapshots must not outlive what they are snapshots of.
+  await forgetCheckpoints(projectId).catch(() => undefined);
   // The cache volume outlives a restart deliberately, but not the project.
   await removeCacheVolume(projectId);
   // Before the row goes: the cascade would take the deployment record with it

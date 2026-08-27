@@ -167,6 +167,16 @@ const envSchema = z.object({
    *  writing in a loop, or one runaway `npm install`, could fill the VM's disk
    *  and take Postgres and every other project down with it. */
   PROJECT_DISK_QUOTA_MB: z.coerce.number().int().positive().default(512),
+
+  /** Periodic file snapshots, so an uncommitted mistake is recoverable.
+   *
+   *  On by default: §8 is right that "an uncommitted mistake is gone" is the
+   *  scarier half of this product, and the cost is bounded by the retention
+   *  window rather than open-ended. */
+  CHECKPOINTS_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false" && value !== "0"),
   /** Disk a managed database's volume may hold, per project.
    *
    *  Its own line rather than sharing PROJECT_DISK_QUOTA_MB: a database is

@@ -29,7 +29,10 @@ describe("PresenceStack", () => {
     usePresenceStore.getState().setPresence([peer("ana@example.com")]);
     render(<PresenceStack />);
 
-    expect(screen.getByLabelText("ana@example.com")).toBeDefined();
+    // The face is a button now — it toggles following — so its accessible
+    // name says what it does as well as who it is. The name is still what
+    // this test is about, and it is still in there.
+    expect(screen.getByLabelText(/ana@example\.com/)).toBeDefined();
   });
 
   it("collapses the tail into a count", () => {

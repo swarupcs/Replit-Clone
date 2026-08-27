@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { snapshot } from "../service/checkpointService.js";
 import path from "node:path";
 import type { Namespace, Socket } from "socket.io";
 import { MAX_FILE_BYTES } from "@replit-clone/shared";
@@ -288,6 +289,15 @@ export const handleEditorSocketEvents = (
       // The owner's overall budget, not just this project's. Checked only when
       // a project was created, so it bound nothing that actually used disk.
       await assertUserDiskQuota(projectId, incoming, replacing);
+
+      // A checkpoint of what is being REPLACED, not of what is being written.
+      // The new contents are on disk and recoverable by any means; the thing
+      // that is about to stop existing is the old version, and that is what
+      // somebody wants back an hour later.
+      if (existing) {
+        const previous = await fs.readFile(absolute, "utf8").catch(() => null);
+        if (previous !== null) await snapshot(projectId, relPath, previous);
+      }
 
       await fs.writeFile(absolute, data, "utf8");
       recordWrite(projectId, incoming, replacing);

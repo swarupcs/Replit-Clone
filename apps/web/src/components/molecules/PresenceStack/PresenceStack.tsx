@@ -11,7 +11,15 @@ function initial(name: string): string {
   return (name.trim()[0] ?? "?").toUpperCase();
 }
 
-function Face({ peer }: { peer: Peer }) {
+function Face({
+  peer,
+  following,
+  onToggleFollow,
+}: {
+  peer: Peer;
+  following: boolean;
+  onToggleFollow: () => void;
+}) {
   return (
     <Tooltip
       title={
@@ -20,9 +28,18 @@ function Face({ peer }: { peer: Peer }) {
           : peer.name
       }
     >
-      <span
-        aria-label={peer.name}
+      <button
+        type="button"
+        aria-label={
+          following
+            ? `Stop following ${peer.name}`
+            : `Follow ${peer.name} to the file they are in`
+        }
+        aria-pressed={following}
+        onClick={onToggleFollow}
         style={{
+          padding: 0,
+          cursor: "pointer",
           display: "grid",
           placeItems: "center",
           width: 17,
@@ -37,10 +54,15 @@ function Face({ peer }: { peer: Peer }) {
           fontSize: 9,
           fontWeight: 700,
           flex: "none",
+          // Following is shown on the face itself rather than in a separate
+          // indicator: the face is what was clicked, so it is where the
+          // answer belongs.
+          outline: following ? `2px solid ${peer.color}` : undefined,
+          outlineOffset: 1,
         }}
       >
         {initial(peer.name)}
-      </span>
+      </button>
     </Tooltip>
   );
 }
@@ -57,6 +79,8 @@ function Face({ peer }: { peer: Peer }) {
  */
 export const PresenceStack = () => {
   const peers = usePresenceStore((state) => state.peers);
+  const following = usePresenceStore((state) => state.following);
+  const follow = usePresenceStore((state) => state.follow);
 
   if (peers.length === 0) return null;
 
@@ -69,7 +93,12 @@ export const PresenceStack = () => {
       title={`${String(peers.length)} other${peers.length === 1 ? "" : "s"} here`}
     >
       {shown.map((peer) => (
-        <Face key={peer.key} peer={peer} />
+        <Face
+          key={peer.key}
+          peer={peer}
+          following={following === peer.key}
+          onToggleFollow={() => follow(following === peer.key ? null : peer.key)}
+        />
       ))}
 
       {rest > 0 && (

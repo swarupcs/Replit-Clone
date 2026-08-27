@@ -347,6 +347,29 @@ export const ProjectPlayground = () => {
    */
   // Derived rather than selected: a selector that builds the resolved object
   // returns a new one every call, which renders forever.
+  /** Follow mode: ride along with whichever file a collaborator is in.
+   *
+   *  §8 calls this a small addition to a layer that exists, and it is —
+   *  presence already knows who is here and which file each of them has
+   *  open. Following is opening theirs when it changes.
+   *
+   *  Their FILE, not their scroll position. Awareness carries a cursor, but
+   *  yanking somebody's viewport on every keystroke of somebody else's is
+   *  motion sickness rather than collaboration; landing in the same file and
+   *  reading at your own pace is what people actually want from this.
+   */
+  const followingPeer = usePresenceStore((state) =>
+    state.peers.find((peer) => peer.key === state.following),
+  );
+  const followedFile = followingPeer?.files[0];
+
+  useEffect(() => {
+    if (!followedFile || !editorSocket) return;
+    if (useOpenTabsStore.getState().activeRelPath === followedFile) return;
+
+    editorSocket.emit("readFile", { relPath: followedFile });
+  }, [followedFile, editorSocket]);
+
   const bindingOverrides = useKeybindingStore(selectOverrides);
   const bindings = useMemo(
     () => resolveBindings(bindingOverrides),

@@ -14,7 +14,15 @@ interface PresenceStore {
    */
   colorsByFile: Record<string, string>;
 
+  /** Whose viewport this editor is riding along with, by peer key.
+   *
+   *  §8's follow mode. Presence already knows who is here and which file
+   *  they are in; following is a small addition to a layer that exists
+   *  rather than a new one. */
+  following: string | null;
+
   setPresence: (peers: Peer[]) => void;
+  follow: (peerKey: string | null) => void;
 }
 
 function colorsFrom(peers: Peer[]): Record<string, string> {
@@ -51,15 +59,28 @@ function same(a: Peer[], b: Peer[]): boolean {
 export const usePresenceStore = create<PresenceStore>((set) => ({
   peers: [],
   colorsByFile: {},
+  following: null,
+
+  follow: (peerKey) => set({ following: peerKey }),
 
   setPresence: (peers) =>
-    set((state) =>
+    set((state) => {
+      // Someone who has left cannot be followed. Left set, the editor would
+      // sit waiting for a viewport that will never move again, and nothing
+      // would say why.
+      const following =
+        state.following && peers.some((peer) => peer.key === state.following)
+          ? state.following
+          : null;
+
+      return (
       // Awareness fires for a cursor move as well as for someone arriving, and
       // a cursor move changes nothing here.
-      same(state.peers, peers)
-        ? state
-        : { peers, colorsByFile: colorsFrom(peers) },
-    ),
+        same(state.peers, peers) && following === state.following
+          ? state
+          : { peers, colorsByFile: colorsFrom(peers), following }
+      );
+    }),
 }));
 
 /** The colours in one file, or "" — a value a row can compare cheaply. */
