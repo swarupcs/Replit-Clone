@@ -152,6 +152,19 @@ the query string would land in access logs.
 
 It defaults by detecting whether the server is itself containerised.
 
+**Embeds** put a project inside somebody else's page. The owner mints a token
+in the share dialog and pastes an `<iframe>`; anyone who loads that page reads
+the source and, beside it, the project's **published site** — with no account,
+no sign-in and no session. `?view=` and `?file=` override the stored defaults,
+so one token can appear twice in an article showing different things, and
+`?theme=light|dark` lets the host author match their own page.
+
+The preview half deliberately frames the deployment and never a running
+container: an anonymous page view must not be able to start one on the owner's
+behalf. Files that usually hold secrets — `.env` and its variants, private
+keys, `.npmrc`, `.ssh`, service-account JSON — are never listed and never
+served, and the dialog names the ones it hid.
+
 ## Security model
 
 The project id is **not** the access control. Every REST route and socket event
@@ -183,6 +196,17 @@ with the session cookie — so the iframe withholds `allow-same-origin`, and
 project apps lose `localStorage`, cookies and IndexedDB as a result. Set
 `VITE_PREVIEW_ORIGIN` to a separate host to move the isolation to the origin
 boundary instead; the iframe then grants those APIs back.
+
+An embed is the one surface that answers with a project's source and no session
+behind it, so it is read-only by construction rather than by permission check —
+there is no write path behind the token to guard. Its two endpoints sit on a
+router of their own rather than under `/projects`, which authenticates
+everything mounted on it; what the embed lists and what it will serve are
+derived from one function, since a path hidden from the listing but readable by
+asking for it directly is not hidden. The embed page sends no credentials and
+does not restore a session: a refresh token is single use, and in a third-party
+frame the browser can hand over the reader's cookie and then refuse to store
+the rotated replacement, signing them out of the tab they came from.
 
 The server mounts the Docker socket, which is equivalent to host root. That is
 only acceptable because authentication and path confinement sit in front of it.
