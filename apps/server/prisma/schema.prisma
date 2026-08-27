@@ -164,6 +164,7 @@ model Project {
 
   collaborators ProjectCollaborator[]
   deployment    Deployment?
+  databaseConnection ProjectDatabaseConnection?
 
   @@index([ownerId])
   @@map("projects")
@@ -253,4 +254,36 @@ enum DeploymentStatus {
   BUILDING
   LIVE
   FAILED
+}
+
+/// An external database a project's query editor is pointed at.
+///
+/// One per project: the editor addresses "this project's database" rather
+/// than a URL, so the connection string never travels to the client and the
+/// client can never name a host of its own choosing.
+model ProjectDatabaseConnection {
+  id String @id @default(uuid())
+
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// The connection string, encrypted with AES-256-GCM under
+  /// SECRET_ENCRYPTION_KEY. Never the plaintext: it carries a password that
+  /// has to be spendable later, so a leaked dump must hand over ciphertext
+  /// and nothing more. The same reasoning as GithubConnection.tokenCipher.
+  urlCipher String
+
+  /// "postgresql" or "mongodb". Kept in the clear so the UI can pick the
+  /// right editor without opening the secret.
+  engine String
+
+  /// Host and port as displayed back to the user, so the panel can say which
+  /// database it is talking to without decrypting anything. Credentials are
+  /// deliberately not here.
+  label String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("project_database_connections")
 }

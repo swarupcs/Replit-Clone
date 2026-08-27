@@ -16,6 +16,14 @@ import {
   renameProjectController,
   setProjectEnvController,
 } from "../../controllers/projectController.js";
+import {
+  databaseQueryController,
+  databaseSchemaController,
+  databaseTableController,
+  getDatabaseConnectionController,
+  removeDatabaseConnectionController,
+  setDatabaseConnectionController,
+} from "../../controllers/databaseController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import {
@@ -168,6 +176,35 @@ router.post(
   asyncHandler(deployController),
 );
 router.delete("/:projectId/deployment", asyncHandler(undeployController));
+
+// The query editor. Rate limited on the same reasoning as installs and
+// deploys: each request holds a database connection open for as long as the
+// statement runs, and the statement is somebody else's to write.
+const queryLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many queries. Try again in a moment.",
+  },
+});
+
+router.get("/:projectId/database", asyncHandler(getDatabaseConnectionController));
+router.put("/:projectId/database", asyncHandler(setDatabaseConnectionController));
+router.delete(
+  "/:projectId/database",
+  asyncHandler(removeDatabaseConnectionController),
+);
+router.get("/:projectId/database/schema", asyncHandler(databaseSchemaController));
+router.get("/:projectId/database/table", asyncHandler(databaseTableController));
+router.post(
+  "/:projectId/database/query",
+  queryLimiter,
+  asyncHandler(databaseQueryController),
+);
 
 router.get("/:projectId/start-command", asyncHandler(getStartCommandController));
 router.put("/:projectId/start-command", asyncHandler(setStartCommandController));
