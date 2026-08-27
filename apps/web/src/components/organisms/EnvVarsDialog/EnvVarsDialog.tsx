@@ -8,6 +8,7 @@ import {
   setProjectEnvApi,
   setStartCommandApi,
 } from "../../../apis/projects.ts";
+import { DevcontainerSection } from "./DevcontainerSection.tsx";
 
 interface EnvVarsDialogProps {
   projectId: string;
@@ -152,6 +153,10 @@ export const EnvVarsDialog = ({ projectId, open, onClose }: EnvVarsDialogProps) 
         width={620}
         destroyOnHidden
       >
+        {/* First, because it decides the container everything else runs in --
+            and because it renders nothing at all for a project without one. */}
+        <DevcontainerSection projectId={projectId} enabled={open} />
+
         {/* The run command sits above the variables because it is the thing an
             imported repository most often needs corrected: the template is
             detected from the files, and a real project's own script is not in

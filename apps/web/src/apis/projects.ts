@@ -1,5 +1,6 @@
 import type {
   ApiSuccess,
+  DevcontainerState,
   GitBranch,
   GitRemote,
   GitRemoteResponse,
@@ -651,6 +652,17 @@ export const getDatabaseTableApi = async (
   const response = await axios.get<{ data: QueryResult }>(
     `/api/v1/projects/${projectId}/database/table`,
     { params: { schema, table, limit, offset } },
+  );
+  return response.data.data;
+};
+
+/** What the project's own .devcontainer/devcontainer.json asked for, and what
+ *  the server did with it. */
+export const getDevcontainerApi = async (
+  projectId: string,
+): Promise<DevcontainerState> => {
+  const response = await axios.get<ApiSuccess<DevcontainerState>>(
+    `/api/v1/projects/${projectId}/devcontainer`,
   );
   return response.data.data;
 };

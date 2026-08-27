@@ -85,13 +85,17 @@ afterEach(() => {
 
 describe("when GitHub is not connected", () => {
   it("offers to connect rather than an empty list", async () => {
+    // The first render in this file pays for antd's and react-query's cold
+    // start, which on a loaded machine is more than the 5s default -- so this
+    // one test fails while every later one in the same file passes. Given the
+    // time it actually takes rather than left to fail intermittently.
     api.getGithubStatusApi.mockResolvedValue({ configured: true, connection: null });
     renderDialog();
 
     expect(await screen.findByText(/Connect GitHub first/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /Connect GitHub/ }));
     expect(onConnect).toHaveBeenCalled();
-  });
+  }, 20_000);
 
   it("does not ask for repositories, which would be a guaranteed failure", async () => {
     api.getGithubStatusApi.mockResolvedValue({ configured: true, connection: null });

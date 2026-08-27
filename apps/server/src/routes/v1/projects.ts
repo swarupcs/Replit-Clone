@@ -77,6 +77,7 @@ import {
   getDeploymentController,
   undeployController,
 } from "../../controllers/deployController.js";
+import { getDevcontainerController } from "../../controllers/devcontainerController.js";
 
 const router = express.Router();
 
@@ -237,6 +238,10 @@ router.post(
   queryLimiter,
   asyncHandler(mongoQueryController),
 );
+
+// What the project's own .devcontainer/devcontainer.json asked for, and what
+// this server did with it.
+router.get("/:projectId/devcontainer", asyncHandler(getDevcontainerController));
 
 router.get("/:projectId/start-command", asyncHandler(getStartCommandController));
 router.put("/:projectId/start-command", asyncHandler(setStartCommandController));

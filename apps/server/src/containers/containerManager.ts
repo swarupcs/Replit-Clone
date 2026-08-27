@@ -16,6 +16,16 @@ import { logger } from "../lib/logger.js";
 import { getEnvVars, toDockerEnv } from "../service/projectEnvService.js";
 import { SANDBOX_NETWORK } from "./sandboxNetwork.js";
 import { increment, registerGauge } from "../lib/metrics.js";
+import {
+  DevcontainerError,
+  imageAllowed,
+  isValidImageReference,
+  readDevcontainer,
+  resolveWorkspaceFolder,
+  setDevcontainerStatus,
+  type DevcontainerConfig,
+} from "./devcontainer.js";
+import { execCapture } from "./execCapture.js";
 
 const docker = new Docker();
 
@@ -68,14 +78,112 @@ const ENV_SIGNATURE_LABEL = "rc.env-signature";
  *  which is this defect all over again: a real change that does not look like
  *  one, so the container is never rebuilt.
  */
-export function envSignature(vars: Record<string, string>): string {
+export function envSignature(
+  vars: Record<string, string>,
+  /** The devcontainer config in force, or null.
+   *
+   *  Part of the signature because it decides the image, the ports, the working
+   *  directory and the environment -- every one of which a running container
+   *  holds for its whole life. Without it, editing `devcontainer.json` would
+   *  change nothing until something else happened to force a rebuild, which is
+   *  the same defect the environment variables had.
+   */
+  devcontainer?: DevcontainerConfig | null,
+): string {
   const stable = JSON.stringify(
     Object.keys(vars)
       .sort()
       .map((name) => [name, vars[name] ?? ""]),
   );
 
-  return createHash("sha256").update(stable).digest("hex").slice(0, 32);
+  const hash = createHash("sha256").update(stable);
+
+  if (devcontainer) {
+    // `source` and `unsupported` are left out on purpose: they describe how
+    // this READ the file, not what the container is, so rewording a refusal
+    // must not cost the user a rebuild.
+    hash.update(
+      JSON.stringify({
+        image: devcontainer.image ?? null,
+        containerEnv: devcontainer.containerEnv ?? null,
+        forwardPorts: devcontainer.forwardPorts ?? null,
+        workspaceFolder: devcontainer.workspaceFolder ?? null,
+        postCreateCommand: devcontainer.postCreateCommand ?? null,
+        postStartCommand: devcontainer.postStartCommand ?? null,
+      }),
+    );
+  }
+
+  return hash.digest("hex").slice(0, 32);
+}
+
+/** Where a project's tree is mounted inside its container.
+ *
+ *  Fixed by this platform, which is what `workspaceFolder` is confined to and
+ *  what `workspaceMount` is refused for. */
+export const MOUNT_POINT = "/home/sandbox/app";
+
+/** Reads a project's devcontainer, recording anything wrong with it.
+ *
+ *  A broken config must NOT stop the container starting. Being locked out of
+ *  the project by the very file you are trying to fix is the worst failure
+ *  available here, so this falls back to the template's defaults and records
+ *  the reason -- which the editor then shows, because a file that silently did
+ *  nothing is the second worst.
+ */
+async function devcontainerFor(
+  projectId: string,
+): Promise<DevcontainerConfig | null> {
+  try {
+    const config = await readDevcontainer(projectId);
+    setDevcontainerStatus(projectId, { config, error: null });
+    return config;
+  } catch (error) {
+    const reason =
+      error instanceof DevcontainerError
+        ? error.message
+        : "The devcontainer config could not be read.";
+    logger.warn("devcontainer ignored", { projectId, reason });
+    setDevcontainerStatus(projectId, { config: null, error: reason });
+    return null;
+  }
+}
+
+/** The image to run, honouring the devcontainer only if it is permitted.
+ *
+ *  `image` decides what code runs in the sandbox, so an arbitrary one is a
+ *  supply-chain decision plus unbounded pull bandwidth and disk. The allowlist
+ *  is the deployment's answer to that; a refusal names the setting, because
+ *  "not permitted" with no way to find out what is permitted is not a message
+ *  anybody can act on.
+ */
+function imageFor(
+  projectId: string,
+  templateImage: string,
+  devcontainer: DevcontainerConfig | null,
+): string {
+  const wanted = devcontainer?.image;
+  if (!wanted) return templateImage;
+
+  if (!isValidImageReference(wanted)) {
+    setDevcontainerStatus(projectId, {
+      error: `"${wanted}" is not a valid image reference, so the template's image was used instead.`,
+    });
+    return templateImage;
+  }
+
+  if (!imageAllowed(wanted, env.DEVCONTAINER_IMAGE_ALLOWLIST)) {
+    setDevcontainerStatus(projectId, {
+      error:
+        `The image "${wanted}" is not permitted on this server, so the ` +
+        `template's image was used instead. Permitted: ` +
+        `${env.DEVCONTAINER_IMAGE_ALLOWLIST.join(", ")}. An operator can widen ` +
+        `this with DEVCONTAINER_IMAGE_ALLOWLIST.`,
+    });
+    return templateImage;
+  }
+
+  return wanted;
 }
 
 function containerName(projectId: string): string {
@@ -199,7 +307,11 @@ export async function ensureContainer(projectId: string): Promise<Container> {
  */
 async function startContainer(projectId: string): Promise<Container> {
   const envVars = await getEnvVars(projectId);
-  const signature = envSignature(envVars);
+  // Before the signature, because the config is part of it: editing
+  // devcontainer.json has to rebuild the container, exactly as changing a
+  // variable does.
+  const devcontainer = await devcontainerFor(projectId);
+  const signature = envSignature(envVars, devcontainer);
 
   const existing = await findContainer(projectId);
 
@@ -216,6 +328,10 @@ async function startContainer(projectId: string): Promise<Container> {
 
       await container.start();
       lastActiveAt.set(projectId, Date.now());
+      // A stopped container that is started again has been "started" as far as
+      // the spec is concerned, so postStart runs -- but postCreate does not,
+      // which is the whole distinction between the two.
+      await runLifecycle(projectId, container, devcontainer, "start");
       return container;
     }
 
@@ -242,7 +358,17 @@ async function startContainer(projectId: string): Promise<Container> {
   // container IPs. It is never bound on 0.0.0.0, so nothing is reachable from
   // outside this machine — the browser always goes through /preview.
   const publishPort = previewTargetMode === "host-loopback";
-  const previewPorts = [template.devPort, ...(template.extraPorts ?? [])];
+  // The template's ports, plus anything the devcontainer forwards. Deduplicated
+  // because Docker rejects a duplicate exposed port, and a devcontainer naming
+  // the port its template already knew about is the ordinary case rather than a
+  // mistake.
+  const previewPorts = [
+    ...new Set([
+      template.devPort,
+      ...(template.extraPorts ?? []),
+      ...(devcontainer?.forwardPorts ?? []),
+    ]),
+  ];
 
   const exposedPorts = Object.fromEntries(
     previewPorts.map((port) => [`${String(port)}/tcp`, {}]),
@@ -252,6 +378,12 @@ async function startContainer(projectId: string): Promise<Container> {
       `${String(port)}/tcp`,
       [{ HostIp: "127.0.0.1", HostPort: "0" }],
     ]),
+  );
+
+  const image = imageFor(projectId, template.image, devcontainer);
+  const workspaceFolder = resolveWorkspaceFolder(
+    devcontainer?.workspaceFolder,
+    MOUNT_POINT,
   );
 
   const container = await withCapacityGate(async () => {
@@ -269,7 +401,7 @@ async function startContainer(projectId: string): Promise<Container> {
     await assertUserContainerBudget(projectId);
 
     return docker.createContainer({
-      Image: template.image,
+      Image: image,
       name: containerName(projectId),
       Tty: true,
       OpenStdin: true,
@@ -278,11 +410,16 @@ async function startContainer(projectId: string): Promise<Container> {
       // terminals and the Run button open leave `User` unset so Docker inherits
       // this, rather than restating a uid that could drift from it.
       User: await containerUser(projectId),
-      WorkingDir: "/home/sandbox/app",
+      WorkingDir: workspaceFolder,
       Env: [
         "HOST=0.0.0.0",
         // Vite serves under this base so the proxied path resolves correctly.
         `PREVIEW_BASE=/preview/${projectId}/`,
+        // The devcontainer's own variables, before the project's. It is a file
+        // in the repository and the project's are the secret store, so where
+        // the two name the same variable the secret wins -- otherwise a
+        // committed placeholder would quietly override a real credential.
+        ...toDockerEnv(devcontainer?.containerEnv ?? {}),
         // The project's own variables. Last, so they cannot shadow the two above
         // — the env service already refuses those names, and this is the belt to
         // that braces.
@@ -296,7 +433,7 @@ async function startContainer(projectId: string): Promise<Container> {
       HostConfig: {
         ...(publishPort ? { PortBindings: portBindings } : {}),
         Binds: [
-          `${projectRoot(projectId)}:/home/sandbox/app`,
+          `${projectRoot(projectId)}:${MOUNT_POINT}`,
           // Package caches, in a named volume rather than the container's
           // writable layer. Containers are stopped when idle and removed on a
           // restart, so without this every cold start re-downloaded the whole of
@@ -321,9 +458,111 @@ async function startContainer(projectId: string): Promise<Container> {
   await container.start();
   lastActiveAt.set(projectId, Date.now());
   increment("containers_started");
-  logger.info("container started", { projectId, image: template.image });
+  logger.info("container started", { projectId, image });
+
+  // A container that was just created has been created, so both run -- in the
+  // order the spec gives them.
+  await runLifecycle(projectId, container, devcontainer, "create");
 
   return container;
+}
+
+/** Runs a devcontainer's lifecycle commands.
+ *
+ *  Best-effort, and deliberately so: these are arbitrary commands out of a file
+ *  in the repository, and one that fails must leave the user with a running
+ *  container and a readable reason rather than a project that will not open.
+ *  The output is recorded for the editor to show, because a `postCreateCommand`
+ *  that failed silently is indistinguishable from one that never ran.
+ *
+ *  `phase` is "create" for a container that has just been made -- which runs
+ *  postCreate and then postStart -- and "start" for one being started again,
+ *  which runs only postStart.
+ */
+async function runLifecycle(
+  projectId: string,
+  container: Container,
+  devcontainer: DevcontainerConfig | null,
+  phase: "create" | "start",
+): Promise<void> {
+  if (!devcontainer) return;
+
+  const commands = [
+    ...(phase === "create" ? (devcontainer.postCreateCommand ?? []) : []),
+    ...(devcontainer.postStartCommand ?? []),
+  ];
+  if (commands.length === 0) return;
+
+  const workingDir = resolveWorkspaceFolder(
+    devcontainer.workspaceFolder,
+    MOUNT_POINT,
+  );
+  const budgetMs = env.DEVCONTAINER_LIFECYCLE_TIMEOUT_MINUTES * 60 * 1000;
+  const startedAt = Date.now();
+
+  setDevcontainerStatus(projectId, { running: true, lifecycleLog: "" });
+  let log = "";
+
+  for (const command of commands) {
+    const remaining = budgetMs - (Date.now() - startedAt);
+    if (remaining <= 0) {
+      log += `\n$ ${command}\n[skipped: the lifecycle budget was already spent]\n`;
+      break;
+    }
+
+    log += `\n$ ${command}\n`;
+
+    // Through `sh -c` because the spec says a string command is run by a
+    // shell. The string comes from the project's own repository, which is the
+    // same trust level as the run command and the terminal -- this is the
+    // user's container, and there is nothing here they could not type into it.
+    const result = await withDeadline(
+      execCapture(container, ["sh", "-c", command], { workingDir }),
+      remaining,
+    );
+
+    if (!result) {
+      log += `[gave up after ${String(env.DEVCONTAINER_LIFECYCLE_TIMEOUT_MINUTES)} minutes]\n`;
+      break;
+    }
+
+    log += [result.stdout, result.stderr].filter((part) => part.trim()).join("\n");
+    if (result.exitCode !== 0) {
+      log += `\n[exited ${String(result.exitCode)}]\n`;
+      // Stopped rather than pressed on: a postCreate that failed has usually
+      // left the environment half-built, and running the next command against
+      // it produces a second, more confusing failure.
+      break;
+    }
+  }
+
+  setDevcontainerStatus(projectId, { running: false, lifecycleLog: log.trim() });
+}
+
+/** Resolves to undefined when the work outlives its budget.
+ *
+ *  The exec keeps running inside the container -- there is no way to reach in
+ *  and stop it -- but the START stops waiting, which is what matters: a
+ *  `sleep infinity` in a postCreateCommand must not hold a project closed.
+ */
+function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      resolve(undefined);
+    }, ms);
+    timer.unref?.();
+
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(undefined);
+      },
+    );
+  });
 }
 
 async function templateForProject(projectId: string) {
@@ -374,6 +613,21 @@ export async function getPreviewTarget(
  *  itself be the wrong answer — the run reconciler, most of all, which must be
  *  able to say "nothing is running here" without making that false.
  */
+/** The image a project's container is actually running, or null when it has
+ *  none yet.
+ *
+ *  Read from Docker rather than recomputed, because the point of showing it is
+ *  to answer "did my devcontainer's image take effect" -- and a container built
+ *  before the config changed is running the old one until it is rebuilt, which
+ *  recomputing would hide.
+ */
+export async function runningImage(projectId: string): Promise<string | null> {
+  const existing = await findContainer(assertValidProjectId(projectId)).catch(
+    () => undefined,
+  );
+  return existing?.Image ?? null;
+}
+
 export async function getRunningContainer(
   projectId: string,
 ): Promise<Container | undefined> {
