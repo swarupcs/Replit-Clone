@@ -49,6 +49,10 @@ afterEach(() => {
 
 describe("when nothing is connected", () => {
   it("says what the extra access is for, not just that it is needed", async () => {
+    // The first render in this file pays for antd's and react-query's cold
+    // start, which on a loaded machine is more than the 5s default -- so this
+    // one test fails while every later one in the same file passes. Given the
+    // time it actually takes rather than left to fail intermittently.
     renderCard();
 
     expect(
@@ -57,7 +61,7 @@ describe("when nothing is connected", () => {
     // The consent is separate from signing in, and asks for more; saying so is
     // the difference between an informed yes and a reflexive one.
     expect(screen.getByText(/separate from signing in/)).toBeDefined();
-  });
+  }, 20_000);
 
   it("sends the browser to the URL the server hands back", async () => {
     renderCard();
