@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { Modal } from "antd";
+import { Dropdown, Modal } from "antd";
+import type { MenuProps } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
-import { VscSplitHorizontal } from "react-icons/vsc";
+import { VscPinned, VscSplitHorizontal } from "react-icons/vsc";
 import { Tooltip } from "antd";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
@@ -17,6 +18,12 @@ export const EditorTabs = () => {
   const { tabs, activeRelPath, secondaryRelPath, splitOpen, setActive, closeTab } =
     useOpenTabsStore();
   const openToSide = useOpenTabsStore((state) => state.openToSide);
+  const promoteTab = useOpenTabsStore((state) => state.promoteTab);
+  const togglePin = useOpenTabsStore((state) => state.togglePin);
+  const moveTab = useOpenTabsStore((state) => state.moveTab);
+  const closeOthers = useOpenTabsStore((state) => state.closeOthers);
+  const closeToRight = useOpenTabsStore((state) => state.closeToRight);
+  const closeSaved = useOpenTabsStore((state) => state.closeSaved);
   /** The whole map: the strip holds a handful of tabs, so one subscription for
    *  the lot is cheaper than one per tab. */
   const colorsByFile = usePresenceStore((state) => state.colorsByFile);
@@ -39,6 +46,38 @@ export const EditorTabs = () => {
 
   /** The strip, so a key press can move focus to a sibling tab. */
   const stripRef = useRef<HTMLDivElement>(null);
+
+  /** The tab being dragged, if any. Held in a ref rather than state: it
+   *  changes on every dragover and nothing renders from it. */
+  const dragging = useRef<string | null>(null);
+
+  /** The per-tab context menu. Built per tab because three of its five items
+   *  are about that tab's position in the strip rather than about the strip. */
+  function menuFor(relPath: string, isPinned: boolean): MenuProps["items"] {
+    return [
+      {
+        key: "pin",
+        label: isPinned ? "Unpin" : "Pin",
+        onClick: () => togglePin(relPath),
+      },
+      { type: "divider" },
+      {
+        key: "others",
+        label: "Close others",
+        onClick: () => closeOthers(relPath),
+      },
+      {
+        key: "right",
+        label: "Close to the right",
+        onClick: () => closeToRight(relPath),
+      },
+      {
+        key: "saved",
+        label: "Close saved",
+        onClick: () => closeSaved(),
+      },
+    ];
+  }
 
   /** Arrow keys walk the strip and switch as they go — `role="tab"` sets the
    *  expectation that moving to a tab selects it, and every tab here is
@@ -103,11 +142,37 @@ export const EditorTabs = () => {
           (splitOpen && tab.relPath === secondaryRelPath);
 
         return (
-          <div
+          <Dropdown
             key={tab.relPath}
+            trigger={["contextMenu"]}
+            menu={{ items: menuFor(tab.relPath, tab.isPinned) }}
+          >
+          <div
             className="rc-tab"
             role="tab"
             aria-selected={isActive}
+            data-preview={tab.isPreview}
+            draggable
+            onDragStart={() => {
+              dragging.current = tab.relPath;
+            }}
+            onDragOver={(event) => {
+              // Without this the drop never fires: the default handling of
+              // dragover is to refuse the drop.
+              if (dragging.current && dragging.current !== tab.relPath) {
+                event.preventDefault();
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              const from = dragging.current;
+              dragging.current = null;
+              if (!from || from === tab.relPath) return;
+              moveTab(from, tabs.findIndex((entry) => entry.relPath === tab.relPath));
+            }}
+            onDragEnd={() => {
+              dragging.current = null;
+            }}
             // One tab stop for the whole strip: Tab reaches the current file
             // and the arrows move within it, rather than Tab walking through
             // every open file to get past the strip.
@@ -118,11 +183,26 @@ export const EditorTabs = () => {
               // Middle click closes, as in every editor.
               if (event.button === 1) requestClose(tab.relPath);
             }}
-            onDoubleClick={() => openToSide(tab.relPath)}
+            // Double click keeps a preview tab, which is what VS Code does
+            // and what makes single-click browsing safe: the strip does not
+            // fill up, and anything worth keeping is one gesture away. The
+            // split gesture moved to the button at the end of the strip,
+            // which was already there and says what it does.
+            onDoubleClick={() => promoteTab(tab.relPath)}
             title={tab.relPath}
           >
-            <FileIcon extension={tab.extension} />
-            <span>{tab.name}</span>
+            <FileIcon extension={tab.extension} name={tab.name} />
+            <span style={{ fontStyle: tab.isPreview ? "italic" : undefined }}>
+              {tab.name}
+            </span>
+
+            {tab.isPinned && (
+              <VscPinned
+                size={11}
+                aria-label="Pinned"
+                style={{ flex: "none", opacity: 0.7 }}
+              />
+            )}
 
             {colorsByFile[tab.relPath] && (
               <span
@@ -173,6 +253,7 @@ export const EditorTabs = () => {
               )}
             </button>
           </div>
+          </Dropdown>
         );
       })}
 

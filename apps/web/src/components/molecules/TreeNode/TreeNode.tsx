@@ -4,6 +4,7 @@ import { IoIosArrowForward } from "react-icons/io";
 import type { TreeNodeData } from "@replit-clone/shared";
 import { fileExtension } from "@replit-clone/shared";
 import { FileIcon, FolderIcon } from "../../atoms/FileIcon/FileIcon.tsx";
+import { markPreviewOpen } from "../../../lib/openIntent.ts";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
@@ -174,9 +175,19 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
               toggleExpanded(node.relPath);
             } else {
               // Single click opens, matching every real editor. It used to
-              // require a double click.
+              // require a double click. It opens as a preview: browsing a
+              // tree a file at a time otherwise leaves a tab behind for every
+              // file looked at and discarded.
+              markPreviewOpen(node.relPath);
               editorSocket?.emit("readFile", { relPath: node.relPath });
             }
+          }}
+          onDoubleClick={() => {
+            // Double-clicking a file in the tree keeps it, the same gesture
+            // that keeps it from the tab strip. Folders already toggle on the
+            // first click, so the second would only close what the first
+            // opened.
+            if (!isFolder) useOpenTabsStore.getState().promoteTab(node.relPath);
           }}
         >
           {isFolder ? (

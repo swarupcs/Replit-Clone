@@ -32,7 +32,11 @@ import {
   selectCanEdit,
   useEditorSocketStore,
 } from "../store/editorSocketStore.ts";
-import { useOpenTabsStore, selectActiveTab } from "../store/openTabsStore.ts";
+import {
+  useOpenTabsStore,
+  selectActiveTab,
+  selectNextMruTab,
+} from "../store/openTabsStore.ts";
 import { useAuthStore } from "../store/authStore.ts";
 import { useRunStore } from "../store/runStore.ts";
 import { useWorkspaceStore } from "../store/workspaceStore.ts";
@@ -486,8 +490,31 @@ export const ProjectPlayground = () => {
             if (active) closeActiveTab(active);
           },
         },
+        {
+          // Reopen the last closed file. The store kept the path, not the
+          // contents — they came from the server and may have moved on — so
+          // this re-reads rather than restoring a stale copy.
+          key: "t",
+          mod: true,
+          shift: true,
+          handler: () => {
+            const relPath = useOpenTabsStore.getState().takeClosed();
+            if (relPath) editorSocket?.emit("readFile", { relPath });
+          },
+        },
+        {
+          // Most-recently-used rather than left-to-right, which is what makes
+          // the chord worth having: the file you want next is almost always
+          // the one you were just in, not whichever happens to sit right.
+          key: "Tab",
+          mod: true,
+          handler: () => {
+            const next = selectNextMruTab(useOpenTabsStore.getState());
+            if (next) useOpenTabsStore.getState().setActive(next.relPath);
+          },
+        },
       ],
-      [closeActiveTab, toggleSidebar, togglePanel, togglePreview],
+      [closeActiveTab, editorSocket, toggleSidebar, togglePanel, togglePreview],
     ),
   );
 
