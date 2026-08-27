@@ -14,6 +14,7 @@ import {
   removeContainer,
 } from "../containers/containerManager.js";
 import { forgetRun } from "../containers/runner.js";
+import { forgetDevcontainer } from "../containers/devcontainer.js";
 import { forgetUsage } from "./diskUsageService.js";
 import { forgetProject as forgetCollab } from "./collabService.js";
 import {
@@ -104,6 +105,9 @@ export async function deleteProjectService(
   // Otherwise a recreated project with the same id would inherit stale run
   // state and a log from the deleted one.
   forgetRun(projectId);
+  // So a recreated project with the same id does not inherit the deleted one's
+  // devcontainer warnings and lifecycle log.
+  forgetDevcontainer(projectId);
   forgetUsage(projectId);
   forgetCollab(projectId);
   forgetUserQuota(projectId, userId);

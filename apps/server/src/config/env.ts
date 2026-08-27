@@ -132,6 +132,46 @@ const envSchema = z.object({
    *  a single nginx or Traefik, 2 behind Cloudflare in front of one of those. */
   TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
 
+  /** --- Dev Containers ---------------------------------------------------
+   *
+   *  A project may carry `.devcontainer/devcontainer.json`, which is how a real
+   *  repository says it needs ffmpeg, or a different Node, or a package this
+   *  platform's three images do not have. See `containers/devcontainer.ts`. */
+
+  /** Images a devcontainer may ask for, comma-separated.
+   *
+   *  An allowlist rather than "anything on Docker Hub", because `image` decides
+   *  what code runs in the sandbox and pulling an arbitrary one is unbounded
+   *  disk and bandwidth on top of a supply-chain decision nobody made. A
+   *  trailing `*` is a prefix wildcard, so a deployment that trusts the
+   *  Microsoft-maintained devcontainer images can say
+   *  `mcr.microsoft.com/devcontainers/*` and mean it.
+   *
+   *  Defaults to this platform's own images, which is the conservative reading:
+   *  a devcontainer can then still set env, ports, a workspace folder and
+   *  install packages in postCreateCommand -- most of what one is for -- without
+   *  the deployment having agreed to run somebody else's image. */
+  DEVCONTAINER_IMAGE_ALLOWLIST: z
+    .string()
+    .default("sandbox-node:latest,sandbox-python:latest,sandbox-go:latest")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+
+  /** Longest a devcontainer's postCreate/postStart commands may run.
+   *
+   *  These sit directly in the path of opening a project, and they are
+   *  arbitrary commands from a file in the repository -- so a `sleep infinity`
+   *  in one must not be able to hold a start open forever. */
+  DEVCONTAINER_LIFECYCLE_TIMEOUT_MINUTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10),
+
   PROJECTS_DIR: z.string().default("projects"),
 
   // Container resource budget. Defaults suit a 2-4 GB VM: 512 MB x 3 leaves

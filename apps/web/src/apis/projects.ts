@@ -1,5 +1,6 @@
 import type {
   ApiSuccess,
+  DevcontainerState,
   GitBranch,
   GitRemote,
   GitRemoteResponse,
@@ -476,6 +477,17 @@ export const setStartCommandApi = async (
   const response = await axios.put<StartCommandResponse>(
     `/api/v1/projects/${projectId}/start-command`,
     { command },
+  );
+  return response.data.data;
+};
+
+/** What the project's own .devcontainer/devcontainer.json asked for, and what
+ *  the server did with it. */
+export const getDevcontainerApi = async (
+  projectId: string,
+): Promise<DevcontainerState> => {
+  const response = await axios.get<ApiSuccess<DevcontainerState>>(
+    `/api/v1/projects/${projectId}/devcontainer`,
   );
   return response.data.data;
 };
