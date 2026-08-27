@@ -141,12 +141,15 @@ export function previewGuard(
 
 const DEV_SERVER_DOWN_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Preview unavailable</title>
-<style>body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;
-place-items:center;min-height:100vh;margin:0;background:#0d0e16;color:#f2f3f7;
+<style>:root{--bg:#ffffff;--fg:#131623;--muted:#4a5169;--kbd:#eef1f8;--line:#d5dbe8}
+@media (prefers-color-scheme:dark){
+:root{--bg:#0d0e16;--fg:#f2f3f7;--muted:#a2a7bd;--kbd:#232634;--line:#303445}}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;
+place-items:center;min-height:100vh;margin:0;background:var(--bg);color:var(--fg);
 text-align:center;padding:24px}
 h1{font-size:19px;font-weight:600;margin:0 0 8px}
-p{color:#a2a7bd;font-size:14px;margin:0;line-height:1.6}
-kbd{background:#232634;border:1px solid #303445;border-radius:6px;padding:2px 7px;
+p{color:var(--muted);font-size:14px;margin:0;line-height:1.6}
+kbd{background:var(--kbd);border:1px solid var(--line);border-radius:6px;padding:2px 7px;
 font-family:ui-monospace,monospace;font-size:13px}</style></head>
 <body><div><h1>Nothing running yet</h1>
 <p>Press <kbd>Run</kbd> in the toolbar to start the dev server,<br>

@@ -25,7 +25,7 @@ export const RULER_COLUMNS = [80, 120] as const;
  */
 export const buildEditorOptions = (
   settings: EditorSettings,
-  { canEdit }: { canEdit: boolean },
+  { canEdit, reducedMotion = false }: { canEdit: boolean; reducedMotion?: boolean },
 ): editor.IStandaloneEditorConstructionOptions => ({
   // Read-only access is presented as read-only rather than letting every
   // keystroke be rejected one at a time.
@@ -42,9 +42,13 @@ export const buildEditorOptions = (
   scrollBeyondLastLine: false,
   automaticLayout: true,
   padding: { top: 16, bottom: 16 },
-  smoothScrolling: true,
-  cursorBlinking: "smooth",
-  cursorSmoothCaretAnimation: "on",
+  // Monaco's animations are its own, out of reach of the stylesheet's
+  // reduced-motion rule, so they are switched off here instead. A caret that
+  // glides and a viewport that eases are exactly the motion someone asking
+  // for less of it means.
+  smoothScrolling: !reducedMotion,
+  cursorBlinking: reducedMotion ? "solid" : "smooth",
+  cursorSmoothCaretAnimation: reducedMotion ? "off" : "on",
   renderLineHighlight: "line",
   roundedSelection: true,
   scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },

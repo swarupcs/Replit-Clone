@@ -9,6 +9,7 @@ import { Flex, Tooltip, Typography } from "antd";
 import { VscDiff, VscSparkle } from "react-icons/vsc";
 import { MAX_FILE_BYTES } from "@replit-clone/shared";
 import draculaTheme from "../../../theme/dracula.json";
+import alucardTheme from "../../../theme/alucard.json";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import {
   selectCanEdit,
@@ -21,6 +22,7 @@ import {
 } from "../../../store/openTabsStore.ts";
 import { useEditorStatusStore } from "../../../store/editorStatusStore.ts";
 import { useThemeMode } from "../../../hooks/useThemeMode.ts";
+import { useMediaQuery } from "../../../hooks/useMediaQuery.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
 import {
@@ -119,11 +121,16 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const [collabTick, setCollabTick] = useState(0);
   useEffect(() => subscribeCollab(() => setCollabTick((value) => value + 1)), []);
   const settings = useEditorSettingsStore();
-  /** Dracula in the dark, Monaco's own "vs" in the light. Dracula is a dark
-   *  scheme by construction — lightening its ground leaves the syntax colours
-   *  unreadable — so the light theme is a different scheme rather than a
-   *  recoloured one. */
-  const monacoTheme = useThemeMode() === "light" ? "vs" : "dracula";
+  /** Both themes are ours. Light used to be Monaco's stock "vs", which is a
+   *  perfectly good theme and the wrong one here: it is lit differently from
+   *  the app around it, so the editor read as a pane borrowed from somewhere
+   *  else. Alucard is Dracula's palette with every hue darkened until it
+   *  carries on white, so the two moods look like one product. */
+  const monacoTheme = useThemeMode() === "light" ? "alucard" : "dracula";
+
+  /** Someone who has asked their OS for less motion means Monaco's caret and
+   *  scrolling too, which the stylesheet cannot reach. */
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   /** The whole store: both actions are stable, so this never re-renders. */
   const publishStatus = useEditorStatusStore.getState();
 
@@ -335,6 +342,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     // Imported rather than fetched from '/Dracula.json', which 404'd and left
     // the editor permanently unmounted.
     monaco.editor.defineTheme("dracula", draculaTheme as editor.IStandaloneThemeData);
+    monaco.editor.defineTheme("alucard", alucardTheme as editor.IStandaloneThemeData);
 
     // Feeds the status bar. Monaco owns the cursor, so this is the only way to
     // observe it; the listener is disposed with the editor.
@@ -739,7 +747,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
           height="100%"
           width="100%"
           theme={monacoTheme}
-          options={buildEditorOptions(settings, { canEdit })}
+          options={buildEditorOptions(settings, { canEdit, reducedMotion })}
           onChange={handleChange}
           onMount={handleMount}
         />

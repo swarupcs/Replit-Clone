@@ -1517,3 +1517,56 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Reduced motion.
+ *
+ *  A blanket rule rather than a per-rule audit, because the failure mode of
+ *  missing one is vestibular discomfort for someone who explicitly asked not
+ *  to have it. Durations go to something non-zero but imperceptible instead
+ *  of zero: a few transitions elsewhere fire `transitionend`, and a zero
+ *  duration can skip the event in some engines. Spinners keep turning —
+ *  a progress indicator that stops looks like a hang — but slow enough to
+ *  stop being a strobe. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+
+  .rc-icon-button[data-spinning="true"] svg,
+  .rc-preview-progress::after {
+    animation-duration: 1.4s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* High contrast.
+ *
+ *  VS Code ships HC Dark and HC Light and treats them as an accessibility
+ *  feature rather than a preference, which is the right framing: someone who
+ *  has asked their OS for more contrast is telling us the subtle borders and
+ *  muted text this design leans on are not reaching them. Borders go solid,
+ *  muted text steps up to the body colour, and focus rings thicken. */
+@media (prefers-contrast: more) {
+  :root {
+    --rc-border: #8b93ad;
+    --rc-border-strong: #c3c9db;
+    --rc-text-muted: #e2e5ef;
+    --rc-text-subtle: #c3c9db;
+  }
+
+  :root[data-theme="light"] {
+    --rc-border: #4a5169;
+    --rc-border-strong: #131623;
+    --rc-text-muted: #1f2434;
+    --rc-text-subtle: #333a4f;
+  }
+
+  :focus-visible {
+    outline-width: 3px;
+  }
+}
