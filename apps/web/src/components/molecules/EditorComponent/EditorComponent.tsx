@@ -23,6 +23,8 @@ import {
 import { useEditorStatusStore } from "../../../store/editorStatusStore.ts";
 import { useThemeMode } from "../../../hooks/useThemeMode.ts";
 import { useMediaQuery } from "../../../hooks/useMediaQuery.ts";
+import { useSymbolStore } from "../../../store/symbolStore.ts";
+import type { FileSymbol } from "../../../lib/documentSymbols.ts";
 import {
   selectRegions,
   useGitGutterStore,
@@ -67,6 +69,56 @@ const WRITE_DEBOUNCE_MS = 800;
  */
 function modelUri(monaco: Monaco, relPath: string) {
   return monaco.Uri.from({ scheme: "inmemory", path: `/${relPath}` });
+}
+
+
+/** The shape the TypeScript worker's navigation tree comes back in.
+ *
+ *  Declared here rather than imported: it is internal to the worker's API
+ *  surface and typescript's own types are not reachable from this bundle. */
+interface NavigationTree {
+  text: string;
+  kind: string;
+  spans: { start: number; length: number }[];
+  childItems?: NavigationTree[];
+}
+
+/** Monaco SymbolKind values for the few kinds worth telling apart in a
+ *  breadcrumb. Anything else falls back to a generic one — the name carries
+ *  the meaning, the icon only helps. */
+const NAVIGATION_KINDS: Record<string, number> = {
+  class: 4,
+  interface: 10,
+  enum: 9,
+  function: 11,
+  method: 5,
+  property: 6,
+  constructor: 8,
+  module: 1,
+  var: 12,
+  const: 13,
+  let: 12,
+};
+
+function navigationToSymbols(
+  items: NavigationTree[],
+  model: editor.ITextModel,
+): FileSymbol[] {
+  return items.map((item) => {
+    const span = item.spans[0];
+    const start = span ? model.getPositionAt(span.start).lineNumber : 1;
+    const end = span
+      ? model.getPositionAt(span.start + span.length).lineNumber
+      : start;
+
+    return {
+      name: item.text,
+      kind: NAVIGATION_KINDS[item.kind] ?? 12,
+      startLine: start,
+      endLine: end,
+      children: navigationToSymbols(item.childItems ?? [], model),
+    };
+  });
 }
 
 interface EditorComponentProps {
@@ -284,6 +336,81 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     // `mounted` for the same reason as the attach effect above: on the first
     // file, Monaco has not produced an editor yet and this would bind nothing.
   }, [activeTab?.relPath, editorSocket, canEdit, user?.email, user?.id, mountTick]);
+
+  /** Document symbols, for the breadcrumbs and the outline.
+   *
+   *  One read feeding both, which is what §2.2 asks for: two fetches of the
+   *  same symbols would be twice the work for something that can then
+   *  disagree with itself. Only the primary pane publishes, so two panes on
+   *  two files do not fight over one store.
+   *
+   *  Read from the TypeScript worker directly. Standalone Monaco has no
+   *  equivalent of VS Code's `executeDocumentSymbolProvider` command, and the
+   *  worker's navigation tree is the same data the outline in VS Code shows.
+   *  That confines this to TypeScript and JavaScript, which is exactly what
+   *  §2.2 says is available until §3 lands a language server.
+   */
+  useEffect(() => {
+    if (pane !== "primary") return;
+
+    const monaco = monacoRef.current;
+    const codeEditor = editorRef.current;
+    const relPath = activeTab?.relPath;
+    if (!monaco || !codeEditor || !relPath) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      const model = codeEditor.getModel();
+      if (!model) return;
+
+      const language = model.getLanguageId();
+      if (language !== "typescript" && language !== "javascript") {
+        // Not an error: most languages have no provider yet, and the
+        // breadcrumb degrades to the path rather than to an empty bar.
+        useSymbolStore.getState().setSymbols(relPath, []);
+        return;
+      }
+
+      try {
+        const getWorker =
+          language === "typescript"
+            ? await monaco.languages.typescript.getTypeScriptWorker()
+            : await monaco.languages.typescript.getJavaScriptWorker();
+        const worker = await getWorker(model.uri);
+        const tree = (await worker.getNavigationTree(model.uri.toString())) as
+          | NavigationTree
+          | undefined;
+
+        if (cancelled || !tree) return;
+        useSymbolStore
+          .getState()
+          .setSymbols(relPath, navigationToSymbols(tree.childItems ?? [], model));
+      } catch {
+        // A worker that has not warmed up yet, or a file it will not parse.
+        if (!cancelled) useSymbolStore.getState().setSymbols(relPath, []);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pane, activeTab?.relPath, activeTab?.value, mountTick]);
+
+  /** Keep the breadcrumb's symbol half pointed at the cursor. */
+  useEffect(() => {
+    if (pane !== "primary") return;
+    const codeEditor = editorRef.current;
+    if (!codeEditor) return;
+
+    const subscription = codeEditor.onDidChangeCursorPosition((event) => {
+      useSymbolStore.getState().setLine(event.position.lineNumber);
+    });
+
+    return () => {
+      subscription.dispose();
+    };
+  }, [pane, mountTick]);
 
   /** The git bars down the left margin.
    *

@@ -1748,3 +1748,87 @@ body {
   color: var(--rc-text-subtle);
   border-top: 1px solid var(--rc-border);
 }
+
+/* Zen mode.
+ *
+ *  Everything but the editor stands down. Done in CSS over the layout that
+ *  already exists, rather than by rendering a second one: the panes keep
+ *  their state, so leaving zen restores exactly what was there — and the
+ *  terminal is never unmounted, which would kill its PTY. The same reasoning
+ *  the responsive drawers were built on.
+ *
+ *  Every selector below also appears elsewhere in this file or in the markup;
+ *  a rule pointed at a class nobody sets is worse than no rule, because it
+ *  reads as handled. `theme.light.test.ts` checks exactly that. */
+.rc-playground[data-zen] > .ant-flex:first-child,
+.rc-playground[data-zen] .rc-drawer-left,
+.rc-playground[data-zen] .rc-drawer-bottom,
+.rc-playground[data-zen] .rc-statusbar {
+  display: none !important;
+}
+
+/* Breadcrumbs: path, then the symbols enclosing the cursor. */
+.rc-breadcrumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 2px;
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--rc-text-subtle);
+  background: var(--rc-surface);
+  border-bottom: 1px solid var(--rc-border);
+  flex: 0 0 auto;
+  scrollbar-width: none;
+}
+
+.rc-breadcrumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.rc-breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.rc-breadcrumb-sep {
+  opacity: 0.5;
+  padding: 0 2px;
+}
+
+.rc-breadcrumb-symbol {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--rc-text-muted);
+  cursor: pointer;
+}
+
+.rc-breadcrumb-symbol:hover {
+  color: var(--rc-text);
+  text-decoration: underline;
+}
+
+/* Outline rows, shared with the go-to-symbol list. */
+.rc-outline-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 8px;
+  border: 0;
+  background: none;
+  color: var(--rc-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rc-outline-row:hover,
+.rc-outline-row[data-active="true"] {
+  background: var(--rc-surface-raised);
+}

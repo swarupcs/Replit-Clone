@@ -12,6 +12,7 @@ import {
   VscSourceControl,
   VscPackage,
   VscDatabase,
+  VscSymbolClass,
   VscCloudUpload,
   VscSettingsGear,
   VscSparkle,
@@ -57,6 +58,9 @@ import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { useGitGutterStore } from "../store/gitGutterStore.ts";
 import { DatabasePanel } from "../components/organisms/DatabasePanel/DatabasePanel.tsx";
+import { Breadcrumbs } from "../components/molecules/Breadcrumbs/Breadcrumbs.tsx";
+import { SymbolSearch } from "../components/organisms/SymbolSearch/SymbolSearch.tsx";
+import { OutlinePanel } from "../components/organisms/OutlinePanel/OutlinePanel.tsx";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
 import { useThemeStore } from "../store/themeStore.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
@@ -118,12 +122,22 @@ export const ProjectPlayground = () => {
     panel: showPanel,
   } = views;
   const [quickOpen, setQuickOpen] = useState(false);
+  /** Go-to-symbol, and zen mode. Both are pure layout over what exists. */
+  const [symbolSearchOpen, setSymbolSearchOpen] = useState(false);
+  const [zen, setZen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** Which sidebar view is showing. */
   const [sidebarView, setSidebarView] = useState<
-    "files" | "search" | "git" | "packages" | "deploy" | "database" | "ai"
+    | "files"
+    | "search"
+    | "git"
+    | "packages"
+    | "deploy"
+    | "database"
+    | "outline"
+    | "ai"
   >(
     "files",
   );
@@ -506,6 +520,23 @@ export const ProjectPlayground = () => {
           },
         },
         {
+          // Go to symbol in the open file. VS Code's Ctrl+T is workspace-wide;
+          // this is file-wide, because a workspace index is a different
+          // feature and Quick Open already covers finding the file.
+          key: "t",
+          mod: true,
+          handler: () => setSymbolSearchOpen(true),
+        },
+        {
+          // Zen mode: everything but the editor stands down. Pure layout,
+          // over the panes that already exist.
+          key: "k",
+          mod: true,
+          alt: true,
+          handler: () => setZen((value) => !value),
+        },
+        {
+
           // Most-recently-used rather than left-to-right, which is what makes
           // the chord worth having: the file you want next is almost always
           // the one you were just in, not whichever happens to sit right.
@@ -622,7 +653,16 @@ export const ProjectPlayground = () => {
   ]);
 
   return (
-    <Flex vertical style={{ height: "100vh", backgroundColor: "var(--rc-surface)" }}>
+    <Flex
+      vertical
+      // Zen mode is a data attribute over the layout that already exists
+      // rather than a second layout: the panes keep their state, so leaving
+      // zen puts everything back exactly as it was — and, more importantly,
+      // the terminal is never unmounted and its PTY never dies. Ctrl+Alt+K.
+      data-zen={zen || undefined}
+      className="rc-playground"
+      style={{ height: "100vh", backgroundColor: "var(--rc-surface)" }}
+    >
       <Flex
         align="center"
         justify="space-between"
@@ -818,6 +858,16 @@ export const ProjectPlayground = () => {
                     <VscCloudUpload size={16} />
                   </button>
                 </Tooltip>
+                <Tooltip title="Outline" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "outline"}
+                    aria-label="Outline"
+                    onClick={() => setSidebarView("outline")}
+                  >
+                    <VscSymbolClass size={16} />
+                  </button>
+                </Tooltip>
                 <Tooltip title="Database" placement="right">
                   <button
                     className="rc-icon-button"
@@ -911,6 +961,14 @@ export const ProjectPlayground = () => {
                   </div>
                 )}
 
+                {sidebarView === "outline" && (
+                  <div style={{ height: "100%" }}>
+                    <ErrorBoundary label="Outline">
+                      <OutlinePanel />
+                    </ErrorBoundary>
+                  </div>
+                )}
+
                 {sidebarView === "database" && projectIdFromUrl && (
                   <div style={{ height: "100%" }}>
                     <ErrorBoundary label="Database">
@@ -964,6 +1022,7 @@ export const ProjectPlayground = () => {
                       }}
                     >
                       <EditorTabs />
+                      <Breadcrumbs />
                       <div style={{ flex: 1, minHeight: 0 }}>
                         {/* Two panes over one tab list and one write queue, so
                             the same file open in both stays in step. */}
@@ -1018,6 +1077,10 @@ export const ProjectPlayground = () => {
       <StatusBar />
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
+      <SymbolSearch
+        open={symbolSearchOpen}
+        onClose={() => setSymbolSearchOpen(false)}
+      />
 
       <CommandPalette
         open={paletteOpen}

@@ -112,6 +112,24 @@ describe("the accessibility media queries", () => {
     }
   });
 
+  /** The same failure the reduced-motion exemption nearly shipped with: a
+   *  rule pointed at a class nobody sets does nothing and reads as handled.
+   *  Every selector zen mode hides has to exist somewhere else. */
+  it("hides only things that exist", () => {
+    const block = css.slice(css.indexOf("/* Zen mode."));
+    const zen = block.slice(0, block.indexOf("}") + 1);
+
+    for (const selector of [".rc-drawer-left", ".rc-drawer-bottom", ".rc-statusbar"]) {
+      expect(zen, `zen does not hide ${selector}`).toContain(selector);
+      // Declared elsewhere in the sheet, which is the proof it is a real
+      // class rather than one invented for this rule.
+      expect(
+        css.indexOf(`${selector} {`) !== -1 || css.indexOf(`${selector},`) !== -1,
+        `${selector} is not defined anywhere`,
+      ).toBe(true);
+    }
+  });
+
   it("raises contrast for anyone who asked, in both themes", () => {
     expect(css).toContain("@media (prefers-contrast: more)");
     const block = css.slice(css.indexOf("@media (prefers-contrast: more)"));
