@@ -1618,3 +1618,133 @@ body {
   border-top: 3px solid transparent;
   border-bottom: 3px solid transparent;
 }
+
+/* The database panel: schema tree, query editor, result grid. */
+.rc-db-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rc-border);
+  background: var(--rc-surface-sunken);
+  flex: 0 0 auto;
+}
+
+.rc-db-tree {
+  width: 210px;
+  flex: none;
+  overflow: auto;
+  border-right: 1px solid var(--rc-border);
+  padding: 6px 0;
+}
+
+.rc-db-schema {
+  padding: 4px 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--rc-text-subtle);
+}
+
+.rc-db-table {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 10px;
+  border: 0;
+  background: none;
+  color: var(--rc-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rc-db-table:hover {
+  background: var(--rc-surface-raised);
+}
+
+.rc-db-view-tag {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--rc-text-subtle);
+}
+
+.rc-db-column {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 10px 2px 28px;
+  font-size: 11px;
+  color: var(--rc-text-muted);
+}
+
+.rc-db-type {
+  color: var(--rc-text-subtle);
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.rc-db-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rc-border);
+  flex: 0 0 auto;
+}
+
+.rc-result-grid {
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  width: max-content;
+  min-width: 100%;
+}
+
+.rc-result-grid th {
+  position: sticky;
+  top: 0;
+  background: var(--rc-surface-sunken);
+  border-bottom: 1px solid var(--rc-border);
+  padding: 5px 10px;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rc-result-grid td {
+  border-bottom: 1px solid var(--rc-border);
+  padding: 4px 10px;
+  white-space: nowrap;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A NULL is not an empty string, and a grid that renders both as nothing is
+   lying about the data. Its own dim italic token says which one this is. */
+.rc-result-grid td[data-kind="null"] {
+  color: var(--rc-text-subtle);
+  font-style: italic;
+}
+
+.rc-result-grid td[data-kind="number"] {
+  text-align: right;
+}
+
+.rc-result-grid td[data-kind="json"] {
+  color: var(--rc-accent);
+}
+
+.rc-result-grid td[data-kind="binary"],
+.rc-result-grid td[data-kind="boolean"] {
+  color: var(--rc-text-muted);
+}
+
+.rc-result-note {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--rc-text-subtle);
+  border-top: 1px solid var(--rc-border);
+}

@@ -11,6 +11,7 @@ import {
   VscSearch,
   VscSourceControl,
   VscPackage,
+  VscDatabase,
   VscCloudUpload,
   VscSettingsGear,
   VscSparkle,
@@ -55,6 +56,7 @@ import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
 import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { useGitGutterStore } from "../store/gitGutterStore.ts";
+import { DatabasePanel } from "../components/organisms/DatabasePanel/DatabasePanel.tsx";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
 import { useThemeStore } from "../store/themeStore.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
@@ -121,7 +123,7 @@ export const ProjectPlayground = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** Which sidebar view is showing. */
   const [sidebarView, setSidebarView] = useState<
-    "files" | "search" | "git" | "packages" | "deploy" | "ai"
+    "files" | "search" | "git" | "packages" | "deploy" | "database" | "ai"
   >(
     "files",
   );
@@ -816,6 +818,16 @@ export const ProjectPlayground = () => {
                     <VscCloudUpload size={16} />
                   </button>
                 </Tooltip>
+                <Tooltip title="Database" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "database"}
+                    aria-label="Database"
+                    onClick={() => setSidebarView("database")}
+                  >
+                    <VscDatabase size={16} />
+                  </button>
+                </Tooltip>
                 {aiModel && (
                   <Tooltip title="Assistant" placement="right">
                     <button
@@ -892,6 +904,17 @@ export const ProjectPlayground = () => {
                   <div style={{ height: "100%" }}>
                     <ErrorBoundary label="Deploy">
                       <DeployPanel
+                        projectId={projectIdFromUrl}
+                        isOwner={accessLevel === "owner"}
+                      />
+                    </ErrorBoundary>
+                  </div>
+                )}
+
+                {sidebarView === "database" && projectIdFromUrl && (
+                  <div style={{ height: "100%" }}>
+                    <ErrorBoundary label="Database">
+                      <DatabasePanel
                         projectId={projectIdFromUrl}
                         isOwner={accessLevel === "owner"}
                       />
