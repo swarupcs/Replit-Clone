@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   selectActiveTab,
   selectHasUnsavedWork,
+  selectMruTabs,
+  selectNextMruTab,
   selectPaneTab,
   useOpenTabsStore,
 } from "./openTabsStore.ts";
@@ -310,5 +312,333 @@ describe("reviewing a proposed change", () => {
     store().closeAll();
 
     expect(store().review).toBeNull();
+  });
+});
+
+describe("preview tabs", () => {
+  const open = (relPath: string, options?: { preview?: boolean }) =>
+    useOpenTabsStore.getState().openTab(relPath, `// ${relPath}`, options);
+
+  beforeEach(() => {
+    useOpenTabsStore.getState().closeAll();
+  });
+
+  it("replaces the previous preview rather than stacking tabs", () => {
+    open("a.ts", { preview: true });
+    open("b.ts", { preview: true });
+    open("c.ts", { preview: true });
+
+    // The complaint this answers: browsing a tree used to leave one tab per
+    // file looked at and discarded.
+    expect(useOpenTabsStore.getState().tabs.map((tab) => tab.relPath)).toEqual([
+      "c.ts",
+    ]);
+  });
+
+  it("replaces in place, keeping the strip's order", () => {
+    open("keep.ts");
+    open("preview.ts", { preview: true });
+    open("last.ts");
+    open("swapped.ts", { preview: true });
+
+    expect(useOpenTabsStore.getState().tabs.map((tab) => tab.relPath)).toEqual([
+      "keep.ts",
+      "swapped.ts",
+      "last.ts",
+    ]);
+  });
+
+  it("keeps a permanent tab beside a preview", () => {
+    open("kept.ts");
+    open("skimmed.ts", { preview: true });
+    open("also-skimmed.ts", { preview: true });
+
+    expect(useOpenTabsStore.getState().tabs.map((tab) => tab.relPath)).toEqual([
+      "kept.ts",
+      "also-skimmed.ts",
+    ]);
+  });
+
+  it("promotes on a deliberate open of the file already previewing", () => {
+    open("a.ts", { preview: true });
+    open("a.ts");
+    open("b.ts", { preview: true });
+
+    expect(useOpenTabsStore.getState().tabs.map((tab) => tab.relPath)).toEqual([
+      "a.ts",
+      "b.ts",
+    ]);
+  });
+
+  it("promotes explicitly, which is what a double click does", () => {
+    open("a.ts", { preview: true });
+    useOpenTabsStore.getState().promoteTab("a.ts");
+    open("b.ts", { preview: true });
+
+    expect(useOpenTabsStore.getState().tabs).toHaveLength(2);
+  });
+
+  /** Typing into a file is the clearest possible statement that it is not
+   *  being skimmed — and replacing it would throw the edit away. */
+  it("keeps a preview the moment it is edited", () => {
+    open("a.ts", { preview: true });
+    useOpenTabsStore.getState().markDirty("a.ts", true);
+    open("b.ts", { preview: true });
+
+    const { tabs } = useOpenTabsStore.getState();
+    expect(tabs.map((tab) => tab.relPath)).toEqual(["a.ts", "b.ts"]);
+    expect(tabs[0]?.isPreview).toBe(false);
+  });
+
+  /** Unreachable through `markDirty`, which clears the preview flag as it
+   *  sets the dirty one — so this reaches past it to build the state
+   *  directly. The clause stays because the cost of the check is nothing and
+   *  the cost of being wrong is somebody's unsaved edit. */
+  it("refuses to replace a dirty preview however it got that way", () => {
+    open("a.ts", { preview: true });
+    useOpenTabsStore.setState((state) => ({
+      tabs: state.tabs.map((tab) => ({ ...tab, isDirty: true })),
+    }));
+    open("b.ts", { preview: true });
+
+    expect(useOpenTabsStore.getState().tabs.map((tab) => tab.relPath)).toEqual([
+      "a.ts",
+      "b.ts",
+    ]);
+  });
+
+  it("never replaces a pinned tab", () => {
+    open("a.ts", { preview: true });
+    useOpenTabsStore.getState().togglePin("a.ts");
+    open("b.ts", { preview: true });
+
+    expect(useOpenTabsStore.getState().tabs).toHaveLength(2);
+  });
+});
+
+describe("pinning", () => {
+  const open = (relPath: string) =>
+    useOpenTabsStore.getState().openTab(relPath, "");
+
+  beforeEach(() => {
+    useOpenTabsStore.getState().closeAll();
+  });
+
+  it("moves a pinned tab left of every unpinned one", () => {
+    open("a.ts");
+    open("b.ts");
+    open("c.ts");
+    useOpenTabsStore.getState().togglePin("c.ts");
+
+    expect(useOpenTabsStore.getState().tabs.map((tab) => tab.relPath)).toEqual([
+      "c.ts",
+      "a.ts",
+      "b.ts",
+    ]);
+  });
+
+  it("returns it to the unpinned block when unpinned", () => {
+    open("a.ts");
+    open("b.ts");
+    useOpenTabsStore.getState().togglePin("b.ts");
+    useOpenTabsStore.getState().togglePin("b.ts");
+
+    const { tabs } = useOpenTabsStore.getState();
+    expect(tabs.every((tab) => !tab.isPinned)).toBe(true);
+  });
+
+  it("survives close others", () => {
+    open("pinned.ts");
+    open("a.ts");
+    open("b.ts");
+    useOpenTabsStore.getState().togglePin("pinned.ts");
+    useOpenTabsStore.getState().closeOthers("a.ts");
+
+    expect(useOpenTabsStore.getState().tabs.map((tab) => tab.relPath)).toEqual([
+      "pinned.ts",
+      "a.ts",
+    ]);
+  });
+});
+
+describe("reordering", () => {
+  const open = (relPath: string) =>
+    useOpenTabsStore.getState().openTab(relPath, "");
+
+  beforeEach(() => {
+    useOpenTabsStore.getState().closeAll();
+  });
+
+  it("moves a tab to a new index", () => {
+    open("a.ts");
+    open("b.ts");
+    open("c.ts");
+    useOpenTabsStore.getState().moveTab("c.ts", 0);
+
+    expect(useOpenTabsStore.getState().tabs.map((tab) => tab.relPath)).toEqual([
+      "c.ts",
+      "a.ts",
+      "b.ts",
+    ]);
+  });
+
+  /** A drag across the pinned boundary is a reorder, not a pin — silently
+   *  changing a tab's state because it was dropped past a line would be a
+   *  surprise nobody asked for. */
+  it("does not let a drag past the boundary pin or unpin anything", () => {
+    open("pinned.ts");
+    open("a.ts");
+    useOpenTabsStore.getState().togglePin("pinned.ts");
+    useOpenTabsStore.getState().moveTab("a.ts", 0);
+
+    const { tabs } = useOpenTabsStore.getState();
+    expect(tabs.map((tab) => tab.relPath)).toEqual(["pinned.ts", "a.ts"]);
+    expect(tabs.find((tab) => tab.relPath === "a.ts")?.isPinned).toBe(false);
+  });
+
+  it("ignores a move of a tab that is not open", () => {
+    open("a.ts");
+    useOpenTabsStore.getState().moveTab("gone.ts", 0);
+    expect(useOpenTabsStore.getState().tabs).toHaveLength(1);
+  });
+});
+
+describe("closing in bulk", () => {
+  const open = (relPath: string) =>
+    useOpenTabsStore.getState().openTab(relPath, "");
+
+  beforeEach(() => {
+    useOpenTabsStore.getState().closeAll();
+  });
+
+  it("closes to the right without touching the left", () => {
+    open("a.ts");
+    open("b.ts");
+    open("c.ts");
+    useOpenTabsStore.getState().closeToRight("b.ts");
+
+    expect(useOpenTabsStore.getState().tabs.map((tab) => tab.relPath)).toEqual([
+      "a.ts",
+      "b.ts",
+    ]);
+  });
+
+  /** The worst bug this file could have: a convenience command that throws
+   *  away work existing nowhere else. */
+  it("keeps unsaved work when closing saved tabs", () => {
+    open("clean.ts");
+    open("dirty.ts");
+    useOpenTabsStore.getState().markDirty("dirty.ts", true);
+    useOpenTabsStore.getState().closeSaved();
+
+    expect(useOpenTabsStore.getState().tabs.map((tab) => tab.relPath)).toEqual([
+      "dirty.ts",
+    ]);
+  });
+
+  it("keeps pinned tabs when closing saved tabs", () => {
+    open("clean.ts");
+    open("pinned.ts");
+    useOpenTabsStore.getState().togglePin("pinned.ts");
+    useOpenTabsStore.getState().closeSaved();
+
+    expect(useOpenTabsStore.getState().tabs.map((tab) => tab.relPath)).toEqual([
+      "pinned.ts",
+    ]);
+  });
+});
+
+describe("reopening a closed tab", () => {
+  const open = (relPath: string) =>
+    useOpenTabsStore.getState().openTab(relPath, "");
+
+  beforeEach(() => {
+    useOpenTabsStore.getState().closeAll();
+  });
+
+  it("hands back the most recently closed path", () => {
+    open("a.ts");
+    open("b.ts");
+    useOpenTabsStore.getState().closeTab("a.ts");
+    useOpenTabsStore.getState().closeTab("b.ts");
+
+    expect(useOpenTabsStore.getState().takeClosed()).toBe("b.ts");
+    expect(useOpenTabsStore.getState().takeClosed()).toBe("a.ts");
+    expect(useOpenTabsStore.getState().takeClosed()).toBeNull();
+  });
+
+  it("skips anything reopened by other means since", () => {
+    open("a.ts");
+    open("b.ts");
+    useOpenTabsStore.getState().closeTab("a.ts");
+    useOpenTabsStore.getState().closeTab("b.ts");
+    open("b.ts");
+
+    // b is already on screen; handing it back would do nothing visible.
+    expect(useOpenTabsStore.getState().takeClosed()).toBe("a.ts");
+  });
+
+  it("remembers everything a bulk close removed", () => {
+    open("a.ts");
+    open("b.ts");
+    open("c.ts");
+    useOpenTabsStore.getState().closeOthers("a.ts");
+
+    expect(useOpenTabsStore.getState().takeClosed()).toBe("c.ts");
+    expect(useOpenTabsStore.getState().takeClosed()).toBe("b.ts");
+  });
+});
+
+describe("most-recently-used order", () => {
+  const open = (relPath: string) =>
+    useOpenTabsStore.getState().openTab(relPath, "");
+
+  beforeEach(() => {
+    useOpenTabsStore.getState().closeAll();
+  });
+
+  it("offers the previously used tab, not the neighbour to the right", () => {
+    open("a.ts");
+    open("b.ts");
+    open("c.ts");
+    useOpenTabsStore.getState().setActive("a.ts");
+
+    // Strip order would say b; MRU says c, which is where the user just was.
+    expect(selectNextMruTab(useOpenTabsStore.getState())?.relPath).toBe("c.ts");
+  });
+
+  it("alternates between two files, which is the common case", () => {
+    open("a.ts");
+    open("b.ts");
+
+    const next = () => {
+      const tab = selectNextMruTab(useOpenTabsStore.getState());
+      if (tab) useOpenTabsStore.getState().setActive(tab.relPath);
+      return tab?.relPath;
+    };
+
+    expect(next()).toBe("a.ts");
+    expect(next()).toBe("b.ts");
+    expect(next()).toBe("a.ts");
+  });
+
+  it("covers tabs the list has never seen", () => {
+    open("a.ts");
+    open("b.ts");
+    useOpenTabsStore.setState({ mru: [] });
+
+    expect(selectMruTabs(useOpenTabsStore.getState())).toHaveLength(2);
+  });
+
+  it("forgets a closed tab", () => {
+    open("a.ts");
+    open("b.ts");
+    useOpenTabsStore.getState().closeTab("b.ts");
+
+    expect(useOpenTabsStore.getState().mru).not.toContain("b.ts");
+  });
+
+  it("returns nothing when nothing is open", () => {
+    expect(selectNextMruTab(useOpenTabsStore.getState())).toBeNull();
   });
 });

@@ -1,10 +1,10 @@
 import { memo, useState } from "react";
 import type { CSSProperties, DragEvent, MouseEvent } from "react";
 import { IoIosArrowForward } from "react-icons/io";
-import { FaFolder, FaFolderOpen } from "react-icons/fa";
 import type { TreeNodeData } from "@replit-clone/shared";
 import { fileExtension } from "@replit-clone/shared";
-import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
+import { FileIcon, FolderIcon } from "../../atoms/FileIcon/FileIcon.tsx";
+import { markPreviewOpen } from "../../../lib/openIntent.ts";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
@@ -13,6 +13,11 @@ import {
   usePresenceStore,
 } from "../../../store/presenceStore.ts";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
+import {
+  selectDecoration,
+  selectFolderDecoration,
+  useGitDecorationStore,
+} from "../../../store/gitDecorationStore.ts";
 import {
   selectOrderedSelection,
   useTreeSelectionStore,
@@ -73,6 +78,14 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
    *  an array would hand every row a new identity on every awareness update
    *  and wake the whole tree. */
   const presence = usePresenceStore(selectFileColors(relPath ?? ""));
+
+  /** Git state for this row. A folder summarises what is under it, which is
+   *  what makes a change findable without expanding anything. */
+  const decoration = useGitDecorationStore(
+    node?.type === "directory"
+      ? selectFolderDecoration(node.relPath)
+      : selectDecoration(node?.relPath ?? ""),
+  );
 
   if (!node) return null;
 
@@ -175,9 +188,19 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
               toggleExpanded(node.relPath);
             } else {
               // Single click opens, matching every real editor. It used to
-              // require a double click.
+              // require a double click. It opens as a preview: browsing a
+              // tree a file at a time otherwise leaves a tab behind for every
+              // file looked at and discarded.
+              markPreviewOpen(node.relPath);
               editorSocket?.emit("readFile", { relPath: node.relPath });
             }
+          }}
+          onDoubleClick={() => {
+            // Double-clicking a file in the tree keeps it, the same gesture
+            // that keeps it from the tab strip. Folders already toggle on the
+            // first click, so the second would only close what the first
+            // opened.
+            if (!isFolder) useOpenTabsStore.getState().promoteTab(node.relPath);
           }}
         >
           {isFolder ? (
@@ -189,11 +212,7 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
                 className="rc-tree-chevron"
                 data-expanded={isExpanded}
               />
-              {isExpanded ? (
-                <FaFolderOpen color="var(--rc-folder)" size={14} style={{ flex: "none" }} />
-              ) : (
-                <FaFolder color="var(--rc-folder)" size={14} style={{ flex: "none" }} />
-              )}
+              <FolderIcon name={node.name} open={isExpanded} />
             </>
           ) : (
             <>
@@ -206,10 +225,31 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
+              // A deleted file keeps its row until the tree refreshes, and
+              // reading it as ordinary would invite opening something that
+              // is not there.
+              textDecoration:
+                decoration?.state === "deleted" ? "line-through" : undefined,
+              color: decoration ? `var(--rc-git-${decoration.state})` : undefined,
             }}
           >
             {node.name}
           </span>
+
+          {decoration?.letter && (
+            <span
+              aria-hidden
+              style={{
+                marginLeft: "auto",
+                flex: "none",
+                fontSize: 10,
+                fontWeight: 600,
+                color: `var(--rc-git-${decoration.state})`,
+              }}
+            >
+              {decoration.letter}
+            </span>
+          )}
 
           {presence && (
             // One dot per person, in their own colour: the same colour their

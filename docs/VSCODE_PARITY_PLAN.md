@@ -796,3 +796,92 @@ Items 1–6 are roughly two weeks and cover most of what "make it look and feel
 like VS Code" actually means to somebody using it. Item 7 is the database
 feature at its smallest useful size. Items 8–11 are the next two months. Items
 10 and 12 are the two that change what the product can do.
+
+---
+
+## 10. Execution ledger
+
+_This section is the working state of the plan, not part of its argument. It
+exists because the work is carried out across many separate sessions, and a
+session that cannot tell what the previous one finished will either repeat it or
+skip it. **Every session updates this table before it ends.**_
+
+### 10.1 How a session runs
+
+1. **Read this ledger first.** The first row that is not `done` is the work.
+   Do not re-plan, do not reorder, do not skip ahead — the order in §9 is
+   already the decision, and re-litigating it each session is how fourteen rows
+   become none.
+2. **Check the open pull request for the branch** before starting. Red CI or a
+   merge conflict is the work, ahead of any ledger row.
+3. **One row, one or more commits.** A row is finished when its acceptance
+   check passes, not when the code is written.
+4. **Verify before every commit**, all four: `pnpm typecheck`, `pnpm lint`,
+   `pnpm --filter server test`, `pnpm --filter web test`. A row that cannot pass
+   these is not done, and the ledger says `blocked` with the reason rather than
+   `done`.
+5. **Update the ledger row** — status, the date, and a one-line note of what
+   landed — in the same commit as the work it describes. A ledger updated in a
+   separate commit is a ledger that will eventually disagree with the tree.
+6. **Push to the branch.** One pull request tracks the whole effort; do not open
+   a second. If the tracking pull request has already merged, restart the branch
+   from the latest `main` and open a fresh one for the next rows.
+7. **Stop at the row boundary.** If a session runs out of room mid-row, leave
+   the row `in progress` with a note saying exactly where it stopped and what
+   the next concrete step is.
+
+### 10.2 Rules that hold across every row
+
+- **No row is skipped for being awkward.** A row that turns out to be wrong gets
+  a note explaining why and a status of `superseded`, never a silent omission.
+- **Rows 10 and 12 have a decision gate** — memory and quota for the managed
+  database, the memory policy for language servers — named in their sections.
+  The gate is a decision to *record in §10.4*, with its reasoning, not a reason
+  to stop: pick the defensible option, write down what was picked and what would
+  change it, and proceed.
+- **Row 14 is deferred by §0.3 and stays deferred.** It is in the table so that
+  its absence is visible and deliberate, not so that it gets built.
+- **Tests are part of the row, not a follow-up.** Every row adds tests for what
+  it changed; a row whose behaviour genuinely cannot be tested says in its note
+  how it was verified instead.
+- **Security-shaped rows carry their guard in the first commit.** §7.2 is the
+  standing example and the rule generalises: the guard ships with the feature it
+  guards, or neither ships.
+- **Scope stays inside the row.** A refactor the row does not need belongs to a
+  later row or to no row at all.
+
+### 10.3 The rows
+
+Order is §9. Effort is the plan's own estimate. `Acceptance` is what has to be
+true for the row to move to `done`.
+
+| # | Row | Plan § | Effort | Acceptance | Status | Landed |
+|---|---|---|---|---|---|---|
+| 1 | Monaco options + settings dialog rows | §2.1 | 1 | Every option in the §2.1 table is on and, where it is a preference, exposed in `EditorSettingsDialog`; a test asserts each is present in the options object | **done** | 2026-08-27 — `lib/editorOptions.ts` builds the option set; nine new preferences, nine new dialog rows; guards on the §2.1 list, on dialog coverage and on persistence |
+| 2 | One extension table, real icon set, folder icons | §1.1–1.3 | 3 | A single `Record<extension, { language, icon }>` is the only source of both; a test proves no language lacks an icon and no icon lacks a language; folders resolve open and closed glyphs by name | **done** | 2026-08-27 — `lib/fileTypes.ts` is the one table (≈120 extensions, 30 names, 48 folders); both accessors read from it; `language: null` marks a deliberate absence; guard rejects unknown Monaco ids. SVG vendoring deferred, see §10.4 |
+| 3 | Preview tabs, reorder, pin, close-others, MRU `Ctrl+Tab` | §2.3 | 3 | Single-click opens a preview tab that the next single-click replaces; double-click pins; drag reorders; `Ctrl+Shift+T` reopens the last closed | **done** | 2026-08-27 — preview/pin flags on `OpenTab`, `lib/openIntent.ts` carries intent across the read round trip, drag reorder with a pinned block, per-tab context menu, `Ctrl+Shift+T` and MRU `Ctrl+Tab`. Tab double-click now keeps rather than splits |
+| 4 | Light editor theme + the theming audit | §6 | 3 | A hand-built light theme replaces stock `vs`; xterm selection and search highlight, the Monaco diff editor and both fallback pages are themed; `prefers-reduced-motion` and `prefers-contrast` are honoured | **done** | 2026-08-27 — `theme/alucard.json` generated from Dracula's token set, every rule ≥4.5:1 on white; diff-editor colours named; xterm selection foreground; both fallback pages follow `prefers-color-scheme`; reduced-motion and high-contrast blocks. No xterm search addon exists, so that half of the item was inapplicable |
+| 5 | Git gutter decorations | §5.1 | 5 | Added, modified and deleted bars render against HEAD, debounced against the diff, and clicking one opens the inline diff | **done** | 2026-08-27 — `lib/gitGutter.ts` reduces a patch to runs, `store/gitGutterStore.ts` debounces at 400ms with a generation guard against out-of-order answers, Monaco `linesDecorationsClassName` draws them. clicking a bar opens the diff view the editor already had |
+| 6 | Git decorations on the tree, files and folders | §1.4–1.5 | 4 | A shared status store tints filenames and badges them `U`/`M`/`D`; a collapsed folder shows its descendants' state | **done** | 2026-08-27 — `store/gitDecorationStore.ts`; folder state derived on read rather than stored; status fetched alongside the tree so decorations do not depend on the panel being open; `--rc-git-*` tokens shared with row 5's margin |
+| 7 | Database client against an external connection | §7.2, §7.5–7.6 | 11 | The SSRF guard lands in the first commit with tests for loopback, link-local, RFC 1918, the post-DNS re-check and the platform's own host and port; then the schema tree, the paginated grid and the query editor with all five limits enforced server-side | **done** | 2026-08-27 — `lib/connectionGuard.ts` first, then `databaseQueryService.ts` with all five limits and `BEGIN READ ONLY` for viewers, `DatabasePanel` with schema tree, typed grid and schema-aware completion. MongoDB landed separately in row 7b |
+| 7b | MongoDB half of the database client | §7.6 | 5 | The driver added; a filter-document and aggregation-pipeline editor that does **not** pretend to be SQL; sampled schema inference labelled as inferred; the row-detail panel as the primary view rather than a grid | **done** | 2026-08-27 — `lib/connectionGuard.checkMongoConnectionString` first (seed lists and SRV, which `new URL` cannot parse), then `mongoQueryService.ts` with `maxTimeMS`, a document cap, a byte cap and read-only enforced structurally — only `find` and `aggregate` are ever called, and `$out`/`$merge` are refused. `MongoWorkbench.tsx` is a separate component from the SQL one: EJSON filter or pipeline against a chosen collection, sampled schema labelled with the document count and per-field presence, documents as the primary view with the flattened table offered second. Address pinning is not possible here — see §10.4 |
+| 8 | Breadcrumbs, outline, peek, `Ctrl+T`, zen mode, context menu | §2.2 | 8 | One symbol provider feeds both breadcrumbs and outline rather than two fetches; the editor's own context menu replaces the browser's | **done** | 2026-08-27 — `store/symbolStore.ts` read once from the TS worker's navigation tree feeds breadcrumbs, outline and `Ctrl+T`; zen mode is CSS over the existing layout with a guard that its selectors exist; Monaco's own context menu was already on. Go-to-symbol is file-scoped, not workspace — see the note in `SymbolSearch` |
+| 9 | Merge conflict resolution | §5.3 | 5 | A conflicted file renders Accept Current / Incoming / Both / Compare per block, and resolving writes a file with no markers left | **done** | 2026-08-27 — `lib/mergeConflicts.ts` scans rather than regexes, so markers inside a README or a string literal are not mistaken for a conflict; both sides tinted in the editor; a bar acts on the first unresolved block; resolving is one undo step and leaves no markers |
+| 10 | Managed sidecar database, then the templates | §7.3–7.4, §7.7 | 15 | The memory and quota decision is recorded in §10.4 first; then provisioning, readiness probing, env-signature inclusion, paired idle reaping, volume deletion on project delete and quota counting, each tested; then the two templates | **done (Postgres engine only)** | 2026-08-27 — decision recorded in §10.4 first; `managedDatabaseService.ts` with sealed generated password, `pg_isready` probe, nothing published to the host; `DATABASE_URL` joins through `getEnvVars` so the env signature picks it up; both quota counters now see `rc-db-`; volume removed with the project; `node-express-postgres` template. The Mongo template waits on row 7b's driver. The managed sidecar is Postgres only and stays that way: row 7b delivered the Mongo *client*, and §10.4's quota decision notes Mongo idles at 3–4× a Postgres sidecar, which is a container-accounting question rather than a client one |
+| 11 | Keybinding registry, then chords, then user editing | §2.4 | 8 | A chord is declared once beside its command; a test proves the palette's `keys:` strings match the registry; then the §2.4 chord list; then a settings surface | **done** | 2026-08-27 — `lib/keybindings.ts` is the single source; the palette's shortcut strings are derived, not typed, and a test forbids typing one; guard proves every chord has a handler and no chord is bound twice; `KeybindingsDialog` records chords and refuses a clash |
+| 12 | Language servers, Python first | §3 | 13 | The memory policy is recorded in §10.4 first; then `lspGateway` with `Content-Length` framing, `monaco-languageclient` wired, lazy start on first file of the language, idle stop, and a refusal-with-reason below the memory threshold — all behind `LSP_ENABLED` | **done** | 2026-08-27 — both decisions in §10.4 first; `lsp/framing.ts` buffers across chunk boundaries, `lsp/lspPolicy.ts` refuses below 1024 MB with the numbers, `lsp/lspGateway.ts` runs stdio without a TTY so stderr cannot corrupt the protocol; a minimal client rather than `monaco-languageclient` (recorded above). Ships behind `LSP_ENABLED`, default off |
+| 13 | Checkpoint history, then follow mode | §8 | 8 | Periodic snapshots with a retention window, restorable per file; then riding a collaborator's viewport off the presence layer that already exists | **done** | 2026-08-27 — `checkpointService.ts` snapshots what a write *replaces*, throttled to a minute and kept 20 deep, stored beside the tree so it is not committed or quota-counted, and never throws into the save path; follow mode rides a peer's file (not their scroll) and clears itself when they leave |
+| 14 | Debugging | §4 | — | **Deferred by §0.3, Decision 1.** Not to be built. Revisiting it means revisiting Route A, not hand-building a debug adapter client | deferred | — |
+
+### 10.4 Decisions recorded during execution
+
+_Empty until a row records one. Rows 10 and 12 are each required by §10.2 to add
+an entry here before they begin._
+
+| Date | Row | Decision | Reasoning | What would change it |
+|---|---|---|---|---|
+| 2026-08-27 | 12 | Write a minimal JSON-RPC client rather than adopting `monaco-languageclient`, which §3.2 suggests | That library pins peer versions of Monaco and of the vscode shim, so taking it on means letting it decide which Monaco this app runs — for a feature set that is, today, a diagnostics push and a few provider registrations. The dependency is also the one piece §3.2 argues is "not a detour" because Route A would use it internally, but Route A is deferred by §0.3 and that argument only pays off if it is ever taken | The language surface growing past diagnostics, completion and hover — rename, code actions, formatting, semantic tokens are where hand-rolling stops being cheaper. `lib/lspClient.ts` is the seam to swap, and nothing above it knows the difference |
+| 2026-08-27 | 12 | Refuse to start a language server when the container's memory limit is below 1024 MB, and say so; start lazily on the first file of that language; stop it with the idle reaper. Ship behind `LSP_ENABLED`, default off | §3.3 is blunt that a server started unconditionally would OOM the dev server it is meant to help with: `CONTAINER_MEMORY_MB` defaults to 512 and pyright idles at 150–300 MB on a real project, so the server and the app are competing for the same half-gigabyte. The threshold is 1024 rather than 512+300 because the app needs headroom too, and an OOM kill of the dev server is a far worse experience than an editor that says "not enough memory for Python intelligence here". Default off because the image cost (§3.3 names pyright pulling Node into the Python image) is paid by every cold start, including for people who never open a `.py` file | Per-project memory limits. If `CONTAINER_MEMORY_MB` becomes something an operator sets per project rather than globally, the threshold should be a fraction of the limit rather than a constant. Also a smaller server: `python-lsp-server` without its heavier plugins idles well under pyright and might fit inside 512 |
+| 2026-08-27 | 10 | A managed database counts as a full container against both caps, and `MAX_CONCURRENT_CONTAINERS` stays at 3 rather than being raised to absorb it | §7.3 names this as the honest objection and §7.4 says it has to be counted rather than discovered. A `postgres:17-alpine` sidecar idles at 30–50 MB against a project container's 512 MB budget, so the *memory* cost is small — but a container slot is not only memory, and quietly not counting them would silently double the effective cap on a VM whose defaults were chosen for three. Raising the cap to 6 to compensate would be choosing, on no evidence, that every project is database-backed. So: database containers are counted, a database-backed project costs two slots, and an operator who wants more raises the cap deliberately with their own VM in view | Numbers from real use. If most projects turn out to be database-backed, the pair is the natural unit and the caps should count *pairs* rather than containers — which is a different accounting, not a bigger number. Mongo would also change it: at 100–200 MB idle it is 3–4× the Postgres cost and might justify counting engines differently |
+| 2026-08-27 | 2 | Map to `react-icons` glyphs rather than vendoring the `vscode-icons` or `material-icon-theme` SVG set | §1.2 says the mapping, not the drawing, is the work — and the mapping is what this row delivers. `react-icons` is already a dependency and carries a brand glyph for every language in the table, so the row lands its full acceptance check without adding ~1,000 SVGs, a build step to sprite them, and a licensing and attribution decision that §1.2 itself flags as needing to be made deliberately | Wanting per-file-type glyphs that no brand icon covers — the distinct React-component, test-file and config-file icons VS Code draws. The table's shape does not change when the glyphs do: `FileType.icon` is one field, and swapping its source is a mechanical edit rather than a redesign |
+| 2026-08-27 | 7b | Check every Mongo host before connecting, but do **not** pin the approved address for the driver to dial — unlike the Postgres path | The two defences are mutually exclusive for Mongo. Atlas is `mongodb+srv://`, whose hostname usually has no A record at all, so the real hosts come from `_mongodb._tcp.<host>`; and Mongo connections are TLS by default with certificates issued for those hostnames, so handing the driver an IP fails hostname verification. Dropping TLS to gain pinning would trade a narrow rebind window for plaintext credentials on the wire, which is the worse trade. So: the SRV record is resolved here and every target is checked, every seed-list member is checked rather than only the first, and the driver then connects by name. The residual gap is a rebind between the check and the driver's own lookup, which requires the attacker to control DNS for the domain and yields only an internal *MongoDB* — a Mongo handshake gets nothing from an HTTP service | A driver hook that reports the address actually dialled, which would let the check run after connect instead of before. `mongodb` exposes topology descriptions only as internal API today; if that becomes public, pin there and close the window |

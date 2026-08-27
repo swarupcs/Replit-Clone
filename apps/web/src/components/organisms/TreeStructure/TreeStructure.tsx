@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getGitStatusApi } from "../../../apis/projects.ts";
+import { useGitDecorationStore } from "../../../store/gitDecorationStore.ts";
 import type { KeyboardEvent } from "react";
 import { Input, Spin, Tooltip, message } from "antd";
 import {
@@ -114,6 +116,35 @@ export const TreeStructure = () => {
   useEffect(() => {
     if (projectId && !treeStructure) void refreshTree();
   }, [projectId, treeStructure, refreshTree]);
+
+  /** Git state for the tree's own decorations.
+   *
+   *  Fetched here rather than fed from the source-control panel, which also
+   *  has it: the panel only exists while its view is open, and a tree that
+   *  showed changes only after someone happened to visit source control
+   *  would look broken rather than empty. Refreshed alongside the tree, so
+   *  the two are never describing different moments.
+   */
+  const treeVersion = useTreeStructureStore((state) => state.treeStructure);
+  useEffect(() => {
+    if (!projectId) return;
+
+    let cancelled = false;
+    void getGitStatusApi(projectId)
+      .then((status) => {
+        if (cancelled) return;
+        useGitDecorationStore.getState().setChanges(status.changes ?? []);
+      })
+      // A project with no repository, or a container that will not start,
+      // means no decorations — not an error worth surfacing in a file tree.
+      .catch(() => {
+        if (!cancelled) useGitDecorationStore.getState().clear();
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, treeVersion]);
 
   const expandedPaths = useTreeStructureStore((state) => state.expandedPaths);
   const setVisibleOrder = useTreeSelectionStore((state) => state.setVisibleOrder);

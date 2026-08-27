@@ -163,11 +163,13 @@ async function serveFile(
 
 const NOT_FOUND_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Not found</title>
-<style>body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;
-place-items:center;min-height:100vh;margin:0;background:#0d0e16;color:#f2f3f7;
+<style>:root{--bg:#ffffff;--fg:#131623;--muted:#4a5169}
+@media (prefers-color-scheme:dark){:root{--bg:#0d0e16;--fg:#f2f3f7;--muted:#a2a7bd}}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;
+place-items:center;min-height:100vh;margin:0;background:var(--bg);color:var(--fg);
 text-align:center;padding:24px}
 h1{font-size:19px;font-weight:600;margin:0 0 8px}
-p{color:#a2a7bd;font-size:14px;margin:0}</style></head>
+p{color:var(--muted);font-size:14px;margin:0}</style></head>
 <body><div><h1>Nothing here</h1>
 <p>There is no site at this address.</p></div></body></html>`;
 

@@ -5,6 +5,7 @@ import type {
   ServerToClientEvents,
 } from "@replit-clone/shared";
 import { useOpenTabsStore } from "./openTabsStore.ts";
+import { takeOpenIntent } from "../lib/openIntent.ts";
 import { useTreeStructureStore } from "./treeStructureStore.ts";
 import { discardWrite, renameWrite } from "../lib/pendingWrites.ts";
 
@@ -46,7 +47,7 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
     const refreshTree = useTreeStructureStore.getState().refreshTree;
 
     incomingSocket.on("readFileSuccess", ({ relPath, value }) => {
-      tabs.openTab(relPath, value);
+      tabs.openTab(relPath, value, takeOpenIntent(relPath));
     });
 
     incomingSocket.on("writeFileSuccess", ({ relPath }) => {

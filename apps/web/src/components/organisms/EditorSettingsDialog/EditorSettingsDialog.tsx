@@ -1,9 +1,13 @@
+import { useState } from "react";
 import { Button, InputNumber, Modal, Segmented, Switch, Typography } from "antd";
 import {
   EDITOR_SETTING_LIMITS,
   useEditorSettingsStore,
+  type EditorSettings,
 } from "../../../store/editorSettingsStore.ts";
 import { useThemeStore, type ThemeChoice } from "../../../store/themeStore.ts";
+import { useKeybindingStore } from "../../../store/keybindingStore.ts";
+import { KeybindingsDialog } from "./KeybindingsDialog.tsx";
 
 interface EditorSettingsDialogProps {
   open: boolean;
@@ -49,6 +53,10 @@ const Row = ({
  */
 export const EditorSettingsDialog = ({ open, onClose }: EditorSettingsDialogProps) => {
   const settings = useEditorSettingsStore();
+  const [bindingsOpen, setBindingsOpen] = useState(false);
+  const changedBindings = useKeybindingStore(
+    (state) => Object.keys(state.overrides).length,
+  );
   const themeChoice = useThemeStore((state) => state.choice);
   const setThemeChoice = useThemeStore((state) => state.setChoice);
 
@@ -157,6 +165,130 @@ export const EditorSettingsDialog = ({ open, onClose }: EditorSettingsDialogProp
             onChange={(value) => settings.set("formatOnSave", value)}
           />
         }
+      />
+
+      <Row
+        label="Bracket pair colours"
+        hint="Tint nested brackets by depth"
+        control={
+          <Switch
+            checked={settings.bracketPairColorization}
+            onChange={(value) => settings.set("bracketPairColorization", value)}
+          />
+        }
+      />
+
+      <Row
+        label="Sticky scroll"
+        hint="Pin the enclosing class and function above the viewport"
+        control={
+          <Switch
+            checked={settings.stickyScroll}
+            onChange={(value) => settings.set("stickyScroll", value)}
+          />
+        }
+      />
+
+      <Row
+        label="Inlay hints"
+        hint="Inferred parameter names and types, shown inline"
+        control={
+          <Switch
+            checked={settings.inlayHints}
+            onChange={(value) => settings.set("inlayHints", value)}
+          />
+        }
+      />
+
+      <Row
+        label="Inline suggestions"
+        hint="Preview the current completion as ghost text"
+        control={
+          <Switch
+            checked={settings.inlineSuggest}
+            onChange={(value) => settings.set("inlineSuggest", value)}
+          />
+        }
+      />
+
+      <Row
+        label="Whitespace"
+        hint="Where tabs and spaces are drawn"
+        control={
+          <Segmented<EditorSettings["renderWhitespace"]>
+            value={settings.renderWhitespace}
+            onChange={(value) => settings.set("renderWhitespace", value)}
+            options={[
+              { label: "None", value: "none" },
+              { label: "Selection", value: "selection" },
+              { label: "All", value: "all" },
+            ]}
+          />
+        }
+      />
+
+      <Row
+        label="Format on paste"
+        control={
+          <Switch
+            checked={settings.formatOnPaste}
+            onChange={(value) => settings.set("formatOnPaste", value)}
+          />
+        }
+      />
+
+      <Row
+        label="Format on type"
+        control={
+          <Switch
+            checked={settings.formatOnType}
+            onChange={(value) => settings.set("formatOnType", value)}
+          />
+        }
+      />
+
+      <Row
+        label="Column guides"
+        hint="Vertical rules at columns 80 and 120"
+        control={
+          <Switch
+            checked={settings.rulers}
+            onChange={(value) => settings.set("rulers", value)}
+          />
+        }
+      />
+
+      <Row
+        label="Keyboard shortcuts"
+        hint={
+          changedBindings === 0
+            ? "Using the defaults"
+            : `${changedBindings} changed from the defaults`
+        }
+        control={
+          <Button size="small" onClick={() => setBindingsOpen(true)}>
+            Customise
+          </Button>
+        }
+      />
+
+      <Row
+        label="Cursor surrounding lines"
+        hint="Lines kept below the cursor while scrolling"
+        control={
+          <InputNumber
+            min={EDITOR_SETTING_LIMITS.cursorSurroundingLines.min}
+            max={EDITOR_SETTING_LIMITS.cursorSurroundingLines.max}
+            value={settings.cursorSurroundingLines}
+            onChange={(value) => settings.set("cursorSurroundingLines", value ?? 3)}
+            style={{ width: 84 }}
+          />
+        }
+      />
+
+      <KeybindingsDialog
+        open={bindingsOpen}
+        onClose={() => setBindingsOpen(false)}
       />
     </Modal>
   );

@@ -13,6 +13,11 @@ export const TERMINAL_THEME: Record<ThemeMode, Record<string, string>> = {
     cursor: "#a78bfa",
     cursorAccent: "#0a0b12",
     selectionBackground: "#2a2e42",
+    // Without a selection foreground xterm keeps each cell's own colour, so
+    // a dim ANSI colour inside a selection lands on a wash barely lighter
+    // than itself. Naming it makes selected text legible whatever it was.
+    selectionForeground: "#f2f3f7",
+    selectionInactiveBackground: "#1b1e2c",
     black: "#0a0b12",
     red: "#f87171",
     green: "#4ade80",
@@ -36,6 +41,8 @@ export const TERMINAL_THEME: Record<ThemeMode, Record<string, string>> = {
     cursor: "#6d28d9",
     cursorAccent: "#ffffff",
     selectionBackground: "#dbe4fa",
+    selectionForeground: "#131623",
+    selectionInactiveBackground: "#e8edf8",
     black: "#131623",
     red: "#c02626",
     green: "#15803d",

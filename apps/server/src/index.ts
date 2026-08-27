@@ -49,6 +49,7 @@ import { requestLogger } from "./middlewares/requestLogger.js";
 import { healthCheck } from "./controllers/healthController.js";
 import { asyncHandler } from "./middlewares/errorHandler.js";
 import { installTerminalGateway } from "./terminal/terminalGateway.js";
+import { installLspGateway } from "./lsp/lspGateway.js";
 import {
   attach,
   detach,
@@ -56,7 +57,9 @@ import {
   reconcileOnBoot,
   startIdleReaper,
   stopAllContainers,
+  setOnProjectReaped,
 } from "./containers/containerManager.js";
+import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
 import {
   docRoomName,
   handleEditorSocketEvents,
@@ -242,6 +245,9 @@ editorNamespace.on("connection", (socket: EditorSocket) => {
 
 // The terminal was a second Express app on its own port with no npm script.
 installTerminalGateway(server);
+// Same shape as the terminal gateway, different framing. Refuses before
+// any container work when the memory policy says no.
+installLspGateway(server);
 
 // Vite's HMR socket rides the preview path, and Express middleware does not run
 // for upgrades — so this authorises and routes them itself. Only when previews
@@ -355,6 +361,11 @@ async function start(): Promise<void> {
   const reconciled = await withTimeout(reconcileOnBoot(), "boot reconcile");
   if (reconciled) logger.info("reconciled state", { ...reconciled });
 
+  // A project's database is stopped with the project, so an idle pair costs
+  // nothing rather than half of nothing.
+  setOnProjectReaped(async (projectId) => {
+    await stopManagedDatabase(projectId).catch(() => undefined);
+  });
   startIdleReaper();
   startTokenPrune();
   startAccessWatch();

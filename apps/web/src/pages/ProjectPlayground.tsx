@@ -11,6 +11,8 @@ import {
   VscSearch,
   VscSourceControl,
   VscPackage,
+  VscDatabase,
+  VscSymbolClass,
   VscCloudUpload,
   VscSettingsGear,
   VscSparkle,
@@ -32,7 +34,11 @@ import {
   selectCanEdit,
   useEditorSocketStore,
 } from "../store/editorSocketStore.ts";
-import { useOpenTabsStore, selectActiveTab } from "../store/openTabsStore.ts";
+import {
+  useOpenTabsStore,
+  selectActiveTab,
+  selectNextMruTab,
+} from "../store/openTabsStore.ts";
 import { useAuthStore } from "../store/authStore.ts";
 import { useRunStore } from "../store/runStore.ts";
 import { useWorkspaceStore } from "../store/workspaceStore.ts";
@@ -50,6 +56,16 @@ import { DeployPanel } from "../components/organisms/DeployPanel/DeployPanel.tsx
 import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
 import { getAiStatusApi } from "../apis/ai.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
+import { useGitGutterStore } from "../store/gitGutterStore.ts";
+import {
+  selectOverrides,
+  useKeybindingStore,
+} from "../store/keybindingStore.ts";
+import { formatChord, resolveBindings } from "../lib/keybindings.ts";
+import { DatabasePanel } from "../components/organisms/DatabasePanel/DatabasePanel.tsx";
+import { Breadcrumbs } from "../components/molecules/Breadcrumbs/Breadcrumbs.tsx";
+import { SymbolSearch } from "../components/organisms/SymbolSearch/SymbolSearch.tsx";
+import { OutlinePanel } from "../components/organisms/OutlinePanel/OutlinePanel.tsx";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
 import { useThemeStore } from "../store/themeStore.ts";
 import { useUnsavedWorkGuard } from "../hooks/useUnsavedWorkGuard.ts";
@@ -111,12 +127,22 @@ export const ProjectPlayground = () => {
     panel: showPanel,
   } = views;
   const [quickOpen, setQuickOpen] = useState(false);
+  /** Go-to-symbol, and zen mode. Both are pure layout over what exists. */
+  const [symbolSearchOpen, setSymbolSearchOpen] = useState(false);
+  const [zen, setZen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** Which sidebar view is showing. */
   const [sidebarView, setSidebarView] = useState<
-    "files" | "search" | "git" | "packages" | "deploy" | "ai"
+    | "files"
+    | "search"
+    | "git"
+    | "packages"
+    | "deploy"
+    | "database"
+    | "outline"
+    | "ai"
   >(
     "files",
   );
@@ -312,9 +338,44 @@ export const ProjectPlayground = () => {
    *
    *  Every entry drives the same handler the button or shortcut does, rather
    *  than a second copy of the behaviour -- the palette is another way in, not
-   *  another implementation. `keys` is display only; the shortcut itself is
-   *  registered below.
+   *  another implementation.
+   *
+   *  The shortcut shown against each entry is looked up from the binding
+   *  registry by command id rather than typed here. It used to be free text,
+   *  which meant the palette could say Ctrl+K while the handler listened for
+   *  Ctrl+L and nothing would notice.
    */
+  // Derived rather than selected: a selector that builds the resolved object
+  // returns a new one every call, which renders forever.
+  /** Follow mode: ride along with whichever file a collaborator is in.
+   *
+   *  §8 calls this a small addition to a layer that exists, and it is —
+   *  presence already knows who is here and which file each of them has
+   *  open. Following is opening theirs when it changes.
+   *
+   *  Their FILE, not their scroll position. Awareness carries a cursor, but
+   *  yanking somebody's viewport on every keystroke of somebody else's is
+   *  motion sickness rather than collaboration; landing in the same file and
+   *  reading at your own pace is what people actually want from this.
+   */
+  const followingPeer = usePresenceStore((state) =>
+    state.peers.find((peer) => peer.key === state.following),
+  );
+  const followedFile = followingPeer?.files[0];
+
+  useEffect(() => {
+    if (!followedFile || !editorSocket) return;
+    if (useOpenTabsStore.getState().activeRelPath === followedFile) return;
+
+    editorSocket.emit("readFile", { relPath: followedFile });
+  }, [followedFile, editorSocket]);
+
+  const bindingOverrides = useKeybindingStore(selectOverrides);
+  const bindings = useMemo(
+    () => resolveBindings(bindingOverrides),
+    [bindingOverrides],
+  );
+
   const commands = useMemo<Command[]>(() => {
     const isLive = runStatus === "running" || runStatus === "starting";
     const viewerReason = "Needs edit access";
@@ -340,14 +401,12 @@ export const ProjectPlayground = () => {
         id: "go.file",
         category: "Go",
         title: "Go to file…",
-        keys: "Ctrl+P",
         run: () => setQuickOpen(true),
       },
       {
         id: "view.search",
         category: "View",
         title: "Search across the project",
-        keys: "Ctrl+Shift+F",
         run: () => {
           setSidebarView("search");
           openView("sidebar");
@@ -401,28 +460,24 @@ export const ProjectPlayground = () => {
         id: "view.sidebar",
         category: "View",
         title: "Toggle the sidebar",
-        keys: "Ctrl+B",
         run: toggleSidebar,
       },
       {
         id: "view.panel",
         category: "View",
         title: "Toggle the terminal panel",
-        keys: "Ctrl+`",
         run: togglePanel,
       },
       {
         id: "view.preview",
         category: "View",
         title: "Toggle the preview",
-        keys: "Ctrl+J",
         run: togglePreview,
       },
       {
         id: "file.closeTab",
         category: "File",
         title: "Close the active editor tab",
-        keys: "Ctrl+Alt+W",
         run: () => {
           const active = useOpenTabsStore.getState().activeRelPath;
           if (active) closeActiveTab(active);
@@ -440,8 +495,12 @@ export const ProjectPlayground = () => {
         title: "Editor settings…",
         run: () => setSettingsOpen(true),
       },
-    ];
+    ].map((command) => {
+      const chord = bindings[command.id];
+      return chord ? { ...command, keys: formatChord(chord) } : command;
+    });
   }, [
+    bindings,
     canEdit,
     closeActiveTab,
     editorSocket,
@@ -451,43 +510,66 @@ export const ProjectPlayground = () => {
     toggleSidebar,
   ]);
 
+  /** What each command's chord does.
+   *
+   *  The chord itself lives in `lib/keybindings.ts`, beside the command it
+   *  belongs to. This is only the handler half, so adding a chord is one
+   *  edit in one place rather than two edits nothing checks are in step.
+   */
+  const handlers = useMemo<Record<string, () => void>>(
+    () => ({
+      "go.file": () => setQuickOpen(true),
+      "go.command": () => setPaletteOpen(true),
+      "go.symbol": () => setSymbolSearchOpen(true),
+      "view.search": () => {
+        setSidebarView("search");
+        openView("sidebar");
+      },
+      "view.files": () => {
+        setSidebarView("files");
+        openView("sidebar");
+      },
+      "view.git": () => {
+        setSidebarView("git");
+        openView("sidebar");
+      },
+      "view.packages": () => {
+        setSidebarView("packages");
+        openView("sidebar");
+      },
+      "view.sidebar": () => toggleSidebar(),
+      "view.panel": () => togglePanel(),
+      "view.preview": () => togglePreview(),
+      "view.zen": () => setZen((value) => !value),
+      "file.closeTab": () => {
+        const active = useOpenTabsStore.getState().activeRelPath;
+        if (active) closeActiveTab(active);
+      },
+      "file.reopenTab": () => {
+        const relPath = useOpenTabsStore.getState().takeClosed();
+        if (relPath) editorSocket?.emit("readFile", { relPath });
+      },
+      "file.nextTab": () => {
+        const next = selectNextMruTab(useOpenTabsStore.getState());
+        if (next) useOpenTabsStore.getState().setActive(next.relPath);
+      },
+    }),
+    [closeActiveTab, editorSocket, openView, toggleSidebar, togglePanel, togglePreview],
+  );
+
   useHotkeys(
     useMemo(
-      () => [
-        { key: "p", mod: true, handler: () => setQuickOpen(true) },
-        {
-          // Distinct from the Ctrl+P above: useHotkeys matches shift exactly,
-          // so the two cannot claim each other's chord whatever the order.
-          key: "p",
-          mod: true,
-          shift: true,
-          handler: () => setPaletteOpen(true),
-        },
-        {
-          key: "f",
-          mod: true,
-          shift: true,
-          handler: () => {
-            setSidebarView("search");
-            openView("sidebar");
-          },
-        },
-        { key: "b", mod: true, handler: () => toggleSidebar() },
-        { key: "`", mod: true, handler: () => togglePanel() },
-        { key: "j", mod: true, handler: () => togglePreview() },
-        {
-          // Ctrl+W is the browser's own close-tab and cannot be reclaimed, so
-          // closing an editor tab uses the Alt variant.
-          key: "w",
-          mod: true,
-          alt: true,
-          handler: () => {
-            const active = useOpenTabsStore.getState().activeRelPath;
-            if (active) closeActiveTab(active);
-          },
-        },
-      ],
-      [closeActiveTab, toggleSidebar, togglePanel, togglePreview],
+      () =>
+        Object.entries(bindings)
+          .map(([commandId, chord]) => {
+            const handler = handlers[commandId];
+            return handler ? { ...chord, handler } : null;
+          })
+          // A binding with no handler is a chord for a command this page does
+          // not own. Dropping it is right; silently binding it to nothing
+          // would look like a broken feature.
+          .filter((hotkey): hotkey is NonNullable<typeof hotkey> => hotkey !== null),
+      [bindings, handlers],
     ),
   );
 
@@ -504,6 +586,10 @@ export const ProjectPlayground = () => {
     }
 
     setProjectId(projectIdFromUrl);
+    // The editor draws the git bars but has no idea which project it is in,
+    // and threading it down as a prop would touch four components to reach
+    // the one that needs it.
+    useGitGutterStore.getState().setProject(projectIdFromUrl);
 
     const editorSocketConn: EditorSocket = io(
       `${import.meta.env.VITE_BACKEND_URL}/editor`,
@@ -588,7 +674,16 @@ export const ProjectPlayground = () => {
   ]);
 
   return (
-    <Flex vertical style={{ height: "100vh", backgroundColor: "var(--rc-surface)" }}>
+    <Flex
+      vertical
+      // Zen mode is a data attribute over the layout that already exists
+      // rather than a second layout: the panes keep their state, so leaving
+      // zen puts everything back exactly as it was — and, more importantly,
+      // the terminal is never unmounted and its PTY never dies. Ctrl+Alt+K.
+      data-zen={zen || undefined}
+      className="rc-playground"
+      style={{ height: "100vh", backgroundColor: "var(--rc-surface)" }}
+    >
       <Flex
         align="center"
         justify="space-between"
@@ -784,6 +879,26 @@ export const ProjectPlayground = () => {
                     <VscCloudUpload size={16} />
                   </button>
                 </Tooltip>
+                <Tooltip title="Outline" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "outline"}
+                    aria-label="Outline"
+                    onClick={() => setSidebarView("outline")}
+                  >
+                    <VscSymbolClass size={16} />
+                  </button>
+                </Tooltip>
+                <Tooltip title="Database" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "database"}
+                    aria-label="Database"
+                    onClick={() => setSidebarView("database")}
+                  >
+                    <VscDatabase size={16} />
+                  </button>
+                </Tooltip>
                 {aiModel && (
                   <Tooltip title="Assistant" placement="right">
                     <button
@@ -867,6 +982,25 @@ export const ProjectPlayground = () => {
                   </div>
                 )}
 
+                {sidebarView === "outline" && (
+                  <div style={{ height: "100%" }}>
+                    <ErrorBoundary label="Outline">
+                      <OutlinePanel />
+                    </ErrorBoundary>
+                  </div>
+                )}
+
+                {sidebarView === "database" && projectIdFromUrl && (
+                  <div style={{ height: "100%" }}>
+                    <ErrorBoundary label="Database">
+                      <DatabasePanel
+                        projectId={projectIdFromUrl}
+                        isOwner={accessLevel === "owner"}
+                      />
+                    </ErrorBoundary>
+                  </div>
+                )}
+
                                 {/* Kept mounted alongside the others so a glance at the file
                     tree does not throw away the conversation. */}
                 <div
@@ -909,6 +1043,7 @@ export const ProjectPlayground = () => {
                       }}
                     >
                       <EditorTabs />
+                      <Breadcrumbs />
                       <div style={{ flex: 1, minHeight: 0 }}>
                         {/* Two panes over one tab list and one write queue, so
                             the same file open in both stays in step. */}
@@ -963,6 +1098,10 @@ export const ProjectPlayground = () => {
       <StatusBar />
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
+      <SymbolSearch
+        open={symbolSearchOpen}
+        onClose={() => setSymbolSearchOpen(false)}
+      />
 
       <CommandPalette
         open={paletteOpen}

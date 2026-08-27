@@ -9,9 +9,11 @@ export interface Command {
   /** Groups related commands, and is matched too -- so "git" finds the
    *  source-control commands without their titles having to repeat the word. */
   category: string;
-  /** Rendered on the right, e.g. "Ctrl+P". Display only: the shortcut itself is
-   *  registered with useHotkeys, not here, so the two cannot disagree about
-   *  what a key does -- only about how it is spelled. */
+  /** Rendered on the right, e.g. "Ctrl+P".
+   *
+   *  Derived from `lib/keybindings.ts` rather than typed, so it cannot
+   *  disagree with the chord that is actually listened for — which it could
+   *  when this was free text and the two lists were kept in step by hand. */
   keys?: string;
   /** False greys the entry out and refuses to run it. A viewer cannot start a
    *  dev server, and a command that silently does nothing is worse than one

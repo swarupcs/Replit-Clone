@@ -34,6 +34,14 @@
   --rc-accent-soft: rgba(167, 139, 250, 0.14);
   --rc-gradient: linear-gradient(135deg, #a78bfa 0%, #60a5fa 50%, #22d3ee 100%);
 
+  /* Git states, shared by the tree's decorations and the editor's margin so
+     a file reads the same on both. Distinct from --rc-green/yellow/red,
+     which are general status colours: an untracked file is not a warning. */
+  --rc-git-added: #4ade80;
+  --rc-git-modified: #fbbf24;
+  --rc-git-deleted: #f87171;
+  --rc-git-renamed: #a78bfa;
+  --rc-git-untracked: #60a5fa;
   --rc-green: #4ade80;
   --rc-yellow: #fbbf24;
   --rc-red: #f87171;
@@ -111,6 +119,11 @@
   --rc-accent-soft: rgba(109, 40, 217, 0.1);
   --rc-gradient: linear-gradient(135deg, #7c3aed 0%, #2563eb 50%, #0891b2 100%);
 
+  --rc-git-added: #15803d;
+  --rc-git-modified: #a16207;
+  --rc-git-deleted: #c02626;
+  --rc-git-renamed: #7c3aed;
+  --rc-git-untracked: #1d4ed8;
   --rc-green: #15803d;
   --rc-yellow: #b45309;
   --rc-red: #dc2626;
@@ -1516,4 +1529,455 @@ body {
   color: var(--rc-text-subtle);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Reduced motion.
+ *
+ *  A blanket rule rather than a per-rule audit, because the failure mode of
+ *  missing one is vestibular discomfort for someone who explicitly asked not
+ *  to have it. Durations go to something non-zero but imperceptible instead
+ *  of zero: a few transitions elsewhere fire `transitionend`, and a zero
+ *  duration can skip the event in some engines. Spinners keep turning —
+ *  a progress indicator that stops looks like a hang — but slow enough to
+ *  stop being a strobe. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+
+  .rc-icon-button[data-spinning="true"] svg,
+  .rc-preview-progress::after {
+    animation-duration: 1.4s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* High contrast.
+ *
+ *  VS Code ships HC Dark and HC Light and treats them as an accessibility
+ *  feature rather than a preference, which is the right framing: someone who
+ *  has asked their OS for more contrast is telling us the subtle borders and
+ *  muted text this design leans on are not reaching them. Borders go solid,
+ *  muted text steps up to the body colour, and focus rings thicken. */
+@media (prefers-contrast: more) {
+  :root {
+    --rc-border: #8b93ad;
+    --rc-border-strong: #c3c9db;
+    --rc-text-muted: #e2e5ef;
+    --rc-text-subtle: #c3c9db;
+  }
+
+  :root[data-theme="light"] {
+    --rc-border: #4a5169;
+    --rc-border-strong: #131623;
+    --rc-text-muted: #1f2434;
+    --rc-text-subtle: #333a4f;
+  }
+
+  :focus-visible {
+    outline-width: 3px;
+  }
+}
+
+/* Git bars down the editor's left margin.
+ *
+ *  The same --rc-git-* tokens the tree's decorations use, so a file's state
+ *  reads the
+ *  same whichever surface it is seen on. The deletion marker is a triangle
+ *  rather than a bar because there is no line to draw a bar over — the text
+ *  is gone, and the mark belongs at the seam it left behind. */
+.rc-gutter {
+  width: 3px !important;
+  margin-left: 3px;
+}
+
+.rc-gutter-added {
+  background: var(--rc-git-added);
+}
+
+.rc-gutter-modified {
+  background: var(--rc-git-modified);
+}
+
+.rc-gutter-removed {
+  background: transparent;
+  position: relative;
+}
+
+.rc-gutter-removed::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -3px;
+  border-left: 4px solid var(--rc-git-deleted);
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+}
+
+/* The database panel: schema tree, query editor, result grid. */
+.rc-db-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rc-border);
+  background: var(--rc-surface-sunken);
+  flex: 0 0 auto;
+}
+
+.rc-db-tree {
+  width: 210px;
+  flex: none;
+  overflow: auto;
+  border-right: 1px solid var(--rc-border);
+  padding: 6px 0;
+}
+
+.rc-db-schema {
+  padding: 4px 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--rc-text-subtle);
+}
+
+.rc-db-table {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 10px;
+  border: 0;
+  background: none;
+  color: var(--rc-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rc-db-table:hover {
+  background: var(--rc-surface-raised);
+}
+
+.rc-db-view-tag {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--rc-text-subtle);
+}
+
+.rc-db-column {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 10px 2px 28px;
+  font-size: 11px;
+  color: var(--rc-text-muted);
+}
+
+.rc-db-type {
+  color: var(--rc-text-subtle);
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.rc-db-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rc-border);
+  flex: 0 0 auto;
+}
+
+.rc-result-grid {
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  width: max-content;
+  min-width: 100%;
+}
+
+.rc-result-grid th {
+  position: sticky;
+  top: 0;
+  background: var(--rc-surface-sunken);
+  border-bottom: 1px solid var(--rc-border);
+  padding: 5px 10px;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rc-result-grid td {
+  border-bottom: 1px solid var(--rc-border);
+  padding: 4px 10px;
+  white-space: nowrap;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A NULL is not an empty string, and a grid that renders both as nothing is
+   lying about the data. Its own dim italic token says which one this is. */
+.rc-result-grid td[data-kind="null"] {
+  color: var(--rc-text-subtle);
+  font-style: italic;
+}
+
+.rc-result-grid td[data-kind="number"] {
+  text-align: right;
+}
+
+.rc-result-grid td[data-kind="json"] {
+  color: var(--rc-accent);
+}
+
+.rc-result-grid td[data-kind="binary"],
+.rc-result-grid td[data-kind="boolean"] {
+  color: var(--rc-text-muted);
+}
+
+.rc-result-note {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--rc-text-subtle);
+  border-top: 1px solid var(--rc-border);
+}
+
+/* MongoDB: the collection tree and the document view.
+ *
+ *  Every selector below is set in `MongoWorkbench.tsx`; a rule pointed at a
+ *  class nobody sets reads as handled and is worse than no rule at all. */
+.rc-db-engine-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border: 1px solid var(--rc-border);
+  border-radius: 3px;
+  color: var(--rc-text-subtle);
+}
+
+.rc-db-table[data-active="true"] {
+  background: var(--rc-surface-raised);
+  color: var(--rc-accent);
+}
+
+.rc-db-empty {
+  padding: 12px 10px;
+  font-size: 12px;
+  color: var(--rc-text-subtle);
+}
+
+/* A collection has no declared schema. This line is the difference between
+   a field list that is honest about being sampled and one that lies. */
+.rc-db-inferred {
+  padding: 3px 10px 3px 28px;
+  font-size: 10px;
+  font-style: italic;
+  color: var(--rc-text-subtle);
+}
+
+.rc-db-presence {
+  color: var(--rc-text-subtle);
+  opacity: 0.75;
+}
+
+.rc-mongo-doc {
+  border-bottom: 1px solid var(--rc-border);
+}
+
+.rc-mongo-doc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  background: none;
+  color: var(--rc-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rc-mongo-doc-head:hover {
+  background: var(--rc-surface-raised);
+}
+
+.rc-mongo-doc-index {
+  min-width: 22px;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--rc-text-subtle);
+}
+
+.rc-mongo-doc-summary {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, monospace;
+  color: var(--rc-text-muted);
+}
+
+.rc-mongo-doc-body {
+  margin: 0;
+  padding: 8px 10px 10px 38px;
+  overflow-x: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--rc-text);
+  background: var(--rc-surface-sunken);
+}
+
+/* Zen mode.
+ *
+ *  Everything but the editor stands down. Done in CSS over the layout that
+ *  already exists, rather than by rendering a second one: the panes keep
+ *  their state, so leaving zen restores exactly what was there — and the
+ *  terminal is never unmounted, which would kill its PTY. The same reasoning
+ *  the responsive drawers were built on.
+ *
+ *  Every selector below also appears elsewhere in this file or in the markup;
+ *  a rule pointed at a class nobody sets is worse than no rule, because it
+ *  reads as handled. `theme.light.test.ts` checks exactly that. */
+.rc-playground[data-zen] > .ant-flex:first-child,
+.rc-playground[data-zen] .rc-drawer-left,
+.rc-playground[data-zen] .rc-drawer-bottom,
+.rc-playground[data-zen] .rc-statusbar {
+  display: none !important;
+}
+
+/* Breadcrumbs: path, then the symbols enclosing the cursor. */
+.rc-breadcrumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 2px;
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--rc-text-subtle);
+  background: var(--rc-surface);
+  border-bottom: 1px solid var(--rc-border);
+  flex: 0 0 auto;
+  scrollbar-width: none;
+}
+
+.rc-breadcrumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.rc-breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.rc-breadcrumb-sep {
+  opacity: 0.5;
+  padding: 0 2px;
+}
+
+.rc-breadcrumb-symbol {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--rc-text-muted);
+  cursor: pointer;
+}
+
+.rc-breadcrumb-symbol:hover {
+  color: var(--rc-text);
+  text-decoration: underline;
+}
+
+/* Outline rows, shared with the go-to-symbol list. */
+.rc-outline-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 8px;
+  border: 0;
+  background: none;
+  color: var(--rc-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rc-outline-row:hover,
+.rc-outline-row[data-active="true"] {
+  background: var(--rc-surface-raised);
+}
+
+/* Merge conflicts.
+ *
+ *  The two sides are tinted rather than only marked, because the thing
+ *  someone needs first is to see where one side stops and the other starts —
+ *  which the raw markers say only if you read them. */
+.rc-conflict-current {
+  background: color-mix(in srgb, var(--rc-git-added) 14%, transparent);
+}
+
+.rc-conflict-incoming {
+  background: color-mix(in srgb, var(--rc-git-untracked) 14%, transparent);
+}
+
+.rc-conflict-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: color-mix(in srgb, var(--rc-git-deleted) 12%, var(--rc-surface-raised));
+  border-bottom: 1px solid var(--rc-border);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.rc-conflict-count {
+  color: var(--rc-git-deleted);
+  font-weight: 600;
+}
+
+.rc-conflict-bar button {
+  border: 1px solid var(--rc-border-strong);
+  border-radius: 5px;
+  background: var(--rc-surface);
+  color: var(--rc-text);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.rc-conflict-bar button:hover {
+  border-color: var(--rc-accent);
+  color: var(--rc-accent);
+}
+
+/* The chord recorder in the keybindings dialog. */
+.rc-chord-button {
+  min-width: 108px;
+  border: 1px solid var(--rc-border-strong);
+  border-radius: 5px;
+  background: var(--rc-surface-sunken);
+  color: var(--rc-text);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.rc-chord-button[data-recording="true"] {
+  border-color: var(--rc-accent);
+  color: var(--rc-accent);
 }

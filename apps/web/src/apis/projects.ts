@@ -479,3 +479,178 @@ export const setStartCommandApi = async (
   );
   return response.data.data;
 };
+
+// --- Database (query editor) ---
+
+export interface DatabaseConnection {
+  engine: string;
+  /** "host:port". Never the credentials — the server does not send them. */
+  label: string;
+}
+
+export interface QueryColumn {
+  name: string;
+  dataTypeId: number;
+}
+
+export interface QueryResult {
+  columns: QueryColumn[];
+  rows: unknown[][];
+  rowCount: number;
+  /** True when the row cap cut the result short. Shown, rather than letting
+   *  part of an answer read as all of it. */
+  truncated: boolean;
+  durationMs: number;
+}
+
+export interface IntrospectedColumn {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  isPrimaryKey: boolean;
+}
+
+export interface IntrospectedTable {
+  schema: string;
+  name: string;
+  kind: "table" | "view";
+  columns: IntrospectedColumn[];
+}
+
+export const getDatabaseConnectionApi = async (
+  projectId: string,
+): Promise<DatabaseConnection | null> => {
+  const response = await axios.get<{ data: DatabaseConnection | null }>(
+    `/api/v1/projects/${projectId}/database`,
+  );
+  return response.data.data;
+};
+
+export const setDatabaseConnectionApi = async (
+  projectId: string,
+  url: string,
+): Promise<DatabaseConnection> => {
+  const response = await axios.put<{ data: DatabaseConnection }>(
+    `/api/v1/projects/${projectId}/database`,
+    { url },
+  );
+  return response.data.data;
+};
+
+export const removeDatabaseConnectionApi = async (
+  projectId: string,
+): Promise<void> => {
+  await axios.delete(`/api/v1/projects/${projectId}/database`);
+};
+
+export const getDatabaseSchemaApi = async (
+  projectId: string,
+): Promise<IntrospectedTable[]> => {
+  const response = await axios.get<{ data: IntrospectedTable[] }>(
+    `/api/v1/projects/${projectId}/database/schema`,
+  );
+  return response.data.data;
+};
+
+export const runDatabaseQueryApi = async (
+  projectId: string,
+  sql: string,
+): Promise<QueryResult> => {
+  const response = await axios.post<{ data: QueryResult }>(
+    `/api/v1/projects/${projectId}/database/query`,
+    { sql },
+  );
+  return response.data.data;
+};
+
+// --- Database (MongoDB) ---
+//
+// Separate calls rather than the SQL ones switching on engine: a filter
+// document and a statement have nothing in common, and §7.6 is explicit that
+// pretending otherwise produces something wrong about both databases.
+
+export interface MongoCollection {
+  database: string;
+  name: string;
+  kind: "collection" | "view";
+}
+
+export interface InferredField {
+  name: string;
+  /** Every BSON type seen for this field — a field need not hold one type. */
+  types: string[];
+  /** Fraction of the sampled documents that had it, 0–1. */
+  presence: number;
+}
+
+export interface CollectionSchema {
+  database: string;
+  collection: string;
+  /** Documents the sample actually saw. This is what makes the field list
+   *  inferred rather than declared, so the UI shows it. */
+  sampled: number;
+  fields: InferredField[];
+}
+
+export interface MongoQueryResult {
+  /** Relaxed-EJSON documents, already plain JSON. */
+  documents: unknown[];
+  fields: string[];
+  documentCount: number;
+  truncated: boolean;
+  durationMs: number;
+}
+
+export const getMongoCollectionsApi = async (
+  projectId: string,
+): Promise<MongoCollection[]> => {
+  const response = await axios.get<{ data: MongoCollection[] }>(
+    `/api/v1/projects/${projectId}/database/collections`,
+  );
+  return response.data.data;
+};
+
+export const getMongoCollectionSchemaApi = async (
+  projectId: string,
+  database: string,
+  collection: string,
+): Promise<CollectionSchema> => {
+  const response = await axios.get<{ data: CollectionSchema }>(
+    `/api/v1/projects/${projectId}/database/collection-schema`,
+    { params: { database, collection } },
+  );
+  return response.data.data;
+};
+
+export const runMongoQueryApi = async (
+  projectId: string,
+  request: {
+    database: string;
+    collection: string;
+    mode: "find" | "aggregate";
+    text: string;
+    sort?: string;
+    limit?: number;
+    skip?: number;
+  },
+): Promise<MongoQueryResult> => {
+  const response = await axios.post<{ data: MongoQueryResult }>(
+    `/api/v1/projects/${projectId}/database/mongo-query`,
+    request,
+  );
+  return response.data.data;
+};
+
+export const getDatabaseTableApi = async (
+  projectId: string,
+  schema: string,
+  table: string,
+  limit: number,
+  offset: number,
+): Promise<QueryResult> => {
+  const response = await axios.get<{ data: QueryResult }>(
+    `/api/v1/projects/${projectId}/database/table`,
+    { params: { schema, table, limit, offset } },
+  );
+  return response.data.data;
+};

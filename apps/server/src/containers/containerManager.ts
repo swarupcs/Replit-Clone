@@ -14,15 +14,21 @@ import { AppError } from "../utils/errors.js";
 import { getTemplate } from "../templates/registry.js";
 import { logger } from "../lib/logger.js";
 import { getEnvVars, toDockerEnv } from "../service/projectEnvService.js";
+import { SANDBOX_NETWORK } from "./sandboxNetwork.js";
 import { increment, registerGauge } from "../lib/metrics.js";
 
 const docker = new Docker();
 
 /** User-defined bridge the sandboxes share. Being off the default bridge means
  *  containers cannot reach host services that bind to the docker0 gateway. */
-export const SANDBOX_NETWORK = "replit-clone-sandbox";
+// Re-exported so existing importers keep working; it lives in its own
+// module now because the database service needs it too.
+export { SANDBOX_NETWORK, ensureNetwork } from "./sandboxNetwork.js";
 
 const CONTAINER_PREFIX = "rc-project-";
+/** Kept here rather than imported from the database service, which imports
+ *  this module — the cycle would be real, and the string is the contract. */
+const DB_CONTAINER_PREFIX = "rc-db-";
 const CACHE_VOLUME_PREFIX = "rc-cache-";
 
 /** Named volume holding a project's package caches. */
@@ -93,22 +99,6 @@ export function detach(projectId: string): void {
   lastActiveAt.set(projectId, Date.now());
 }
 
-/** Ensures the sandbox network exists. Idempotent. */
-export async function ensureNetwork(): Promise<void> {
-  const networks = await docker.listNetworks({
-    filters: { name: [SANDBOX_NETWORK] },
-  });
-
-  if (networks.some((network) => network.Name === SANDBOX_NETWORK)) return;
-
-  await docker.createNetwork({
-    Name: SANDBOX_NETWORK,
-    Driver: "bridge",
-    // Keeps sandboxes off the default bridge, which several unrelated
-    // containers on this host also share.
-    Internal: false,
-  });
-}
 
 /** Finds a container by EXACT name.
  *
@@ -135,13 +125,24 @@ async function findContainer(
  *  substring one, so this looks for the name that actually starts with our
  *  prefix and takes what follows it. */
 function projectIdFromNames(names: string[]): string | undefined {
-  const name = names.find((entry) => entry.startsWith(`/${CONTAINER_PREFIX}`));
-  return name?.slice(`/${CONTAINER_PREFIX}`.length);
+  for (const prefix of [CONTAINER_PREFIX, DB_CONTAINER_PREFIX]) {
+    const name = names.find((entry) => entry.startsWith(`/${prefix}`));
+    if (name) return name.slice(`/${prefix}`.length);
+  }
+  return undefined;
 }
 
+/** Every container this platform runs, projects and their databases both.
+ *
+ *  §7.4 is explicit that database containers have to be counted: they are a
+ *  full container against a budget chosen for three, and leaving them out
+ *  would silently double the effective cap on the VM the defaults were
+ *  picked for. A database-backed project costs two slots, and an operator
+ *  who wants more raises the cap deliberately.
+ */
 async function runningCount(): Promise<number> {
   const containers = await docker.listContainers({
-    filters: { name: [CONTAINER_PREFIX] },
+    filters: { name: [CONTAINER_PREFIX, DB_CONTAINER_PREFIX] },
   });
   return containers.length;
 }
@@ -418,6 +419,17 @@ let reaperTimer: NodeJS.Timeout | undefined;
  *  project reconnected — so on a small VM every project ever opened stayed
  *  resident until the host ran out of memory.
  */
+/** Called when a project's container is reaped, so its database can be
+ *  stopped with it. Injected rather than imported: this module is below the
+ *  services in the dependency order and pulling one down would invert it. */
+let onProjectReaped: ((projectId: string) => Promise<void>) | undefined;
+
+export function setOnProjectReaped(
+  handler: (projectId: string) => Promise<void>,
+): void {
+  onProjectReaped = handler;
+}
+
 export function startIdleReaper(): void {
   const idleMs = env.CONTAINER_IDLE_MINUTES * 60 * 1000;
 
@@ -445,6 +457,13 @@ export function startIdleReaper(): void {
           logger.info("reaping idle container", { projectId: name });
           increment("containers_reaped");
           await docker.getContainer(info.Id).stop({ t: 5 }).catch(() => {});
+
+          // §7.4: the pair is one unit. A project's container stopping while
+          // its database keeps running is a memory leak with extra steps —
+          // and the reverse, stopping the database under a running app, is
+          // an outage the user did not cause. Only this direction is safe,
+          // and only because the app has already gone.
+          await onProjectReaped?.(name);
         }
       } catch (error) {
         logger.error("idle reaper failed", error);
@@ -648,9 +667,13 @@ async function assertUserContainerBudget(projectId: string): Promise<void> {
   const ownedIds = new Set(owned.map((entry) => entry.id));
 
   const running = await docker
-    .listContainers({ filters: { name: [CONTAINER_PREFIX] } })
+    .listContainers({
+      filters: { name: [CONTAINER_PREFIX, DB_CONTAINER_PREFIX] },
+    })
     .catch(() => []);
 
+  // A project's database counts against its owner, the same as the project
+  // container does — it is running on their behalf and on this VM's budget.
   const theirs = running.filter((info) => {
     const projectId = projectIdFromNames(info.Names);
     return projectId !== undefined && ownedIds.has(projectId);
