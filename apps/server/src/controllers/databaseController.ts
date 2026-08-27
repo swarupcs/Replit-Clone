@@ -16,6 +16,11 @@ import {
   setConnection,
   tablePage,
 } from "../service/databaseQueryService.js";
+import {
+  describe as describeManaged,
+  destroy as destroyManaged,
+  provision as provisionManaged,
+} from "../service/managedDatabaseService.js";
 
 /** Who may do what with a project's database.
  *
@@ -181,4 +186,44 @@ export async function databaseTableController(
   } catch (error) {
     translate(error);
   }
+}
+
+/** The managed database — one this platform runs for the project.
+ *
+ *  Distinct from the external connection above: this one the client never
+ *  names at all, because there is nothing to name. Provisioning and
+ *  destroying are the owner's, for the same reason setting a connection
+ *  string is — it costs a container slot on a shared VM.
+ */
+export async function getManagedDatabaseController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  res.json({
+    success: true,
+    message: "Managed database",
+    data: await describeManaged(projectId),
+  });
+}
+
+export async function provisionManagedDatabaseController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "owner");
+  res.json({
+    success: true,
+    message: "Database provisioned",
+    data: await provisionManaged(projectId),
+  });
+}
+
+export async function destroyManagedDatabaseController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "owner");
+  await destroyManaged(projectId);
+  res.json({ success: true, message: "Database removed", data: null });
 }

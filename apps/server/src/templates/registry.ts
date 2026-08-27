@@ -27,6 +27,13 @@ export interface TemplateDefinition {
   expectsPreviewBase: boolean;
   /** Directory under `templates/files` copied into a new project. */
   filesDir: string;
+  /** A database this template needs, provisioned when a project is created
+   *  from it. Absent for templates that need none.
+   *
+   *  On the template AND on the project (see `Project.database`): a user who
+   *  started from React and then needed a database should not have to start
+   *  over, which is exactly what a template-only design forces. */
+  database?: "postgres";
   /** How this template produces a directory of files that can be served by a
    *  plain static host, or absent when it cannot.
    *
@@ -85,6 +92,24 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     startCommand: "npm install && npm start",
     filesDir: "node-express",
     expectsPreviewBase: false,
+  },
+  "node-express-postgres": {
+    id: "node-express-postgres",
+    label: "Node (Express + Postgres)",
+    image: "sandbox-node:latest",
+    devPort: 3000,
+    extraPorts: [5173, 8080],
+    // The migration is in the serve half, after the first `&&`, so warm start
+    // keeps running it on every start rather than only on the first install.
+    // That is what a migration should do — which is why schema.sql is
+    // idempotent.
+    startCommand: "npm install && npm run migrate && npm start",
+    filesDir: "node-express-postgres",
+    expectsPreviewBase: false,
+    // No staticBuild, deliberately. A database-backed app serves requests
+    // from a running process; offering a static deploy button and then
+    // producing a site with no data behind it would be worse than saying no.
+    database: "postgres",
   },
   "node-express-ts": {
     id: "node-express-ts",

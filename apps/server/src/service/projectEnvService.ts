@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
+import { databaseEnv } from "./managedDatabaseService.js";
 import { BadRequestError } from "../utils/errors.js";
 
 /** Per-project environment variables.
@@ -63,7 +64,20 @@ export async function getEnvVars(projectId: string): Promise<EnvVars> {
     select: { envVars: true },
   });
 
-  return parseEnvVars(project?.envVars);
+  const own = parseEnvVars(project?.envVars);
+
+  // A managed database's URL joins here rather than being added at container
+  // start, and that placement is the point: `envSignature` is computed from
+  // whatever this returns, so provisioning a database changes the signature
+  // and forces the rebuild that gives the container its DATABASE_URL. A
+  // container started before the database would otherwise keep the old,
+  // absent value for the rest of its life — §7.4's warning, exactly.
+  //
+  // The user's own value wins. Someone who has set DATABASE_URL by hand has
+  // said which database they mean, and silently overriding it would be the
+  // platform arguing with them.
+  const managed = await databaseEnv(projectId).catch(() => ({}));
+  return { ...managed, ...own };
 }
 
 export async function setEnvVars(

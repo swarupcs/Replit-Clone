@@ -13,6 +13,10 @@ import {
   removeCacheVolume,
   removeContainer,
 } from "../containers/containerManager.js";
+import {
+  destroy as destroyManagedDatabase,
+  provision as provisionManagedDatabase,
+} from "./managedDatabaseService.js";
 import { forgetRun } from "../containers/runner.js";
 import { forgetUsage } from "./diskUsageService.js";
 import { forgetProject as forgetCollab } from "./collabService.js";
@@ -74,8 +78,17 @@ export async function createProjectService(
     // Best-effort: when the server is not root this cannot succeed, and
     // `containerUser` matches the container to the directory instead.
     await claimForSandbox(dir).catch(() => {});
+
+    // A template that names a database gets one. Provisioning here rather
+    // than at first run means DATABASE_URL exists before the container is
+    // ever built, so the migration in the start command has something to
+    // talk to on the very first open.
+    if (template.database) {
+      await provisionManagedDatabase(project.id);
+    }
   } catch (error) {
     // Never leave a DB row pointing at a directory that was not scaffolded.
+    await destroyManagedDatabase(project.id).catch(() => {});
     await prisma.project.delete({ where: { id: project.id } }).catch(() => {});
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     throw error;
@@ -93,6 +106,10 @@ export async function deleteProjectService(
   await assertAccess(projectId, userId, "owner");
 
   await removeContainer(projectId);
+  // The database container AND its volume. A volume outliving the row that
+  // pointed at it is the mistake `deployService.unpublish` learned about
+  // published files, with rather more disk attached to it.
+  await destroyManagedDatabase(projectId).catch(() => undefined);
   // The cache volume outlives a restart deliberately, but not the project.
   await removeCacheVolume(projectId);
   // Before the row goes: the cascade would take the deployment record with it

@@ -165,6 +165,7 @@ model Project {
   collaborators ProjectCollaborator[]
   deployment    Deployment?
   databaseConnection ProjectDatabaseConnection?
+  managedDatabase    ManagedDatabase?
 
   @@index([ownerId])
   @@map("projects")
@@ -286,4 +287,37 @@ model ProjectDatabaseConnection {
   updatedAt DateTime @updatedAt
 
   @@map("project_database_connections")
+}
+
+/// A database this platform runs for a project, in its own container.
+///
+/// §7.3 chose a sidecar per project over a shared cluster because its
+/// isolation is structural — a separate container, a separate volume, its own
+/// credentials — rather than a set of grants that all have to stay right, and
+/// every mistake in the shared version is cross-tenant.
+model ManagedDatabase {
+  id String @id @default(uuid())
+
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// "postgres" for now. Mongo needs its own driver and its own editor; see
+  /// row 7b of the parity plan.
+  engine String
+
+  /// The generated password, encrypted with AES-256-GCM under
+  /// SECRET_ENCRYPTION_KEY. Generated rather than chosen, and never shown:
+  /// it exists to be injected into the project's container, not typed.
+  passwordCipher String
+
+  /// Database name and the named Docker volume holding its data. The volume
+  /// is recorded rather than derived so that deleting the project can remove
+  /// it even if the naming scheme changes later.
+  databaseName String
+  volumeName   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("managed_databases")
 }

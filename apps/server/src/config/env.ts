@@ -146,6 +146,12 @@ const envSchema = z.object({
    *  writing in a loop, or one runaway `npm install`, could fill the VM's disk
    *  and take Postgres and every other project down with it. */
   PROJECT_DISK_QUOTA_MB: z.coerce.number().int().positive().default(512),
+  /** Disk a managed database's volume may hold, per project.
+   *
+   *  Its own line rather than sharing PROJECT_DISK_QUOTA_MB: a database is
+   *  the easiest way in this whole product to fill a disk, and it fills a
+   *  different one — a named Docker volume rather than the project tree. */
+  DATABASE_DISK_QUOTA_MB: z.coerce.number().int().positive().default(1024),
 
   /** Per-user limits.
    *

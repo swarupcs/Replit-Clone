@@ -23,6 +23,9 @@ import {
   getDatabaseConnectionController,
   removeDatabaseConnectionController,
   setDatabaseConnectionController,
+  getManagedDatabaseController,
+  provisionManagedDatabaseController,
+  destroyManagedDatabaseController,
 } from "../../controllers/databaseController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
@@ -197,6 +200,19 @@ router.put("/:projectId/database", asyncHandler(setDatabaseConnectionController)
 router.delete(
   "/:projectId/database",
   asyncHandler(removeDatabaseConnectionController),
+);
+router.get(
+  "/:projectId/database/managed",
+  asyncHandler(getManagedDatabaseController),
+);
+router.post(
+  "/:projectId/database/managed",
+  deployLimiter,
+  asyncHandler(provisionManagedDatabaseController),
+);
+router.delete(
+  "/:projectId/database/managed",
+  asyncHandler(destroyManagedDatabaseController),
 );
 router.get("/:projectId/database/schema", asyncHandler(databaseSchemaController));
 router.get("/:projectId/database/table", asyncHandler(databaseTableController));

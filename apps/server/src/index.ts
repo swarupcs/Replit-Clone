@@ -56,7 +56,9 @@ import {
   reconcileOnBoot,
   startIdleReaper,
   stopAllContainers,
+  setOnProjectReaped,
 } from "./containers/containerManager.js";
+import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
 import {
   docRoomName,
   handleEditorSocketEvents,
@@ -355,6 +357,11 @@ async function start(): Promise<void> {
   const reconciled = await withTimeout(reconcileOnBoot(), "boot reconcile");
   if (reconciled) logger.info("reconciled state", { ...reconciled });
 
+  // A project's database is stopped with the project, so an idle pair costs
+  // nothing rather than half of nothing.
+  setOnProjectReaped(async (projectId) => {
+    await stopManagedDatabase(projectId).catch(() => undefined);
+  });
   startIdleReaper();
   startTokenPrune();
   startAccessWatch();
