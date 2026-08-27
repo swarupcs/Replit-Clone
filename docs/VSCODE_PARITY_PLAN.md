@@ -796,3 +796,87 @@ Items 1–6 are roughly two weeks and cover most of what "make it look and feel
 like VS Code" actually means to somebody using it. Item 7 is the database
 feature at its smallest useful size. Items 8–11 are the next two months. Items
 10 and 12 are the two that change what the product can do.
+
+---
+
+## 10. Execution ledger
+
+_This section is the working state of the plan, not part of its argument. It
+exists because the work is carried out across many separate sessions, and a
+session that cannot tell what the previous one finished will either repeat it or
+skip it. **Every session updates this table before it ends.**_
+
+### 10.1 How a session runs
+
+1. **Read this ledger first.** The first row that is not `done` is the work.
+   Do not re-plan, do not reorder, do not skip ahead — the order in §9 is
+   already the decision, and re-litigating it each session is how fourteen rows
+   become none.
+2. **Check the open pull request for the branch** before starting. Red CI or a
+   merge conflict is the work, ahead of any ledger row.
+3. **One row, one or more commits.** A row is finished when its acceptance
+   check passes, not when the code is written.
+4. **Verify before every commit**, all four: `pnpm typecheck`, `pnpm lint`,
+   `pnpm --filter server test`, `pnpm --filter web test`. A row that cannot pass
+   these is not done, and the ledger says `blocked` with the reason rather than
+   `done`.
+5. **Update the ledger row** — status, the date, and a one-line note of what
+   landed — in the same commit as the work it describes. A ledger updated in a
+   separate commit is a ledger that will eventually disagree with the tree.
+6. **Push to the branch.** One pull request tracks the whole effort; do not open
+   a second. If the tracking pull request has already merged, restart the branch
+   from the latest `main` and open a fresh one for the next rows.
+7. **Stop at the row boundary.** If a session runs out of room mid-row, leave
+   the row `in progress` with a note saying exactly where it stopped and what
+   the next concrete step is.
+
+### 10.2 Rules that hold across every row
+
+- **No row is skipped for being awkward.** A row that turns out to be wrong gets
+  a note explaining why and a status of `superseded`, never a silent omission.
+- **Rows 10 and 12 have a decision gate** — memory and quota for the managed
+  database, the memory policy for language servers — named in their sections.
+  The gate is a decision to *record in §10.4*, with its reasoning, not a reason
+  to stop: pick the defensible option, write down what was picked and what would
+  change it, and proceed.
+- **Row 14 is deferred by §0.3 and stays deferred.** It is in the table so that
+  its absence is visible and deliberate, not so that it gets built.
+- **Tests are part of the row, not a follow-up.** Every row adds tests for what
+  it changed; a row whose behaviour genuinely cannot be tested says in its note
+  how it was verified instead.
+- **Security-shaped rows carry their guard in the first commit.** §7.2 is the
+  standing example and the rule generalises: the guard ships with the feature it
+  guards, or neither ships.
+- **Scope stays inside the row.** A refactor the row does not need belongs to a
+  later row or to no row at all.
+
+### 10.3 The rows
+
+Order is §9. Effort is the plan's own estimate. `Acceptance` is what has to be
+true for the row to move to `done`.
+
+| # | Row | Plan § | Effort | Acceptance | Status | Landed |
+|---|---|---|---|---|---|---|
+| 1 | Monaco options + settings dialog rows | §2.1 | 1 | Every option in the §2.1 table is on and, where it is a preference, exposed in `EditorSettingsDialog`; a test asserts each is present in the options object | not started | — |
+| 2 | One extension table, real icon set, folder icons | §1.1–1.3 | 3 | A single `Record<extension, { language, icon }>` is the only source of both; a test proves no language lacks an icon and no icon lacks a language; folders resolve open and closed glyphs by name | not started | — |
+| 3 | Preview tabs, reorder, pin, close-others, MRU `Ctrl+Tab` | §2.3 | 3 | Single-click opens a preview tab that the next single-click replaces; double-click pins; drag reorders; `Ctrl+Shift+T` reopens the last closed | not started | — |
+| 4 | Light editor theme + the theming audit | §6 | 3 | A hand-built light theme replaces stock `vs`; xterm selection and search highlight, the Monaco diff editor and both fallback pages are themed; `prefers-reduced-motion` and `prefers-contrast` are honoured | not started | — |
+| 5 | Git gutter decorations | §5.1 | 5 | Added, modified and deleted bars render against HEAD, debounced against the diff, and clicking one opens the inline diff | not started | — |
+| 6 | Git decorations on the tree, files and folders | §1.4–1.5 | 4 | A shared status store tints filenames and badges them `U`/`M`/`D`; a collapsed folder shows its descendants' state | not started | — |
+| 7 | Database client against an external connection | §7.2, §7.5–7.6 | 11 | The SSRF guard lands in the first commit with tests for loopback, link-local, RFC 1918, the post-DNS re-check and the platform's own host and port; then the schema tree, the paginated grid and the query editor with all five limits enforced server-side | not started | — |
+| 8 | Breadcrumbs, outline, peek, `Ctrl+T`, zen mode, context menu | §2.2 | 8 | One symbol provider feeds both breadcrumbs and outline rather than two fetches; the editor's own context menu replaces the browser's | not started | — |
+| 9 | Merge conflict resolution | §5.3 | 5 | A conflicted file renders Accept Current / Incoming / Both / Compare per block, and resolving writes a file with no markers left | not started | — |
+| 10 | Managed sidecar database, then the templates | §7.3–7.4, §7.7 | 15 | The memory and quota decision is recorded in §10.4 first; then provisioning, readiness probing, env-signature inclusion, paired idle reaping, volume deletion on project delete and quota counting, each tested; then the two templates | not started | — |
+| 11 | Keybinding registry, then chords, then user editing | §2.4 | 8 | A chord is declared once beside its command; a test proves the palette's `keys:` strings match the registry; then the §2.4 chord list; then a settings surface | not started | — |
+| 12 | Language servers, Python first | §3 | 13 | The memory policy is recorded in §10.4 first; then `lspGateway` with `Content-Length` framing, `monaco-languageclient` wired, lazy start on first file of the language, idle stop, and a refusal-with-reason below the memory threshold — all behind `LSP_ENABLED` | not started | — |
+| 13 | Checkpoint history, then follow mode | §8 | 8 | Periodic snapshots with a retention window, restorable per file; then riding a collaborator's viewport off the presence layer that already exists | not started | — |
+| 14 | Debugging | §4 | — | **Deferred by §0.3, Decision 1.** Not to be built. Revisiting it means revisiting Route A, not hand-building a debug adapter client | deferred | — |
+
+### 10.4 Decisions recorded during execution
+
+_Empty until a row records one. Rows 10 and 12 are each required by §10.2 to add
+an entry here before they begin._
+
+| Date | Row | Decision | Reasoning | What would change it |
+|---|---|---|---|---|
+| — | — | — | — | — |
