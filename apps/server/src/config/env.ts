@@ -137,6 +137,27 @@ const envSchema = z.object({
   // Container resource budget. Defaults suit a 2-4 GB VM: 512 MB x 3 leaves
   // room for Postgres, the server, and the OS.
   CONTAINER_MEMORY_MB: z.coerce.number().int().positive().default(512),
+
+  /** Whether language servers may be started inside project containers.
+   *
+   *  Off by default. §3.3's image cost — pyright pulls Node into the Python
+   *  image — is paid on every cold start, including by people who never open
+   *  a .py file, so switching this on is an operator's decision about their
+   *  own images and their own VM. */
+  LSP_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true" || value === "1"),
+
+  /** Below this, a language server is refused rather than started.
+   *
+   *  §3.3: pyright idles at 150-300 MB on a real project and
+   *  CONTAINER_MEMORY_MB defaults to 512, so a server started
+   *  unconditionally would be competing with the dev server it exists to
+   *  help. 1024 rather than 512+300 because the app needs headroom too —
+   *  and an OOM kill of somebody's dev server is a far worse experience than
+   *  an editor that says why it has no Python intelligence here. */
+  LSP_MIN_CONTAINER_MEMORY_MB: z.coerce.number().int().positive().default(1024),
   CONTAINER_CPUS: z.coerce.number().positive().default(0.5),
   CONTAINER_IDLE_MINUTES: z.coerce.number().int().positive().default(20),
   /** Ceiling on a single project's working tree.
