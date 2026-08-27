@@ -1,71 +1,10 @@
-import type { ReactNode } from "react";
-import { FaCss3Alt, FaHtml5, FaJs, FaLeaf } from "react-icons/fa";
 import {
-  SiDocker,
-  SiGit,
-  SiMarkdown,
-  SiPython,
-  SiReact,
-  SiSass,
-  SiTypescript,
-  SiYaml,
-} from "react-icons/si";
-import { VscFile, VscFileMedia, VscJson, VscLock } from "react-icons/vsc";
+  DEFAULT_FILE,
+  fileTypeFor,
+  folderTypeFor,
+} from "../../../lib/fileTypes.ts";
 
 const SIZE = 15;
-
-/** Extension -> icon.
- *
- *  Keys are lowercased extensions; `byName` below handles the dotfiles and
- *  fixed filenames that have no meaningful extension. */
-const BY_EXTENSION: Record<string, ReactNode> = {
-  js: <FaJs color="#f7df1e" size={SIZE} />,
-  mjs: <FaJs color="#f7df1e" size={SIZE} />,
-  cjs: <FaJs color="#f7df1e" size={SIZE} />,
-  jsx: <SiReact color="#61dbfa" size={SIZE} />,
-  ts: <SiTypescript color="#3178c6" size={SIZE} />,
-  mts: <SiTypescript color="#3178c6" size={SIZE} />,
-  cts: <SiTypescript color="#3178c6" size={SIZE} />,
-  tsx: <SiReact color="#3178c6" size={SIZE} />,
-
-  css: <FaCss3Alt color="#3c99dc" size={SIZE} />,
-  scss: <SiSass color="#cd6799" size={SIZE} />,
-  sass: <SiSass color="#cd6799" size={SIZE} />,
-  html: <FaHtml5 color="#e34c26" size={SIZE} />,
-
-  json: <VscJson color="#fbbf24" size={SIZE} />,
-  md: <SiMarkdown color="#a2a7bd" size={SIZE} />,
-  mdx: <SiMarkdown color="#a2a7bd" size={SIZE} />,
-
-  py: <SiPython color="#4b8bbe" size={SIZE} />,
-  yml: <SiYaml color="#a2a7bd" size={SIZE} />,
-  yaml: <SiYaml color="#a2a7bd" size={SIZE} />,
-  env: <FaLeaf color="#4ade80" size={SIZE} />,
-
-  svg: <VscFileMedia color="#ffb13b" size={SIZE} />,
-  png: <VscFileMedia color="#a78bfa" size={SIZE} />,
-  jpg: <VscFileMedia color="#a78bfa" size={SIZE} />,
-  jpeg: <VscFileMedia color="#a78bfa" size={SIZE} />,
-  gif: <VscFileMedia color="#a78bfa" size={SIZE} />,
-  webp: <VscFileMedia color="#a78bfa" size={SIZE} />,
-  ico: <VscFileMedia color="#a78bfa" size={SIZE} />,
-};
-
-/** Whole filenames that carry more meaning than their extension does. */
-const BY_NAME: Record<string, ReactNode> = {
-  "package.json": <VscJson color="#8bc500" size={SIZE} />,
-  "package-lock.json": <VscLock color="#6b7192" size={SIZE} />,
-  "pnpm-lock.yaml": <VscLock color="#6b7192" size={SIZE} />,
-  "yarn.lock": <VscLock color="#6b7192" size={SIZE} />,
-  "requirements.txt": <SiPython color="#4b8bbe" size={SIZE} />,
-  dockerfile: <SiDocker color="#2496ed" size={SIZE} />,
-  ".dockerignore": <SiDocker color="#2496ed" size={SIZE} />,
-  ".gitignore": <SiGit color="#f05033" size={SIZE} />,
-  ".gitattributes": <SiGit color="#f05033" size={SIZE} />,
-  ".env": <FaLeaf color="#4ade80" size={SIZE} />,
-  ".env.local": <FaLeaf color="#4ade80" size={SIZE} />,
-  ".env.example": <FaLeaf color="#4ade80" size={SIZE} />,
-};
 
 interface FileIconProps {
   extension: string | undefined;
@@ -74,27 +13,60 @@ interface FileIconProps {
   name?: string;
 }
 
+/** One 15px slot, whatever goes in it.
+ *
+ *  Fixed size and centred so that a row's label sits at the same indent
+ *  whichever glyph landed beside it — the reason this renders a fallback
+ *  rather than nothing when a file is unrecognised. */
+const Slot = ({ children }: { children: React.ReactNode }) => (
+  <span
+    style={{
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      width: SIZE,
+      height: SIZE,
+      flex: "none",
+    }}
+  >
+    {children}
+  </span>
+);
+
 /** Always renders something.
  *
- *  Previously only four extensions were mapped and everything else rendered
- *  `null`, so most rows in a real project had no icon at all and their labels
- *  sat at a different indent from their neighbours'. */
+ *  The mapping lives in `lib/fileTypes.ts`, shared with the Monaco language
+ *  lookup, so the icon and the highlighting cannot disagree about what a file
+ *  is — which they did while each had a table of its own.
+ */
 export const FileIcon = ({ extension, name }: FileIconProps) => {
-  const byName = name ? BY_NAME[name.toLowerCase()] : undefined;
-  const byExtension = extension ? BY_EXTENSION[extension.toLowerCase()] : undefined;
+  const { icon: Icon, color } = fileTypeFor(extension, name) ?? DEFAULT_FILE;
 
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: SIZE,
-        height: SIZE,
-        flex: "none",
-      }}
-    >
-      {byName ?? byExtension ?? <VscFile color="#6b7192" size={SIZE} />}
-    </span>
+    <Slot>
+      <Icon color={color} size={SIZE} />
+    </Slot>
+  );
+};
+
+interface FolderIconProps {
+  name: string;
+  open: boolean;
+}
+
+/** The folder equivalent, open and closed.
+ *
+ *  VS Code gives `src`, `test`, `node_modules` and about eighty others their
+ *  own glyph, and it is more of what makes a tree recognisable than the file
+ *  icons are — a folder is what someone is actually scanning for.
+ */
+export const FolderIcon = ({ name, open }: FolderIconProps) => {
+  const type = folderTypeFor(name);
+  const Icon = open ? type.open : type.closed;
+
+  return (
+    <Slot>
+      <Icon color={type.color} size={SIZE} />
+    </Slot>
   );
 };

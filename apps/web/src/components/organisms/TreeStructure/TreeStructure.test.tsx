@@ -11,6 +11,11 @@ vi.mock("../../atoms/FileIcon/FileIcon.tsx", () => ({
     rowRenders.set(name, (rowRenders.get(name) ?? 0) + 1);
     return <span />;
   },
+  // A folder row is a row too, and these tests are about which rows wake.
+  FolderIcon: ({ name }: { name: string; open: boolean }) => {
+    rowRenders.set(name, (rowRenders.get(name) ?? 0) + 1);
+    return <span />;
+  },
 }));
 import type { TreeNodeData } from "@replit-clone/shared";
 import { TreeStructure } from "./TreeStructure.tsx";

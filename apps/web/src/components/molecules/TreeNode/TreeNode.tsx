@@ -1,10 +1,9 @@
 import { memo, useState } from "react";
 import type { CSSProperties, DragEvent, MouseEvent } from "react";
 import { IoIosArrowForward } from "react-icons/io";
-import { FaFolder, FaFolderOpen } from "react-icons/fa";
 import type { TreeNodeData } from "@replit-clone/shared";
 import { fileExtension } from "@replit-clone/shared";
-import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
+import { FileIcon, FolderIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { useFileContextMenuStore } from "../../../store/fileContextMenuStore.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
@@ -189,11 +188,7 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
                 className="rc-tree-chevron"
                 data-expanded={isExpanded}
               />
-              {isExpanded ? (
-                <FaFolderOpen color="var(--rc-folder)" size={14} style={{ flex: "none" }} />
-              ) : (
-                <FaFolder color="var(--rc-folder)" size={14} style={{ flex: "none" }} />
-              )}
+              <FolderIcon name={node.name} open={isExpanded} />
             </>
           ) : (
             <>
