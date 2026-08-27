@@ -14,6 +14,11 @@ import {
 } from "../../../store/presenceStore.ts";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 import {
+  selectDecoration,
+  selectFolderDecoration,
+  useGitDecorationStore,
+} from "../../../store/gitDecorationStore.ts";
+import {
   selectOrderedSelection,
   useTreeSelectionStore,
 } from "../../../store/treeSelectionStore.ts";
@@ -73,6 +78,14 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
    *  an array would hand every row a new identity on every awareness update
    *  and wake the whole tree. */
   const presence = usePresenceStore(selectFileColors(relPath ?? ""));
+
+  /** Git state for this row. A folder summarises what is under it, which is
+   *  what makes a change findable without expanding anything. */
+  const decoration = useGitDecorationStore(
+    node?.type === "directory"
+      ? selectFolderDecoration(node.relPath)
+      : selectDecoration(node?.relPath ?? ""),
+  );
 
   if (!node) return null;
 
@@ -212,10 +225,31 @@ function TreeNodeRow({ node, depth = 0 }: TreeNodeProps) {
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
+              // A deleted file keeps its row until the tree refreshes, and
+              // reading it as ordinary would invite opening something that
+              // is not there.
+              textDecoration:
+                decoration?.state === "deleted" ? "line-through" : undefined,
+              color: decoration ? `var(--rc-git-${decoration.state})` : undefined,
             }}
           >
             {node.name}
           </span>
+
+          {decoration?.letter && (
+            <span
+              aria-hidden
+              style={{
+                marginLeft: "auto",
+                flex: "none",
+                fontSize: 10,
+                fontWeight: 600,
+                color: `var(--rc-git-${decoration.state})`,
+              }}
+            >
+              {decoration.letter}
+            </span>
+          )}
 
           {presence && (
             // One dot per person, in their own colour: the same colour their

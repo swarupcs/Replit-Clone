@@ -34,6 +34,14 @@
   --rc-accent-soft: rgba(167, 139, 250, 0.14);
   --rc-gradient: linear-gradient(135deg, #a78bfa 0%, #60a5fa 50%, #22d3ee 100%);
 
+  /* Git states, shared by the tree's decorations and the editor's margin so
+     a file reads the same on both. Distinct from --rc-green/yellow/red,
+     which are general status colours: an untracked file is not a warning. */
+  --rc-git-added: #4ade80;
+  --rc-git-modified: #fbbf24;
+  --rc-git-deleted: #f87171;
+  --rc-git-renamed: #a78bfa;
+  --rc-git-untracked: #60a5fa;
   --rc-green: #4ade80;
   --rc-yellow: #fbbf24;
   --rc-red: #f87171;
@@ -111,6 +119,11 @@
   --rc-accent-soft: rgba(109, 40, 217, 0.1);
   --rc-gradient: linear-gradient(135deg, #7c3aed 0%, #2563eb 50%, #0891b2 100%);
 
+  --rc-git-added: #15803d;
+  --rc-git-modified: #a16207;
+  --rc-git-deleted: #c02626;
+  --rc-git-renamed: #7c3aed;
+  --rc-git-untracked: #1d4ed8;
   --rc-green: #15803d;
   --rc-yellow: #b45309;
   --rc-red: #dc2626;
@@ -1573,8 +1586,8 @@ body {
 
 /* Git bars down the editor's left margin.
  *
- *  The same --rc-green/yellow/red the source-control panel uses for A/M/D,
- *  so a file's state reads the
+ *  The same --rc-git-* tokens the tree's decorations use, so a file's state
+ *  reads the
  *  same whichever surface it is seen on. The deletion marker is a triangle
  *  rather than a bar because there is no line to draw a bar over — the text
  *  is gone, and the mark belongs at the seam it left behind. */
@@ -1584,11 +1597,11 @@ body {
 }
 
 .rc-gutter-added {
-  background: var(--rc-green);
+  background: var(--rc-git-added);
 }
 
 .rc-gutter-modified {
-  background: var(--rc-yellow);
+  background: var(--rc-git-modified);
 }
 
 .rc-gutter-removed {
@@ -1601,7 +1614,7 @@ body {
   position: absolute;
   left: 0;
   bottom: -3px;
-  border-left: 4px solid var(--rc-red);
+  border-left: 4px solid var(--rc-git-deleted);
   border-top: 3px solid transparent;
   border-bottom: 3px solid transparent;
 }
