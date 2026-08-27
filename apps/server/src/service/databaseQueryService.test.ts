@@ -42,12 +42,14 @@ vi.mock("../lib/secretBox.js", () => ({
   },
 }));
 
-const { checkConnectionString } = vi.hoisted(() => ({
+const { checkConnectionString, checkMongoConnectionString } = vi.hoisted(() => ({
   checkConnectionString: vi.fn(),
+  checkMongoConnectionString: vi.fn(),
 }));
 vi.mock("../lib/connectionGuard.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   checkConnectionString,
+  checkMongoConnectionString,
 }));
 
 const service = await import("./databaseQueryService.js");
@@ -94,11 +96,49 @@ describe("storing a connection", () => {
     expect(prismaMock.projectDatabaseConnection.upsert).not.toHaveBeenCalled();
   });
 
-  it("says plainly that Mongo is not supported yet", async () => {
-    checkConnectionString.mockResolvedValue({ ...CHECKED, scheme: "mongodb" });
-    await expect(service.setConnection("p1", "mongodb://x")).rejects.toThrow(
-      /MongoDB/,
+  it("checks a Mongo string with the Mongo guard, not the Postgres one", async () => {
+    // Not interchangeable: `new URL` cannot parse a Mongo seed list at all,
+    // so running the Postgres check over one would refuse every replica set
+    // as malformed.
+    checkMongoConnectionString.mockResolvedValue({
+      url: "mongodb://a.example.com,b.example.com/shop",
+      scheme: "mongodb",
+      srv: false,
+      hosts: [],
+      label: "a.example.com:27017,b.example.com:27017",
+    });
+
+    const stored = await service.setConnection(
+      "p1",
+      "mongodb://a.example.com,b.example.com/shop",
     );
+
+    expect(checkConnectionString).not.toHaveBeenCalled();
+    expect(stored).toEqual({
+      engine: "mongodb",
+      label: "a.example.com:27017,b.example.com:27017",
+    });
+  });
+
+  it("refuses a Mongo string the Mongo guard rejected", async () => {
+    checkMongoConnectionString.mockRejectedValue(new Error("refused"));
+    await expect(service.setConnection("p1", "mongodb://x")).rejects.toThrow();
+    expect(prismaMock.projectDatabaseConnection.upsert).not.toHaveBeenCalled();
+  });
+
+  it("refuses to run SQL against a stored Mongo connection", async () => {
+    // `pg` would take the mongodb:// string and fail with something about a
+    // password, which is a worse answer than the true one.
+    prismaMock.projectDatabaseConnection.findUnique.mockResolvedValue({
+      projectId: "p1",
+      engine: "mongodb",
+      urlCipher: `v1.${Buffer.from("mongodb://h/shop").toString("base64url")}`,
+      label: "h:27017",
+    });
+
+    await expect(
+      service.runQuery("p1", "SELECT 1", { readOnly: true }),
+    ).rejects.toMatchObject({ code: "ENGINE_MISMATCH" });
   });
 });
 

@@ -4,9 +4,14 @@ import { prisma } from "../lib/prisma.js";
 import { open, seal } from "../lib/secretBox.js";
 import {
   checkConnectionString,
+  checkMongoConnectionString,
   redactConnectionString,
+  type CheckedConnection,
+  type CheckedMongoConnection,
 } from "../lib/connectionGuard.js";
 import { logger } from "../lib/logger.js";
+import { DatabaseQueryError } from "./databaseErrors.js";
+import { closeConnection as closeMongoConnection } from "./mongoQueryService.js";
 
 /** How long any one statement may run before the database cancels it.
  *
@@ -50,15 +55,8 @@ export interface QueryResult {
   durationMs: number;
 }
 
-export class DatabaseQueryError extends Error {
-  constructor(
-    message: string,
-    readonly code: string,
-  ) {
-    super(message);
-    this.name = "DatabaseQueryError";
-  }
-}
+// Re-exported so existing importers keep one place to import it from.
+export { DatabaseQueryError } from "./databaseErrors.js";
 
 /** Stores a connection string for a project, after checking it.
  *
@@ -69,17 +67,19 @@ export async function setConnection(
   projectId: string,
   url: string,
 ): Promise<StoredConnection> {
-  const checked = await checkConnectionString(url);
+  // Which check runs is decided by the scheme rather than by trying one and
+  // falling back: a Mongo string names a seed list that `new URL` cannot
+  // parse at all, so "the Postgres check threw" says nothing useful about it.
+  const isMongo = /^mongodb(\+srv)?:/i.test(url.trim());
 
-  if (checked.scheme !== "postgresql") {
-    throw new DatabaseQueryError(
-      "MongoDB connections are not supported yet — the query editor speaks SQL, " +
-        "and a Mongo editor takes filter documents and pipelines rather than statements.",
-      "ENGINE_UNSUPPORTED",
-    );
-  }
+  const checked = isMongo
+    ? await checkMongoConnectionString(url)
+    : await checkConnectionString(url);
 
-  const label = `${checked.host}:${checked.port}`;
+  const label = isMongo
+    ? (checked as CheckedMongoConnection).label
+    : `${(checked as CheckedConnection).host}:${(checked as CheckedConnection).port}`;
+
   const record = {
     urlCipher: seal(checked.url),
     engine: checked.scheme,
@@ -92,8 +92,11 @@ export async function setConnection(
     update: record,
   });
 
-  // Replacing the connection must not leave the old one pooled.
+  // Replacing the connection must not leave the old one connected, on either
+  // engine — the previous string is a credential that has just been revoked
+  // as far as this project is concerned.
   closePool(projectId);
+  closeMongoConnection(projectId);
 
   return { engine: checked.scheme, label };
 }
@@ -109,6 +112,7 @@ export async function getConnection(
 
 export async function removeConnection(projectId: string): Promise<void> {
   closePool(projectId);
+  closeMongoConnection(projectId);
   await prisma.projectDatabaseConnection
     .delete({ where: { projectId } })
     .catch(() => ({}));
@@ -143,6 +147,14 @@ async function poolFor(projectId: string): Promise<Pool> {
     throw new DatabaseQueryError(
       "This project has no database connection yet.",
       "NO_CONNECTION",
+    );
+  }
+  if (row.engine !== "postgresql") {
+    // `pg` would accept a mongodb:// string and fail with something about a
+    // password, which is a worse answer than the true one.
+    throw new DatabaseQueryError(
+      "This project's database is not Postgres.",
+      "ENGINE_MISMATCH",
     );
   }
 

@@ -26,6 +26,9 @@ import {
   getManagedDatabaseController,
   provisionManagedDatabaseController,
   destroyManagedDatabaseController,
+  mongoCollectionsController,
+  mongoCollectionSchemaController,
+  mongoQueryController,
 } from "../../controllers/databaseController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
@@ -216,10 +219,23 @@ router.delete(
 );
 router.get("/:projectId/database/schema", asyncHandler(databaseSchemaController));
 router.get("/:projectId/database/table", asyncHandler(databaseTableController));
+router.get(
+  "/:projectId/database/collections",
+  asyncHandler(mongoCollectionsController),
+);
+router.get(
+  "/:projectId/database/collection-schema",
+  asyncHandler(mongoCollectionSchemaController),
+);
 router.post(
   "/:projectId/database/query",
   queryLimiter,
   asyncHandler(databaseQueryController),
+);
+router.post(
+  "/:projectId/database/mongo-query",
+  queryLimiter,
+  asyncHandler(mongoQueryController),
 );
 
 router.get("/:projectId/start-command", asyncHandler(getStartCommandController));

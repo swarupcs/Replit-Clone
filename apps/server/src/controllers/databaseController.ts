@@ -21,6 +21,11 @@ import {
   destroy as destroyManaged,
   provision as provisionManaged,
 } from "../service/managedDatabaseService.js";
+import {
+  inferCollectionSchema,
+  listCollections,
+  runMongoQuery,
+} from "../service/mongoQueryService.js";
 
 /** Who may do what with a project's database.
  *
@@ -226,4 +231,96 @@ export async function destroyManagedDatabaseController(
   const projectId = await authorise(req, "owner");
   await destroyManaged(projectId);
   res.json({ success: true, message: "Database removed", data: null });
+}
+
+/* ------------------------------------------------------------------ *
+ *  MongoDB
+ *
+ *  Separate endpoints rather than the SQL ones switching on engine: the
+ *  request bodies have nothing in common. §7.6 is explicit that a Mongo
+ *  editor takes a filter document or an aggregation pipeline against a
+ *  chosen collection, and that papering over the difference produces
+ *  something wrong about both databases — an endpoint taking `{ sql }` and
+ *  quietly meaning `{ collection, filter }` is exactly that paper.
+ * ------------------------------------------------------------------ */
+
+export async function mongoCollectionsController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  try {
+    res.json({
+      success: true,
+      message: "Collections",
+      data: await listCollections(projectId),
+    });
+  } catch (error) {
+    translate(error);
+  }
+}
+
+export async function mongoCollectionSchemaController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  const database = stringField(req.query["database"]);
+  const collection = stringField(req.query["collection"]);
+
+  if (!collection) {
+    throw new BadRequestError("A collection is required.", "COLLECTION_REQUIRED");
+  }
+
+  try {
+    res.json({
+      success: true,
+      message: "Inferred schema",
+      data: await inferCollectionSchema(projectId, database, collection),
+    });
+  } catch (error) {
+    translate(error);
+  }
+}
+
+export async function mongoQueryController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  const body = req.body as Record<string, unknown>;
+
+  const collection = stringField(body["collection"]);
+  if (!collection) {
+    throw new BadRequestError("A collection is required.", "COLLECTION_REQUIRED");
+  }
+
+  // Anything that is not the string "aggregate" is a find. Defaulting the
+  // *narrower* way round matters: an unrecognised mode must not become the
+  // one that can carry a $merge stage.
+  const mode = body["mode"] === "aggregate" ? "aggregate" : "find";
+  const limit = Number(body["limit"] ?? 50);
+  const skip = Number(body["skip"] ?? 0);
+
+  try {
+    res.json({
+      success: true,
+      message: "Query result",
+      data: await runMongoQuery(
+        projectId,
+        {
+          database: stringField(body["database"]),
+          collection,
+          mode,
+          text: stringField(body["text"], "{}"),
+          sort: stringField(body["sort"]),
+          limit: Number.isFinite(limit) ? limit : 50,
+          skip: Number.isFinite(skip) ? skip : 0,
+        },
+        { readOnly: !(await mayWrite(req, projectId)) },
+      ),
+    });
+  } catch (error) {
+    translate(error);
+  }
 }

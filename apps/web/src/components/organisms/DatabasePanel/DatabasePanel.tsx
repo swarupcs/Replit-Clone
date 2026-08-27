@@ -17,6 +17,7 @@ import {
 import { completionsFor } from "../../../lib/sqlCompletion.ts";
 import { renderCell } from "../../../lib/cellRender.ts";
 import { useThemeMode } from "../../../hooks/useThemeMode.ts";
+import { MongoWorkbench } from "./MongoWorkbench.tsx";
 
 const PAGE_SIZE = 100;
 
@@ -249,7 +250,7 @@ export const DatabasePanel = ({ projectId, isOwner }: Props) => {
           description={
             <span style={{ color: "var(--rc-text-muted)", fontSize: 13 }}>
               {isOwner
-                ? "Point this project at a Postgres database to browse it and run queries."
+                ? "Point this project at a Postgres or MongoDB database to browse it and run queries."
                 : "No database is connected to this project."}
             </span>
           }
@@ -258,7 +259,7 @@ export const DatabasePanel = ({ projectId, isOwner }: Props) => {
         {isOwner && (
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <Input.Password
-              placeholder="postgresql://user:password@host:5432/database"
+              placeholder="postgresql://… or mongodb+srv://…"
               value={url}
               onChange={(event) => setUrl(event.target.value)}
               onPressEnter={() => void connect()}
@@ -274,6 +275,21 @@ export const DatabasePanel = ({ projectId, isOwner }: Props) => {
           </div>
         )}
       </div>
+    );
+  }
+
+  // Routed on engine rather than switching labels inside one workbench. §7.6
+  // is explicit that a Mongo editor takes filter documents and pipelines
+  // rather than statements, and a shared component would have to pretend
+  // otherwise in every branch.
+  if (connection.engine === "mongodb") {
+    return (
+      <MongoWorkbench
+        projectId={projectId}
+        label={connection.label}
+        isOwner={isOwner}
+        onDisconnect={() => void disconnect()}
+      />
     );
   }
 
