@@ -1832,3 +1832,47 @@ body {
 .rc-outline-row[data-active="true"] {
   background: var(--rc-surface-raised);
 }
+
+/* Merge conflicts.
+ *
+ *  The two sides are tinted rather than only marked, because the thing
+ *  someone needs first is to see where one side stops and the other starts —
+ *  which the raw markers say only if you read them. */
+.rc-conflict-current {
+  background: color-mix(in srgb, var(--rc-git-added) 14%, transparent);
+}
+
+.rc-conflict-incoming {
+  background: color-mix(in srgb, var(--rc-git-untracked) 14%, transparent);
+}
+
+.rc-conflict-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: color-mix(in srgb, var(--rc-git-deleted) 12%, var(--rc-surface-raised));
+  border-bottom: 1px solid var(--rc-border);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.rc-conflict-count {
+  color: var(--rc-git-deleted);
+  font-weight: 600;
+}
+
+.rc-conflict-bar button {
+  border: 1px solid var(--rc-border-strong);
+  border-radius: 5px;
+  background: var(--rc-surface);
+  color: var(--rc-text);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.rc-conflict-bar button:hover {
+  border-color: var(--rc-accent);
+  color: var(--rc-accent);
+}

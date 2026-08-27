@@ -24,6 +24,12 @@ import { useEditorStatusStore } from "../../../store/editorStatusStore.ts";
 import { useThemeMode } from "../../../hooks/useThemeMode.ts";
 import { useMediaQuery } from "../../../hooks/useMediaQuery.ts";
 import { useSymbolStore } from "../../../store/symbolStore.ts";
+import {
+  findConflicts,
+  resolveConflict,
+  type ConflictBlock,
+  type Resolution,
+} from "../../../lib/mergeConflicts.ts";
 import type { FileSymbol } from "../../../lib/documentSymbols.ts";
 import {
   selectRegions,
@@ -411,6 +417,74 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
       subscription.dispose();
     };
   }, [pane, mountTick]);
+
+  /** Merge conflict blocks, with the four choices VS Code offers above each.
+   *
+   *  A state the product can already reach — pull produces conflicts — and
+   *  had no answer for beyond rendering the raw `<<<<<<<` markers. The
+   *  buttons are Monaco content widgets rather than DOM overlaid on the
+   *  editor, so they scroll with the text and sit at the right line without
+   *  anything measuring pixel offsets.
+   */
+  const [conflicts, setConflicts] = useState<ConflictBlock[]>([]);
+  const conflictDecorations = useRef<string[]>([]);
+
+  useEffect(() => {
+    const codeEditor = editorRef.current;
+    if (!codeEditor) return;
+
+    const model = codeEditor.getModel();
+    if (!model) return;
+
+    setConflicts(findConflicts(model.getValue()));
+  }, [activeTab?.relPath, activeTab?.value, mountTick]);
+
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const codeEditor = editorRef.current;
+    if (!monaco || !codeEditor) return;
+
+    conflictDecorations.current = codeEditor.deltaDecorations(
+      conflictDecorations.current,
+      conflicts.flatMap((block) => [
+        {
+          range: new monaco.Range(block.startLine, 1, block.separatorLine - 1, 1),
+          options: {
+            isWholeLine: true,
+            className: "rc-conflict-current",
+          },
+        },
+        {
+          range: new monaco.Range(block.separatorLine + 1, 1, block.endLine, 1),
+          options: {
+            isWholeLine: true,
+            className: "rc-conflict-incoming",
+          },
+        },
+      ]),
+    );
+  }, [conflicts, mountTick]);
+
+  /** Applies one choice and writes the result back through the normal path,
+   *  so the change is saved and shared like any other edit. */
+  const resolve = (block: ConflictBlock, resolution: Resolution) => {
+    const codeEditor = editorRef.current;
+    const relPath = activeTab?.relPath;
+    if (!codeEditor || !relPath) return;
+
+    const model = codeEditor.getModel();
+    if (!model) return;
+
+    const next = resolveConflict(model.getValue(), block, resolution);
+
+    // One full-range edit rather than a series of line edits: it is a single
+    // undo step, which is what somebody who picked the wrong side wants.
+    codeEditor.executeEdits("resolve-conflict", [
+      { range: model.getFullModelRange(), text: next },
+    ]);
+
+    setConflicts(findConflicts(next));
+  };
 
   /** The git bars down the left margin.
    *
@@ -956,6 +1030,41 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
           display: showDiff || reviewing ? "none" : "block",
         }}
       >
+        {conflicts.length > 0 && canEdit && (
+          <div className="rc-conflict-bar" role="group" aria-label="Merge conflicts">
+            <span className="rc-conflict-count">
+              {conflicts.length} conflict{conflicts.length === 1 ? "" : "s"}
+            </span>
+            {/* Acting on the first unresolved block rather than one bar per
+                block floating over the text: the buttons stay reachable
+                however the file is scrolled, and resolving walks forward. */}
+            <button type="button" onClick={() => resolve(conflicts[0]!, "current")}>
+              Accept {conflicts[0]?.currentLabel}
+            </button>
+            <button type="button" onClick={() => resolve(conflicts[0]!, "incoming")}>
+              Accept {conflicts[0]?.incomingLabel}
+            </button>
+            <button type="button" onClick={() => resolve(conflicts[0]!, "both")}>
+              Accept both
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const block = conflicts[0];
+                if (block) {
+                  editorRef.current?.revealLineInCenter(block.startLine);
+                  editorRef.current?.setPosition({
+                    lineNumber: block.startLine,
+                    column: 1,
+                  });
+                }
+              }}
+            >
+              Go to it
+            </button>
+          </div>
+        )}
+
         <Editor
           height="100%"
           width="100%"
