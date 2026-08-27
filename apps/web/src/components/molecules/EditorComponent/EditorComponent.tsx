@@ -23,6 +23,10 @@ import { useEditorStatusStore } from "../../../store/editorStatusStore.ts";
 import { useThemeMode } from "../../../hooks/useThemeMode.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
+import {
+  buildDiffOptions,
+  buildEditorOptions,
+} from "../../../lib/editorOptions.ts";
 import { useAiChatStore } from "../../../store/aiChatStore.ts";
 import {
   flushAllWrites,
@@ -697,15 +701,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
           // have instead.
           original={reviewBase}
           modified={reviewing?.contents ?? ""}
-          options={{
-            readOnly: true,
-            renderSideBySide: true,
-            fontSize: settings.fontSize,
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-            minimap: { enabled: false },
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-          }}
+          options={buildDiffOptions(settings)}
         />
       </div>
 
@@ -724,15 +720,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
           // Left is the file as saved; right is what is in the buffer now.
           original={activeTab.value}
           modified={diffCurrent}
-          options={{
-            readOnly: true,
-            renderSideBySide: true,
-            fontSize: settings.fontSize,
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-            minimap: { enabled: false },
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-          }}
+          options={buildDiffOptions(settings)}
         />
       </div>
 
@@ -751,29 +739,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
           height="100%"
           width="100%"
           theme={monacoTheme}
-          options={{
-            // Read-only access is presented as read-only rather than letting
-            // every keystroke be rejected one at a time.
-            readOnly: !canEdit,
-            fontSize: settings.fontSize,
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-            fontLigatures: true,
-            lineHeight: 1.6,
-            minimap: { enabled: settings.minimap },
-            lineNumbers: settings.lineNumbers ? "on" : "off",
-            wordWrap: settings.wordWrap ? "on" : "off",
-            tabSize: settings.tabSize,
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            padding: { top: 16, bottom: 16 },
-            smoothScrolling: true,
-            cursorBlinking: "smooth",
-            cursorSmoothCaretAnimation: "on",
-            renderLineHighlight: "line",
-            roundedSelection: true,
-            scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
-            guides: { indentation: true, bracketPairs: true },
-          }}
+          options={buildEditorOptions(settings, { canEdit })}
           onChange={handleChange}
           onMount={handleMount}
         />

@@ -857,7 +857,7 @@ true for the row to move to `done`.
 
 | # | Row | Plan § | Effort | Acceptance | Status | Landed |
 |---|---|---|---|---|---|---|
-| 1 | Monaco options + settings dialog rows | §2.1 | 1 | Every option in the §2.1 table is on and, where it is a preference, exposed in `EditorSettingsDialog`; a test asserts each is present in the options object | not started | — |
+| 1 | Monaco options + settings dialog rows | §2.1 | 1 | Every option in the §2.1 table is on and, where it is a preference, exposed in `EditorSettingsDialog`; a test asserts each is present in the options object | **done** | 2026-08-27 — `lib/editorOptions.ts` builds the option set; nine new preferences, nine new dialog rows; guards on the §2.1 list, on dialog coverage and on persistence |
 | 2 | One extension table, real icon set, folder icons | §1.1–1.3 | 3 | A single `Record<extension, { language, icon }>` is the only source of both; a test proves no language lacks an icon and no icon lacks a language; folders resolve open and closed glyphs by name | not started | — |
 | 3 | Preview tabs, reorder, pin, close-others, MRU `Ctrl+Tab` | §2.3 | 3 | Single-click opens a preview tab that the next single-click replaces; double-click pins; drag reorders; `Ctrl+Shift+T` reopens the last closed | not started | — |
 | 4 | Light editor theme + the theming audit | §6 | 3 | A hand-built light theme replaces stock `vs`; xterm selection and search highlight, the Monaco diff editor and both fallback pages are themed; `prefers-reduced-motion` and `prefers-contrast` are honoured | not started | — |
