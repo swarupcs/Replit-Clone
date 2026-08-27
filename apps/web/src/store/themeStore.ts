@@ -10,6 +10,15 @@ export type ThemeMode = "light" | "dark";
 interface ThemeStore {
   choice: ThemeChoice;
   setChoice: (choice: ThemeChoice) => void;
+  /** Forced by the page rather than chosen by the user, and it wins.
+   *
+   *  An embed is themed by the article that frames it: its `?theme=` parameter
+   *  is the host author saying what looks right beside their own text, and a
+   *  preference this reader happened to save on this platform months ago is not
+   *  a better answer than that. Null everywhere else.
+   */
+  override: ThemeMode | null;
+  setOverride: (mode: ThemeMode | null) => void;
 }
 
 export const useThemeStore = create<ThemeStore>()(
@@ -19,8 +28,17 @@ export const useThemeStore = create<ThemeStore>()(
       setChoice: (choice) => {
         set({ choice });
       },
+      override: null,
+      setOverride: (override) => {
+        set({ override });
+      },
     }),
-    { name: "rc-theme" },
+    {
+      name: "rc-theme",
+      // The override belongs to the URL, not to the user, so it must not
+      // outlive the page that set it.
+      partialize: (state) => ({ choice: state.choice }),
+    },
   ),
 );
 

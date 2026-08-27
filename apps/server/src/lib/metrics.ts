@@ -34,7 +34,14 @@ export type CounterName =
   // A request to the public origin whose path tried to leave one site's
   // directory. Never zero-and-forgotten: this counting up at all says
   // somebody is probing the one origin that needs no account.
-  | "deploy_site_traversal_blocked";
+  | "deploy_site_traversal_blocked"
+  // Embeds. `embed_views` is how much reach the feature actually has;
+  // `embed_path_rejected` is the other kind of number entirely -- an
+  // unauthenticated endpoint being asked for paths it does not serve.
+  | "embeds_created"
+  | "embeds_revoked"
+  | "embed_views"
+  | "embed_path_rejected";
 
 const counters = new Map<CounterName, number>();
 

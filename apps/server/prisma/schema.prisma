@@ -16,8 +16,8 @@ model User {
   passwordHash String?
 
   /// Set once the address has been confirmed. Unverified accounts can still
-  /// sign in — locking people out of a tool they just signed up for is worse
-  /// than the risk — but the state is recorded so it can be acted on.
+  /// sign in â€” locking people out of a tool they just signed up for is worse
+  /// than the risk â€” but the state is recorded so it can be acted on.
   emailVerifiedAt DateTime?
 
   /// GitHub's numeric user id, when the account is linked. Stable across
@@ -110,7 +110,7 @@ model RefreshToken {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   /// Set when the token is rotated or explicitly revoked. A token presented
-  /// after this is a replay, and revokes its whole family — the standard
+  /// after this is a replay, and revokes its whole family â€” the standard
   /// signal that a token was stolen.
   revokedAt DateTime?
 
@@ -166,6 +166,7 @@ model Project {
   deployment    Deployment?
   databaseConnection ProjectDatabaseConnection?
   managedDatabase    ManagedDatabase?
+  embed              Embed?
 
   @@index([ownerId])
   @@map("projects")
@@ -174,8 +175,8 @@ model Project {
 /// A GitHub authorisation this server may act under.
 ///
 /// Separate from `User.githubId`, which only records that an account signed in
-/// with GitHub. This is the part that can *do* things — read repositories,
-/// clone, push, open a pull request — and so it is a deliberate, separate
+/// with GitHub. This is the part that can *do* things â€” read repositories,
+/// clone, push, open a pull request â€” and so it is a deliberate, separate
 /// consent that can be revoked on its own without signing the person out.
 model GithubConnection {
   id String @id @default(uuid())
@@ -189,7 +190,7 @@ model GithubConnection {
   /// ciphertext and nothing more.
   tokenCipher String
 
-  /// What GitHub actually granted, which is not always what was asked for —
+  /// What GitHub actually granted, which is not always what was asked for â€”
   /// an organisation can withhold `repo`. Stored so the app can say which
   /// operation is unavailable and why, rather than failing at the API call.
   scopes String
@@ -291,9 +292,9 @@ model ProjectDatabaseConnection {
 
 /// A database this platform runs for a project, in its own container.
 ///
-/// §7.3 chose a sidecar per project over a shared cluster because its
-/// isolation is structural — a separate container, a separate volume, its own
-/// credentials — rather than a set of grants that all have to stay right, and
+/// Â§7.3 chose a sidecar per project over a shared cluster because its
+/// isolation is structural â€” a separate container, a separate volume, its own
+/// credentials â€” rather than a set of grants that all have to stay right, and
 /// every mistake in the shared version is cross-tenant.
 model ManagedDatabase {
   id String @id @default(uuid())
@@ -320,4 +321,41 @@ model ManagedDatabase {
   updatedAt DateTime @updatedAt
 
   @@map("managed_databases")
+}
+
+/// A read-only, unauthenticated view of a project, for framing in someone
+/// else's page.
+///
+/// One row per project, because the token IS the embed: an owner who wants a
+/// different token has revoked the old one, and rotating in place says that
+/// plainly. Presentation (`view`, `activeFile`) lives here rather than only in
+/// the URL so the owner can change their mind without editing every snippet
+/// they have ever pasted.
+model Embed {
+  id String @id @default(uuid())
+
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// The credential in the iframe's URL. 32 random bytes, base64url. Stored in
+  /// the clear, unlike a refresh token, because it is not a secret the server
+  /// verifies -- it is the address of a public thing, and the whole page it
+  /// grants is meant to be read by strangers.
+  token String @unique
+
+  /// Which halves are shown: "code", "preview", or "split".
+  view String @default("split")
+
+  /// What the preview half frames: "none" or "deployment". Never a running
+  /// container -- an anonymous page view must not be able to start one.
+  preview String @default("deployment")
+
+  /// Project-relative POSIX path of the file that opens first, or null for
+  /// whichever the tree offers.
+  activeFile String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("embeds")
 }

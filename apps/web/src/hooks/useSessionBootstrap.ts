@@ -7,11 +7,23 @@ import { useAuthStore } from "../store/authStore.ts";
  *
  *  The access token is deliberately memory-only, so it is gone after a reload;
  *  this exchanges the surviving refresh cookie for a fresh one.
+ *
+ *  `enabled` exists for the embed route, and the reason is worth stating: a
+ *  refresh token is SINGLE USE and rotates on every exchange. An embed runs in
+ *  an iframe on somebody else's site, where the browser may hand over the
+ *  reader's cookie (a deployment with COOKIE_SAME_SITE=none) and then refuse to
+ *  store the replacement, because storage in a third-party frame is
+ *  partitioned. The old token is spent, the new one is lost, and the session
+ *  the reader has open in their real tab is dead -- so embedding a project
+ *  would quietly sign people out of it. Nothing on that page needs a session
+ *  anyway.
  */
-export function useSessionBootstrap(): void {
+export function useSessionBootstrap(enabled = true): void {
   const { setSession, clearSession } = useAuthStore();
 
   useEffect(() => {
+    if (!enabled) return;
+
     let cancelled = false;
 
     void (async () => {
@@ -41,5 +53,5 @@ export function useSessionBootstrap(): void {
     return () => {
       cancelled = true;
     };
-  }, [setSession, clearSession]);
+  }, [enabled, setSession, clearSession]);
 }

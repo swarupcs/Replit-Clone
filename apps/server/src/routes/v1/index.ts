@@ -7,6 +7,7 @@ import { aiStatusController } from "../../controllers/aiController.js";
 import authRouter from "./auth.js";
 import projectRouter from "./projects.js";
 import githubRouter from "./github.js";
+import embedRouter from "./embeds.js";
 
 const router = express.Router();
 
@@ -24,5 +25,8 @@ router.get("/ai/status", requireAuth, asyncHandler(aiStatusController));
 router.use("/auth", authRouter);
 router.use("/projects", projectRouter);
 router.use("/github", githubRouter);
+// Deliberately NOT behind requireAuth: an embed is read by people who have
+// no account here and never will. See routes/v1/embeds.ts.
+router.use("/embeds", embedRouter);
 
 export default router;

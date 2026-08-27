@@ -20,6 +20,16 @@ const ProjectPlayground = lazy(() =>
   })),
 );
 
+/** Lazy for the same reason, and for one more: an embed is loaded by readers
+ *  who did not ask for it, often several to a page. Nothing about the editor's
+ *  own routes should be on their critical path, and nothing about theirs should
+ *  be on the dashboard's. */
+const EmbedPage = lazy(() =>
+  import("./pages/EmbedPage.tsx").then((module) => ({
+    default: module.EmbedPage,
+  })),
+);
+
 const RouteFallback = () => (
   <Flex
     align="center"
@@ -47,6 +57,18 @@ export const Router = () => {
         {/* Deliberately outside ProtectedRoute: the page itself explains that
             signing in is needed, and carries the link through the detour. */}
         <Route path="/join" element={<JoinProject />} />
+
+        {/* Outside it for a different reason: an embed's readers have no
+            account and never will. Bouncing them to a login form inside an
+            iframe on somebody's blog would be the whole feature failing. */}
+        <Route
+          path="/embed/:token"
+          element={
+            <Suspense fallback={<RouteFallback />}>
+              <EmbedPage />
+            </Suspense>
+          }
+        />
 
         <Route
           path="/"
