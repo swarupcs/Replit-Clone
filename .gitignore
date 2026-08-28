@@ -17,3 +17,8 @@ coverage/
 apps/web/e2e/.artifacts/
 apps/web/playwright-report/
 apps/web/test-results/
+
+# Copied from packages/shared/dist by `pnpm images:prepare`, so the egress
+# gateway enforces the same address policy the server does rather than a
+# second copy of it.
+images/egress/network.js

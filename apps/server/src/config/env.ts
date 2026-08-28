@@ -234,6 +234,60 @@ const envSchema = z.object({
   MAX_CONTAINERS_PER_USER: z.coerce.number().int().positive().default(2),
   MAX_CONCURRENT_CONTAINERS: z.coerce.number().int().positive().default(3),
 
+  /** Cut the sandbox network off from everything but the egress gateway.
+   *
+   *  Containers have had memory, CPU, PID and disk limits for a while, and no
+   *  network policy at all: the sandbox bridge had ordinary NAT, so a project
+   *  could reach the internet (which it must, to install packages) and, with
+   *  it, the host's LAN, the cloud metadata endpoint that hands out
+   *  credentials, and in the compose deployment the platform's own API. See
+   *  `containers/sandboxNetwork.ts` for how the control works.
+   *
+   *  OFF by default, and that default is a migration decision rather than a
+   *  security opinion. Turning it on requires `sandbox-egress:latest` to be
+   *  built (`pnpm images:build`), and an existing deployment that upgraded
+   *  into it without that image would lose every package install with no
+   *  obvious cause. New deployments should set it. */
+  SANDBOX_EGRESS_FILTERED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true" || value === "1"),
+
+  /** The gateway image. Separate from the sandbox images because it is not a
+   *  place user code runs — it is the thing user code has to go through. */
+  EGRESS_IMAGE: z.string().default("sandbox-egress:latest"),
+
+  /** Domain suffixes a sandbox may reach, or empty for any public address.
+   *
+   *  Empty by default: no operator can enumerate in advance every registry,
+   *  CDN and git host a real project legitimately needs, and a sandbox whose
+   *  `npm install` fails is not a sandbox. The private-address floor holds
+   *  either way — this is a ceiling for deployments that want one. */
+  EGRESS_ALLOW_DOMAINS: z
+    .string()
+    .default("")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+
+  /** Ports a sandbox may reach, whatever the destination.
+   *
+   *  A public address is not automatically a safe one: port 25 from this
+   *  platform's IP address is somebody else's spam problem. HTTP, HTTPS and
+   *  git's own port cover what a build actually does. */
+  EGRESS_ALLOW_PORTS: z
+    .string()
+    .default("80,443,9418")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((entry) => Number(entry.trim()))
+        .filter((port) => Number.isInteger(port) && port > 0),
+    ),
+
   /** Start a project's dev server as soon as somebody opens it, instead of
    *  waiting for the Run button.
    *
