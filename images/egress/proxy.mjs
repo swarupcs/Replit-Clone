@@ -182,7 +182,9 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(
     JSON.stringify({
       event: "egress.listening",
-      port: PORT,
+      // What was actually bound, not what was asked for. They differ when the
+      // port is 0, and an operator reading this line wants the real one.
+      port: server.address().port,
       allowDomains: POLICY.allowDomains.length === 0 ? "any public" : POLICY.allowDomains,
       allowPorts: POLICY.allowPorts,
     }),

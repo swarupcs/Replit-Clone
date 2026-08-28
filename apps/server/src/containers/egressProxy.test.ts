@@ -55,20 +55,24 @@ describe.skipIf(!prepared)("the egress gateway, end to end", () => {
     victimPort = (victim.address() as AddressInfo).port;
 
     proxy = spawn(process.execPath, [PROXY], {
-      // Port 0 would leave the proxy unable to report which port it took, so
-      // it is asked for a high fixed one. Above 15000: Windows can refuse to
-      // bind lower ports for reasons unrelated to whether they are in use.
-      env: { ...process.env, EGRESS_PORT: "15931" },
+      // Port 0, and the port it actually took is read back off its own
+      // startup line. A fixed port here made this suite flaky: it collides
+      // with a leftover process from an earlier run, and the collision
+      // surfaces as "the gateway did not start" rather than as what it is.
+      env: { ...process.env, EGRESS_PORT: "0" },
       stdio: "pipe",
     });
-    proxyPort = 15931;
 
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error("the gateway did not start"));
       }, 10_000);
+      let line = "";
       proxy.stdout.on("data", (chunk: Buffer) => {
-        if (chunk.toString().includes("egress.listening")) {
+        line += chunk.toString();
+        const match = /"event":"egress\.listening","port":(\d+)/.exec(line);
+        if (match?.[1]) {
+          proxyPort = Number(match[1]);
           clearTimeout(timer);
           resolve();
         }
