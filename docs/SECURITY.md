@@ -163,8 +163,32 @@ can see rather than anything on the network
   `object-src 'none'`), and the sandbox's own CSP/X-Frame-Options headers are
   dropped — defense in depth against a compromised sandbox serving hostile
   markup into the IDE's iframe.
-- Containers are capped: memory, CPUs, a global concurrency limit, a
-  per-user limit, and an idle reaper (`containers/containerManager.ts`).
+- Containers are capped: memory, CPUs, PIDs, disk, a global concurrency limit,
+  a per-user limit, and an idle reaper (`containers/containerManager.ts`).
+- **Egress** is filtered where the deployment turns it on
+  (`SANDBOX_EGRESS_FILTERED`). The sandbox bridge is then created
+  `Internal: true` — Docker adds no route off it and no NAT — and a single
+  unprivileged gateway container (`images/egress`) attached to both that
+  network and an ordinary one is the only way out. It refuses any destination
+  resolving to a private address, using the same rule as the SSRF guard above
+  (`packages/shared/src/network.ts`, so there is one definition rather than
+  two that agree on the day they were written), and it refuses ports outside
+  80/443/9418. An optional domain allowlist is a ceiling on top.
+
+  The proxy variables handed to project containers are a convenience, not the
+  control: code that respects `HTTPS_PROXY` gets a working `npm install`, and
+  code that ignores it — which is what hostile code would do — finds no route.
+  The policy is enforced by the topology.
+
+  Without it, a project container reaches the internet (which it must, to
+  install packages) and with it the host's LAN, the cloud instance metadata
+  endpoint that hands credentials to anything that asks, and in the compose
+  deployment this server's own API. It is off by default only so that an
+  existing deployment does not lose package installs on upgrade; a deployment
+  running untrusted code should turn it on. Turning it on when the network
+  already exists is refused at boot rather than ignored, because Docker cannot
+  change the flag on an existing network and a server that believes it is
+  filtering when it is not is worse than one that will not start.
 - The terminal is a shell *inside that container*, reached by a WebSocket
   whose token travels in the subprotocol list (never the query string, which
   lands in access logs). It requires editor access and is closed on

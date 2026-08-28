@@ -12,7 +12,8 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
-    "images:build": "docker build -t sandbox-node:latest images/node && docker build -t sandbox-python:latest images/python && docker build -t sandbox-go:latest images/go",
+    "images:prepare": "pnpm --filter @replit-clone/shared build && node -e \"require('fs').copyFileSync('packages/shared/dist/network.js','images/egress/network.js')\"",
+    "images:build": "pnpm images:prepare && docker build -t sandbox-node:latest images/node && docker build -t sandbox-python:latest images/python && docker build -t sandbox-go:latest images/go && docker build -t sandbox-egress:latest images/egress",
     "db:up": "docker compose up -d"
   },
   "pnpm": {

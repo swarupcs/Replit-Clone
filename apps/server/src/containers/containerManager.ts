@@ -15,6 +15,7 @@ import { getTemplate } from "../templates/registry.js";
 import { logger } from "../lib/logger.js";
 import { getEnvVars, toDockerEnv } from "../service/projectEnvService.js";
 import { SANDBOX_NETWORK } from "./sandboxNetwork.js";
+import { proxyEnv } from "./egressGateway.js";
 import { increment, registerGauge } from "../lib/metrics.js";
 import {
   DevcontainerError,
@@ -415,6 +416,10 @@ async function startContainer(projectId: string): Promise<Container> {
         "HOST=0.0.0.0",
         // Vite serves under this base so the proxied path resolves correctly.
         `PREVIEW_BASE=/preview/${projectId}/`,
+        // Where the way out is, when there is a controlled one. Empty when
+        // egress filtering is off. These point tools at the gateway; they do
+        // not enforce anything — see `egressGateway.proxyEnv`.
+        ...proxyEnv(),
         // The devcontainer's own variables, before the project's. It is a file
         // in the repository and the project's are the secret store, so where
         // the two name the same variable the secret wins -- otherwise a

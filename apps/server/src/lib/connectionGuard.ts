@@ -1,5 +1,6 @@
 import { lookup, resolveSrv } from "node:dns/promises";
 import { isIP } from "node:net";
+import { isPrivateAddress } from "@replit-clone/shared";
 import { env } from "../config/env.js";
 
 /** Why a connection string was refused. Distinct codes because the operator
@@ -50,53 +51,12 @@ const DEFAULT_PORTS: Record<string, number> = {
   "mongodb+srv:": 27017,
 };
 
-/** Everything a server must not be talked into dialling on someone's behalf.
- *
- *  169.254.0.0/16 earns its place twice over: it is link-local, and it is
- *  where every major cloud puts its instance metadata endpoint, which hands
- *  out credentials to anything that can make an HTTP request from the host.
+/** Re-exported so callers here keep one import, and so the shared definition
+ *  is the only one. It moved to `@replit-clone/shared` when the egress gateway
+ *  needed the same rule from a different process — see `shared/src/network.ts`
+ *  for why the two must not each keep a copy.
  */
-function isPrivateV4(address: string): boolean {
-  const parts = address.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) return true;
-
-  const [a = 0, b = 0] = parts;
-
-  if (a === 0) return true; // "this network"
-  if (a === 10) return true; // RFC 1918
-  if (a === 127) return true; // loopback
-  if (a === 169 && b === 254) return true; // link-local, and cloud metadata
-  if (a === 172 && b >= 16 && b <= 31) return true; // RFC 1918
-  if (a === 192 && b === 168) return true; // RFC 1918
-  if (a === 100 && b >= 64 && b <= 127) return true; // RFC 6598 carrier NAT
-  if (a >= 224) return true; // multicast and reserved
-
-  return false;
-}
-
-function isPrivateV6(address: string): boolean {
-  const value = address.toLowerCase().split("%")[0] ?? "";
-
-  if (value === "::1" || value === "::") return true;
-  // Unique-local and link-local.
-  if (/^f[cd]/.test(value)) return true;
-  if (value.startsWith("fe80")) return true;
-
-  // IPv4-mapped (::ffff:127.0.0.1) is the standard way to smuggle a v4
-  // loopback past a check that only looks at v6 prefixes.
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(value);
-  if (mapped?.[1]) return isPrivateV4(mapped[1]);
-
-  return false;
-}
-
-export function isPrivateAddress(address: string): boolean {
-  const family = isIP(address);
-  if (family === 4) return isPrivateV4(address);
-  if (family === 6) return isPrivateV6(address);
-  // Not an IP at all: refuse rather than guess.
-  return true;
-}
+export { isPrivateAddress };
 
 /** The platform's own database, by host and port.
  *

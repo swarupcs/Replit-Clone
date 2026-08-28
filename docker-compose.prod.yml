@@ -55,6 +55,13 @@ services:
       # `allow-same-origin` from the iframe) breaks every client-rendered
       # preview: an opaque origin fails CORS on its own module scripts.
       PREVIEW_PORT: 3001
+      # Cut the sandbox network off from everything but the egress gateway.
+      # Requires `pnpm images:build` to have built sandbox-egress:latest on
+      # this host. Without it a project container can reach this VM's LAN, the
+      # cloud metadata endpoint, and the API server above -- which is on the
+      # sandbox network so that previews work.
+      SANDBOX_EGRESS_FILTERED: ${SANDBOX_EGRESS_FILTERED:-false}
+      EGRESS_ALLOW_DOMAINS: ${EGRESS_ALLOW_DOMAINS:-}
     # /health checks Postgres and the Docker daemon; /ping always answered 200
     # no matter what state the process was in.
     healthcheck:

@@ -59,6 +59,7 @@ import {
   stopAllContainers,
   setOnProjectReaped,
 } from "./containers/containerManager.js";
+import { ensureEgressGateway } from "./containers/egressGateway.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
 import {
   docRoomName,
@@ -355,6 +356,12 @@ async function start(): Promise<void> {
   // server that is not running, and `tsx watch` never retries because nothing
   // ever crashed.
   await withTimeout(ensureNetwork(), "docker network setup");
+
+  // The sandbox network's only way out, when it is cut off from having one
+  // of its own. Before the reconcile below rather than after, and before any
+  // project can be opened: a container whose install fails because the
+  // gateway was not up yet looks exactly like a project that is broken.
+  await withTimeout(ensureEgressGateway(), "egress gateway");
 
   // A crash or a `docker kill` leaves containers whose project is gone, and
   // directories with no row. Neither used to be cleaned up, ever.
