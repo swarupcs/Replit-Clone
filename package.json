@@ -8,6 +8,8 @@
   "packageManager": "pnpm@10.28.1",
   "scripts": {
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
+    "dev:server": "pnpm --filter @replit-clone/shared build && pnpm --filter @replit-clone/server dev",
+    "dev:web": "pnpm --filter @replit-clone/shared build && pnpm --filter @replit-clone/web dev",
     "build": "pnpm --filter @replit-clone/shared build && pnpm --parallel --filter \"./apps/*\" build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",

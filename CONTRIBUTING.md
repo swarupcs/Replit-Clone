@@ -17,6 +17,17 @@ pnpm --filter '@replit-clone/server' exec prisma migrate deploy   # apply the sc
 pnpm dev            # web on :15273, API on :3100
 ```
 
+`pnpm dev` runs both in one terminal. To keep their output apart -- worth
+it when you are watching the server's logs -- run one in each:
+
+```bash
+pnpm dev:server     # API on :3100, preview :3101, deploy sites :3102
+pnpm dev:web        # :15273
+```
+
+Order does not matter; the web dev server proxies to the API and simply
+fails those calls until it is up.
+
 The web dev port is pinned and deliberate (see `apps/web/vite.config.ts`) —
 CORS, the preview cookie, and frame-ancestors all key off the exact origin.
 
