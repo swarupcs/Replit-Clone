@@ -60,6 +60,7 @@ import {
   setOnProjectReaped,
 } from "./containers/containerManager.js";
 import { ensureEgressGateway } from "./containers/egressGateway.js";
+import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
 import {
   docRoomName,
@@ -106,6 +107,11 @@ app.use(
 );
 app.use(cors({ origin: env.WEB_ORIGIN, credentials: true }));
 app.use(cookieParser());
+
+// Everything helmet had to leave off, because with PREVIEW_PORT=0 this app
+// also proxies previews. See the module: the exemption is now the preview
+// path rather than the whole server.
+app.use(apiSecurityHeaders(previewPort === 0));
 
 // Before the routes, so everything below inherits a request id.
 app.use(requestLogger);

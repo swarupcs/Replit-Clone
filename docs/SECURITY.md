@@ -193,6 +193,22 @@ can see rather than anything on the network
   whose token travels in the subprotocol list (never the query string, which
   lands in access logs). It requires editor access and is closed on
   revocation.
+- **The editor origin refuses to be framed.** `frame-ancestors 'none'` plus
+  `X-Frame-Options: DENY`, served by Vite in development and nginx in the
+  image, from one set of values with a test that fails when the two drift. A
+  page able to frame the IDE would be showing a real editor carrying the
+  reader's real session under markup of its own choosing. `/embed/` is the one
+  exception and drops the framing rule rather than loosening it, because being
+  framed by pages this platform will never see is the entire feature.
+
+  Deliberately not a full policy: no `default-src` or `script-src`, because
+  Monaco loads workers from blob: URLs and its TypeScript worker needs eval —
+  a strict script policy there is a white editor rather than a secure one.
+- **The API origin** carries `default-src 'none'; frame-ancestors 'none';
+  base-uri 'none'; form-action 'none'`, which is safe there precisely because
+  nothing it serves is a document. Previews are exempt, and only when
+  `PREVIEW_PORT=0` actually puts them on this origin — the exemption used to
+  be the whole server.
 - Uploads and downloads are bounded (25 MB per file), quota-checked, path-
   confined, and downloads are forced `attachment` with `nosniff` so the API
   origin never renders user content.

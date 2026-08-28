@@ -1,9 +1,30 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { headersFor } from "./src/config/securityHeaders.js";
+
+/** Serves the same security headers nginx serves in the image.
+ *
+ *  Vite's own `server.headers` is global, and this app needs two sets: an
+ *  embed exists to be framed and everything else must not be. A header that
+ *  differs between development and production is the worst of both -- absent
+ *  exactly where it matters, present where nobody would notice it missing.
+ */
+const securityHeaders: Plugin = {
+  name: "security-headers",
+  configureServer(server) {
+    server.middlewares.use((req, res, next) => {
+      const pathname = (req.url ?? "/").split("?")[0] ?? "/";
+      for (const [name, value] of Object.entries(headersFor(pathname))) {
+        res.setHeader(name, value);
+      }
+      next();
+    });
+  },
+};
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), securityHeaders],
   build: {
     rollupOptions: {
       output: {
