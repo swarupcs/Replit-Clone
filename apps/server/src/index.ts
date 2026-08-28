@@ -61,6 +61,7 @@ import {
 } from "./containers/containerManager.js";
 import { ensureEgressGateway } from "./containers/egressGateway.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
+import { EgressControlUnavailable } from "./containers/sandboxNetwork.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
 import {
   docRoomName,
@@ -361,7 +362,23 @@ async function start(): Promise<void> {
   // listening on nothing. From a browser that is indistinguishable from a
   // server that is not running, and `tsx watch` never retries because nothing
   // ever crashed.
-  await withTimeout(ensureNetwork(), "docker network setup");
+  await withTimeout(
+    ensureNetwork().catch((error: unknown) => {
+      // withTimeout swallows failures on purpose: a Docker daemon that is
+      // down or slow should cost the container features and nothing else.
+      // This one refusal is not that. It means egress filtering was turned
+      // ON and is not in effect, so every sandbox has unrestricted outbound
+      // access while the configuration says otherwise -- and the server would
+      // carry on serving, with the reason sitting in a log line nobody reads
+      // until afterwards. The guard is only a guard if it stops the boot.
+      if (error instanceof EgressControlUnavailable) {
+        logger.error("refusing to start", error);
+        process.exit(1);
+      }
+      throw error;
+    }),
+    "docker network setup",
+  );
 
   // The sandbox network's only way out, when it is cut off from having one
   // of its own. Before the reconcile below rather than after, and before any

@@ -80,12 +80,21 @@ export async function ensureEgressGateway(): Promise<void> {
     return;
   }
 
-  // Present but stopped: remove rather than start, so it comes back with the
-  // current image and the current allowlist rather than the one it was
+  // Present but not running: remove rather than start, so it comes back with
+  // the current image and the current allowlist rather than the ones it was
   // created with.
-  if (current) {
-    await docker.getContainer(EGRESS_CONTAINER).remove({ force: true });
-  }
+  //
+  // Unconditional rather than guarded on `current`, because `existing()`
+  // reports "no such container" for any inspect failure and a name that is
+  // taken is not always a container that inspects cleanly -- a half-created
+  // one from an interrupted boot holds the name and produced a 409 here.
+  // Removing something that is already gone is not an error worth having.
+  await docker
+    .getContainer(EGRESS_CONTAINER)
+    .remove({ force: true })
+    .catch(() => {
+      // Never existed, or someone else removed it first.
+    });
 
   const container = await docker.createContainer({
     Image: env.EGRESS_IMAGE,

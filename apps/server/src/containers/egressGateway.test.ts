@@ -41,9 +41,8 @@ vi.mock("../config/env.js", async (importOriginal) => ({
   env: settings,
 }));
 
-const { ensureNetwork, SANDBOX_NETWORK, EGRESS_NETWORK } = await import(
-  "./sandboxNetwork.js"
-);
+const { ensureNetwork, SANDBOX_NETWORK, EGRESS_NETWORK, EgressControlUnavailable } =
+  await import("./sandboxNetwork.js");
 const { ensureEgressGateway, proxyEnv, EGRESS_CONTAINER } = await import(
   "./egressGateway.js"
 );
@@ -119,6 +118,11 @@ describe("the sandbox network", () => {
     });
 
     await expect(ensureNetwork()).rejects.toThrow(/not internal/);
+    // A type of its own, because boot must EXIT on this one rather than
+    // logging it and serving on -- which is what it used to do.
+    await expect(ensureNetwork()).rejects.toBeInstanceOf(
+      EgressControlUnavailable,
+    );
   });
 
   it("names the command that fixes it", async () => {
@@ -185,6 +189,7 @@ describe("the gateway container", () => {
     docker.getNetwork.mockReturnValue({ connect, inspect: vi.fn() });
     docker.getContainer.mockReturnValue({
       inspect: vi.fn().mockRejectedValue(new Error("none")),
+      remove: vi.fn().mockResolvedValue(undefined),
     });
 
     await ensureEgressGateway();
@@ -242,6 +247,52 @@ describe("the gateway container", () => {
 
     expect(remove).toHaveBeenCalledWith({ force: true });
     expect(docker.createContainer).toHaveBeenCalled();
+  });
+
+  it("clears the name even when the leftover cannot be inspected", async () => {
+    // The 409 this replaced. `existing()` reports "no such container" for any
+    // inspect failure, but a half-created container from an interrupted boot
+    // still HOLDS the name -- so trusting inspect meant createContainer
+    // failing on a conflict every boot until someone removed it by hand.
+    settings.SANDBOX_EGRESS_FILTERED = true;
+    const remove = vi.fn().mockResolvedValue(undefined);
+    docker.createContainer.mockResolvedValue({
+      id: "gw1",
+      start: vi.fn().mockResolvedValue(undefined),
+    });
+    docker.getNetwork.mockReturnValue({
+      connect: vi.fn().mockResolvedValue(undefined),
+      inspect: vi.fn(),
+    });
+    docker.getContainer.mockReturnValue({
+      inspect: vi.fn().mockRejectedValue(new Error("no such container")),
+      remove,
+    });
+
+    await ensureEgressGateway();
+
+    expect(remove).toHaveBeenCalledWith({ force: true });
+    expect(docker.createContainer).toHaveBeenCalled();
+  });
+
+  it("does not treat a missing container as a failure", async () => {
+    // The ordinary first boot: nothing to remove, and the remove must not
+    // take the gateway down with it.
+    settings.SANDBOX_EGRESS_FILTERED = true;
+    docker.createContainer.mockResolvedValue({
+      id: "gw1",
+      start: vi.fn().mockResolvedValue(undefined),
+    });
+    docker.getNetwork.mockReturnValue({
+      connect: vi.fn().mockResolvedValue(undefined),
+      inspect: vi.fn(),
+    });
+    docker.getContainer.mockReturnValue({
+      inspect: vi.fn().mockRejectedValue(new Error("none")),
+      remove: vi.fn().mockRejectedValue(new Error("No such container")),
+    });
+
+    await expect(ensureEgressGateway()).resolves.toBeUndefined();
   });
 });
 

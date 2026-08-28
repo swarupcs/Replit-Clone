@@ -21,6 +21,23 @@ export const SANDBOX_NETWORK = "replit-clone-sandbox";
  */
 export const EGRESS_NETWORK = "replit-clone-egress";
 
+/** A control the operator asked for that is not, in fact, in effect.
+ *
+ *  Its own type because boot treats it differently from every other Docker
+ *  failure. A daemon that is down or slow costs the container features and
+ *  nothing else -- the server still serves the editor, and that is the right
+ *  trade. This is not that: it means sandboxes are running with unrestricted
+ *  outbound access while the configuration says they are not, and booting
+ *  past it leaves the deployment wrong about itself in the one direction that
+ *  matters.
+ */
+export class EgressControlUnavailable extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EgressControlUnavailable";
+  }
+}
+
 /** Whether the sandbox bridge is cut off from everything but the gateway.
  *
  *  This is the entire egress control, and it is worth being precise about why
@@ -104,7 +121,7 @@ async function assertSandboxIsInternal(): Promise<void> {
 
   if (details.Internal) return;
 
-  throw new Error(
+  throw new EgressControlUnavailable(
     `SANDBOX_EGRESS_FILTERED is on, but the "${SANDBOX_NETWORK}" network ` +
       "already exists and is not internal, so sandboxes would still have " +
       "unrestricted outbound access. Docker cannot change this on an " +
