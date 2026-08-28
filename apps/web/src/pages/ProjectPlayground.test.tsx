@@ -86,6 +86,11 @@ vi.mock("../lib/projectSources.ts", () => ({
   clearProjectSources,
 }));
 // The real loader pulls in Monaco, which jsdom cannot run.
+// Registers the editor themes against the real Monaco, which cannot load
+// here. The component under test only needs the theme NAMES, and those
+// live in editorThemes.ts, which this does not touch.
+vi.mock("../config/monacoSetup.ts", () => ({}));
+
 vi.mock("@monaco-editor/react", () => ({
   loader: { init: () => Promise.resolve({ fake: "monaco" }) },
 }));

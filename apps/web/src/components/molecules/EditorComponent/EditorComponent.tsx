@@ -2,14 +2,13 @@ import { useEffect, useRef, useState } from "react";
 // Must precede the Editor import's first render: points Monaco at our bundle
 // rather than a CDN. See the file for why.
 import "../../../config/monacoSetup.ts";
+import { EDITOR_THEMES } from "../../../config/editorThemes.ts";
 import Editor, { DiffEditor } from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { Flex, Tooltip, Typography } from "antd";
 import { VscDiff, VscSparkle } from "react-icons/vsc";
 import { MAX_FILE_BYTES } from "@replit-clone/shared";
-import draculaTheme from "../../../theme/dracula.json";
-import alucardTheme from "../../../theme/alucard.json";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import {
   selectCanEdit,
@@ -188,7 +187,8 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
    *  the app around it, so the editor read as a pane borrowed from somewhere
    *  else. Alucard is Dracula's palette with every hue darkened until it
    *  carries on white, so the two moods look like one product. */
-  const monacoTheme = useThemeMode() === "light" ? "alucard" : "dracula";
+  const monacoTheme =
+    useThemeMode() === "light" ? EDITOR_THEMES.light : EDITOR_THEMES.dark;
 
   /** Someone who has asked their OS for less motion means Monaco's caret and
    *  scrolling too, which the stylesheet cannot reach. */
@@ -626,10 +626,9 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     editorRef.current = codeEditor;
     monacoRef.current = monaco;
 
-    // Imported rather than fetched from '/Dracula.json', which 404'd and left
-    // the editor permanently unmounted.
-    monaco.editor.defineTheme("dracula", draculaTheme as editor.IStandaloneThemeData);
-    monaco.editor.defineTheme("alucard", alucardTheme as editor.IStandaloneThemeData);
+    // The themes are NOT defined here. They are registered in monacoSetup at
+    // module load, because this hook fires after the editor has already been
+    // created and themed -- see that file.
 
     // Feeds the status bar. Monaco owns the cursor, so this is the only way to
     // observe it; the listener is disposed with the editor.

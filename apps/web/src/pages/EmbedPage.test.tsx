@@ -19,6 +19,8 @@ vi.mock("@monaco-editor/react", () => ({
     <div data-testid="editor">{value}</div>
   ),
 }));
+// Registers the themes against the real Monaco, which cannot load here. The
+// page only needs the NAMES, and those come from editorThemes.ts.
 vi.mock("../config/monacoSetup.ts", () => ({}));
 
 import { EmbedPage } from "./EmbedPage.tsx";

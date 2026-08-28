@@ -1,5 +1,10 @@
 import * as monaco from "monaco-editor";
 import { loader } from "@monaco-editor/react";
+import {
+  alucardTheme,
+  draculaTheme,
+  EDITOR_THEMES,
+} from "./editorThemes.ts";
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
@@ -37,3 +42,21 @@ self.MonacoEnvironment = {
 };
 
 loader.config({ monaco });
+
+/** Both editor themes, registered before any editor can be created.
+ *
+ *  This has to happen at module load and NOT in an editor's `onMount`, which is
+ *  where it used to live. @monaco-editor/react calls `editor.setTheme(theme)`
+ *  immediately after `editor.create(...)` and only fires `onMount` afterwards --
+ *  so a theme defined in `onMount` does not exist yet at the moment it is asked
+ *  for, Monaco falls back to its built-in `vs`, and the editor comes up WHITE
+ *  inside a dark IDE. Nothing corrected it later either: the library reapplies
+ *  the theme only when the prop CHANGES, so the first paint was the one you
+ *  kept until you toggled light/dark and back.
+ *
+ *  Registering here also means every editor in the app gets them by importing
+ *  this module, rather than by being lucky enough to mount after the one
+ *  component that happened to define them.
+ */
+monaco.editor.defineTheme(EDITOR_THEMES.dark, draculaTheme);
+monaco.editor.defineTheme(EDITOR_THEMES.light, alucardTheme);

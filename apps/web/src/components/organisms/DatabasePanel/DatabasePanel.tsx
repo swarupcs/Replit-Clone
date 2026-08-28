@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Empty, Input, Spin, Tooltip, message } from "antd";
+// Registers the editor themes before any editor is created. Without it this
+// panel renders in Monaco's built-in light theme unless the code editor
+// happened to mount first.
+import "../../../config/monacoSetup.ts";
+import { EDITOR_THEMES } from "../../../config/editorThemes.ts";
 import Editor from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/react";
 import { VscDatabase, VscPlay, VscRefresh, VscTable, VscTrash } from "react-icons/vsc";
@@ -108,7 +113,8 @@ export const DatabasePanel = ({ projectId, isOwner }: Props) => {
   const [running, setRunning] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const monacoTheme = useThemeMode() === "light" ? "alucard" : "dracula";
+  const monacoTheme =
+    useThemeMode() === "light" ? EDITOR_THEMES.light : EDITOR_THEMES.dark;
 
   /** Kept in a ref as well as state so the completion provider — registered
    *  once — reads the current schema rather than the one that existed when it

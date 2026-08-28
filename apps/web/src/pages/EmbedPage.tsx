@@ -3,11 +3,10 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Spin } from "antd";
 import "../config/monacoSetup.ts";
+import { EDITOR_THEMES } from "../config/editorThemes.ts";
 import Editor from "@monaco-editor/react";
-import type { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import type { EmbedView } from "@replit-clone/shared";
-import draculaTheme from "../theme/dracula.json";
 import { FileIcon } from "../components/atoms/FileIcon/FileIcon.tsx";
 import { getEmbedApi, getEmbedFileApi } from "../apis/embeds.ts";
 import { extensionToFileType } from "../utils/extensionToFileType.ts";
@@ -193,8 +192,10 @@ export const EmbedPage = () => {
               height="100%"
               language={language}
               value={file?.contents ?? ""}
-              theme={mode === "light" ? "vs" : "dracula"}
-              beforeMount={defineDracula}
+              // The same two themes the editor uses. An embed rendering in
+              // Monaco's stock `vs` while the rest of the page is ours was a
+              // small, permanent tell that it was a different thing.
+              theme={mode === "light" ? EDITOR_THEMES.light : EDITOR_THEMES.dark}
               options={READ_ONLY_OPTIONS}
             />
           </>
@@ -303,10 +304,3 @@ const READ_ONLY_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
   overviewRulerLanes: 0,
   contextmenu: false,
 };
-
-function defineDracula(monaco: Monaco): void {
-  monaco.editor.defineTheme(
-    "dracula",
-    draculaTheme as editor.IStandaloneThemeData,
-  );
-}

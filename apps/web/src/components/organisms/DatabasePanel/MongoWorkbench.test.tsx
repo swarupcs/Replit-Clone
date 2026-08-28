@@ -6,6 +6,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
  *  neither is the thing under test — what the filter box *does* with the text
  *  is. */
 const editorProps = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+// Registers the editor themes against the real Monaco, which cannot load
+// here. The component under test only needs the theme NAMES, and those
+// live in editorThemes.ts, which this does not touch.
+vi.mock("../../../config/monacoSetup.ts", () => ({}));
+
 vi.mock("@monaco-editor/react", () => ({
   default: (props: Record<string, unknown>) => {
     editorProps.current = props;

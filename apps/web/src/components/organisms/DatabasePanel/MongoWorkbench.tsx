@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Segmented, Spin, Tooltip, message } from "antd";
+// Registers the editor themes before any editor is created. Without it this
+// panel renders in Monaco's built-in light theme unless the code editor
+// happened to mount first.
+import "../../../config/monacoSetup.ts";
+import { EDITOR_THEMES } from "../../../config/editorThemes.ts";
 import Editor from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/react";
 import {
@@ -123,7 +128,8 @@ export const MongoWorkbench = ({ projectId, label, isOwner, onDisconnect }: Prop
   const [skip, setSkip] = useState(0);
   const [view, setView] = useState<"documents" | "table">("documents");
 
-  const monacoTheme = useThemeMode() === "light" ? "alucard" : "dracula";
+  const monacoTheme =
+    useThemeMode() === "light" ? EDITOR_THEMES.light : EDITOR_THEMES.dark;
 
   const load = useCallback(async () => {
     setLoading(true);
