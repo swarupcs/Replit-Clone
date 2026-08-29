@@ -44,19 +44,23 @@ about it:
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm --filter server test` | **1397 passing**, 149 skipped (83 files) |
-| `pnpm --filter web test` | **858 passing** (64 files) |
+| `pnpm --filter web test` | **903 passing** (67 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
 The 149 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI.
 
-**Done: 71 items. Open: 6.** All six are blocked on a decision or on
-infrastructure — five in §3.3, plus report-and-review in §3.1, which needs
-somebody to decide who moderates. **Nothing on this page is unblocked.** The
-one item that was — the dangling section references found by the 2026-08-29
-audit — was closed the same day (§2.9), which is what empties this list of
-work anybody could simply pick up.
+**Done: 74 items. Open: 5.** All five are blocked on a decision or on
+infrastructure — four in §3.3, plus report-and-review in §3.1, which needs
+somebody to decide who moderates. **Nothing on this page is unblocked.**
+
+Two items left the open list on 2026-08-29 that the audit that day had passed
+over: the dangling section references (§2.9), and follow-mode's viewport sync
+(§2.10), which was recorded as blocked on cursor positions that turned out to
+have been on the wire the whole time. The remaining five are blocked on
+something outside this repository — a DNS record, a certificate, a cost model,
+or a decision about who moderates — and not on anybody's time.
 
 Everything in §2 was re-verified against the source on 2026-08-29 rather than
 carried forward on trust. Three claims did not survive it — see §5.
@@ -253,6 +257,62 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.10 Since (2026-08-29, later still)
+
+- [x] **Other people's cursors are visible.** They were never missing from the
+      wire. `MonacoBinding` has published every local selection into awareness
+      and decorated every remote one since collaborative editing shipped,
+      tagging each decoration `yRemoteSelection-<clientID>` — a class per
+      person, so that colours can differ. y-monaco ships no stylesheet for
+      those classes and there was none here either, so every remote selection
+      rendered as an unstyled span: present in the DOM, invisible on screen.
+
+      `lib/remoteCursors.ts` generates the rules, which have to be generated
+      rather than written once because the class name carries a client id known
+      only at runtime. Selections are tinted rather than filled — the code
+      underneath still has to be readable — and each caret is labelled, because
+      with four people in a file colour alone stops answering the question
+      anyone actually has.
+
+      The colour and the name are interpolated into a stylesheet and both
+      arrive from another client, so both are checked: colours are *matched*
+      against the forms this app produces rather than escaped, and anything
+      else falls back to the colour derived from the person's name. A peer
+      whose colour was `red; } body { display: none } .x {` would otherwise
+      have been writing CSS into everybody else's page.
+
+- [x] **Follow mode rides the viewport, not just the file.** Awareness now
+      carries a `viewport` — the visible line range, per document, because
+      somebody in two files is scrolled to two places. No server change: the
+      awareness relay is opaque bytes and always was.
+
+      Scoped to follow mode on purpose. The argument against doing this,
+      recorded when following shipped, was that yanking somebody's viewport
+      around is motion sickness rather than collaboration — and that argument
+      still holds for everyone who has not asked. Following is a button
+      somebody pressed. It is a request to be moved.
+
+      Two things that are easy to get wrong and were: publishing is skipped
+      when the visible *lines* have not changed, or a flick-scroll puts a
+      packet on the socket every frame; and a scroll caused by following is
+      not republished as though it were ours, or two people following each
+      other push one another back and forth forever. The second guard began as
+      a flag cleared on a timer and that was a race — `setScrollTop` does not
+      promise when its event arrives. It matches the expected line instead,
+      and gives that line up as soon as any scroll lands anywhere else, since
+      Monaco cannot always scroll as far as it is asked to.
+
+- [x] **A correction to the audit.** §5 said the awareness transport "carries a
+      name and a colour and no cursor position", and used that to confirm §3.3's
+      blocker. Both halves were wrong. y-monaco puts a `selection` on the wire
+      and has all along; what was missing was any CSS to draw it. The audit
+      searched this repository's own code for cursor handling and found none,
+      which was true and not the question — the code doing it was in a
+      dependency. Checking what a library already does, not only what the
+      application does, is the lesson.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -291,9 +351,6 @@ Each is named with what blocks it, so none reads as ready to start.
 - [ ] **Autoscale and scheduled jobs.** A different product with a different
       cost model. Always-on compute exists in its smallest useful form; scaling
       it is a separate decision, not an extension of that work.
-- [ ] **Follow-mode with viewport sync.** Following a *file* shipped in ledger
-      row 13. Riding someone's scroll position needs cursor positions and scroll
-      sync — a new feature rather than a display of what already exists.
 - [ ] **Debugging.** Deferred on purpose — see §6, decision 1 — and listed
       here so its absence is visible rather than forgotten. If
       debugging becomes the deciding feature, the answer is Route A
@@ -347,9 +404,15 @@ whoever owns the data, not to a cleanup script.
    worth doing while §6 was fresh — though §6 turned out to be the right home
    for only six of them.
 
-Everything in §3.3 is blocked on a decision or on infrastructure and should not
-be started until that decision is made. Item 4 needs a decision before it needs
-a developer. **There is nothing left on this page to simply start.**
+8. ~~**§3.3 follow-mode with viewport sync.**~~ Done 2026-08-29. It should not
+   have been in §3.3 at all: its stated blocker was a feature the editor
+   already had.
+
+Everything still in §3.3 is blocked on a decision or on infrastructure and
+should not be started until that decision is made. Item 4 needs a decision
+before it needs a developer. **There is nothing left on this page to simply
+start** — and that claim has now been wrong twice in one day, so it is worth
+reading as "nothing found yet" rather than as a proof.
 
 ---
 
@@ -382,9 +445,16 @@ the data.
 Every claim above was re-checked against the source rather than re-read. All
 seven commit hashes in §2.1 resolve and match their subjects; the headline
 numbers reproduce exactly; every file and symbol named as a deliverable in §2
-exists; and every item in §3.1 and §3.3 is genuinely absent, including the
-follow-mode blocker — the awareness transport carries a name and a colour and
-no cursor position, so "needs cursor positions and scroll sync" is accurate.
+exists; and every item in §3.1 and §3.3 was genuinely absent.
+
+One conclusion in that list did not survive the next day. The follow-mode
+blocker was confirmed here on the grounds that "the awareness transport carries
+a name and a colour and no cursor position". It carries a selection, and has
+since collaborative editing shipped — `MonacoBinding` puts it there. The search
+that produced this covered the code in this repository, where there is indeed
+nothing handling cursors, and stopped at its edge; the code doing it was in
+y-monaco. **An audit of what an application does is not an audit of what it
+has.** See §2.10.
 
 Three claims were wrong and are corrected above:
 
