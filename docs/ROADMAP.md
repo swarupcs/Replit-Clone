@@ -44,16 +44,17 @@ about it:
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm --filter server test` | **1390 passing**, 149 skipped (82 files) |
-| `pnpm --filter web test` | **846 passing** (64 files) |
+| `pnpm --filter web test` | **858 passing** (64 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
 The 149 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI.
 
-**Done: 67 items. Open: 7.** Of the 7, one is a defect, one is unblocked
-work, and five are blocked on a decision or on infrastructure. No
-documentation debts remain.
+**Done: 68 items. Open: 6.** One is a defect — the abuse story, which is a
+product decision as much as a task — and the other five are blocked on a
+decision or on infrastructure. **Nothing on this page is both unblocked and
+undone.**
 
 ---
 
@@ -194,6 +195,13 @@ Rows 1–13, all `done`:
       one — so the next person saw 149 silent skips and no reason. It also
       still claimed CI does not run E2E, which stopped being true an hour
       earlier; both fixed together.
+- [x] **A dashboard list view.** The last open Tier 3 UI item. A segmented
+      toggle beside the sort, remembered per browser in `localStorage` and
+      wrapped in try/catch on both sides — a private window makes the accessor
+      itself throw, and failing to render a dashboard over a display preference
+      would be the worst possible trade. The action menu was extracted into one
+      `ProjectActions` shared by both layouts: two copies of a menu whose
+      entries depend on ownership is exactly the pair that drifts.
 
 ---
 
@@ -212,8 +220,8 @@ moved to §2.8. One remains.
 
 ### 3.2 Unblocked — work, not decisions
 
-- [ ] **A dashboard list view.** The last open Tier 3 UI item. Cards only; past
-      roughly thirty projects a compact list beats scrolling.
+Empty. Every item that was here on 2026-08-29 is now in §2.8.
+
 
 ### 3.3 Blocked on a decision or on infrastructure
 
@@ -278,8 +286,7 @@ whoever owns the data, not to a cleanup script.
 4. **§3.1 abuse handling** — before any deployment that is both public and
    multi-tenant, and not before that.
 5. ~~**§3.4 the remaining debts**.~~ Done 2026-08-29.
-6. **§3.2 the dashboard list view**, which is an afternoon. (The env vars
-   half of this line is done.)
+6. ~~**§3.2 env vars and the dashboard list view**.~~ Done 2026-08-29.
 
 Everything in §3.3 is blocked on a decision or on infrastructure and should not
 be started until that decision is made.

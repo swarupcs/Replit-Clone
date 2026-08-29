@@ -7,7 +7,9 @@ import {
   Empty,
   Input,
   Modal,
+  Segmented,
   Select,
+  Tooltip,
   Typography,
   message,
 } from "antd";
@@ -22,7 +24,13 @@ import {
   PlusOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
-import { VscFolder, VscGithub, VscTerminal } from "react-icons/vsc";
+import {
+  VscFolder,
+  VscGithub,
+  VscListFlat,
+  VscTerminal,
+  VscGrabber,
+} from "react-icons/vsc";
 import type { Project } from "@replit-clone/shared";
 import {
   createProjectApi,
@@ -61,6 +69,137 @@ function relativeTime(iso: string): string {
 }
 
 type SortKey = "recent" | "created" | "name";
+
+/** Everything a project row offers, in both layouts.
+ *
+ *  Extracted when the list view arrived, not before: two copies of a menu
+ *  whose entries depend on ownership is exactly the pair that drifts, and the
+ *  half that drifts silently is the one nobody is looking at.
+ */
+function ProjectActions({
+  project,
+  isOwner,
+  onShare,
+  onRename,
+  onDuplicate,
+  onDelete,
+}: {
+  project: Project;
+  isOwner: boolean;
+  onShare: () => void;
+  onRename: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    // Stop propagation so a menu click doesn't also open the project behind
+    // it. True of a card and of a row alike.
+    <div
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <Dropdown
+        trigger={["click"]}
+        menu={{
+          items: [
+            // A project shared with you is not yours to rename, share on, or
+            // delete -- the menu says so by omission rather than by offering
+            // something that will fail.
+            ...(isOwner
+              ? [
+                  {
+                    key: "share",
+                    icon: <ShareAltOutlined />,
+                    label: "Share",
+                    onClick: onShare,
+                  },
+                  {
+                    key: "rename",
+                    icon: <EditOutlined />,
+                    label: "Rename",
+                    onClick: onRename,
+                  },
+                ]
+              : []),
+            {
+              key: "duplicate",
+              icon: <CopyOutlined />,
+              label: "Duplicate",
+              onClick: onDuplicate,
+            },
+            {
+              key: "export",
+              icon: <DownloadOutlined />,
+              label: "Download as zip",
+              // A real navigation, so the browser honours the
+              // Content-Disposition filename.
+              onClick: () => {
+                window.location.assign(projectExportUrl(project.id));
+              },
+            },
+            ...(isOwner
+              ? [
+                  { type: "divider" as const },
+                  {
+                    key: "delete",
+                    icon: <DeleteOutlined />,
+                    label: "Delete",
+                    danger: true,
+                    onClick: onDelete,
+                  },
+                ]
+              : []),
+          ],
+        }}
+      >
+        <Button
+          type="text"
+          size="small"
+          icon={<MoreOutlined />}
+          aria-label={`Actions for ${project.name}`}
+        />
+      </Dropdown>
+    </div>
+  );
+}
+
+/** When a project was last touched, phrased as the thing worth knowing.
+ *
+ *  `lastActiveAt` is written on every connect; "created" is the least useful
+ *  fact about a project you are trying to find again. */
+function lastTouched(project: Project): string {
+  return project.lastActiveAt
+    ? `Opened ${relativeTime(project.lastActiveAt)}`
+    : `Created ${relativeTime(project.createdAt)}`;
+}
+
+
+type ViewMode = "grid" | "list";
+
+/** Where the chosen layout is remembered.
+ *
+ *  A per-viewer convenience and nothing more: it belongs to this browser, it
+ *  is worth nothing to anybody else, and it must never be the reason the page
+ *  fails to render. Hence the try/catch on both sides -- a private window, a
+ *  browser set to block site data, or a thumbnail capture can each make the
+ *  accessor itself throw rather than merely return null. */
+const VIEW_STORAGE_KEY = "rc.dashboard.view";
+
+function storedView(): ViewMode {
+  try {
+    return localStorage.getItem(VIEW_STORAGE_KEY) === "list" ? "list" : "grid";
+  } catch {
+    return "grid";
+  }
+}
+
+function rememberView(view: ViewMode): void {
+  try {
+    localStorage.setItem(VIEW_STORAGE_KEY, view);
+  } catch {
+    // Nothing is lost but the preference, and only until the next choice.
+  }
+}
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "recent", label: "Last opened" },
@@ -105,6 +244,10 @@ export const Dashboard = () => {
    *  anything, which stops being usable at about a dozen projects. */
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("recent");
+  /** Cards or a list. Remembered per browser: past roughly thirty projects a
+   *  compact list beats scrolling a grid, and which side of that line somebody
+   *  is on does not change between visits. */
+  const [view, setView] = useState<ViewMode>(storedView);
 
   /** The project being renamed, and the name being typed for it. */
   const [renaming, setRenaming] = useState<Project | null>(null);
@@ -266,6 +409,44 @@ export const Dashboard = () => {
               aria-label="Sort projects"
             />
 
+            <Segmented
+              value={view}
+              onChange={(value) => {
+                const next = value as ViewMode;
+                setView(next);
+                rememberView(next);
+              }}
+              aria-label="Project layout"
+              options={[
+                {
+                  value: "grid",
+                  label: (
+                    <Tooltip title="Cards">
+                      <span
+                        aria-label="Card view"
+                        style={{ display: "flex", padding: "0 2px" }}
+                      >
+                        <VscGrabber size={14} />
+                      </span>
+                    </Tooltip>
+                  ),
+                },
+                {
+                  value: "list",
+                  label: (
+                    <Tooltip title="List">
+                      <span
+                        aria-label="List view"
+                        style={{ display: "flex", padding: "0 2px" }}
+                      >
+                        <VscListFlat size={14} />
+                      </span>
+                    </Tooltip>
+                  ),
+                },
+              ]}
+            />
+
             <Button
               size="large"
               icon={<VscGithub />}
@@ -290,9 +471,18 @@ export const Dashboard = () => {
           // keeps the shape it is about to have, so the page does not jump
           // when the projects land. Six is a plausible first screen; fewer
           // would jump the other way.
-          <div className="rc-project-grid" aria-label="Loading projects">
+          <div
+            className={view === "grid" ? "rc-project-grid" : "rc-project-list"}
+            aria-label="Loading projects"
+          >
             {Array.from({ length: 6 }, (_, index) => (
-              <div key={index} className="rc-skeleton-card" aria-hidden="true">
+              <div
+                key={index}
+                className={
+                  view === "grid" ? "rc-skeleton-card" : "rc-skeleton-row"
+                }
+                aria-hidden="true"
+              >
                 <span className="rc-skeleton" style={{ width: "58%", height: 15 }} />
                 <span className="rc-skeleton" style={{ width: "84%", height: 11 }} />
                 <span className="rc-skeleton" style={{ width: "40%", height: 11 }} />
@@ -300,32 +490,51 @@ export const Dashboard = () => {
             ))}
           </div>
         ) : visibleProjects.length > 0 ? (
-          <div className="rc-project-grid">
-            {visibleProjects.map((project) => (
-              <div
-                key={project.id}
-                className="rc-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => void navigate(`/project/${project.id}`)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    void navigate(`/project/${project.id}`);
-                  }
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    justifyContent: "space-between",
-                    gap: 8,
+          <div
+            className={view === "grid" ? "rc-project-grid" : "rc-project-list"}
+          >
+            {visibleProjects.map((project) => {
+              const isOwner = project.ownerId === user?.id;
+              const open = () => void navigate(`/project/${project.id}`);
+              const actions = (
+                <ProjectActions
+                  project={project}
+                  isOwner={isOwner}
+                  onShare={() => setSharing(project)}
+                  onRename={() => {
+                    setRenaming(project);
+                    setRenameValue(project.name);
                   }}
-                >
-                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  onDuplicate={() => duplicateMutation.mutate(project.id)}
+                  onDelete={() => setDeleting(project)}
+                />
+              );
+
+              // Both layouts are the same row of facts at different widths, so
+              // they share the click target, the keyboard handling and the
+              // menu. Only the arrangement differs.
+              const activate = (event: React.KeyboardEvent) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  open();
+                }
+              };
+
+              if (view === "list") {
+                return (
+                  <div
+                    key={project.id}
+                    className="rc-project-row"
+                    role="button"
+                    tabIndex={0}
+                    onClick={open}
+                    onKeyDown={activate}
+                  >
+                    <span className="rc-project-row-name" title={project.name}>
+                      {project.name}
+                    </span>
                     <span className="rc-badge">{project.template}</span>
-                    {project.ownerId !== user?.id && (
+                    {!isOwner && (
                       <span
                         className="rc-badge"
                         title="Shared with you"
@@ -334,108 +543,66 @@ export const Dashboard = () => {
                         <TeamOutlined /> Shared
                       </span>
                     )}
-                  </span>
+                    <span className="rc-project-row-when">
+                      {lastTouched(project)}
+                    </span>
+                    {actions}
+                  </div>
+                );
+              }
 
-                  {/* Stop propagation so a menu click doesn't also open the
-                      project behind it. */}
+              return (
+                <div
+                  key={project.id}
+                  className="rc-card"
+                  role="button"
+                  tabIndex={0}
+                  onClick={open}
+                  onKeyDown={activate}
+                >
                   <div
-                    onClick={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => event.stopPropagation()}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                      gap: 8,
+                    }}
                   >
-                    <Dropdown
-                      trigger={["click"]}
-                      menu={{
-                        items: [
-                          // A project shared with you is not yours to rename,
-                          // share on, or delete — the menu says so by omission
-                          // rather than by offering something that will fail.
-                          ...(project.ownerId === user?.id
-                            ? [
-                                {
-                                  key: "share",
-                                  icon: <ShareAltOutlined />,
-                                  label: "Share",
-                                  onClick: () => setSharing(project),
-                                },
-                              ]
-                            : []),
-                          ...(project.ownerId === user?.id
-                            ? [
-                                {
-                                  key: "rename",
-                                  icon: <EditOutlined />,
-                                  label: "Rename",
-                                  onClick: () => {
-                                    setRenaming(project);
-                                    setRenameValue(project.name);
-                                  },
-                                },
-                              ]
-                            : []),
-                          {
-                            key: "duplicate",
-                            icon: <CopyOutlined />,
-                            label: "Duplicate",
-                            onClick: () => duplicateMutation.mutate(project.id),
-                          },
-                          {
-                            key: "export",
-                            icon: <DownloadOutlined />,
-                            label: "Download as zip",
-                            // A real navigation, so the browser honours the
-                            // Content-Disposition filename.
-                            onClick: () => {
-                              window.location.assign(projectExportUrl(project.id));
-                            },
-                          },
-                          ...(project.ownerId === user?.id
-                            ? [
-                                { type: "divider" as const },
-                                {
-                                  key: "delete",
-                                  icon: <DeleteOutlined />,
-                                  label: "Delete",
-                                  danger: true,
-                                  onClick: () => setDeleting(project),
-                                },
-                              ]
-                            : []),
-                        ],
-                      }}
-                    >
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<MoreOutlined />}
-                        aria-label={`Actions for ${project.name}`}
-                      />
-                    </Dropdown>
+                    <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span className="rc-badge">{project.template}</span>
+                      {!isOwner && (
+                        <span
+                          className="rc-badge"
+                          title="Shared with you"
+                          style={{ display: "flex", alignItems: "center", gap: 4 }}
+                        >
+                          <TeamOutlined /> Shared
+                        </span>
+                      )}
+                    </span>
+
+                    {actions}
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: 16,
+                      fontWeight: 600,
+                      letterSpacing: -0.2,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {project.name}
+                  </div>
+
+                  <div style={{ color: "var(--rc-text-subtle)", fontSize: 12.5 }}>
+                    {lastTouched(project)}
                   </div>
                 </div>
-
-                <div
-                  style={{
-                    fontSize: 16,
-                    fontWeight: 600,
-                    letterSpacing: -0.2,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {project.name}
-                </div>
-
-                <div style={{ color: "var(--rc-text-subtle)", fontSize: 12.5 }}>
-                  {/* lastActiveAt was written on every connect and never shown;
-                      "created" is the least useful thing to know about a
-                      project you are looking for. */}
-                  {project.lastActiveAt
-                    ? `Opened ${relativeTime(project.lastActiveAt)}`
-                    : `Created ${relativeTime(project.createdAt)}`}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="rc-panel" style={{ padding: "64px 24px" }}>
