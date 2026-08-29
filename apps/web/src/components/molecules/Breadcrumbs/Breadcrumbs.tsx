@@ -6,9 +6,9 @@ import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 /** The path-plus-symbol bar under the tab strip.
  *
  *  The symbol half only appears for languages that have a symbol provider —
- *  TypeScript and JavaScript today, everything else once §3 lands a language
- *  server. It degrades to just the path rather than to an empty bar, because
- *  a file's location is worth showing on its own.
+ *  TypeScript and JavaScript today; anything else needs a language server to
+ *  supply them. It degrades to just the path rather than to an empty bar,
+ *  because a file's location is worth showing on its own.
  */
 export const Breadcrumbs = () => {
   const activeTab = useOpenTabsStore(selectActiveTab);

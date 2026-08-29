@@ -1,6 +1,7 @@
 import express from "express";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
+import { createPublishLimiter } from "../../utils/publishBudget.js";
 import {
   createProjectController,
   deleteProjectController,
@@ -277,7 +278,25 @@ router.post("/:projectId/duplicate", createLimiter, asyncHandler(duplicateProjec
 // Forking a PUBLIC project needs no invitation from anybody, which is the
 // whole point of it -- so it is rate limited like any other project creation.
 router.post("/:projectId/fork", createLimiter, asyncHandler(forkProjectController));
-router.patch("/:projectId/visibility", asyncHandler(setVisibilityController));
+// Publishing a project puts it in a gallery every signed-in user can read, so
+// it is the one action here whose cost lands on people other than the person
+// taking it. Forking was already rate limited (as project creation) and
+// publishing never was.
+//
+// Only in the publishing direction -- see `countsAgainstPublishBudget`, which
+// is where that asymmetry is explained and tested.
+//
+// Deliberately not a moderation system. Reporting and review are a product
+// decision about who reviews and with what authority, and this app has no
+// notion of an administrator to hang them on. This is the half that needs no
+// such decision.
+const publishLimiter = createPublishLimiter();
+
+router.patch(
+  "/:projectId/visibility",
+  publishLimiter,
+  asyncHandler(setVisibilityController),
+);
 router.get("/:projectId/export", asyncHandler(exportProjectController));
 router.get("/:projectId/env", asyncHandler(getProjectEnvController));
 router.post(

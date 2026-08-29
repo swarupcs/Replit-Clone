@@ -45,10 +45,10 @@ function errorMessage(error: unknown): string {
 
 /** One document, collapsed to a summary line until it is opened.
  *
- *  §7.6 calls this the *primary* view for MongoDB rather than a secondary
- *  one, and the reason is structural: a document nests, and a grid can only
- *  show the top level. A grid of `address: {4 fields}` is a grid that has
- *  hidden the answer.
+ *  The *primary* view for MongoDB rather than a secondary one, and the
+ *  reason is structural: a document nests, and a grid can only show the top
+ *  level. A grid of `address: {4 fields}` is a grid that has hidden the
+ *  answer.
  */
 const DocumentCard = ({ document, index }: { document: unknown; index: number }) => {
   const [open, setOpen] = useState(index === 0);
@@ -112,8 +112,8 @@ const DocumentGrid = ({ result }: { result: MongoQueryResult }) => (
  *  Deliberately not the SQL workbench with different words on the buttons.
  *  The input is an EJSON filter document or an aggregation pipeline against
  *  a chosen collection, the schema is sampled rather than declared, and the
- *  result is a list of documents — §7.6 is explicit that papering over those
- *  differences produces something wrong about both databases.
+ *  result is a list of documents. Papering over those differences produces
+ *  something wrong about both databases.
  */
 export const MongoWorkbench = ({ projectId, label, isOwner, onDisconnect }: Props) => {
   const [collections, setCollections] = useState<MongoCollection[]>([]);

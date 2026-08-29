@@ -61,9 +61,9 @@ export { isPrivateAddress };
 /** The platform's own database, by host and port.
  *
  *  A second line that does not depend on the range check being complete.
- *  §7.2 asks for it by value precisely because "we blocked the private
- *  ranges" is the kind of claim that is true until the deployment moves the
- *  database somewhere public.
+ *  Checked by value precisely because "we blocked the private ranges" is
+ *  the kind of claim that is true until the deployment moves the database
+ *  somewhere public.
  */
 function isPlatformDatabase(host: string, port: number): boolean {
   try {
@@ -90,10 +90,11 @@ export function redactConnectionString(value: string): string {
 
 /** Checks a user-supplied connection string before anything dials it.
  *
- *  §7.2 is blunt about why: the query runs on the server, so the string is a
- *  host the *server* dials, from inside the deployment's network, with the
- *  deployment's reachability. Pointed at the platform's own Postgres it is a
- *  shell on every user row, password hash and encrypted GitHub token.
+ *  Why this has to exist at all: the query runs on the server, so the
+ *  string is a host the *server* dials, from inside the deployment's
+ *  network, with the deployment's reachability. Pointed at the platform's
+ *  own Postgres it is a shell on every user row, password hash and encrypted
+ *  GitHub token.
  */
 export async function checkConnectionString(
   raw: string,
@@ -331,7 +332,8 @@ export function parseMongoAuthority(raw: string): {
  *  mutually exclusive here, and dropping TLS to gain pinning would be a worse
  *  trade. The residual gap is a rebind between this check and the driver's
  *  own lookup, which needs the attacker to control DNS for the domain; see
- *  §10.4 for the decision and what would make it worth revisiting.
+ *  `docs/ROADMAP.md` §6, decision 6 for the decision and what would make it
+ *  worth revisiting.
  */
 export async function checkMongoConnectionString(
   raw: string,

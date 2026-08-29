@@ -606,8 +606,8 @@ export const runDatabaseQueryApi = async (
 // --- Database (MongoDB) ---
 //
 // Separate calls rather than the SQL ones switching on engine: a filter
-// document and a statement have nothing in common, and §7.6 is explicit that
-// pretending otherwise produces something wrong about both databases.
+// document and a statement have nothing in common, and pretending otherwise
+// produces something wrong about both databases.
 
 export interface MongoCollection {
   database: string;

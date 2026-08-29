@@ -61,7 +61,7 @@ describe("the light editor theme", () => {
     }
   });
 
-  /** §6 item 4 is the one with an actual bug in it: the diff editor's colours
+  /** The one theming gap with an actual bug in it: the diff editor's colours
    *  are inherited when unset, and the dark defaults are near-illegible on
    *  white. Naming them is the fix. */
   it("states the diff editor's colours rather than inheriting them", () => {

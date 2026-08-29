@@ -16,12 +16,13 @@ const optionsWith = (overrides: Partial<EditorSettings> = {}) =>
   buildEditorOptions({ ...defaults(), ...overrides }, { canEdit: true });
 
 describe("buildEditorOptions", () => {
-  /** The §2.1 table of the parity plan, as a list rather than as prose.
+  /** Every option the settings dialog exposes, as a list rather than as
+   *  prose.
    *
-   *  This is the row's acceptance check: each of these is an option Monaco
-   *  already implements and the editor simply never switched on, so the
-   *  failure mode being guarded against is one of them silently going
-   *  missing in a later edit to the options object. */
+   *  Each of these is an option Monaco already implements and the editor
+   *  simply never switched on, so the failure mode being guarded against is
+   *  one of them silently going missing in a later edit to the options
+   *  object. */
   it.each([
     "bracketPairColorization",
     "stickyScroll",

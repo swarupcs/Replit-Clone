@@ -36,9 +36,9 @@ export function expectsTable(textBeforeCursor: string): boolean {
 
 /** What to offer at the cursor.
  *
- *  §7.6 calls this the detail that makes the editor feel finished rather than
- *  merely functional, and it is a day's work on data already fetched for the
- *  tree — which is the whole argument for doing it.
+ *  The detail that makes the editor feel finished rather than merely
+ *  functional, and it is a day's work on data already fetched for the tree —
+ *  which is the whole argument for doing it.
  */
 export function completionsFor(
   textBeforeCursor: string,

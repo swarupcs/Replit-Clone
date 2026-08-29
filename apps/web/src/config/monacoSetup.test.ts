@@ -4,63 +4,49 @@ import { describe, expect, it } from "vitest";
 import dracula from "../theme/dracula.json";
 import alucard from "../theme/alucard.json";
 
-/** The editor came up white inside a dark IDE, and no test noticed.
+/** What is left of the white-editor guard once a real browser checks it.
  *
- *  None could have. The bug was in the ORDER two real Monaco calls happened in:
- *  @monaco-editor/react runs `setTheme("dracula")` immediately after
- *  `editor.create(...)`, while the theme was being defined in `onMount`, which
- *  fires afterwards. Monaco fell back to its built-in `vs`, and nothing ever
- *  corrected it because the library only reapplies a theme when the prop
- *  CHANGES. Reproducing that needs workers, layout and a real canvas, so every
- *  suite that renders an editor mocks Monaco away — and `monaco-editor` cannot
- *  even be imported here, which is why this reads the source instead.
+ *  The bug: the editor came up white inside a dark IDE, because the themes
+ *  were defined in `onMount` and @monaco-editor/react calls `setTheme` the
+ *  instant after `editor.create(...)`. Reproducing it needs workers, layout
+ *  and a real canvas, so this file used to hold the fix in place by reading
+ *  its own source with `readFileSync` and asserting on the text — which is a
+ *  fair way to stop a specific line moving and no way at all to know what
+ *  colour anything is.
  *
- *  Source-level assertions are a poor way to test behaviour and a good way to
- *  hold a fix in place. What they pin down is exactly what broke: where the
- *  themes are registered, and that nothing asks for a name by hand.
+ *  **The behaviour is now asserted where it is visible**: `e2e/
+ *  playground-flow.spec.ts` opens a real editor and reads the computed
+ *  background off `.monaco-editor-background`. That runs in CI on every pull
+ *  request, which is what made it safe to delete the source-text assertions
+ *  rather than merely regret them.
+ *
+ *  Two things stay here, both because the browser cannot see them:
+ *
+ *  - Which polarity each named theme has. The E2E asserts the editor is dark
+ *    in dark mode; it does not open the light one.
+ *  - That the three editors the E2E never opens have not grown a theme of
+ *    their own. A second registration site is how the two fall out of step,
+ *    and no run of the flow above would notice.
  */
 
 function read(relative: string): string {
   return readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
 }
 
-const setup = read("./monacoSetup.ts");
-const names = read("./editorThemes.ts");
-
-describe("where the themes are registered", () => {
-  it("registers both, at module load rather than inside anything", () => {
-    // Not indented, so not in a function, so it has already run by the time any
-    // component can create an editor. That is the entire fix.
-    const topLevel = setup
-      .split("\n")
-      .filter((line) => line.startsWith("monaco.editor.defineTheme("));
-
-    expect(topLevel).toHaveLength(2);
-  });
-
-  it("registers exactly the two names the app asks for", () => {
-    // The names live apart from the registration so that importing them does
-    // not drag Monaco in; this is what keeps the two halves agreeing.
-    expect(names).toContain(
-      'export const EDITOR_THEMES = { dark: "dracula", light: "alucard" }',
-    );
-    expect(setup).toContain("EDITOR_THEMES.dark");
-    expect(setup).toContain("EDITOR_THEMES.light");
-  });
-
+describe("the two themes", () => {
   it("pairs each name with a theme of the right polarity", () => {
-    // Names alone would pass if the two were swapped, which is the same white
-    // editor by another route.
+    // Swapping these is the same white editor by another route, and the pair
+    // is data rather than source text — this is a real assertion about the
+    // thing that ships, not about how it is written.
     expect(dracula.base).toBe("vs-dark");
     expect(alucard.base).toBe("vs");
   });
 });
 
-describe("every editor in the app", () => {
+describe("the editors the browser test never opens", () => {
   /** Monaco's `vs` and `vs-dark` are the fallback the bug landed on, so a
    *  component naming one is that failure written down deliberately. */
   const SOURCES = [
-    "../components/molecules/EditorComponent/EditorComponent.tsx",
     "../components/organisms/DatabasePanel/DatabasePanel.tsx",
     "../components/organisms/DatabasePanel/MongoWorkbench.tsx",
     "../pages/EmbedPage.tsx",

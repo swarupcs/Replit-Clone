@@ -35,6 +35,8 @@ import {
   useGitGutterStore,
 } from "../../../store/gitGutterStore.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
+import { useLanguageServer } from "../../../hooks/useLanguageServer.ts";
+import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
 import {
   buildDiffOptions,
@@ -345,16 +347,16 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
 
   /** Document symbols, for the breadcrumbs and the outline.
    *
-   *  One read feeding both, which is what §2.2 asks for: two fetches of the
-   *  same symbols would be twice the work for something that can then
-   *  disagree with itself. Only the primary pane publishes, so two panes on
-   *  two files do not fight over one store.
+   *  One read feeding both: two fetches of the same symbols would be twice
+   *  the work for something that can then disagree with itself. Only the
+   *  primary pane publishes, so two panes on two files do not fight over one
+   *  store.
    *
    *  Read from the TypeScript worker directly. Standalone Monaco has no
    *  equivalent of VS Code's `executeDocumentSymbolProvider` command, and the
    *  worker's navigation tree is the same data the outline in VS Code shows.
    *  That confines this to TypeScript and JavaScript, which is exactly what
-   *  §2.2 says is available until §3 lands a language server.
+   *  is available without a language server.
    */
   useEffect(() => {
     if (pane !== "primary") return;
@@ -402,6 +404,30 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
       cancelled = true;
     };
   }, [pane, activeTab?.relPath, activeTab?.value, mountTick]);
+
+  /** Diagnostics from a real language server, for the languages that have one.
+   *
+   *  The effect above reaches into Monaco's bundled TypeScript worker, which
+   *  is why TypeScript and JavaScript have had squiggles all along and Python
+   *  and Go have had none: there is no worker in the browser that understands
+   *  them. This is the other half — an actual `pylsp` or `gopls` running in
+   *  the project's own container, where the imports resolve and the toolchain
+   *  already lives.
+   *
+   *  Primary pane only. Two panes on the same file would open two connections
+   *  and publish the same markers twice; the markers are set on the model, so
+   *  the second pane displays them regardless of which pane asked. */
+  const lspProjectId = useTreeStructureStore((state) => state.projectId);
+  useLanguageServer({
+    monaco: pane === "primary" ? monacoRef.current : null,
+    editor: pane === "primary" ? editorRef.current : null,
+    projectId: lspProjectId ?? "",
+    relPath: activeTab?.relPath,
+    language: activeTab
+      ? extensionToFileType(activeTab.extension, activeTab.name)
+      : undefined,
+    mountTick,
+  });
 
   /** Keep the breadcrumb's symbol half pointed at the cursor. */
   useEffect(() => {
@@ -488,9 +514,9 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
 
   /** The git bars down the left margin.
    *
-   *  §5.1 calls this the most visible git feature the editor did not have,
-   *  and the data was already here — the source-control panel has been
-   *  reading these diffs all along. What was missing is the decoration layer.
+   *  The most visible git feature the editor did not have, and the data was
+   *  already here — the source-control panel has been reading these diffs all
+   *  along. What was missing is the decoration layer.
    *
    *  Decorations are replaced wholesale on every change rather than diffed
    *  against the previous set: Monaco's `deltaDecorations` already does that

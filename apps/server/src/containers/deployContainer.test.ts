@@ -31,6 +31,7 @@ const settings = vi.hoisted(() => ({
   DEPLOY_MEMORY_MB: 512,
   DEPLOY_CPUS: 0.5,
   MAX_DEPLOYED_SERVICES: 5,
+  MAX_DEPLOYED_SERVICES_PER_USER: 2,
   SANDBOX_EGRESS_FILTERED: false,
 }));
 
@@ -68,6 +69,8 @@ const SPEC = {
   port: 3000,
   root: "/srv/deployments/quiet-fern-84f1",
   projectEnv: ["DATABASE_URL=postgres://example"],
+  // Its own subdomain and no other: an account publishing its first service.
+  ownedSubdomains: ["quiet-fern-84f1"],
 };
 
 function stubCreate() {
@@ -104,6 +107,7 @@ function created(): {
 beforeEach(() => {
   vi.clearAllMocks();
   settings.MAX_DEPLOYED_SERVICES = 5;
+  settings.MAX_DEPLOYED_SERVICES_PER_USER = 2;
   preview.mode = "container-ip";
   docker.listContainers.mockResolvedValue([]);
 });
@@ -273,6 +277,97 @@ describe("how many may run at once", () => {
     stubCreate();
 
     await expect(startService(SPEC)).resolves.toBeUndefined();
+  });
+});
+
+describe("how many one account may hold", () => {
+  it("refuses one past the account's limit while the host has room", async () => {
+    // The defect this closes: only the host-wide cap existed, so one account
+    // publishing MAX_DEPLOYED_SERVICES apps took every always-on slot on the
+    // machine and every other user's deploy was refused for a resource they
+    // never got a share of. Ordinary use reaches it; no malice required.
+    settings.MAX_DEPLOYED_SERVICES = 5;
+    settings.MAX_DEPLOYED_SERVICES_PER_USER = 2;
+    docker.listContainers.mockResolvedValue([
+      { Names: ["/rc-deploy-mine-one"] },
+      { Names: ["/rc-deploy-mine-two"] },
+    ]);
+    stubCreate();
+
+    await expect(
+      startService({
+        ...SPEC,
+        ownedSubdomains: [SPEC.subdomain, "mine-one", "mine-two"],
+      }),
+    ).rejects.toThrow(/already have 2 always-on deployments/);
+    expect(docker.createContainer).not.toHaveBeenCalled();
+  });
+
+  it("does not count other people's deployments against you", async () => {
+    // The host is nearly full, but none of it is theirs. Refusing here would
+    // be the original defect wearing the fix's clothes.
+    settings.MAX_DEPLOYED_SERVICES = 5;
+    settings.MAX_DEPLOYED_SERVICES_PER_USER = 2;
+    docker.listContainers.mockResolvedValue([
+      { Names: ["/rc-deploy-someone-else"] },
+      { Names: ["/rc-deploy-a-third-party"] },
+      { Names: ["/rc-deploy-and-another"] },
+    ]);
+    stubCreate();
+
+    await expect(
+      startService({ ...SPEC, ownedSubdomains: [SPEC.subdomain] }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not count a redeploy of your own live service against you", async () => {
+    // At the account's limit, one of which is the app being redeployed. It is
+    // already holding that slot, so updating it must not be refused for the
+    // space it already occupies.
+    settings.MAX_DEPLOYED_SERVICES_PER_USER = 2;
+    docker.listContainers.mockResolvedValue([
+      { Names: ["/rc-deploy-mine-one"] },
+      { Names: [`/${deployContainerName(SPEC.subdomain)}`] },
+    ]);
+    stubCreate();
+
+    await expect(
+      startService({ ...SPEC, ownedSubdomains: [SPEC.subdomain, "mine-one"] }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses an account before the host, and says which it was", async () => {
+    // Two different refusals on purpose. The host being full is a 503: a
+    // condition of the server, and nothing about this request was wrong. An
+    // account being full is a 429, because the person reading it can act on
+    // it -- unpublish one of their own.
+    settings.MAX_DEPLOYED_SERVICES = 5;
+    settings.MAX_DEPLOYED_SERVICES_PER_USER = 1;
+    docker.listContainers.mockResolvedValue([{ Names: ["/rc-deploy-mine"] }]);
+    stubCreate();
+
+    await expect(
+      startService({ ...SPEC, ownedSubdomains: [SPEC.subdomain, "mine"] }),
+    ).rejects.toMatchObject({ statusCode: 429, code: "USER_DEPLOY_LIMIT" });
+  });
+
+  it("counts a stopped service of yours as costing nothing", async () => {
+    // Counted over running containers rather than over rows, the same as the
+    // host-wide half: a row for a service that is not up is not consuming a
+    // slot anyone else could be using.
+    settings.MAX_DEPLOYED_SERVICES_PER_USER = 2;
+    docker.listContainers.mockResolvedValue([
+      { Names: ["/rc-deploy-mine-one"] },
+    ]);
+    stubCreate();
+
+    await expect(
+      startService({
+        ...SPEC,
+        // Three published, only one of them actually running.
+        ownedSubdomains: [SPEC.subdomain, "mine-one", "mine-two", "mine-three"],
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 

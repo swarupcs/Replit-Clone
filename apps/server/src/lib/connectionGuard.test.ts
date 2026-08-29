@@ -134,9 +134,9 @@ describe("checkConnectionString", () => {
     );
   });
 
-  /** §7.2's second line, and it does not depend on the range check: the
-   *  platform's own database is refused by host and port, whatever network
-   *  it happens to be on. */
+  /** The second line of defence, and it does not depend on the range check:
+   *  the platform's own database is refused by host and port, whatever
+   *  network it happens to be on. */
   it("refuses the platform's own database by name", async () => {
     expect(await refusal("postgresql://replit:replit@203.0.113.9:15432/replit_clone"))
       .toBe("PLATFORM_DATABASE");

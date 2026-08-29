@@ -102,3 +102,125 @@ jobs:
             sandbox-node:latest \
             bash -lc 'touch /home/sandbox/app/created.txt && test -w "$HOME"'
           test -f /tmp/probe/created.txt
+
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+
+    # The only tests here that exercise the real stack: a browser, the API, a
+    # project container, a dev server inside it, and the preview proxy in
+    # front. Every bug the notes describe as "invisible to the unit tests" was
+    # of exactly that shape -- a seam between two things that are each fine.
+    # They used to run only when somebody remembered.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: replit_clone_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/replit_clone_e2e?schema=public
+      # Ports the e2e harness already defaults to, set explicitly so a change
+      # to either side is a visible edit rather than a silent mismatch.
+      PORT: "3100"
+      PREVIEW_PORT: "3101"
+      DEPLOY_PORT: "3102"
+      WEB_ORIGIN: http://localhost:15273
+      API_ORIGIN: http://localhost:3100
+      # Never used to sign anything a person holds; regenerated per run so a
+      # value here cannot be mistaken for a secret worth protecting.
+      JWT_ACCESS_SECRET: ci-access-secret-not-a-real-one-000000
+      JWT_REFRESH_SECRET: ci-refresh-secret-not-a-real-one-00000
+      PROJECTS_DIR: /tmp/rc-e2e-projects
+      E2E_BASE_URL: http://localhost:15273
+      E2E_API_URL: http://localhost:3100
+      # Turns "the stack is not up" from a quiet skip into a failure. Without
+      # it this job could pass having run nothing at all, which is the one
+      # outcome worse than not having the job.
+      E2E_REQUIRE: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Every E2E flow creates a static-html project, and that template runs in
+      # sandbox-node. The other images are covered by the `images` job.
+      - name: Build the sandbox image the flows use
+        run: |
+          pnpm images:prepare
+          docker build -t sandbox-node:latest images/node
+
+      - name: Build shared package
+        run: pnpm --filter @replit-clone/shared build
+
+      - name: Migrate the database
+        run: pnpm --filter @replit-clone/server exec prisma migrate deploy
+
+      - name: Build the server
+        run: pnpm --filter @replit-clone/server build
+
+      - name: Build the web app
+        run: pnpm --filter @replit-clone/web build
+        env:
+          VITE_BACKEND_URL: http://localhost:3100
+          VITE_PREVIEW_ORIGIN: http://localhost:3101
+
+      - name: Start the API
+        run: |
+          mkdir -p "$PROJECTS_DIR"
+          nohup pnpm --filter @replit-clone/server start > /tmp/rc-api.log 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:3100/health > /dev/null && exit 0
+            sleep 1
+          done
+          echo "API never became healthy:"; cat /tmp/rc-api.log; exit 1
+
+      - name: Serve the built web app
+        run: |
+          nohup pnpm --filter @replit-clone/web exec vite preview \
+            --port 15273 --strictPort > /tmp/rc-web.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:15273 > /dev/null && exit 0
+            sleep 1
+          done
+          echo "web app never came up:"; cat /tmp/rc-web.log; exit 1
+
+      - name: Install Playwright's browser
+        run: pnpm --filter @replit-clone/web exec playwright install --with-deps chromium
+
+      - name: Run the end-to-end flows
+        run: pnpm --filter @replit-clone/web e2e
+
+      # A failing E2E run is usually a failing stack, and the trace alone does
+      # not say which half. The logs are the difference between a reproducible
+      # report and a rerun.
+      - name: Server and web logs
+        if: failure()
+        run: |
+          echo "--- api ---"; tail -200 /tmp/rc-api.log || true
+          echo "--- web ---"; tail -100 /tmp/rc-web.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: apps/web/e2e/.artifacts
+          retention-days: 7
+          if-no-files-found: ignore

@@ -5,10 +5,16 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { verifyAccessToken } from "../service/tokenService.js";
 import { assertProjectAccess } from "../service/projectAccessService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
-import { ensureContainer, attach, detach } from "../containers/containerManager.js";
+import {
+  ensureContainer,
+  attach,
+  detach,
+  MOUNT_POINT,
+} from "../containers/containerManager.js";
 import { logger } from "../lib/logger.js";
 import { MessageReader, encodeMessage } from "./framing.js";
 import { LANGUAGE_SERVERS, canStartLanguageServer } from "./lspPolicy.js";
+import { getTemplate } from "../templates/registry.js";
 
 /** Bytes a half-received message may occupy before the connection is closed.
  *
@@ -27,8 +33,8 @@ function tokenFromRequest(req: IncomingMessage): string | null {
  *
  *  The same shape as `terminalGateway` — an authorised upgrade attached to a
  *  process inside the container with a bidirectional stream — with two
- *  differences §3.2 names. The framing is LSP's `Content-Length` headers
- *  rather than raw PTY bytes, so a chunk boundary is not a message boundary.
+ *  differences. The framing is LSP's `Content-Length` headers rather than
+ *  raw PTY bytes, so a chunk boundary is not a message boundary.
  *  And there is no TTY, which is what lets stdout and stderr be told apart:
  *  a server's diagnostics on stderr must not be spliced into the JSON-RPC
  *  stream on stdout.
@@ -54,13 +60,20 @@ export function installLspGateway(server: Server): void {
         // A language server reads the whole project and can be asked to
         // rename across it, so it needs the same level a shell does rather
         // than a viewer's.
-        await assertProjectAccess(projectId, claims.sub, "editor");
+        const project = await assertProjectAccess(projectId, claims.sub, "editor");
 
-        const verdict = canStartLanguageServer(language);
+        // The image the project's container actually runs, so a `.py` file
+        // opened in a Node project is refused here with a sentence rather
+        // than by `exec` reporting "executable file not found" after the
+        // client has already been told the server was starting.
+        const verdict = canStartLanguageServer(
+          language,
+          getTemplate(project.template).image,
+        );
         if (!verdict.allowed) {
-          // Refused with the reason, before any container work. §3.3 is
-          // explicit that this must say so rather than starting a server and
-          // letting the dev server be killed for memory.
+          // Refused with the reason, before any container work. It has to
+          // say so rather than start a server and let the dev server be
+          // killed for memory — `docs/ROADMAP.md` §6, decision 3.
           socket.write(
             `HTTP/1.1 503 Service Unavailable\r\n` +
               `Content-Type: text/plain\r\n\r\n${verdict.message}`,
@@ -80,6 +93,45 @@ export function installLspGateway(server: Server): void {
       }
     })();
   });
+}
+
+/** How a language server is exec'd inside the project's container.
+ *
+ *  Its own function so the two things that have to be right about it can be
+ *  asserted without a Docker daemon. Both have been wrong:
+ *
+ *  **WorkingDir** said `"/app"`, which exists in none of the sandbox images --
+ *  the bind mount is at `/home/sandbox/app`. Docker does not create a missing
+ *  working directory; it refuses to start the process, with `chdir to cwd
+ *  ("/app") failed: no such file or directory`. No language server had ever
+ *  started. It went unnoticed because the feature ships behind LSP_ENABLED and
+ *  that defaults to off. A wrong-but-EXISTING directory would have been the
+ *  worse bug: the server would start, index nothing, and answer everything
+ *  with an empty result -- which reads as "this language has no intelligence"
+ *  rather than as a broken path. So this is pinned to the mount point itself,
+ *  not to a string that currently equals it.
+ *
+ *  **Tty** must stay false. With a TTY, Docker merges stdout and stderr into
+ *  one stream, and the server's own logging would be spliced into the JSON-RPC
+ *  it is meant to be speaking -- a corrupted protocol rather than a visible
+ *  failure.
+ */
+export function languageServerExec(argv: string[]): {
+  Cmd: string[];
+  AttachStdin: boolean;
+  AttachStdout: boolean;
+  AttachStderr: boolean;
+  Tty: boolean;
+  WorkingDir: string;
+} {
+  return {
+    Cmd: argv,
+    AttachStdin: true,
+    AttachStdout: true,
+    AttachStderr: true,
+    Tty: false,
+    WorkingDir: MOUNT_POINT,
+  };
 }
 
 async function startLanguageServer(
@@ -114,17 +166,7 @@ async function startLanguageServer(
       return;
     }
 
-    const exec = await container.exec({
-      Cmd: server.argv,
-      AttachStdin: true,
-      AttachStdout: true,
-      AttachStderr: true,
-      // No TTY, deliberately: with one, stdout and stderr are merged into a
-      // single stream and the server's own logging would be spliced into the
-      // JSON-RPC it is meant to be speaking.
-      Tty: false,
-      WorkingDir: "/app",
-    });
+    const exec = await container.exec(languageServerExec(server.argv));
 
     const stream = await exec.start({ hijack: true, stdin: true });
 

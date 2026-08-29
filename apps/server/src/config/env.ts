@@ -107,6 +107,20 @@ const envSchema = z.object({
    */
   MAX_DEPLOYED_SERVICES: z.coerce.number().int().positive().default(5),
 
+  /** How many of those one account may hold.
+   *
+   *  Without this the host-wide cap is a first-come-first-served queue: one
+   *  user publishing five apps takes every always-on slot, and everybody
+   *  else's deploy is refused for a resource they never got a share of. Two
+   *  by default against a host budget of five, so a handful of accounts can
+   *  each keep something up without any one of them filling the machine.
+   */
+  MAX_DEPLOYED_SERVICES_PER_USER: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(2),
+
   /** How long a service deployment gets to answer on its port before the
    *  publish is called failed.
    *
@@ -245,10 +259,14 @@ const envSchema = z.object({
 
   /** Whether language servers may be started inside project containers.
    *
-   *  Off by default. §3.3's image cost — pyright pulls Node into the Python
-   *  image — is paid on every cold start, including by people who never open
-   *  a .py file, so switching this on is an operator's decision about their
-   *  own images and their own VM. */
+   *  Off by default, though the cost turned out smaller than the note that
+   *  used to be here claimed. It assumed pyright, which pulls Node into the
+   *  Python image; the implementation uses `pylsp`, which is pure Python.
+   *  Measured: the Python image grows 307 MB to 338 MB, and the Go image
+   *  1.31 GB to 1.36 GB for `gopls`. Still paid on every cold start by people
+   *  who never open a .py or .go file, so switching it on stays an operator's
+   *  decision about their own images and their own VM — but it is 31 MB, not
+   *  a runtime. */
   LSP_ENABLED: z
     .string()
     .optional()
@@ -256,7 +274,7 @@ const envSchema = z.object({
 
   /** Below this, a language server is refused rather than started.
    *
-   *  §3.3: pyright idles at 150-300 MB on a real project and
+   *  A language server idles in the low hundreds of MB on a real project and
    *  CONTAINER_MEMORY_MB defaults to 512 in a deployment, so a server started
    *  unconditionally would be competing with the dev server it exists to
    *  help. 1024 rather than 512+300 because the app needs headroom too —
@@ -281,9 +299,9 @@ const envSchema = z.object({
 
   /** Periodic file snapshots, so an uncommitted mistake is recoverable.
    *
-   *  On by default: §8 is right that "an uncommitted mistake is gone" is the
-   *  scarier half of this product, and the cost is bounded by the retention
-   *  window rather than open-ended. */
+   *  On by default: "an uncommitted mistake is gone" is the scarier half of
+   *  this product, and the cost is bounded by the retention window rather
+   *  than open-ended. */
   CHECKPOINTS_ENABLED: z
     .string()
     .optional()

@@ -71,7 +71,7 @@ export async function getEnvVars(projectId: string): Promise<EnvVars> {
   // whatever this returns, so provisioning a database changes the signature
   // and forces the rebuild that gives the container its DATABASE_URL. A
   // container started before the database would otherwise keep the old,
-  // absent value for the rest of its life — §7.4's warning, exactly.
+  // absent value for the rest of its life.
   //
   // The user's own value wins. Someone who has set DATABASE_URL by hand has
   // said which database they mean, and silently overriding it would be the

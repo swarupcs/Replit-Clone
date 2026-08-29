@@ -94,6 +94,37 @@ test.describe.serial("playground flow", () => {
       { timeout: 30_000 },
     );
 
+    // --- The editor is painted in the app's own theme, not Monaco's default.
+    //
+    //  This is the one assertion in the suite that exists because a UNIT test
+    //  could not make it. The editor once came up white inside a dark IDE:
+    //  @monaco-editor/react calls `setTheme("dracula")` immediately after
+    //  `editor.create(...)`, the theme was being defined in `onMount` which
+    //  fires afterwards, so Monaco fell back to its built-in `vs` and nothing
+    //  reapplied it. Reproducing that needs workers, layout and a real canvas,
+    //  which is why the guard used to be a test that read its own source with
+    //  `readFileSync` — a good way to hold a fix in place and no way at all to
+    //  know the editor is dark.
+    //
+    //  Asserted as brightness rather than as an exact hex, because what broke
+    //  was "white where it should be dark", not "not #282a36". A theme change
+    //  is allowed; falling back to `vs` is not.
+    const paint = await page
+      .locator(".monaco-editor:visible .monaco-editor-background")
+      .first()
+      .evaluate((node) => getComputedStyle(node).backgroundColor);
+
+    const channels = (/rgba?\(([^)]+)\)/.exec(paint)?.[1] ?? "")
+      .split(",")
+      .slice(0, 3)
+      .map((part) => Number(part.trim()));
+
+    expect(channels).toHaveLength(3);
+    expect(
+      channels.reduce((total, value) => total + value, 0) / 3,
+      `editor background was ${paint}; Monaco fell back to its built-in theme`,
+    ).toBeLessThan(128);
+
     // --- Replace the heading with one carrying this run's marker.
     await editor.click();
     await page.keyboard.press("Control+A");

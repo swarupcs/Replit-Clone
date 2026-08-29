@@ -22,6 +22,7 @@ import {
   removeService,
   runningServices,
   serviceLogs,
+  serviceTarget,
   startService,
   waitForService,
 } from "../containers/deployContainer.js";
@@ -228,6 +229,64 @@ function toDeployment(row: DeploymentRow): Deployment {
   };
 }
 
+/** What a published service is actually doing, as opposed to what the row
+ *  remembers about the moment it was published.
+ *
+ *  Two things go stale the instant `publish` returns, and both of them are
+ *  read from this one place:
+ *
+ *  1. **The status.** The row says LIVE from the successful publish onwards
+ *     and nothing ever writes to it again. Docker restarts a service that
+ *     crashes, ten times, and then leaves it dead -- from which moment the
+ *     public address answers 503 and the owner's panel shows a green dot for
+ *     as long as they care to look at it. The one person who could fix the app
+ *     was the one being told nothing was wrong.
+ *  2. **The log.** `deployment.log` is the tail captured during publish. A
+ *     service up for a week showed its first thirty seconds, which is the half
+ *     of its output least likely to explain anything.
+ *
+ *  Read-time only, and deliberately not written back. `restoreServices` brings
+ *  LIVE rows up after the host restarts, so persisting FAILED here would mean
+ *  a crashed app were never resurrected -- the row records what was asked for,
+ *  and this records what is true right now.
+ *
+ *  Never throws. A daemon that cannot be reached is a reason to show the row
+ *  as it stands, not a reason for the panel to fail to load.
+ */
+async function observeService(row: DeploymentRow): Promise<Deployment> {
+  const stored = toDeployment(row);
+
+  // Only a running service can disagree with its row. A static deployment has
+  // no container, and a row that already says BUILDING or FAILED is not
+  // claiming anything that needs checking.
+  if (row.kind !== "SERVICE" || row.status !== "LIVE" || row.port === null) {
+    return stored;
+  }
+
+  try {
+    const target = await serviceTarget(row.subdomain, row.port);
+    const log = await serviceLogs(row.subdomain, MAX_LOG_CHARS);
+
+    // Empty means there is no container to ask -- keep the publish-time tail,
+    // which is the last thing anyone did see, rather than blanking the panel.
+    const current = log.trim() ? log : stored.log;
+
+    if (target !== undefined) return { ...stored, log: current };
+
+    return {
+      ...stored,
+      status: "failed",
+      error:
+        "This deployment is not answering. Its container has stopped, and " +
+        "Docker has given up restarting it. The output below is the last " +
+        "thing it printed; deploy again once the cause is fixed.",
+      log: current,
+    };
+  } catch {
+    return stored;
+  }
+}
+
 export async function deploymentState(
   projectId: string,
 ): Promise<DeploymentState> {
@@ -252,7 +311,9 @@ export async function deploymentState(
 
   return {
     target,
-    deployment: project.deployment ? toDeployment(project.deployment) : null,
+    deployment: project.deployment
+      ? await observeService(project.deployment)
+      : null,
   };
 }
 
@@ -697,6 +758,28 @@ async function buildAndCopy(
  *  -- and why its failure attaches the container's own logs, which are the
  *  only account of what went wrong that the user has any way to see.
  */
+/** Every subdomain published by the account that owns this project.
+ *
+ *  Handed to `startService` so the per-user half of the deployment budget can
+ *  be counted without `deployContainer` knowing anything about ownership.
+ *  Counted against the OWNER rather than whoever pressed Deploy, matching the
+ *  project-container budget: a project shared with several people costs its
+ *  owner one slot, not one each.
+ */
+async function ownedSubdomains(projectId: string): Promise<string[]> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { ownerId: true },
+  });
+  if (!project) return [];
+
+  const rows = await prisma.deployment.findMany({
+    where: { kind: "SERVICE", project: { ownerId: project.ownerId } },
+    select: { subdomain: true },
+  });
+  return rows.map((row) => row.subdomain);
+}
+
 async function publishService(
   projectId: string,
   subdomain: string,
@@ -749,6 +832,7 @@ async function publishService(
     port: service.port,
     root: live,
     projectEnv: toDockerEnv(await getEnvVars(projectId)),
+    ownedSubdomains: await ownedSubdomains(projectId),
   });
 
   const ready = await waitForService(
@@ -820,6 +904,11 @@ export async function restoreServices(): Promise<{ restored: number }> {
         port: row.port,
         root: siteDirectory(row.subdomain),
         projectEnv: toDockerEnv(await getEnvVars(row.projectId)),
+        // Restoring respects the per-user cap too. A cap lowered since these
+        // were published means the excess does not come back — which the
+        // owner's panel now reports honestly rather than as a green dot, and
+        // which the warning below records.
+        ownedSubdomains: await ownedSubdomains(row.projectId),
       });
       restored += 1;
     } catch (error) {

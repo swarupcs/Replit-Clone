@@ -16,9 +16,9 @@ interface PresenceStore {
 
   /** Whose viewport this editor is riding along with, by peer key.
    *
-   *  §8's follow mode. Presence already knows who is here and which file
-   *  they are in; following is a small addition to a layer that exists
-   *  rather than a new one. */
+   *  Follow mode. Presence already knows who is here and which file they
+   *  are in; following is a small addition to a layer that exists rather
+   *  than a new one. */
   following: string | null;
 
   setPresence: (peers: Peer[]) => void;

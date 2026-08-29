@@ -303,3 +303,223 @@ describe("Dashboard creating", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 });
+
+/** Cards or a list.
+ *
+ *  The point of the list is scanning: past roughly thirty projects a card is
+ *  mostly whitespace and the name is three lines down in each of them. These
+ *  pin down that both layouts show the same projects and offer the same
+ *  actions, which is the pair most likely to drift once there are two of them.
+ */
+describe("choosing a layout", () => {
+  beforeEach(() => {
+    // The choice is remembered in localStorage, which does not reset between
+    // tests -- found by two of these failing because the one before them had
+    // switched to list and left it there. Proof the persistence works, and a
+    // reason each test has to start from a known layout.
+    localStorage.clear();
+  });
+
+  function rowNames() {
+    return [...document.querySelectorAll(".rc-project-row")].map((row) =>
+      row
+        .querySelector("[aria-label^='Actions for ']")
+        ?.getAttribute("aria-label")
+        ?.replace("Actions for ", ""),
+    );
+  }
+
+  it("shows cards to begin with", async () => {
+    api.listProjectsApi.mockResolvedValue(PROJECTS);
+    renderDashboard();
+
+    await screen.findByText("Zebra");
+    expect(document.querySelectorAll(".rc-card").length).toBe(2);
+    expect(document.querySelectorAll(".rc-project-row").length).toBe(0);
+  });
+
+  it("switches to one row per project", async () => {
+    api.listProjectsApi.mockResolvedValue(PROJECTS);
+    renderDashboard();
+
+    await screen.findByText("Zebra");
+    fireEvent.click(screen.getByLabelText("List view"));
+
+    expect(rowNames()).toEqual(["Zebra", "Apple"]);
+    expect(document.querySelectorAll(".rc-card").length).toBe(0);
+  });
+
+  it("puts the rows in a container the list styles apply to", async () => {
+    // The rows carry their own class, so they render either way -- which
+    // means every other test here passes with the container left as a grid,
+    // and the list arrives with no border, no separators and card spacing.
+    // Found by mutation: this is the assertion that was missing.
+    api.listProjectsApi.mockResolvedValue(PROJECTS);
+    renderDashboard();
+
+    await screen.findByText("Zebra");
+    expect(document.querySelector(".rc-project-list")).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("List view"));
+
+    expect(document.querySelector(".rc-project-list")).not.toBeNull();
+    expect(document.querySelector(".rc-project-grid")).toBeNull();
+  });
+
+  it("holds the shape it is about to have while loading", async () => {
+    // The skeletons exist so the page does not jump when the projects land.
+    // Card-shaped placeholders inside a list would jump twice: once for the
+    // data, once for the layout correcting itself.
+    localStorage.setItem("rc.dashboard.view", "list");
+    let resolve: (value: Project[]) => void = () => undefined;
+    api.listProjectsApi.mockReturnValue(
+      new Promise<Project[]>((done) => {
+        resolve = done;
+      }),
+    );
+
+    renderDashboard();
+
+    const loading = await screen.findByLabelText("Loading projects");
+    expect(loading.className).toBe("rc-project-list");
+    // Scoped to this container: the Explore section below renders skeleton
+    // cards of its own, and they are not what this is about.
+    expect(loading.querySelectorAll(".rc-skeleton-row").length).toBeGreaterThan(0);
+    expect(loading.querySelectorAll(".rc-skeleton-card").length).toBe(0);
+
+    resolve(PROJECTS);
+    await screen.findByText("Zebra");
+  });
+
+  it("shows the same projects in the same order in both", async () => {
+    // The sort is the user's, and the layout is a display choice. A list that
+    // reordered would look like a bug in the sort.
+    api.listProjectsApi.mockResolvedValue(PROJECTS);
+    renderDashboard();
+
+    await screen.findByText("Zebra");
+    const cards = cardNames();
+
+    fireEvent.click(screen.getByLabelText("List view"));
+
+    expect(rowNames()).toEqual(cards);
+  });
+
+  it("keeps the search filter across a layout change", async () => {
+    api.listProjectsApi.mockResolvedValue(PROJECTS);
+    renderDashboard();
+
+    await screen.findByText("Zebra");
+    fireEvent.change(screen.getByPlaceholderText("Search projects"), {
+      target: { value: "app" },
+    });
+    await waitFor(() => {
+      expect(cardNames()).toEqual(["Apple"]);
+    });
+
+    fireEvent.click(screen.getByLabelText("List view"));
+
+    expect(rowNames()).toEqual(["Apple"]);
+  });
+
+  it("opens a project from a row", async () => {
+    api.listProjectsApi.mockResolvedValue(PROJECTS);
+    renderDashboard();
+
+    await screen.findByText("Zebra");
+    fireEvent.click(screen.getByLabelText("List view"));
+
+    const row = document.querySelectorAll(".rc-project-row")[0];
+    fireEvent.click(row!);
+
+    expect(navigate).toHaveBeenCalledWith("/project/a");
+  });
+
+  it("offers the same actions from a row as from a card", async () => {
+    // One menu, rendered by both. The version of this that goes wrong is two
+    // copies where the list quietly loses Delete for owners.
+    api.listProjectsApi.mockResolvedValue(PROJECTS);
+    renderDashboard();
+
+    await screen.findByText("Zebra");
+    fireEvent.click(screen.getByLabelText("List view"));
+
+    fireEvent.click(screen.getAllByLabelText("Actions for Zebra")[0]!);
+
+    for (const label of ["Share", "Rename", "Duplicate", "Delete"]) {
+      expect(await screen.findByText(label)).toBeTruthy();
+    }
+  });
+
+  it("does not open the project when the row's menu is clicked", async () => {
+    // The menu sits inside the row's click target, so without the stopped
+    // propagation every menu click also navigates away from the page holding
+    // the menu.
+    api.listProjectsApi.mockResolvedValue(PROJECTS);
+    renderDashboard();
+
+    await screen.findByText("Zebra");
+    fireEvent.click(screen.getByLabelText("List view"));
+    fireEvent.click(screen.getAllByLabelText("Actions for Zebra")[0]!);
+
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("remembers the layout for next time", async () => {
+    api.listProjectsApi.mockResolvedValue(PROJECTS);
+    const first = renderDashboard();
+
+    await screen.findByText("Zebra");
+    fireEvent.click(screen.getByLabelText("List view"));
+    first.unmount();
+
+    renderDashboard();
+    await screen.findByText("Zebra");
+
+    expect(document.querySelectorAll(".rc-project-row").length).toBe(2);
+  });
+
+  it("renders as cards when the stored preference cannot be read", async () => {
+    // A private window, or a browser blocking site data, makes the accessor
+    // itself throw rather than return null. A dashboard that fails to render
+    // over a display preference would be the worst possible trade.
+    //
+    // Spied on the INSTANCE, not on `Storage.prototype`: the test setup
+    // installs its own MemoryStorage, so a prototype spy applies to nothing
+    // and this test passed against code with no try/catch at all. Caught by
+    // reverting the guard and finding the test still green.
+    const getItem = vi
+      .spyOn(globalThis.localStorage, "getItem")
+      .mockImplementation(() => {
+        throw new Error("blocked");
+      });
+
+    api.listProjectsApi.mockResolvedValue(PROJECTS);
+    expect(() => renderDashboard()).not.toThrow();
+    await screen.findByText("Zebra");
+    expect(document.querySelectorAll(".rc-card").length).toBe(2);
+
+    getItem.mockRestore();
+  });
+
+  it("keeps working when the preference cannot be written", async () => {
+    // The other half. Losing the preference is acceptable; losing the click
+    // that set it is not.
+    const setItem = vi
+      .spyOn(globalThis.localStorage, "setItem")
+      .mockImplementation(() => {
+        throw new Error("blocked");
+      });
+
+    api.listProjectsApi.mockResolvedValue(PROJECTS);
+    renderDashboard();
+    await screen.findByText("Zebra");
+
+    expect(() => {
+      fireEvent.click(screen.getByLabelText("List view"));
+    }).not.toThrow();
+    expect(document.querySelectorAll(".rc-project-row").length).toBe(2);
+
+    setItem.mockRestore();
+  });
+});

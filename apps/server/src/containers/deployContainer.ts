@@ -57,6 +57,13 @@ export interface ServiceSpec {
   root: string;
   /** The project's own environment variables, already in `NAME=value` form. */
   projectEnv: string[];
+  /** Every subdomain published by the owner of this one, this one included.
+   *
+   *  Passed in rather than looked up, so this module stays a Docker module
+   *  with no opinion about who owns what. It answers "which of the containers
+   *  running right now are on this account's tab", which is the only thing the
+   *  per-user half of the budget needs to know. */
+  ownedSubdomains: string[];
 }
 
 async function existing(subdomain: string) {
@@ -73,7 +80,7 @@ async function existing(subdomain: string) {
  *  be the new one.
  */
 export async function startService(spec: ServiceSpec): Promise<void> {
-  await assertServiceBudget(spec.subdomain);
+  await assertServiceBudget(spec.subdomain, spec.ownedSubdomains);
   await removeService(spec.subdomain);
 
   const publishPort = previewTargetMode === "host-loopback";
@@ -150,14 +157,31 @@ export async function startService(spec: ServiceSpec): Promise<void> {
   });
 }
 
-/** Refuses to start one more than the host is configured to carry.
+/** Refuses to start one more than the host, or the account, is configured to
+ *  carry.
  *
  *  Counted over running containers rather than over rows, because a row for a
  *  service that is not up is not consuming anything. Skips the subdomain being
  *  published, so a redeploy of an already-live service is never refused for
  *  the space it is already occupying.
+ *
+ *  Two caps, and the second is why this took a second argument. Only the
+ *  host-wide count existed, so one account publishing `MAX_DEPLOYED_SERVICES`
+ *  apps took every always-on slot on the machine and every other user's
+ *  deploys answered "the server is at its limit" — with nothing anyone but an
+ *  administrator could do about it. No malice required; ordinary use gets
+ *  there. The project-container path solved exactly this with
+ *  `assertUserContainerBudget`, and this one never grew the equivalent.
+ *
+ *  The two refusals are deliberately different. The host being full is a 503:
+ *  a condition of the server, temporary, nothing about this request was wrong.
+ *  An account being full is a 429 naming the number, because the person
+ *  reading it can act on it — unpublish one of their own.
  */
-async function assertServiceBudget(subdomain: string): Promise<void> {
+async function assertServiceBudget(
+  subdomain: string,
+  ownedSubdomains: readonly string[],
+): Promise<void> {
   const name = deployContainerName(subdomain);
   const running = await docker.listContainers({
     filters: { name: [DEPLOY_CONTAINER_PREFIX] },
@@ -175,6 +199,26 @@ async function assertServiceBudget(subdomain: string): Promise<void> {
       `This server keeps ${String(env.MAX_DEPLOYED_SERVICES)} always-on ` +
         "deployments running at once and is at that limit. Unpublish one " +
         "that is no longer needed, and try again.",
+    );
+  }
+
+  // The subdomain being published is excluded above, so a redeploy is measured
+  // against the account's OTHER live services — a redeploy of an app that is
+  // already up never costs a slot it is already holding.
+  const mine = new Set(ownedSubdomains);
+  const theirs = others.filter((info) =>
+    info.Names.some((each) =>
+      mine.has(each.replace(/^\//, "").slice(DEPLOY_CONTAINER_PREFIX.length)),
+    ),
+  );
+
+  if (theirs.length >= env.MAX_DEPLOYED_SERVICES_PER_USER) {
+    increment("deploy_services_capacity_rejected");
+    throw new AppError(
+      429,
+      "USER_DEPLOY_LIMIT",
+      `You already have ${String(theirs.length)} always-on deployments ` +
+        "running. Take one offline before publishing another.",
     );
   }
 }

@@ -20,7 +20,7 @@ import { BadRequestError, UnauthorizedError } from "../utils/errors.js";
  *  nothing between "public repositories" and "everything": there is no read-
  *  only-private and no per-repository grant. A GitHub App would offer both and
  *  is the better long-term answer; it is also a heavier setup for a self-hosted
- *  install, so it is noted in the plan rather than assumed here.
+ *  install, so it is not assumed here.
  */
 export const CONNECT_SCOPES = "repo read:user";
 
