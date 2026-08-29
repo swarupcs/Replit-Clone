@@ -107,6 +107,20 @@ const envSchema = z.object({
    */
   MAX_DEPLOYED_SERVICES: z.coerce.number().int().positive().default(5),
 
+  /** How many of those one account may hold.
+   *
+   *  Without this the host-wide cap is a first-come-first-served queue: one
+   *  user publishing five apps takes every always-on slot, and everybody
+   *  else's deploy is refused for a resource they never got a share of. Two
+   *  by default against a host budget of five, so a handful of accounts can
+   *  each keep something up without any one of them filling the machine.
+   */
+  MAX_DEPLOYED_SERVICES_PER_USER: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(2),
+
   /** How long a service deployment gets to answer on its port before the
    *  publish is called failed.
    *

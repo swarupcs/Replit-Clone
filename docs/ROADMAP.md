@@ -43,7 +43,7 @@ about it:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1366 passing**, 149 skipped (80 files) |
+| `pnpm --filter server test` | **1379 passing**, 149 skipped (81 files) |
 | `pnpm --filter web test` | **831 passing** (62 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
@@ -51,7 +51,7 @@ The 149 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI.
 
-**Done: 58 items. Open: 15.** Of the 15, four are defects, four are unblocked
+**Done: 61 items. Open: 12.** Of the 12, one is a defect, four are unblocked
 work, five are blocked on a decision or on infrastructure, and two are
 documentation debts.
 
@@ -142,6 +142,21 @@ Rows 1–13, all `done`:
 
 - [x] The assistant can offer a change, and a person accepts it — `propose_edit`, reviewed as a diff, applied through the editor's undo stack
 - [x] The file tree stopped waking for other people's news — per-row selectors and a memo
+- [x] **A crashed deployment no longer reports "live".** `deploymentState`
+      reconciles a LIVE service row against `serviceTarget` before answering,
+      and reports `failed` with the reason when nothing is listening. Read-time
+      only, deliberately not written back: `restoreServices` brings LIVE rows up
+      after a host restart, so persisting the failure would mean a crashed app
+      were never resurrected.
+- [x] **A deployment's log is no longer frozen at publish time.** The same read
+      pulls the current tail through `serviceLogs`, falling back to the stored
+      one when there is no container to ask.
+- [x] **One user can no longer occupy every always-on slot.**
+      `MAX_DEPLOYED_SERVICES_PER_USER` (default 2 against a host budget of 5).
+      The owner's subdomains are passed into `startService` rather than looked
+      up, so `deployContainer` stays a Docker module with no opinion about
+      ownership. A full host is a 503; a full account is a 429 that names the
+      number, because that one the reader can act on.
 
 ---
 
@@ -149,26 +164,9 @@ Rows 1–13, all `done`:
 
 ### 3.1 Defects — code that is merged and wrong
 
-Verified still present on 2026-08-29.
+The three deployment defects listed here were fixed on 2026-08-29 and have
+moved to §2.8. One remains.
 
-- [ ] **A crashed deployment still reports "live".** `deploymentState`
-      (`service/deployService.ts:231`) reads the `Deployment` row and nothing
-      else. The published container restarts on failure ten times and then
-      stays dead; from that moment the public address answers 503 and the
-      owner's panel shows a green dot indefinitely. **This is a feature lying
-      about its own state** — the one person who could fix the app is the one
-      being told nothing is wrong. Reconcile via `serviceTarget` for
-      `kind === "service"` rows before answering.
-- [ ] **A deployment's log is frozen at publish time.** `deployment.log` holds
-      the tail captured during publish and never changes. A service up for a
-      week shows its first thirty seconds. `serviceLogs()` already exists and
-      is already used on the failure path.
-- [ ] **One user can occupy every always-on slot.** `assertServiceBudget`
-      (`containers/deployContainer.ts:160`) counts `rc-deploy-` containers
-      host-wide with no per-user component. The same problem was solved for
-      project containers by `assertUserContainerBudget`; the deployment path
-      never grew the equivalent. Reachable through ordinary use, no malice
-      required.
 - [ ] **Public projects have no abuse story.** No report mechanism, no review,
       no rate limit on *publishing* (forking is rate limited as project
       creation). Single-tenant or invite-only is unaffected; a public
@@ -259,9 +257,7 @@ whoever owns the data, not to a cleanup script.
 
 ## 4. Recommended order
 
-1. **§3.1's first three defects, together.** All small, all in code committed
-   the same day, and the crashed-deployment one is the only item on this whole
-   page that actively misinforms a user.
+1. ~~**§3.1's first three defects.**~~ Done 2026-08-29.
 2. **§3.2 E2E in CI**, with the `monacoSetup` debt folded in. It is the
    cheapest way to stop shipping the class of bug the notes keep describing as
    "only a real run could have caught it".
@@ -283,8 +279,8 @@ be started until that decision is made.
 Claims here were checked against the source rather than carried over on trust.
 Specifically:
 
-- `deploymentState` reads the row and returns — **no reconcile**. Confirmed open.
-- `assertServiceBudget(subdomain)` takes no user and counts host-wide. Confirmed open.
+- `deploymentState` read the row and returned — **no reconcile**. Fixed.
+- `assertServiceBudget(subdomain)` took no user and counted host-wide. Fixed.
 - `LANGUAGE_SERVERS` has one key, `python`. Confirmed open.
 - `checkpointService.ts` and `PresenceStack.tsx`'s follow affordance both exist
   — so the old §8.6's claim that they were missing was confirmed **stale**, and
