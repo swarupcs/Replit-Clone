@@ -61,7 +61,7 @@ import {
 } from "./containers/containerManager.js";
 import { ensureEgressGateway } from "./containers/egressGateway.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
-import { EgressControlUnavailable } from "./containers/sandboxNetwork.js";
+import { SandboxNetworkMismatch } from "./containers/sandboxNetwork.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
 import {
   docRoomName,
@@ -366,12 +366,15 @@ async function start(): Promise<void> {
     ensureNetwork().catch((error: unknown) => {
       // withTimeout swallows failures on purpose: a Docker daemon that is
       // down or slow should cost the container features and nothing else.
-      // This one refusal is not that. It means egress filtering was turned
-      // ON and is not in effect, so every sandbox has unrestricted outbound
-      // access while the configuration says otherwise -- and the server would
-      // carry on serving, with the reason sitting in a log line nobody reads
-      // until afterwards. The guard is only a guard if it stops the boot.
-      if (error instanceof EgressControlUnavailable) {
+      // This one refusal is not that. It means the sandbox network is not
+      // the one the configuration describes: either filtering is on and not
+      // in effect, so every sandbox has unrestricted outbound access while
+      // the configuration says otherwise, or the network cannot publish the
+      // ports previews are resolved through, so every preview reports that
+      // nothing is running. Either way the server would carry on serving with
+      // the reason sitting in a log line nobody reads until afterwards, and
+      // the guard is only a guard if it stops the boot.
+      if (error instanceof SandboxNetworkMismatch) {
         logger.error("refusing to start", error);
         process.exit(1);
       }

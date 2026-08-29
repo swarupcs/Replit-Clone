@@ -188,7 +188,20 @@ can see rather than anything on the network
   running untrusted code should turn it on. Turning it on when the network
   already exists is refused at boot rather than ignored, because Docker cannot
   change the flag on an existing network and a server that believes it is
-  filtering when it is not is worse than one that will not start.
+  filtering when it is not is worse than one that will not start. Turning it
+  back *off* while the internal network survives is refused for the same
+  reason, from the other side: package installs fail and previews go dark.
+
+  It is also incompatible with `PREVIEW_TARGET_MODE=host-loopback`, and that
+  is likewise refused at boot. Docker publishes a container port by adding a
+  DNAT rule on the host and does not do so for a container on an internal
+  network — it accepts the request and silently produces no binding — so the
+  preview proxy, which dials the published port on 127.0.0.1 in that mode, has
+  nothing to reach. Every preview then reports that nothing is running while
+  the dev server is demonstrably up, which reads as a bug in the project
+  rather than as a network flag two layers away. Filtering therefore belongs
+  to deployments where the server shares the sandbox network — the compose
+  setup — and not to a server run directly on a developer's machine.
 - The terminal is a shell *inside that container*, reached by a WebSocket
   whose token travels in the subprotocol list (never the query string, which
   lands in access logs). It requires editor access and is closed on
