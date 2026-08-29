@@ -52,7 +52,10 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
   const level = async (userId: string) =>
     (await service.getProjectAccess(projectId, userId))?.level;
 
-  const allows = async (userId: string, need: "viewer" | "editor" | "owner") => {
+  const allows = async (
+    userId: string,
+    need: "visitor" | "viewer" | "editor" | "owner",
+  ) => {
     try {
       await service.assertProjectAccess(projectId, userId, need);
       return true;
@@ -216,6 +219,177 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
     it("only lets the owner create or revoke a link", async () => {
       await expect(service.rotateShareToken(projectId, strangerId)).rejects.toThrow();
       await expect(service.revokeShareToken(projectId, strangerId)).rejects.toThrow();
+    });
+  });
+
+  describe("a public project", () => {
+    async function publish() {
+      await service.setProjectVisibility(
+        projectId,
+        ownerId,
+        service.ProjectVisibility.PUBLIC,
+      );
+    }
+
+    it("is invisible to a stranger until it is published", async () => {
+      expect(await level(strangerId)).toBe("none");
+    });
+
+    it("gives a stranger `visitor`, and only `visitor`", async () => {
+      await publish();
+
+      expect(await level(strangerId)).toBe("visitor");
+    });
+
+    it("does NOT give a stranger the things a named viewer gets", async () => {
+      // The entire security design of this feature is that `visitor` ranks
+      // BELOW `viewer`. Every existing check in the codebase asks for viewer or
+      // higher, so they all keep refusing a stranger with no further work --
+      // and had PUBLIC granted `viewer` instead, making a project public would
+      // silently have handed out the database query editor (viewer-level
+      // throughout `databaseController`) and the git history, remote URLs and
+      // any token in them.
+      await publish();
+
+      expect(await allows(strangerId, "visitor")).toBe(true);
+      expect(await allows(strangerId, "viewer")).toBe(false);
+      expect(await allows(strangerId, "editor")).toBe(false);
+      expect(await allows(strangerId, "owner")).toBe(false);
+    });
+
+    it("never lets a stranger write, however public it is", async () => {
+      await publish();
+
+      await expect(
+        service.assertProjectAccess(projectId, strangerId, "editor"),
+      ).rejects.toThrow();
+    });
+
+    it("does not demote somebody who was actually invited", async () => {
+      // An editor invited before the project was published keeps editor. The
+      // public grant is a floor, not a ceiling, and the order of the checks in
+      // `getProjectAccess` is what makes that true.
+      await service.setCollaborator(
+        projectId,
+        ownerId,
+        await emailOf(mateId),
+        service.ProjectRole.EDITOR,
+      );
+      await publish();
+
+      expect(await level(mateId)).toBe("editor");
+    });
+
+    it("leaves the owner as the owner", async () => {
+      await publish();
+
+      expect(await level(ownerId)).toBe("owner");
+    });
+
+    it("goes back to invisible when it is made private again", async () => {
+      await publish();
+      await service.setProjectVisibility(
+        projectId,
+        ownerId,
+        service.ProjectVisibility.PRIVATE,
+      );
+
+      expect(await level(strangerId)).toBe("none");
+    });
+
+    it("can only be published by its owner", async () => {
+      // Publishing puts somebody's source in front of strangers. A
+      // collaborator with edit access has not been given that decision.
+      await service.setCollaborator(
+        projectId,
+        ownerId,
+        await emailOf(mateId),
+        service.ProjectRole.EDITOR,
+      );
+
+      await expect(
+        service.setProjectVisibility(
+          projectId,
+          mateId,
+          service.ProjectVisibility.PUBLIC,
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("does not touch the collaborator list or the share link", async () => {
+      // Publishing is one decision. Revoking an invitation as a side effect of
+      // it would be a second one the owner did not make.
+      await service.setCollaborator(
+        projectId,
+        ownerId,
+        await emailOf(mateId),
+        service.ProjectRole.VIEWER,
+      );
+      const token = await service.rotateShareToken(projectId, ownerId);
+
+      await publish();
+
+      expect(await service.listCollaborators(projectId, ownerId)).toHaveLength(1);
+      const after = await prisma.project.findUniqueOrThrow({
+        where: { id: projectId },
+      });
+      expect(after.shareToken).toBe(token);
+    });
+  });
+
+  describe("the gallery", () => {
+    it("lists a project once it is public", async () => {
+      await service.setProjectVisibility(
+        projectId,
+        ownerId,
+        service.ProjectVisibility.PUBLIC,
+      );
+
+      const listed = await service.listPublicProjects();
+
+      expect(listed.map((row) => row.id)).toContain(projectId);
+    });
+
+    it("does not list a private one", async () => {
+      const listed = await service.listPublicProjects();
+
+      expect(listed.map((row) => row.id)).not.toContain(projectId);
+    });
+
+    it("carries no secrets and no share token", async () => {
+      // This list is readable by anybody with an account. A `Project` row
+      // carries `envVars` and `shareToken`, so the shape is narrowed at the
+      // query rather than trusted to be stripped by whoever renders it.
+      await prisma.project.update({
+        where: { id: projectId },
+        data: { envVars: { API_KEY: "hunter2" }, shareToken: "s3cret-token" },
+      });
+      await service.setProjectVisibility(
+        projectId,
+        ownerId,
+        service.ProjectVisibility.PUBLIC,
+      );
+
+      const listed = await service.listPublicProjects();
+      const serialised = JSON.stringify(listed);
+
+      expect(serialised).not.toContain("hunter2");
+      expect(serialised).not.toContain("s3cret-token");
+      expect(serialised).not.toContain("envVars");
+    });
+
+    it("names the owner without publishing their email address", async () => {
+      await service.setProjectVisibility(
+        projectId,
+        ownerId,
+        service.ProjectVisibility.PUBLIC,
+      );
+
+      const listed = await service.listPublicProjects();
+      const mine = listed.find((row) => row.id === projectId);
+
+      expect(mine?.ownerName).not.toContain("@");
+      expect(JSON.stringify(listed)).not.toContain(await emailOf(ownerId));
     });
   });
 });

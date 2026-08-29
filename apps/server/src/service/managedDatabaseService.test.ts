@@ -17,6 +17,12 @@ vi.mock("dockerode", () => ({
     getVolume = getVolume;
     listNetworks = vi.fn().mockResolvedValue([{ Name: "replit-clone-sandbox" }]);
     createNetwork = vi.fn();
+    // `ensureNetwork` inspects an existing sandbox network to check it matches
+    // the configured egress mode, which this suite leaves at its default: off,
+    // and so not internal.
+    getNetwork = vi.fn().mockReturnValue({
+      inspect: vi.fn().mockResolvedValue({ Internal: false }),
+    });
   },
 }));
 

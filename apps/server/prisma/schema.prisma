@@ -162,6 +162,25 @@ model Project {
   /// so a link never becomes an anonymous write credential.
   shareRole ProjectRole @default(VIEWER)
 
+  /// Whether anybody signed in may read this project and take a copy.
+  ///
+  /// PRIVATE by default and always: publishing a project puts its source in
+  /// front of strangers, which is a decision its owner makes rather than one
+  /// inherited from a default. PUBLIC grants the `visitor` level and nothing
+  /// more -- read the files, fork them. It is deliberately BELOW `viewer`,
+  /// because a named viewer may query the project's database and read its git
+  /// history, and neither of those is what "public" is meant to mean.
+  visibility ProjectVisibility @default(PRIVATE)
+
+  /// The public project this one was forked from, if it was.
+  ///
+  /// Nullable and SetNull rather than Cascade: deleting an original must not
+  /// delete the copies somebody else now owns and has since worked on. The
+  /// link is provenance, not ownership.
+  forkedFromId String?
+  forkedFrom   Project?  @relation("ProjectForks", fields: [forkedFromId], references: [id], onDelete: SetNull)
+  forks        Project[] @relation("ProjectForks")
+
   collaborators ProjectCollaborator[]
   deployment    Deployment?
   databaseConnection ProjectDatabaseConnection?
@@ -169,7 +188,15 @@ model Project {
   embed              Embed?
 
   @@index([ownerId])
+  /// The gallery reads this, and only this.
+  @@index([visibility])
+  @@index([forkedFromId])
   @@map("projects")
+}
+
+enum ProjectVisibility {
+  PRIVATE
+  PUBLIC
 }
 
 /// A GitHub authorisation this server may act under.
@@ -225,11 +252,21 @@ model Deployment {
 
   status DeploymentStatus @default(BUILDING)
 
+  /// Static files copied out, or a container kept running behind the public
+  /// origin. Recorded rather than derived from the template at read time: a
+  /// template gaining a static build later must not change how an already
+  /// published site is served.
+  kind DeploymentKind @default(STATIC)
+
   /// What actually ran, and what was read afterwards. Recorded rather than
   /// looked up, so changing a template's defaults does not rewrite what a
   /// published site claims about itself.
   buildCommand String
   outputDir    String
+
+  /// The container port a SERVICE deployment is proxied to. Null for a static
+  /// one, which has no container behind it.
+  port Int?
 
   /// Bytes published, so a quota has something to count.
   sizeBytes Int @default(0)
@@ -256,6 +293,11 @@ enum DeploymentStatus {
   BUILDING
   LIVE
   FAILED
+}
+
+enum DeploymentKind {
+  STATIC
+  SERVICE
 }
 
 /// An external database a project's query editor is pointed at.

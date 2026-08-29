@@ -360,6 +360,7 @@ means their assets must use relative URLs.
 pnpm dev            # run web + server
 pnpm dev:server     # just the server, for a terminal of its own
 pnpm dev:web        # just the web app
+pnpm dev:split      # server here, web in a second terminal
 pnpm build          # build everything
 pnpm typecheck      # typecheck every package
 pnpm lint           # lint the web app

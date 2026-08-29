@@ -4,16 +4,28 @@ import path from "node:path";
 import {
   SUBDOMAIN_PATTERN,
   type Deployment,
+  type DeploymentKind,
   type DeploymentState,
   type DeployTarget,
 } from "@replit-clone/shared";
-import type { DeploymentStatus } from "../generated/prisma/enums.js";
+import type {
+  DeploymentKind as DeploymentKindRow,
+  DeploymentStatus,
+} from "../generated/prisma/enums.js";
 import { DEPLOYMENTS_ROOT, deployOrigin, deploymentsEnabled, env } from "../config/env.js";
 import { ensureContainer } from "../containers/containerManager.js";
 import { execCapture } from "../containers/execCapture.js";
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
 import { increment } from "../lib/metrics.js";
+import {
+  removeService,
+  runningServices,
+  serviceLogs,
+  startService,
+  waitForService,
+} from "../containers/deployContainer.js";
+import { getEnvVars, toDockerEnv } from "./projectEnvService.js";
 import { getTemplate, type StaticBuild } from "../templates/registry.js";
 import { assertValidProjectId, projectRoot } from "../utils/projectPaths.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.js";
@@ -22,9 +34,17 @@ import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.j
  *
  *  Everything else in this codebase serves a project to somebody who already
  *  has a session, through a container that is running right now. A deployment
- *  is neither: it is a directory of plain files, copied OUT of the project tree
- *  once, served with no authentication and no container behind it. Two
- *  consequences run through the whole file --
+ *  is neither, and it comes in two shapes:
+ *
+ *  - **static** — a directory of plain files, copied OUT of the project tree
+ *    once and served with no container behind it at all. Preferred wherever a
+ *    template can produce one: nothing to keep running, nothing to crash.
+ *  - **service** — for the templates that answer requests from a process and
+ *    therefore have no directory to offer. The source is copied out the same
+ *    way, and a container of its own runs it for as long as it stays
+ *    published, with the public origin proxying to it.
+ *
+ *  Three consequences run through the whole file --
  *
  *  1. What is copied is served to the entire internet, so the copy is the
  *     security boundary. It refuses symlinks, refuses anything that is not a
@@ -32,6 +52,9 @@ import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.j
  *  2. Nothing reclaims the disk afterwards. A published site outlives its
  *     container, its idle timer, and the session that made it, so its size is
  *     capped before a single byte is written rather than after.
+ *  3. A copy, never the project tree itself. A published address that changed
+ *     under its visitors every time its author saved a file would not be a
+ *     deployment; it would be the preview with the authentication removed.
  */
 
 const APP_DIR = "/home/sandbox/app";
@@ -50,22 +73,51 @@ const MAX_LOG_CHARS = 8_000;
  *  they are a different shape, and static hosting is simply not the thing they
  *  need.
  */
-const NOT_STATIC =
-  "This project serves requests from a running process, so there is nothing " +
-  "to publish as static files. Static deployment covers the frontend " +
-  "templates — Vite, Next with `output: 'export'`, and static HTML.";
+const NOT_DEPLOYABLE =
+  "This template has neither a static build nor a serve command, so there is " +
+  "nothing to publish. Every template that ships with this platform has one " +
+  "of the two.";
 
+/** How a project would be published, worked out from its template.
+ *
+ *  Static wins wherever both are declared. It is the cheaper mechanism by a
+ *  wide margin -- no container, no memory held while nobody visits, nothing to
+ *  fall over unattended -- so a template that can produce files should publish
+ *  files. Service exists for the templates that cannot.
+ */
 export function deployTarget(templateId: string): DeployTarget {
-  const build: StaticBuild | undefined = getTemplate(templateId).staticBuild;
+  const template = getTemplate(templateId);
+  const build: StaticBuild | undefined = template.staticBuild;
 
-  if (!build) {
-    return { deployable: false, reason: NOT_STATIC, buildCommand: "", outputDir: "" };
+  if (build) {
+    return {
+      deployable: true,
+      kind: "static",
+      buildCommand: build.command,
+      outputDir: build.outputDir,
+      port: null,
+    };
+  }
+
+  const service = template.serviceDeploy;
+  if (service) {
+    return {
+      deployable: true,
+      kind: "service",
+      buildCommand: service.command,
+      // Nothing is read back: the command does not terminate.
+      outputDir: "",
+      port: service.port,
+    };
   }
 
   return {
-    deployable: true,
-    buildCommand: build.command,
-    outputDir: build.outputDir,
+    deployable: false,
+    kind: "static",
+    reason: NOT_DEPLOYABLE,
+    buildCommand: "",
+    outputDir: "",
+    port: null,
   };
 }
 
@@ -138,15 +190,28 @@ interface DeploymentRow {
   status: DeploymentStatus;
   buildCommand: string;
   outputDir: string;
+  port: number | null;
+  kind: DeploymentKindRow;
   sizeBytes: number;
   log: string;
   error: string | null;
   deployedAt: Date | null;
 }
 
+const KIND_OUT = {
+  STATIC: "static",
+  SERVICE: "service",
+} as const satisfies Record<DeploymentKindRow, DeploymentKind>;
+
+const KIND_IN = {
+  static: "STATIC",
+  service: "SERVICE",
+} as const satisfies Record<DeploymentKind, DeploymentKindRow>;
+
 function toDeployment(row: DeploymentRow): Deployment {
   return {
     status: STATUS_OUT[row.status],
+    kind: KIND_OUT[row.kind],
     subdomain: row.subdomain,
     // Only once something has actually gone live. A row exists from the moment
     // the first build starts — so that the subdomain is reserved before it is
@@ -155,6 +220,7 @@ function toDeployment(row: DeploymentRow): Deployment {
     url: row.deployedAt ? siteUrl(row.subdomain) : null,
     buildCommand: row.buildCommand,
     outputDir: row.outputDir,
+    port: row.port,
     sizeBytes: row.sizeBytes,
     log: row.log,
     error: row.error,
@@ -175,12 +241,14 @@ export async function deploymentState(
 
   const target = deploymentsEnabled
     ? deployTarget(project.template)
-    : {
+    : ({
         deployable: false,
+        kind: "static",
         reason: "Deployments are turned off on this server.",
         buildCommand: "",
         outputDir: "",
-      };
+        port: null,
+      } satisfies DeployTarget);
 
   return {
     target,
@@ -313,6 +381,7 @@ export async function copyTree(
   from: string,
   to: string,
   budgetBytes: number,
+  skip?: (name: string) => boolean,
 ): Promise<CopyResult> {
   let bytes = 0;
   let files = 0;
@@ -325,6 +394,11 @@ export async function copyTree(
       // `opendir` reports the link itself rather than its target, so this is
       // the check that actually stops one being published.
       if (entry.isSymbolicLink()) continue;
+
+      // Only a service deployment passes this, to leave installed
+      // dependencies and history behind. A static build output has nothing
+      // in it that should be skipped -- it is exactly what was asked for.
+      if (skip?.(entry.name)) continue;
 
       const source = path.join(sourceDir, entry.name);
       const target = path.join(targetDir, entry.name);
@@ -359,6 +433,27 @@ export async function copyTree(
   await walk(from, to);
   return { bytes, files };
 }
+
+/** Directory names never copied into a service deployment.
+ *
+ *  Not an optimisation. `node_modules` is reinstalled by the deploy command
+ *  anyway and can hold native binaries built for a different libc than the
+ *  deployment image; copying it means publishing a tree that may not run, and
+ *  spending the byte budget to do it. `.git` carries the project's whole
+ *  history including anything ever committed and later removed, into a
+ *  directory whose only job is to be readable by a container -- and, if a
+ *  template ever gains a static build, by the internet.
+ */
+const SKIPPED_FROM_SOURCE = new Set([
+  "node_modules",
+  ".git",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".next",
+  "dist",
+  "build",
+]);
 
 /** Where the build output is on the HOST.
  *
@@ -403,7 +498,7 @@ export async function publish(rawProjectId: string): Promise<Deployment> {
 
   const target = deployTarget(project.template);
   if (!target.deployable) {
-    throw new BadRequestError(target.reason ?? NOT_STATIC, "NOT_DEPLOYABLE");
+    throw new BadRequestError(target.reason ?? NOT_DEPLOYABLE, "NOT_DEPLOYABLE");
   }
 
   const build: StaticBuild = {
@@ -415,10 +510,18 @@ export async function publish(rawProjectId: string): Promise<Deployment> {
   try {
     // The row first, so the subdomain is reserved before anything is built for
     // it — and so a build that fails still has somewhere to record why.
-    const row = await reserve(projectId, project.deployment?.subdomain, build);
+    const row = await reserve(
+      projectId,
+      project.deployment?.subdomain,
+      build,
+      target,
+    );
 
     try {
-      const published = await buildAndCopy(projectId, row.subdomain, build);
+      const published =
+        target.kind === "service"
+          ? await publishService(projectId, row.subdomain, project.template)
+          : await buildAndCopy(projectId, row.subdomain, build);
       increment("deploys_succeeded");
 
       return toDeployment(
@@ -476,7 +579,10 @@ async function reserve(
   projectId: string,
   existing: string | undefined,
   build: StaticBuild,
+  target: DeployTarget,
 ): Promise<{ subdomain: string }> {
+  const shape = { kind: KIND_IN[target.kind], port: target.port };
+
   if (existing) {
     await prisma.deployment.update({
       where: { projectId },
@@ -485,6 +591,10 @@ async function reserve(
         error: null,
         buildCommand: build.command,
         outputDir: build.outputDir,
+        // Re-read from the template on every deploy, so a project whose
+        // template gained a static build publishes as static from then on
+        // rather than staying a service because it once was one.
+        ...shape,
       },
     });
     return { subdomain: existing };
@@ -502,6 +612,7 @@ async function reserve(
           status: "BUILDING",
           buildCommand: build.command,
           outputDir: build.outputDir,
+          ...shape,
         },
       });
       return { subdomain };
@@ -578,6 +689,150 @@ async function buildAndCopy(
   }
 }
 
+/** Copies the source out and runs it in a container of its own.
+ *
+ *  The static path builds and then reads a directory back. There is nothing to
+ *  read back here: the command does not terminate, so "did it work" can only
+ *  be answered by asking the running thing. That is what the readiness wait is
+ *  -- and why its failure attaches the container's own logs, which are the
+ *  only account of what went wrong that the user has any way to see.
+ */
+async function publishService(
+  projectId: string,
+  subdomain: string,
+  templateId: string,
+): Promise<{ bytes: number; log: string }> {
+  const template = getTemplate(templateId);
+  const service = template.serviceDeploy;
+  if (!service) {
+    // Unreachable via `publish`, which checked the target first. Stated
+    // rather than asserted, because a template edited later should fail here
+    // legibly rather than with a property access on undefined.
+    throw new BadRequestError(
+      "This template has no serve command.",
+      "NOT_DEPLOYABLE",
+    );
+  }
+
+  const live = siteDirectory(subdomain);
+  const staging = path.join(DEPLOYMENTS_ROOT, `.staging-${subdomain}`);
+
+  await rm(staging, { recursive: true, force: true });
+  await mkdir(DEPLOYMENTS_ROOT, { recursive: true });
+
+  let bytes = 0;
+  try {
+    ({ bytes } = await copyTree(
+      projectRoot(projectId),
+      staging,
+      env.DEPLOY_MAX_MB * 1024 * 1024,
+      (name) => SKIPPED_FROM_SOURCE.has(name),
+    ));
+
+    // The container holds the live directory open, so it has to let go before
+    // the tree beneath it is replaced. Removing it here rather than inside
+    // `startService` also means a redeploy that fails to copy has already
+    // taken the previous version down -- which is the honest outcome: what is
+    // published should be what was last asked for, not a mix.
+    await removeService(subdomain);
+
+    await rm(live, { recursive: true, force: true });
+    await rename(staging, live);
+  } finally {
+    await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+  }
+
+  await startService({
+    subdomain,
+    image: template.image,
+    command: service.command,
+    port: service.port,
+    root: live,
+    projectEnv: toDockerEnv(await getEnvVars(projectId)),
+  });
+
+  const ready = await waitForService(
+    subdomain,
+    service.port,
+    env.DEPLOY_READY_TIMEOUT_MS,
+  );
+
+  const log = await serviceLogs(subdomain, MAX_LOG_CHARS);
+
+  if (!ready) {
+    // Left running rather than torn down. The logs above are a snapshot; a
+    // user reading "it never answered" is going to want to look again, and a
+    // container removed on the way out of this function is one they cannot.
+    // The row records FAILED, so nothing is served from it either way.
+    throw new BuildFailure(
+      `The app did not start listening on port ${String(service.port)} ` +
+        `within ${String(Math.round(env.DEPLOY_READY_TIMEOUT_MS / 1000))} ` +
+        "seconds. The output below is what it printed.",
+      log,
+    );
+  }
+
+  return { bytes, log };
+}
+
+/** Brings published services back up after the host restarts.
+ *
+ *  Without this, "always-on" lasts until the next deploy of this platform. A
+ *  Docker restart policy covers a process that crashes, but not a container
+ *  that was removed, a daemon that was restarted with its containers pruned,
+ *  or a machine that was rebuilt -- and in all three the row still says LIVE
+ *  and the address still resolves. The gap between what the database claims
+ *  and what is running is the thing to close on boot.
+ *
+ *  Deliberately does not wait for readiness. A slow install must not hold the
+ *  server's own startup, and a service that never comes up is already visible:
+ *  the address answers 503 and says so. Failures are logged per deployment and
+ *  never propagate, because one broken published app is not a reason for the
+ *  platform not to start.
+ */
+export async function restoreServices(): Promise<{ restored: number }> {
+  if (!deploymentsEnabled) return { restored: 0 };
+
+  const rows = await prisma.deployment.findMany({
+    where: { kind: "SERVICE", status: "LIVE" },
+    include: { project: { select: { template: true } } },
+  });
+  if (rows.length === 0) return { restored: 0 };
+
+  const alreadyUp = await runningServices();
+  let restored = 0;
+
+  for (const row of rows) {
+    if (alreadyUp.has(row.subdomain)) continue;
+    if (row.port === null) continue;
+
+    const template = getTemplate(row.project.template);
+    if (!template.serviceDeploy) continue;
+
+    try {
+      await startService({
+        subdomain: row.subdomain,
+        image: template.image,
+        // The command RECORDED on the row, not the template's current one.
+        // Restoring is meant to put back what was published, and a template
+        // edited since was never deployed here.
+        command: row.buildCommand,
+        port: row.port,
+        root: siteDirectory(row.subdomain),
+        projectEnv: toDockerEnv(await getEnvVars(row.projectId)),
+      });
+      restored += 1;
+    } catch (error) {
+      logger.warn("could not restore service deployment", {
+        subdomain: row.subdomain,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { restored };
+}
+
 /* ---- taking a site down ---- */
 
 /** Removes the published files and the row.
@@ -591,6 +846,12 @@ export async function unpublish(rawProjectId: string): Promise<void> {
   const row = await prisma.deployment.findUnique({ where: { projectId } });
   if (!row) return;
 
+  // Before the files, because the container has them mounted. Unconditional
+  // rather than only for a SERVICE row: a project that was published as a
+  // service and later as static has a container from the earlier shape that
+  // nothing else will ever clean up.
+  await removeService(row.subdomain);
+
   await rm(siteDirectory(row.subdomain), { recursive: true, force: true });
   await prisma.deployment.delete({ where: { projectId } });
   increment("deploys_removed");
@@ -603,16 +864,32 @@ export async function unpublish(rawProjectId: string): Promise<void> {
  *  unauthenticated, so distinguishing "no such site" from "that site is not
  *  live yet" would let anyone enumerate what exists.
  */
+export interface ResolvedSite {
+  subdomain: string;
+  /** Where the files are. Meaningful for a static site; for a service it is
+   *  the source tree its container has mounted, which is never served from
+   *  here. */
+  root: string;
+  kind: DeploymentKind;
+  /** The container port to proxy to, for a service. Null for a static site. */
+  port: number | null;
+}
+
 export async function resolveSite(
   hostname: string,
-): Promise<{ subdomain: string; root: string } | undefined> {
+): Promise<ResolvedSite | undefined> {
   const subdomain = subdomainFromHost(hostname);
   if (!subdomain) return undefined;
 
   const row = await prisma.deployment.findUnique({ where: { subdomain } });
   if (!row || row.deployedAt === null) return undefined;
 
-  return { subdomain, root: siteDirectory(subdomain) };
+  return {
+    subdomain,
+    root: siteDirectory(subdomain),
+    kind: KIND_OUT[row.kind],
+    port: row.port,
+  };
 }
 
 /** The label in front of the configured deploy host, or undefined.

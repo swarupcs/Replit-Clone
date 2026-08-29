@@ -28,6 +28,18 @@ pnpm dev:web        # :15273
 Order does not matter; the web dev server proxies to the API and simply
 fails those calls until it is up.
 
+Or one command that does both, opening a second terminal for the web app and
+keeping the server in the current one -- the server being the half whose logs
+you came to read:
+
+```bash
+pnpm dev:split
+```
+
+The web terminal is independent: Ctrl+C here stops the server and leaves it
+running, because a window that closes itself when an unrelated process stops
+is worse than one you close yourself.
+
 The web dev port is pinned and deliberate (see `apps/web/vite.config.ts`) —
 CORS, the preview cookie, and frame-ancestors all key off the exact origin.
 

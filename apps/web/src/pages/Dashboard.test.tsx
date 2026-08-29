@@ -27,6 +27,13 @@ const api = vi.hoisted(() => ({
   duplicateProjectApi: vi.fn(),
   renameProjectApi: vi.fn(),
   projectExportUrl: vi.fn(() => "http://export"),
+  // The Explore section reads this. Empty by default so it renders nothing at
+  // all, which keeps every assertion below about the user's OWN projects --
+  // otherwise a public project and a personal one would both match a query
+  // like "shows the projects once they load".
+  listPublicProjectsApi: vi.fn().mockResolvedValue([]),
+  forkProjectApi: vi.fn(),
+  setProjectVisibilityApi: vi.fn(),
 }));
 vi.mock("../apis/projects.ts", () => api);
 

@@ -31,6 +31,11 @@ export type CounterName =
   | "deploys_succeeded"
   | "deploys_failed"
   | "deploys_removed"
+  // Always-on deployments: one container per published service.
+  | "deploy_services_started"
+  | "deploy_services_capacity_rejected"
+  | "deploy_service_proxy_errors"
+  | "deploy_service_unavailable"
   // A request to the public origin whose path tried to leave one site's
   // directory. Never zero-and-forgotten: this counting up at all says
   // somebody is probing the one origin that needs no account.

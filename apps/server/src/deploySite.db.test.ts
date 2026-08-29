@@ -50,6 +50,36 @@ function get(port: number, host: string, urlPath: string): Promise<Answer> {
   });
 }
 
+/** The same, for a method other than GET. */
+function send(
+  port: number,
+  host: string,
+  urlPath: string,
+  method: string,
+): Promise<Answer> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        host: "127.0.0.1",
+        port,
+        path: urlPath,
+        method,
+        headers: { host, accept: "text/html" },
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => (body += chunk));
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, body, headers: res.headers });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 describe.skipIf(!TEST_DATABASE_URL)("the public deployment origin", () => {
   const scope = dbScope("deploy-site");
 
@@ -249,5 +279,97 @@ describe.skipIf(!TEST_DATABASE_URL)("the public deployment origin", () => {
     const answer = await get(port, `${subdomain}.localhost`, "/");
 
     expect(answer.headers["cache-control"]).toBe("no-cache");
+  });
+
+  it("refuses a POST to a static site", async () => {
+    // A directory of files has no answer for one, and pretending otherwise
+    // would be a 200 with the index in it.
+    await goLive();
+
+    const answer = await send(port, `${subdomain}.localhost`, "/", "POST");
+
+    expect(answer.status).toBe(404);
+  });
+
+  describe("a service deployment", () => {
+    /** Live, of the SERVICE kind, with no container behind it. */
+    async function goLiveAsService() {
+      await prisma.deployment.create({
+        data: {
+          projectId,
+          subdomain,
+          status: "LIVE",
+          kind: "SERVICE",
+          port: 3000,
+          buildCommand: "npm install --omit=dev && node server.js",
+          outputDir: "",
+          deployedAt: new Date(),
+        },
+      });
+    }
+
+    it("answers 503 rather than 404 when nothing is running", async () => {
+      // The distinction is the useful one and is safe to make: the subdomain
+      // already resolved, so nothing is disclosed by saying the app is down
+      // rather than absent. A 404 here would send its author looking for a
+      // deployment that exists.
+      await goLiveAsService();
+
+      const answer = await get(port, `${subdomain}.localhost`, "/");
+
+      expect(answer.status).toBe(503);
+      expect(answer.body).toContain("not responding");
+    });
+
+    it("never serves the source tree it has copied out", async () => {
+      // The published directory for a service is SOURCE, not a build output:
+      // server code, and whatever else was in the project. Falling back to
+      // the static path for it would publish the lot.
+      await goLiveAsService();
+
+      const answer = await get(port, `${subdomain}.localhost`, "/index.html");
+
+      expect(answer.status).toBe(503);
+      // The fixture's own index, which the static path WOULD have served.
+      expect(answer.body).not.toContain("<h1>published</h1>");
+    });
+
+    it("does not disclose the .env sitting in that tree", async () => {
+      await goLiveAsService();
+
+      const answer = await get(port, `${subdomain}.localhost`, "/.env");
+
+      expect(answer.body).not.toContain("hunter2");
+    });
+
+    it("takes a POST, because a published API exists to be posted to", async () => {
+      // Not a 404. The static path refuses every method but GET and HEAD, and
+      // applying that before knowing the kind made every service read-only.
+      await goLiveAsService();
+
+      const answer = await send(port, `${subdomain}.localhost`, "/api", "POST");
+
+      // 503 because nothing is running -- but it reached the proxy branch,
+      // which is what a 404 would have proved it did not.
+      expect(answer.status).toBe(503);
+    });
+
+    it("is unreachable once it is no longer live", async () => {
+      await prisma.deployment.create({
+        data: {
+          projectId,
+          subdomain,
+          status: "BUILDING",
+          kind: "SERVICE",
+          port: 3000,
+          buildCommand: "x",
+          outputDir: "",
+        },
+      });
+
+      const answer = await get(port, `${subdomain}.localhost`, "/");
+
+      expect(answer.status).toBe(404);
+    });
   });
 });

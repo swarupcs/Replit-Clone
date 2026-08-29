@@ -38,10 +38,30 @@ export interface TemplateDefinition {
    *  plain static host, or absent when it cannot.
    *
    *  Absent is the honest answer for anything that needs a process at request
-   *  time -- Express, Flask, FastAPI, Go. There is nothing to build there and
-   *  no way to serve the result without running the app, which is a different
-   *  product from this one. */
+   *  time -- Express, Flask, FastAPI, Go. Those templates carry
+   *  `serviceDeploy` instead. */
   staticBuild?: StaticBuild;
+  /** How this template is published when it has no static output: a command
+   *  that does not terminate, and the port it listens on.
+   *
+   *  Exactly one of `staticBuild` and `serviceDeploy` should be present. A
+   *  template with neither cannot be published at all, and a test holds that
+   *  every template has one of them so a new one cannot quietly ship
+   *  unpublishable. */
+  serviceDeploy?: ServiceDeploy;
+}
+
+export interface ServiceDeploy {
+  /** Install and serve, run inside the deployment's own container.
+   *
+   *  Not the same string as `startCommand`, and the differences are the point:
+   *  no file watcher (a published app has no editor writing to it, and a
+   *  reloader is a way for it to fall over at 3am), and dev dependencies
+   *  omitted where the package manager can express it. */
+  command: string;
+  /** Where the process listens INSIDE its container. The public origin
+   *  reverse-proxies here; nothing is ever published to the host. */
+  port: number;
 }
 
 export interface StaticBuild {
@@ -91,6 +111,13 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     extraPorts: [5173, 8080],
     startCommand: "npm install && npm start",
     filesDir: "node-express",
+    // `node server.js`, not `npm start` -- this template's start script is
+    // `node --watch server.js`, and a file watcher behind a published app is
+    // a process that restarts itself over a tree nothing is writing to.
+    serviceDeploy: {
+      command: "npm install --omit=dev && node server.js",
+      port: 3000,
+    },
     expectsPreviewBase: false,
   },
   "node-express-postgres": {
@@ -105,6 +132,15 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     // idempotent.
     startCommand: "npm install && npm run migrate && npm start",
     filesDir: "node-express-postgres",
+    // The migration runs on every start, as it does in development, and
+    // schema.sql is idempotent. The deployed app reads DATABASE_URL from the
+    // project's own environment -- it shares the project's database rather
+    // than getting one of its own, which is a decision worth knowing about.
+    // Plain `node` for the same watcher reason given on `node-express`.
+    serviceDeploy: {
+      command: "npm install --omit=dev && node migrate.js && node server.js",
+      port: 3000,
+    },
     expectsPreviewBase: false,
     // No staticBuild, deliberately. A database-backed app serves requests
     // from a running process; offering a static deploy button and then
@@ -121,6 +157,13 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     // build step between editing a file and seeing the result.
     startCommand: "npm install && npm start",
     filesDir: "node-express-ts",
+    // Dev dependencies are kept, unlike the other Node templates: tsx runs
+    // the TypeScript directly rather than compiling it, so it is what serves
+    // the app in production too and `--omit=dev` would remove the runtime.
+    serviceDeploy: {
+      command: "npm install && npx tsx src/server.ts",
+      port: 3000,
+    },
     expectsPreviewBase: false,
   },
   "static-html": {
@@ -190,6 +233,18 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     extraPorts: [8000, 8080],
     startCommand: "pip install -r requirements.txt && python app.py",
     filesDir: "python-flask",
+    // gunicorn rather than `python app.py`, which starts Flask's development
+    // server -- single-threaded, reloading, and it prints a warning telling
+    // you not to do exactly this. Installed alongside the project's own
+    // requirements rather than written into the template's requirements.txt:
+    // it is this platform's choice of production server and has no business
+    // appearing in a tree the user is reading.
+    serviceDeploy: {
+      command:
+        "pip install -r requirements.txt gunicorn && " +
+        "gunicorn -b 0.0.0.0:5000 -w 2 app:app",
+      port: 5000,
+    },
     expectsPreviewBase: false,
   },
   "python-fastapi": {
@@ -201,6 +256,15 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     startCommand:
       "pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
     filesDir: "python-fastapi",
+    // Without --reload. The dev command watches the tree; a published app
+    // has nothing writing to its tree and a watcher is only a way to fall
+    // over unattended.
+    serviceDeploy: {
+      command:
+        "pip install -r requirements.txt && " +
+        "uvicorn main:app --host 0.0.0.0 --port 8000",
+      port: 8000,
+    },
     expectsPreviewBase: false,
   },
   "go-http": {
@@ -211,6 +275,12 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
     extraPorts: [3000, 8000],
     startCommand: "go run .",
     filesDir: "go-http",
+    // Built once rather than `go run .`, which recompiles into a temporary
+    // binary and keeps the toolchain resident behind the server.
+    serviceDeploy: {
+      command: "go build -o /tmp/server . && /tmp/server",
+      port: 8080,
+    },
     expectsPreviewBase: false,
   },
 };

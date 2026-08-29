@@ -10,6 +10,7 @@
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
     "dev:server": "pnpm --filter @replit-clone/shared build && pnpm --filter @replit-clone/server dev",
     "dev:web": "pnpm --filter @replit-clone/shared build && pnpm --filter @replit-clone/web dev",
+    "dev:split": "node scripts/dev-split.mjs",
     "build": "pnpm --filter @replit-clone/shared build && pnpm --parallel --filter \"./apps/*\" build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",

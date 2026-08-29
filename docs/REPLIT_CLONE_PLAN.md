@@ -492,11 +492,42 @@ could have been quietly wrong:
   asset URL at build time. A build that inherited it would produce a site whose
   scripts all point at a path that does not exist on the deploy origin.
 
-**Still open:** everything that needs a process at request time. Express, Flask,
-FastAPI and Go projects are told plainly that there is nothing static to
-publish. Always-on compute, autoscale, and scheduled jobs are a different
-product with a different cost model — a long-lived container on this host, or a
-handoff to Fly/Railway/Cloudflare — and that decision has not been made.
+**Done — always-on deployments.** _Added 2026-08-28._ The six templates that
+answer requests from a process (Express, Express+Postgres, Express+TS, Flask,
+FastAPI, Go) used to be told there was nothing to publish, which meant half the
+templates this platform ships stopped working at the point a user wanted to
+show somebody. They are now published by running a container of their own:
+`containers/deployContainer.ts` starts one over a copy of the source, and the
+deploy origin reverse-proxies to it instead of serving files. Every template
+can now be published.
+
+The cost decision was made the small way: a long-lived container on this host,
+with a budget of its own (`MAX_DEPLOYED_SERVICES`, default 5) so publishing
+cannot exhaust the containers the editor needs, and its own smaller memory and
+CPU figures because these are up whether or not anybody is looking. Autoscale
+and a handoff to Fly/Railway/Cloudflare remain unmade decisions; this is the
+smallest thing that closes the gap.
+
+Two failures worth recording, because both were invisible to the unit tests and
+to the type checker and only a real deployment found them:
+
+- The readiness probe was a TCP connect. In host-loopback mode the published
+  port belongs to `docker-proxy`, which **accepts** a connection whether or not
+  anything is listening inside the container and only fails when it tries to
+  forward — so every publish reported LIVE within a second, while `npm install`
+  was still running, and every request to the new address died with a socket
+  hang up. It is an HTTP request now, and any status counts.
+- The serve command ran under `sh -lc`. A login shell sources `/etc/profile`,
+  which **replaces** `PATH` with the distribution's default and discards
+  whatever the image set. Node and Python live in `/usr/bin` and survived it;
+  Go's toolchain is on `/usr/local/go/bin`, so every Go deployment failed with
+  `go: not found` five minutes later when the readiness wait gave up.
+
+`service/serviceDeploy.e2e.test.ts` is kept, behind `DEPLOY_E2E=1`, because it
+is the only thing that could have caught either.
+
+**Still open:** autoscale and scheduled jobs, which are a different product with
+a different cost model.
 
 **Also open:** custom domains. A deployment host needs a wildcard DNS record
 and, over HTTPS, a wildcard certificate. Locally that costs nothing, because
@@ -566,10 +597,26 @@ a project you already own; share invites a named collaborator. Taking a
 stranger's project, getting your own copy, and needing no permission to do it
 is what makes a template gallery or a shared tutorial link work at all.
 
-- **Blocked on:** a visibility model on `Project` and its consequences —
-  abuse (public projects are a spam and malware surface), quota accounting for
-  a fork, and whether secrets and git remotes are stripped on copy. The last
-  one is a security requirement, not a nicety.
+**Done.** _Added 2026-08-28._ `Project.visibility` is PRIVATE by default and
+PUBLIC by explicit choice of the owner alone. A public project grants a new
+access level, `visitor`, deliberately ranked BELOW `viewer` — see
+`docs/SECURITY.md`, but the short version is that every existing check asks for
+viewer or higher, so a level underneath opens nothing until an endpoint is
+lowered on purpose. Three were: the file tree, the start command and the zip
+export. `forkProjectService` copies the files for anybody who can see them, and
+`ExploreSection` on the dashboard is the gallery that makes them findable.
+
+The three questions this entry was blocked on, answered:
+
+- **Secrets and git remotes on copy** — stripped, as the entry says it must be.
+  `envVars` is `{}` on every fork and `.git` was already excluded from every
+  copy path, so no remote and no token in one travels.
+- **Quota** — a fork counts against the forker's own quota, like any project
+  they create. It is exactly as expensive to host.
+- **Abuse** — not yet addressed, and worth naming rather than implying it was.
+  There is no report mechanism, no rate limit on publishing (forking is rate
+  limited as project creation), and no review. A single-tenant or invite-only
+  deployment is fine; a public multi-tenant one would need those first.
 
 ### 8.6 Smaller, and each genuinely smaller
 
@@ -594,6 +641,10 @@ made yet:
 1. ~~**8.4 packages**~~ — done.
 2. ~~**8.2 warm containers**~~ — done as far as the install step goes; process
    snapshots remain.
-3. ~~**8.1 static deployments**~~ — done. Always-on compute and custom domains
-   remain, and both are blocked on a cost decision rather than on work.
-4. **8.3 persistent data**, then **8.5 fork** — both need a design round first.
+3. ~~**8.1 deployments**~~ — done, both shapes. Static output for the templates
+   that produce it, and an always-on container for the six that serve from a
+   process. Custom domains remain, blocked on a wildcard DNS record and a
+   wildcard certificate rather than on work here.
+4. ~~**8.3 persistent data**~~, ~~**8.5 fork**~~ — both done. What remains in
+   §8.6 is smaller and independent: language servers beyond Python, a CLI and
+   local sync, follow-mode, and scheduled jobs.

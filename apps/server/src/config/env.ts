@@ -14,6 +14,18 @@ import {
 // failed six auto-start tests on their machine and nowhere else.
 if (process.env["NODE_ENV"] !== "test") dotenv.config();
 
+/** Whether this is a developer's own machine rather than a deployment.
+ *
+ *  Read straight off the raw environment rather than from the parsed `env`
+ *  below, because it decides schema DEFAULTS -- which have to be fixed before
+ *  anything is parsed. `isProduction` is the same question asked afterwards.
+ *
+ *  Anything other than "development" -- including "test", which must stay on
+ *  the deployment figures so the suite asserts against numbers that do not
+ *  depend on whose machine it runs on -- gets the conservative defaults.
+ */
+const inDevelopment = (process.env["NODE_ENV"] ?? "development") === "development";
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
 
@@ -71,6 +83,42 @@ const envSchema = z.object({
    *  what is served to the public must not be reachable from a path a project's
    *  own code can write to. */
   DEPLOYMENTS_DIR: z.string().default("deployments"),
+
+  /* ---- always-on (service) deployments ---- */
+
+  /** Resource budget for ONE published service container.
+   *
+   *  Deliberately not the development figures. A service deployment is
+   *  always-on: it holds whatever it is given for as long as it stays
+   *  published, whether or not anybody is looking at it, and several of them
+   *  are running at once on a box that also has the projects their authors
+   *  are still editing open. Smaller and stingier is right here in a way it
+   *  is not for a container somebody is sitting in front of.
+   */
+  DEPLOY_MEMORY_MB: z.coerce.number().int().positive().default(512),
+  DEPLOY_CPUS: z.coerce.number().positive().default(0.5),
+
+  /** How many service deployments may be live at once on this host.
+   *
+   *  MAX_CONCURRENT_CONTAINERS does not cover these and must not: that limit
+   *  exists so an interactive project can always be opened, and counting
+   *  always-on containers against it means enough publishing makes the editor
+   *  unusable. Two budgets, because they are two different resources.
+   */
+  MAX_DEPLOYED_SERVICES: z.coerce.number().int().positive().default(5),
+
+  /** How long a service deployment gets to answer on its port before the
+   *  publish is called failed.
+   *
+   *  Generous, because this window contains a cold `npm install` or `pip
+   *  install` on a container with half a core. The cost of it being too short
+   *  is a deployment reported as broken that was merely still installing.
+   */
+  DEPLOY_READY_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(300_000),
 
   /** Ceiling on one published site.
    *
@@ -174,9 +222,26 @@ const envSchema = z.object({
 
   PROJECTS_DIR: z.string().default("projects"),
 
-  // Container resource budget. Defaults suit a 2-4 GB VM: 512 MB x 3 leaves
-  // room for Postgres, the server, and the OS.
-  CONTAINER_MEMORY_MB: z.coerce.number().int().positive().default(512),
+  // Container resource budget, and the defaults differ by environment because
+  // the two are not the same problem.
+  //
+  // A deployment is packing other people's projects onto a shared VM, so the
+  // figure that matters is how many fit: 512 MB x 3 leaves room for Postgres,
+  // the server and the OS on a 2-4 GB box, and a project that wants more is
+  // taking it from someone else.
+  //
+  // A developer running this locally is the only tenant, on a machine with an
+  // order of magnitude more of both, and the cost of the small figures there
+  // is paid on every single cold start -- 0.5 of a CPU is what makes a first
+  // `npm install` and a first Vite transform feel broken rather than slow,
+  // and 512 MB is under what a modern toolchain wants before it starts
+  // trading against the dev server it is building for. Nothing is shared, so
+  // there is nothing to protect the headroom from.
+  CONTAINER_MEMORY_MB: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(inDevelopment ? 2048 : 512),
 
   /** Whether language servers may be started inside project containers.
    *
@@ -192,13 +257,19 @@ const envSchema = z.object({
   /** Below this, a language server is refused rather than started.
    *
    *  §3.3: pyright idles at 150-300 MB on a real project and
-   *  CONTAINER_MEMORY_MB defaults to 512, so a server started
+   *  CONTAINER_MEMORY_MB defaults to 512 in a deployment, so a server started
    *  unconditionally would be competing with the dev server it exists to
    *  help. 1024 rather than 512+300 because the app needs headroom too —
    *  and an OOM kill of somebody's dev server is a far worse experience than
-   *  an editor that says why it has no Python intelligence here. */
+   *  an editor that says why it has no Python intelligence here.
+   *
+   *  Development's larger default clears this bar on its own, so a language
+   *  server is eligible there as soon as LSP_ENABLED is set. */
   LSP_MIN_CONTAINER_MEMORY_MB: z.coerce.number().int().positive().default(1024),
-  CONTAINER_CPUS: z.coerce.number().positive().default(0.5),
+  CONTAINER_CPUS: z.coerce
+    .number()
+    .positive()
+    .default(inDevelopment ? 2 : 0.5),
   CONTAINER_IDLE_MINUTES: z.coerce.number().int().positive().default(20),
   /** Ceiling on a single project's working tree.
    *

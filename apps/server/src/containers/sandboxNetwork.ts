@@ -1,5 +1,5 @@
 import Docker from "dockerode";
-import { env } from "../config/env.js";
+import { env, previewTargetMode } from "../config/env.js";
 
 const docker = new Docker();
 
@@ -21,20 +21,22 @@ export const SANDBOX_NETWORK = "replit-clone-sandbox";
  */
 export const EGRESS_NETWORK = "replit-clone-egress";
 
-/** A control the operator asked for that is not, in fact, in effect.
+/** The sandbox network is not the one the configuration describes.
  *
  *  Its own type because boot treats it differently from every other Docker
  *  failure. A daemon that is down or slow costs the container features and
  *  nothing else -- the server still serves the editor, and that is the right
- *  trade. This is not that: it means sandboxes are running with unrestricted
- *  outbound access while the configuration says they are not, and booting
- *  past it leaves the deployment wrong about itself in the one direction that
- *  matters.
+ *  trade. This is not that. Every case that raises it leaves the deployment
+ *  quietly wrong about itself: either sandboxes have unrestricted outbound
+ *  access while the configuration says they have none, or no preview can
+ *  work at all and each one reports that nothing is running while the dev
+ *  server is demonstrably up. Both are far harder to diagnose from the
+ *  symptom than from a message at boot.
  */
-export class EgressControlUnavailable extends Error {
+export class SandboxNetworkMismatch extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "EgressControlUnavailable";
+    this.name = "SandboxNetworkMismatch";
   }
 }
 
@@ -70,6 +72,13 @@ async function networkExists(name: string): Promise<boolean> {
   return networks.some((network) => network.Name === name);
 }
 
+async function sandboxIsInternal(): Promise<boolean> {
+  const details = (await docker.getNetwork(SANDBOX_NETWORK).inspect()) as {
+    Internal?: boolean;
+  };
+  return details.Internal === true;
+}
+
 /** Ensures the sandbox network exists, and the egress network with it.
  *
  *  Idempotent, but NOT self-correcting: an existing network's `Internal` flag
@@ -82,8 +91,10 @@ async function networkExists(name: string): Promise<boolean> {
 export async function ensureNetwork(): Promise<void> {
   const filtered = egressFiltered();
 
+  assertPreviewsCanWork(filtered);
+
   if (await networkExists(SANDBOX_NETWORK)) {
-    if (filtered) await assertSandboxIsInternal();
+    await assertNetworkMatchesConfig(filtered);
   } else {
     await docker.createNetwork({
       Name: SANDBOX_NETWORK,
@@ -105,27 +116,70 @@ export async function ensureNetwork(): Promise<void> {
   }
 }
 
-/** Refuses to run with a control that is configured on and not in effect.
+/** Refuses the one configuration in which no preview can ever load.
  *
- *  The failure mode this exists for is quiet and bad: an operator sets
- *  `SANDBOX_EGRESS_FILTERED=true`, the network already existed from before,
- *  Docker ignores the flag on an existing network, and every sandbox keeps
- *  full outbound access while the deployment believes otherwise. A refusal at
- *  boot with the command to fix it is worth more than a running server that
- *  is wrong about itself.
+ *  Docker publishes a container port by installing a DNAT rule on the host,
+ *  and it does not do that for a container whose only network is internal.
+ *  The request is accepted and silently produces no binding at all --
+ *  `HostConfig.PortBindings` holds what was asked for and
+ *  `NetworkSettings.Ports` comes back empty. So in host-loopback mode, where
+ *  the preview proxy reaches a project through its published port on
+ *  127.0.0.1, turning the egress control on removes the only route it has.
+ *
+ *  Nothing about that is visible from the symptom. The container runs, the
+ *  dev server compiles and prints its banner in the terminal, and every
+ *  preview reports that nothing is running -- which reads as a bug in the
+ *  project rather than as a network setting two layers away.
+ *
+ *  The two are not reconcilable, only choosable between: publishing a port
+ *  off an internal network is not something Docker can be persuaded to do.
+ *  So this names the choice instead of quietly making it.
  */
-async function assertSandboxIsInternal(): Promise<void> {
-  const details = (await docker.getNetwork(SANDBOX_NETWORK).inspect()) as {
-    Internal?: boolean;
-  };
+function assertPreviewsCanWork(filtered: boolean): void {
+  if (!filtered || previewTargetMode !== "host-loopback") return;
 
-  if (details.Internal) return;
+  throw new SandboxNetworkMismatch(
+    "SANDBOX_EGRESS_FILTERED is on and previews resolve in host-loopback " +
+      "mode. These cannot both hold: Docker does not publish ports for a " +
+      "container on an internal network, so every preview would report that " +
+      "nothing is running however healthy the dev server is. Either set " +
+      "SANDBOX_EGRESS_FILTERED=false (the usual choice when running this " +
+      "server directly on your own machine), or give the server a route to " +
+      "container IPs and set PREVIEW_TARGET_MODE=container-ip -- which on a " +
+      "host whose Docker keeps container IPs to itself means running the " +
+      "server in a container, as docker-compose does.",
+  );
+}
 
-  throw new EgressControlUnavailable(
-    `SANDBOX_EGRESS_FILTERED is on, but the "${SANDBOX_NETWORK}" network ` +
-      "already exists and is not internal, so sandboxes would still have " +
-      "unrestricted outbound access. Docker cannot change this on an " +
-      "existing network. Stop the running project containers and remove it " +
+/** Refuses to run when the network on the host is not the one configured.
+ *
+ *  `Internal` cannot be changed on an existing network, so flipping
+ *  SANDBOX_EGRESS_FILTERED does nothing whatever to a network that is
+ *  already there -- and the resulting state is quiet in both directions:
+ *
+ *  - Turned ON, network still permissive: every sandbox keeps full outbound
+ *    access while the deployment believes it has none.
+ *  - Turned OFF, network still internal: package installs fail with network
+ *    errors, and in host-loopback mode no preview can bind a port.
+ *
+ *  Neither is something an operator will trace back to a network they last
+ *  thought about weeks ago, so both refuse with the command that fixes them.
+ */
+async function assertNetworkMatchesConfig(filtered: boolean): Promise<void> {
+  const internal = await sandboxIsInternal();
+  if (internal === filtered) return;
+
+  const problem = filtered
+    ? "SANDBOX_EGRESS_FILTERED is on, but the network already exists and is " +
+      "not internal, so sandboxes would still have unrestricted outbound " +
+      "access"
+    : "SANDBOX_EGRESS_FILTERED is off, but the network already exists and " +
+      "IS internal, so sandboxes have no outbound access and previews " +
+      "cannot publish a port";
+
+  throw new SandboxNetworkMismatch(
+    `${problem}. Docker cannot change this on an existing network. Stop the ` +
+      "running project containers and remove it " +
       `("docker network rm ${SANDBOX_NETWORK}"); it will be recreated ` +
       "correctly on the next boot.",
   );

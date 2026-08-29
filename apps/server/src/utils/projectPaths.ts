@@ -122,7 +122,16 @@ export async function claimOneForSandbox(target: string): Promise<void> {
  *  will have succeeded in that case anyway, since only root sees uid 0 here.
  */
 export async function containerUser(projectId: string): Promise<string> {
-  const stats = await fs.stat(projectRoot(projectId)).catch(() => undefined);
+  return userForDirectory(projectRoot(projectId));
+}
+
+/** The same question for a directory that is not a project working tree.
+ *
+ *  A deployment's container bind-mounts a COPY of the tree rather than the
+ *  tree itself, so it needs the rule without the project id in front of it.
+ */
+export async function userForDirectory(directory: string): Promise<string> {
+  const stats = await fs.stat(directory).catch(() => undefined);
   const uid = stats && stats.uid !== 0 ? stats.uid : SANDBOX_UID;
   return `${String(uid)}:${String(SANDBOX_GID)}`;
 }

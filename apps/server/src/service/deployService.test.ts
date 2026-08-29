@@ -13,6 +13,7 @@ import {
   tailLog,
 } from "./deployService.js";
 import { SUBDOMAIN_PATTERN } from "@replit-clone/shared";
+import { TEMPLATES } from "../templates/registry.js";
 
 async function scratch(): Promise<string> {
   return mkdtemp(path.join(os.tmpdir(), "rc-deploy-"));
@@ -22,25 +23,59 @@ describe("deployTarget", () => {
   it("offers a build for the templates that produce files", () => {
     const vite = deployTarget("react-vite");
     expect(vite.deployable).toBe(true);
+    expect(vite.kind).toBe("static");
     expect(vite.buildCommand).toContain("npm run build");
     expect(vite.outputDir).toBe("dist");
+    // Nothing to proxy to: a static site has no container behind it.
+    expect(vite.port).toBeNull();
   });
 
   it("has nothing to build for a template that is already its own output", () => {
     const html = deployTarget("static-html");
     expect(html.deployable).toBe(true);
+    expect(html.kind).toBe("static");
     expect(html.buildCommand).toBe("");
     expect(html.outputDir).toBe(".");
   });
 
-  it("refuses a template that needs a process at request time", () => {
-    // Express, Flask, FastAPI and Go all serve responses from running code.
-    // There is nothing static to publish, and saying so is better than
-    // offering a button that always fails.
-    for (const id of ["node-express", "python-flask", "python-fastapi", "go-http"]) {
+  it("offers an always-on container to the templates that serve from a process", () => {
+    // These used to be refused outright, which meant half the templates this
+    // platform ships could not be published at all -- the point at which a
+    // user wants to show somebody was the point it stopped.
+    for (const id of [
+      "node-express",
+      "node-express-postgres",
+      "node-express-ts",
+      "python-flask",
+      "python-fastapi",
+      "go-http",
+    ]) {
       const target = deployTarget(id);
-      expect(target.deployable).toBe(false);
-      expect(target.reason).toBeTruthy();
+      expect(target.deployable).toBe(true);
+      expect(target.kind).toBe("service");
+      expect(target.port).toBeGreaterThan(0);
+      // Nothing is read back afterwards: the command does not terminate.
+      expect(target.outputDir).toBe("");
+    }
+  });
+
+  it("never publishes a service with a watcher in front of it", () => {
+    // The npm scripts in these templates are `node --watch` and `tsx watch`,
+    // which is right for development and wrong for a published app: a file
+    // watcher over a tree nothing writes to is only a way to restart at 3am.
+    // Reusing `startCommand` here would have shipped exactly that.
+    for (const id of ["node-express", "node-express-postgres", "node-express-ts"]) {
+      expect(deployTarget(id).buildCommand).not.toContain("watch");
+    }
+    expect(deployTarget("python-fastapi").buildCommand).not.toContain("--reload");
+  });
+
+  it("leaves no template unpublishable", () => {
+    // The guard on the gap this closed. A template added later with neither a
+    // static build nor a serve command is one a user cannot publish, and the
+    // failure would only show up when somebody tried.
+    for (const id of Object.keys(TEMPLATES)) {
+      expect(deployTarget(id).deployable).toBe(true);
     }
   });
 });

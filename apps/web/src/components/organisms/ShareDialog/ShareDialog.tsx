@@ -7,6 +7,7 @@ import {
   Popconfirm,
   Select,
   Spin,
+  Switch,
   Tag,
   Typography,
   message,
@@ -18,6 +19,7 @@ import {
   removeCollaboratorApi,
   revokeShareLinkApi,
   setCollaboratorApi,
+  setProjectVisibilityApi,
   shareLinkUrl,
   type ProjectRole,
 } from "../../../apis/projects.ts";
@@ -26,6 +28,11 @@ import { EmbedSection } from "./EmbedSection.tsx";
 interface ShareDialogProps {
   projectId: string;
   projectName: string;
+  /** Whether the project is currently readable by anybody signed in. */
+  isPublic: boolean;
+  /** Told when that changes, so the page around this can reflect it without
+   *  refetching the whole project. */
+  onVisibilityChange: (isPublic: boolean) => void;
   open: boolean;
   onClose: () => void;
 }
@@ -50,6 +57,8 @@ function apiMessage(error: unknown, fallback: string): string {
 export const ShareDialog = ({
   projectId,
   projectName,
+  isPublic,
+  onVisibilityChange,
   open,
   onClose,
 }: ShareDialogProps) => {
@@ -122,6 +131,23 @@ export const ShareDialog = ({
     }
   }
 
+  const visibilityMutation = useMutation({
+    mutationFn: (next: boolean) =>
+      setProjectVisibilityApi(projectId, next ? "public" : "private"),
+    onSuccess: (project) => {
+      onVisibilityChange(project.visibility === "PUBLIC");
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void messageApi.success(
+        project.visibility === "PUBLIC"
+          ? "Anyone signed in can now find this project"
+          : "This project is private again",
+      );
+    },
+    onError: (error) => {
+      void messageApi.error(apiMessage(error, "Could not change that."));
+    },
+  });
+
   const isOwner = data?.level === "owner";
 
   return (
@@ -151,6 +177,46 @@ export const ShareDialog = ({
           </Typography.Paragraph>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {/* First, because it is by far the broadest grant in this dialog:
+                everything below names a person, and this names everybody. */}
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <Typography.Text strong style={{ fontSize: 13 }}>
+                  Anyone can find and fork this
+                </Typography.Text>
+                <Switch
+                  size="small"
+                  checked={isPublic}
+                  loading={visibilityMutation.isPending}
+                  aria-label="Make this project public"
+                  onChange={(next) => {
+                    visibilityMutation.mutate(next);
+                  }}
+                />
+              </div>
+              <Typography.Paragraph
+                style={{
+                  color: "var(--rc-text-subtle)",
+                  fontSize: 12,
+                  margin: "6px 0 0",
+                }}
+              >
+                {isPublic
+                  ? "Anyone signed in can read this project's files and take " +
+                    "their own copy. They cannot run it, edit it, see its " +
+                    "secrets, or reach its database. Forks start with no " +
+                    "environment variables."
+                  : "Only you and the people below can open this project."}
+              </Typography.Paragraph>
+            </div>
+
             <div>
               <Typography.Text strong style={{ fontSize: 13 }}>
                 Invite by email
