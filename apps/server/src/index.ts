@@ -21,6 +21,7 @@ import {
 } from "./routes/preview.js";
 import {
   createDeploySiteServer,
+  installServiceUpgrade,
   listenForSites,
 } from "./deploySite.js";
 import { deployPort, env, isProduction, previewPort } from "./config/env.js";
@@ -60,6 +61,7 @@ import {
   setOnProjectReaped,
 } from "./containers/containerManager.js";
 import { ensureEgressGateway } from "./containers/egressGateway.js";
+import { restoreServices } from "./service/deployService.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
 import { SandboxNetworkMismatch } from "./containers/sandboxNetwork.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
@@ -160,6 +162,10 @@ const previewServer = createPreviewServer(previewProxy);
 // when deployments are configured -- with DEPLOY_PORT=0 the feature is off and
 // nothing listens, which is what the endpoints then report.
 const deploySiteServer = createDeploySiteServer();
+// A published app may serve a WebSocket, and Express middleware never sees an
+// upgrade. Installed here rather than inside the factory so the listener and
+// its handler are visible in one place.
+installServiceUpgrade(deploySiteServer);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -393,6 +399,13 @@ async function start(): Promise<void> {
   // directories with no row. Neither used to be cleaned up, ever.
   const reconciled = await withTimeout(reconcileOnBoot(), "boot reconcile");
   if (reconciled) logger.info("reconciled state", { ...reconciled });
+
+  // Published services, which the reconcile above deliberately does not touch:
+  // it sweeps `rc-project-` containers, and a deployment is not one. Always-on
+  // has to survive this process restarting, or it only means "until the next
+  // deploy of the platform".
+  const services = await withTimeout(restoreServices(), "service deployments");
+  if (services?.restored) logger.info("service deployments restored", { ...services });
 
   // A project's database is stopped with the project, so an idle pair costs
   // nothing rather than half of nothing.

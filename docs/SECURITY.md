@@ -202,6 +202,31 @@ can see rather than anything on the network
   rather than as a network flag two layers away. Filtering therefore belongs
   to deployments where the server shares the sandbox network — the compose
   setup — and not to a server run directly on a developer's machine.
+- **A published service is a container the public can reach**, and is treated
+  as one. The templates that serve from a process are published by running a
+  container of their own (`containers/deployContainer.ts`) with the public
+  origin proxying to it. It gets the same confinement a project container
+  does — `CapDrop: ALL`, `no-new-privileges`, a memory and PID cap, the sandbox
+  network, and the egress control when that is on — plus three differences that
+  follow from being reachable by strangers:
+
+  - It runs a **copy** of the tree, never the project's working directory. A
+    published address that changed under its visitors every time its author
+    saved a file would not be a deployment. The copy goes through the same
+    symlink-refusing, budget-checking `copyTree` the static path uses, and
+    additionally leaves `node_modules` and `.git` behind — the latter because a
+    project's whole history, including anything committed and later removed, has
+    no business in a directory whose purpose is to be reachable.
+  - It publishes **no host port** except in host-loopback mode, where it binds
+    127.0.0.1 only. The deploy origin is the sole way in.
+  - It has a **budget of its own** (`MAX_DEPLOYED_SERVICES`) rather than a share
+    of `MAX_CONCURRENT_CONTAINERS`. Counting always-on containers against the
+    interactive limit means enough publishing makes the editor unopenable, which
+    is a denial of service reachable by ordinary use.
+
+  The public origin proxies these without parsing a cookie, as it serves static
+  sites without parsing one: there is no identity on that origin, and an app's
+  own cookies belong to its own subdomain.
 - The terminal is a shell *inside that container*, reached by a WebSocket
   whose token travels in the subprotocol list (never the query string, which
   lands in access logs). It requires editor access and is closed on

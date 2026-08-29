@@ -492,11 +492,42 @@ could have been quietly wrong:
   asset URL at build time. A build that inherited it would produce a site whose
   scripts all point at a path that does not exist on the deploy origin.
 
-**Still open:** everything that needs a process at request time. Express, Flask,
-FastAPI and Go projects are told plainly that there is nothing static to
-publish. Always-on compute, autoscale, and scheduled jobs are a different
-product with a different cost model — a long-lived container on this host, or a
-handoff to Fly/Railway/Cloudflare — and that decision has not been made.
+**Done — always-on deployments.** _Added 2026-08-28._ The six templates that
+answer requests from a process (Express, Express+Postgres, Express+TS, Flask,
+FastAPI, Go) used to be told there was nothing to publish, which meant half the
+templates this platform ships stopped working at the point a user wanted to
+show somebody. They are now published by running a container of their own:
+`containers/deployContainer.ts` starts one over a copy of the source, and the
+deploy origin reverse-proxies to it instead of serving files. Every template
+can now be published.
+
+The cost decision was made the small way: a long-lived container on this host,
+with a budget of its own (`MAX_DEPLOYED_SERVICES`, default 5) so publishing
+cannot exhaust the containers the editor needs, and its own smaller memory and
+CPU figures because these are up whether or not anybody is looking. Autoscale
+and a handoff to Fly/Railway/Cloudflare remain unmade decisions; this is the
+smallest thing that closes the gap.
+
+Two failures worth recording, because both were invisible to the unit tests and
+to the type checker and only a real deployment found them:
+
+- The readiness probe was a TCP connect. In host-loopback mode the published
+  port belongs to `docker-proxy`, which **accepts** a connection whether or not
+  anything is listening inside the container and only fails when it tries to
+  forward — so every publish reported LIVE within a second, while `npm install`
+  was still running, and every request to the new address died with a socket
+  hang up. It is an HTTP request now, and any status counts.
+- The serve command ran under `sh -lc`. A login shell sources `/etc/profile`,
+  which **replaces** `PATH` with the distribution's default and discards
+  whatever the image set. Node and Python live in `/usr/bin` and survived it;
+  Go's toolchain is on `/usr/local/go/bin`, so every Go deployment failed with
+  `go: not found` five minutes later when the readiness wait gave up.
+
+`service/serviceDeploy.e2e.test.ts` is kept, behind `DEPLOY_E2E=1`, because it
+is the only thing that could have caught either.
+
+**Still open:** autoscale and scheduled jobs, which are a different product with
+a different cost model.
 
 **Also open:** custom domains. A deployment host needs a wildcard DNS record
 and, over HTTPS, a wildcard certificate. Locally that costs nothing, because

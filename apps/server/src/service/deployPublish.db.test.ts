@@ -145,14 +145,26 @@ describe.skipIf(!TEST_DATABASE_URL)("publishing a project", () => {
     expect(state.deployment?.url).toBeNull();
   });
 
-  it("refuses a project whose template needs a running process", async () => {
+  it("offers an always-on container to a template that needs a running process", async () => {
+    // This used to assert a refusal, and the refusal was the gap: six of the
+    // thirteen templates could not be published at all, so half of them
+    // stopped working at the point somebody wanted to show their work.
+    //
+    // Only the TARGET is checked here. Actually publishing one starts a
+    // container and installs its dependencies, which belongs in
+    // `serviceDeploy.e2e.test.ts` behind DEPLOY_E2E=1 rather than in a suite
+    // that only needs a database.
     const api = await prisma.project.create({
       data: { name: "api", template: "node-express", ownerId: userId },
     });
 
-    await expect(deployService.publish(api.id)).rejects.toThrow(
-      /running process/i,
-    );
+    const state = await deployService.deploymentState(api.id);
+
+    expect(state.target.deployable).toBe(true);
+    expect(state.target.kind).toBe("service");
+    expect(state.target.port).toBe(3000);
+    // Nothing is read back afterwards: the command does not terminate.
+    expect(state.target.outputDir).toBe("");
   });
 
   it("takes the site down, files and all", async () => {

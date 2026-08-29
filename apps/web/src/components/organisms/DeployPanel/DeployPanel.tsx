@@ -37,12 +37,18 @@ function size(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Publishing a project's build output to a public address.
+/** Publishing a project to a public address.
  *
  *  The preview shows a dev server to somebody who already has a session, behind
- *  a container that stops when it goes idle. This is the other thing: a build,
- *  on an origin that needs no account, that stays up. It is the difference
- *  between an editor and somewhere you finish something.
+ *  a container that stops when it goes idle. This is the other thing: an origin
+ *  that needs no account, that stays up. It is the difference between an editor
+ *  and somewhere you finish something.
+ *
+ *  Two shapes, and the panel says which one this project gets rather than
+ *  hiding it. They differ in the ways a user would notice: a static site keeps
+ *  nothing running and cannot fall over, while a service holds memory for as
+ *  long as it is published and can crash on its own — so the copy, the log and
+ *  the "take offline" tooltip are all worded per kind.
  */
 export const DeployPanel = ({ projectId, isOwner }: DeployPanelProps) => {
   const [state, setState] = useState<DeploymentState | null>(null);
@@ -120,7 +126,7 @@ export const DeployPanel = ({ projectId, isOwner }: DeployPanelProps) => {
           description={
             <span style={{ color: "var(--rc-text-subtle)", fontSize: 12.5 }}>
               {state?.target.reason ??
-                "This project cannot be published as static files."}
+                "This project cannot be published."}
             </span>
           }
         />
@@ -130,6 +136,10 @@ export const DeployPanel = ({ projectId, isOwner }: DeployPanelProps) => {
 
   const { deployment, target } = state;
   const live = deployment?.status === "live" && deployment.url !== null;
+  // The kind that WOULD be used, unless something is already published — in
+  // which case what is actually running is the honest thing to describe.
+  const kind = deployment?.kind ?? target.kind;
+  const isService = kind === "service";
 
   return (
     <div
@@ -196,6 +206,7 @@ export const DeployPanel = ({ projectId, isOwner }: DeployPanelProps) => {
         {live && deployment.deployedAt && (
           <div className="rc-deploy-meta">
             Published {ago(deployment.deployedAt)} · {size(deployment.sizeBytes)}
+            {isService && " · always on"}
           </div>
         )}
 
@@ -203,9 +214,14 @@ export const DeployPanel = ({ projectId, isOwner }: DeployPanelProps) => {
           <p className="rc-deploy-blurb">
             {deployment
               ? "This project is not live right now."
-              : "Build this project and publish it at a public address. Anyone " +
-                "with the link can open it — no account, and nothing left " +
-                "running."}
+              : isService
+                ? "This project answers requests from a running process, so " +
+                  "publishing it keeps a container of its own running at a " +
+                  "public address. Anyone with the link can open it — no " +
+                  "account — and it stays up when you close the editor."
+                : "Build this project and publish it at a public address. " +
+                  "Anyone with the link can open it — no account, and nothing " +
+                  "left running."}
           </p>
         )}
 
@@ -217,7 +233,11 @@ export const DeployPanel = ({ projectId, isOwner }: DeployPanelProps) => {
 
         <div className="rc-deploy-command">
           <span>{target.buildCommand || "No build step"}</span>
-          <span className="rc-deploy-outdir">→ {target.outputDir}</span>
+          <span className="rc-deploy-outdir">
+            {isService && target.port !== null
+              ? `→ :${String(target.port)}`
+              : `→ ${target.outputDir}`}
+          </span>
         </div>
 
         {isOwner && (
@@ -232,7 +252,13 @@ export const DeployPanel = ({ projectId, isOwner }: DeployPanelProps) => {
               {live ? "Redeploy" : "Deploy"}
             </Button>
             {deployment && (
-              <Tooltip title="Remove the published files and free the address">
+              <Tooltip
+                title={
+                  isService
+                    ? "Stop the container and free the address"
+                    : "Remove the published files and free the address"
+                }
+              >
                 <Button
                   size="small"
                   danger
@@ -253,7 +279,10 @@ export const DeployPanel = ({ projectId, isOwner }: DeployPanelProps) => {
         )}
 
         {deployment?.log && (
-          <pre className="rc-deploy-log" aria-label="Build output">
+          <pre
+            className="rc-deploy-log"
+            aria-label={isService ? "App output" : "Build output"}
+          >
             {deployment.log}
           </pre>
         )}

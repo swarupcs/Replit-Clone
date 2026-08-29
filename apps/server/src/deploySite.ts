@@ -1,12 +1,16 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
+import { Agent, createServer, type IncomingMessage, type Server } from "node:http";
+import type { Socket } from "node:net";
+import type { Duplex } from "node:stream";
 import path from "node:path";
-import express, { type Request, type Response } from "express";
+import express, { type Request, type RequestHandler, type Response } from "express";
 import helmet from "helmet";
+import { createProxyMiddleware } from "http-proxy-middleware";
 import { requestLogger } from "./middlewares/requestLogger.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 import { resolveSite } from "./service/deployService.js";
+import { serviceTarget } from "./containers/deployContainer.js";
 import { logger } from "./lib/logger.js";
 import { increment } from "./lib/metrics.js";
 
@@ -25,7 +29,14 @@ import { increment } from "./lib/metrics.js";
  *  that carries a live preview credential. Three concerns, three origins.
  *
  *  Nothing here reads a cookie, and no cookie parser is installed. There is no
- *  identity on this origin to get wrong.
+ *  identity on this origin to get wrong. A published app may set and read
+ *  cookies of its own -- they belong to its subdomain and mean nothing to this
+ *  server, which is exactly why it does not parse them.
+ *
+ *  Two kinds of site are served from here. A static one is files on disk and
+ *  everything below about paths, traversal and hidden entries applies to it. A
+ *  service one is a container, and none of it applies: the request is proxied
+ *  whole and the app decides what its own paths mean.
  */
 
 /** Content types by extension.
@@ -181,6 +192,100 @@ function notFound(res: Response): void {
   res.send(NOT_FOUND_HTML);
 }
 
+/** Target for the request currently being proxied.
+ *
+ *  A WeakMap keyed on the raw message rather than a property on `req`, for the
+ *  same reason the preview proxy does it: an upgrade never becomes an Express
+ *  request, and both paths have to look the answer up the same way.
+ */
+const serviceTargets = new WeakMap<IncomingMessage, string>();
+
+const SERVICE_DOWN_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Unavailable</title>
+<style>:root{--bg:#ffffff;--fg:#131623;--muted:#4a5169}
+@media (prefers-color-scheme:dark){:root{--bg:#0d0e16;--fg:#f2f3f7;--muted:#a2a7bd}}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;
+place-items:center;min-height:100vh;margin:0;background:var(--bg);color:var(--fg);
+text-align:center;padding:24px}
+h1{font-size:19px;font-weight:600;margin:0 0 8px}
+p{color:var(--muted);font-size:14px;margin:0}</style></head>
+<body><div><h1>This app is not responding</h1>
+<p>It was published, but nothing is answering right now.</p></div></body></html>`;
+
+/** Reverse proxy for service deployments.
+ *
+ *  One connection per request, for the reason the preview proxy gives: a
+ *  pooled socket to a container goes stale when Docker's backend pauses, and
+ *  the next request over it dies with ECONNRESET -- which a visitor reads as
+ *  the site being broken.
+ */
+function createServiceProxy(): RequestHandler & {
+  upgrade: (req: Request, socket: Socket, head: Buffer) => void;
+} {
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
+  return createProxyMiddleware<Request, Response>({
+    router: (req) => serviceTargets.get(req) ?? "http://127.0.0.1:1",
+    agent: new Agent({ keepAlive: false }),
+    changeOrigin: true,
+    // Off for the reason preview.ts documents at length: it would attach an
+    // unfiltered upgrade handler to the whole server. Upgrades are handled
+    // explicitly by `installServiceUpgrade` below.
+    ws: false,
+    on: {
+      error: (error, _req, res) => {
+        increment("deploy_service_proxy_errors");
+        logger.warn("service deployment proxy error", {
+          reason: error.message,
+        });
+        if ("writeHead" in res && !res.headersSent) {
+          res.writeHead(502, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(SERVICE_DOWN_HTML);
+        }
+      },
+    },
+  });
+}
+
+const serviceProxy = createServiceProxy();
+
+function serviceUnavailable(res: Response): void {
+  increment("deploy_service_unavailable");
+  res.status(503).type("html").setHeader("Cache-Control", "no-store");
+  res.send(SERVICE_DOWN_HTML);
+}
+
+/** Routes WebSocket upgrades to a published service.
+ *
+ *  A published app that uses a socket -- a chat, a live dashboard, anything
+ *  built on one -- is not an edge case worth refusing. Nothing is authorised
+ *  here because there is nothing to authorise: this origin is public, and the
+ *  Host header is the whole of the routing decision.
+ */
+export function installServiceUpgrade(server: Server): void {
+  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    void (async () => {
+      try {
+        const site = await resolveSite(req.headers.host ?? "");
+        if (!site || site.kind !== "service" || site.port === null) {
+          socket.destroy();
+          return;
+        }
+
+        const target = await serviceTarget(site.subdomain, site.port);
+        if (!target) {
+          socket.destroy();
+          return;
+        }
+
+        serviceTargets.set(req, target);
+        serviceProxy.upgrade(req as Request, socket as Socket, head);
+      } catch {
+        socket.destroy();
+      }
+    })();
+  });
+}
+
 export function createDeploySiteServer(): Server {
   const app = express();
 
@@ -208,16 +313,45 @@ export function createDeploySiteServer(): Server {
   // origin, so there is nothing for either to do except create a way to be
   // wrong about it.
 
-  app.get(/.*/, (req: Request, res: Response, next) => {
+  // Every method, not only GET. A static site still answers nothing else --
+  // the check moved below, after the site is resolved -- but a published API
+  // exists to be POSTed to, and refusing before knowing which kind of site
+  // this is would have made every service deployment read-only.
+  app.all(/.*/, (req: Request, res: Response, next) => {
     void (async () => {
       try {
-        if (req.method !== "GET" && req.method !== "HEAD") {
+
+        const site = await resolveSite(req.hostname || req.headers.host || "");
+        if (!site) {
           notFound(res);
           return;
         }
 
-        const site = await resolveSite(req.hostname || req.headers.host || "");
-        if (!site) {
+        // A service deployment is a container, not a directory. None of the
+        // path handling below applies: the app owns its own routing, its own
+        // 404s and its own idea of what an extension means.
+        if (site.kind === "service") {
+          if (site.port === null) {
+            serviceUnavailable(res);
+            return;
+          }
+
+          const target = await serviceTarget(site.subdomain, site.port);
+          if (!target) {
+            // Published, but nothing running behind it -- crashed, or the
+            // host restarted and has not brought it back yet. A 503 rather
+            // than a 404, because the address IS a site; it is the app that
+            // is missing.
+            serviceUnavailable(res);
+            return;
+          }
+
+          serviceTargets.set(req, target);
+          serviceProxy(req, res, next);
+          return;
+        }
+
+        if (req.method !== "GET" && req.method !== "HEAD") {
           notFound(res);
           return;
         }

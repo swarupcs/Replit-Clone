@@ -84,6 +84,41 @@ const envSchema = z.object({
    *  own code can write to. */
   DEPLOYMENTS_DIR: z.string().default("deployments"),
 
+  /* ---- always-on (service) deployments ---- */
+
+  /** Resource budget for ONE published service container.
+   *
+   *  Deliberately not the development figures. A service deployment is
+   *  always-on: it holds whatever it is given for as long as it stays
+   *  published, whether or not anybody is looking at it, and several of them
+   *  are running at once on a box that also has the projects their authors
+   *  are still editing open. Smaller and stingier is right here in a way it
+   *  is not for a container somebody is sitting in front of.
+   */
+  DEPLOY_MEMORY_MB: z.coerce.number().int().positive().default(512),
+  DEPLOY_CPUS: z.coerce.number().positive().default(0.5),
+
+  /** How many service deployments may be live at once on this host.
+   *
+   *  MAX_CONCURRENT_CONTAINERS does not cover these and must not: that limit
+   *  exists so an interactive project can always be opened, and counting
+   *  always-on containers against it means enough publishing makes the editor
+   *  unusable. Two budgets, because they are two different resources.
+   */
+  MAX_DEPLOYED_SERVICES: z.coerce.number().int().positive().default(5),
+
+  /** How long a service deployment gets to answer on its port before the
+   *  publish is called failed.
+   *
+   *  Generous, because this window contains a cold `npm install` or `pip
+   *  install` on a container with half a core. The cost of it being too short
+   *  is a deployment reported as broken that was merely still installing.
+   */
+  DEPLOY_READY_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(300_000),
 
   /** Ceiling on one published site.
    *

@@ -29,6 +29,8 @@ import { DeployPanel } from "./DeployPanel.tsx";
 
 const LIVE: Deployment = {
   status: "live",
+  kind: "static",
+  port: null,
   subdomain: "quiet-fern-84f1",
   url: "http://quiet-fern-84f1.localhost:3102",
   buildCommand: "npm install && npm run build",
@@ -42,6 +44,8 @@ const LIVE: Deployment = {
 const DEPLOYABLE: DeploymentState = {
   target: {
     deployable: true,
+    kind: "static",
+    port: null,
     buildCommand: "npm install && npm run build",
     outputDir: "dist",
   },
@@ -180,6 +184,8 @@ describe("a project that cannot be published statically", () => {
     show({
       target: {
         deployable: false,
+        kind: "static",
+        port: null,
         reason: "This project serves requests from a running process.",
         buildCommand: "",
         outputDir: "",

@@ -225,11 +225,21 @@ model Deployment {
 
   status DeploymentStatus @default(BUILDING)
 
+  /// Static files copied out, or a container kept running behind the public
+  /// origin. Recorded rather than derived from the template at read time: a
+  /// template gaining a static build later must not change how an already
+  /// published site is served.
+  kind DeploymentKind @default(STATIC)
+
   /// What actually ran, and what was read afterwards. Recorded rather than
   /// looked up, so changing a template's defaults does not rewrite what a
   /// published site claims about itself.
   buildCommand String
   outputDir    String
+
+  /// The container port a SERVICE deployment is proxied to. Null for a static
+  /// one, which has no container behind it.
+  port Int?
 
   /// Bytes published, so a quota has something to count.
   sizeBytes Int @default(0)
@@ -256,6 +266,11 @@ enum DeploymentStatus {
   BUILDING
   LIVE
   FAILED
+}
+
+enum DeploymentKind {
+  STATIC
+  SERVICE
 }
 
 /// An external database a project's query editor is pointed at.
