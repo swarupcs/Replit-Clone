@@ -51,9 +51,9 @@ The 149 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI.
 
-**Done: 66 items. Open: 8.** Of the 8, one is a defect, one is unblocked
-work, five are blocked on a decision or on infrastructure, and one is a
-documentation debt.
+**Done: 67 items. Open: 7.** Of the 7, one is a defect, one is unblocked
+work, and five are blocked on a decision or on infrastructure. No
+documentation debts remain.
 
 ---
 
@@ -188,6 +188,12 @@ Rows 1–13, all `done`:
 - [x] **Every env var the schema accepts is in `.env.example`** — 41 of 41,
       audited rather than eyeballed. The four that were missing included
       `LSP_ENABLED`, which is how the feature above stayed undiscoverable.
+- [x] **The test database is documented**, with commands verified by running
+      them. `CONTRIBUTING.md` said the DB-backed suites skip without
+      `TEST_DATABASE_URL` and never said the database existed or how to make
+      one — so the next person saw 149 silent skips and no reason. It also
+      still claimed CI does not run E2E, which stopped being true an hour
+      earlier; both fixed together.
 
 ---
 
@@ -242,18 +248,18 @@ Postgres); the user's own VS Code extensions, which Monaco cannot reach at all.
 
 ### 3.4 Documentation debts
 
-Three of the four debts once on this list are closed. Two went with the
+All four debts once on this list are closed. Two went with the
 consolidation rather than with any work: `REPLIT_CLONE_PLAN` §8.6 listed
 follow-mode and checkpoint history as missing when both had shipped, and §8.5
 named a `forkProjectService` module that does not exist (the function lives in
 `service/projectService.ts`). The document that was wrong is gone; the lesson
 it taught is §7. The third, `monacoSetup.test.ts` asserting on its own source
-text, was closed by giving it a real browser to assert against — §2.8.
+text, was closed by giving it a real browser to assert against. The fourth, an
+undocumented test database, is now a section of `CONTRIBUTING.md` with the
+commands verified by running them — §2.8 for all three.
 
-- [ ] **The `rc_test` database is undocumented.** `CONTRIBUTING.md` mentions
-      `TEST_DATABASE_URL` and says the suites skip without it, but never says
-      the database exists or how to make one. The next person sees 149 silently
-      skipped tests and no reason.
+Nothing is open here.
+
 
 Not a debt but worth recording: **two `Project` rows have no working tree**
 ("P" and "site", created 2026-08-27). Reported 2026-08-28 and deliberately left
@@ -271,8 +277,7 @@ whoever owns the data, not to a cleanup script.
    because nothing underneath it had ever run.
 4. **§3.1 abuse handling** — before any deployment that is both public and
    multi-tenant, and not before that.
-5. **§3.4 the two remaining debts**, whenever they are cheaper than the
-   confusion they cause.
+5. ~~**§3.4 the remaining debts**.~~ Done 2026-08-29.
 6. **§3.2 the dashboard list view**, which is an afternoon. (The env vars
    half of this line is done.)
 
@@ -294,8 +299,6 @@ Specifically:
 - `checkpointService.ts` and `PresenceStack.tsx`'s follow affordance both exist
   — so the old §8.6's claim that they were missing was confirmed **stale**, and
   the document making it has since been deleted.
-- `CONTRIBUTING.md` mentions `TEST_DATABASE_URL` once and never says how to
-  create the database. Confirmed open.
 - Every file named as a deliverable in §2 exists, bar `forkProjectService.ts`,
   which the old plan invented; `forkProject` is in `service/projectService.ts`.
 

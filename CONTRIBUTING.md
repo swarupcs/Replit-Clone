@@ -60,15 +60,22 @@ pnpm --filter '@replit-clone/server' exec vitest run src/service/searchService.t
 pnpm --filter '@replit-clone/web' e2e     # end-to-end, see below
 ```
 
-CI runs typecheck, lint, test, and build on every push; it does not run the
-E2E suite (that needs Docker and the sandbox images).
+CI runs typecheck, lint, test, and build on every push, in a job with a real
+Postgres — so the DB-backed suites that skip on your laptop always run there.
+A second job builds the sandbox images, and a third runs the **E2E suite**
+against a stack it starts itself: Postgres, the API, the built web app, and a
+real `sandbox-node` container. That job sets `E2E_REQUIRE=1`, which turns the
+suite's usual "the stack is not up, skipping" into a hard failure — a run that
+skips everything and reports green would claim the real stack was exercised
+when nothing had been started.
 
 ## Tests
 
 - **Server** tests are colocated (`*.test.ts` next to the file) and use
   Vitest + supertest. DB-backed suites skip themselves gracefully when
   `TEST_DATABASE_URL` is unset — a local run without Postgres is green, not
-  red.
+  red. That is roughly **129 tests you are not running**, so it is worth
+  fifteen seconds to turn them on (below).
 - **Web** tests live next to their stores/components; vitest only collects
   `src/**/*.test.*`, so the E2E specs are not picked up by accident.
 - **E2E** (`apps/web/e2e/`) drives the real stack: your own `pnpm dev`, real
@@ -76,6 +83,39 @@ E2E suite (that needs Docker and the sandbox images).
   and every run deletes the project it created so containers don't accumulate
   against the concurrency cap. Run it before touching anything in the seams
   it covers: save → container filesystem → dev server → preview.
+
+### Running the DB-backed suites
+
+Some suites exercise real rows rather than mocks — refresh-token rotation with
+its unique hashes and replay detection, project access, the stored GitHub
+connection. Those cannot be faithfully faked, so they skip unless you point
+them at a database. They will not touch your development one: give them a
+throwaway of their own.
+
+With `pnpm db:up` already running, create it once and migrate it:
+
+```bash
+docker exec replit-clone-postgres psql -U replit -d postgres -c "CREATE DATABASE rc_test"
+```
+
+```bash
+cd apps/server && DATABASE_URL="postgresql://replit:replit@localhost:15432/rc_test?schema=public" pnpm exec prisma migrate deploy
+```
+
+Then run the suite with the URL in the environment:
+
+```bash
+cd apps/server && TEST_DATABASE_URL="postgresql://replit:replit@localhost:15432/rc_test?schema=public" pnpm exec vitest run
+```
+
+It has to come from the **shell**, not from `.env`: `config/env.ts` skips
+dotenv when `NODE_ENV=test` on purpose, so that your own `.env` — and the
+development database in it — cannot leak into a suite that writes rows.
+
+Without it: 1390 passing, 149 skipped. With it: **1519 passing, 20 skipped**
+(the remainder are shell-quoting round-trips that need `/bin/bash`, so they
+skip on Windows and run in CI). If your numbers look like the first pair, the
+variable did not reach the runner.
 
 When you fix a bug, the test that would have caught it goes in the same PR —
 the race-condition fixes of the past few months all grew one.
