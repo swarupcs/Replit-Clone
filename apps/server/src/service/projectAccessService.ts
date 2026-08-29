@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
+import type { PublicProject } from "@replit-clone/shared";
 import type { Project } from "../generated/prisma/client.js";
-import { ProjectRole } from "../generated/prisma/enums.js";
+import { ProjectRole, ProjectVisibility } from "../generated/prisma/enums.js";
 import { prisma } from "../lib/prisma.js";
 import { ForbiddenError, NotFoundError } from "../utils/errors.js";
 
@@ -12,15 +13,36 @@ import { ForbiddenError, NotFoundError } from "../utils/errors.js";
  *  needs rather than assuming the caller is the owner.
  */
 
-/** Ordered, so a check is a comparison rather than a list of equality tests. */
+/** Ordered, so a check is a comparison rather than a list of equality tests.
+ *
+ *  `visitor` sits BELOW `viewer`, and that placement is the whole security
+ *  design of public projects. Every existing check in this codebase asks for
+ *  `viewer` or higher, so introducing a level underneath it opens nothing:
+ *  each of those checks refuses a visitor until somebody deliberately lowers
+ *  it. Making PUBLIC grant `viewer` instead would have silently handed
+ *  strangers the project's database query editor (`databaseController` is
+ *  viewer-level throughout) and its git history including remote URLs. Neither
+ *  is what a person means when they make a project public.
+ */
 const RANK: Record<AccessLevel, number> = {
   none: 0,
-  viewer: 1,
-  editor: 2,
-  owner: 3,
+  visitor: 1,
+  viewer: 2,
+  editor: 3,
+  owner: 4,
 };
 
-export type AccessLevel = "none" | "viewer" | "editor" | "owner";
+/** What a caller may do with a project.
+ *
+ *  - `visitor` — the project is public. Read its files, take a copy. Nothing
+ *    else: no preview (which would start a container for a stranger), no
+ *    database, no git, no collaborator list, no environment variables.
+ *  - `viewer` — a named, invited reader. Everything a visitor may do, plus the
+ *    things that assume the owner chose to trust this particular person.
+ *  - `editor` — may write and run.
+ *  - `owner` — may also share, publish, rename and delete.
+ */
+export type AccessLevel = "none" | "visitor" | "viewer" | "editor" | "owner";
 
 export interface ProjectAccess {
   project: Project;
@@ -50,7 +72,69 @@ export async function getProjectAccess(
   const collaborator = project.collaborators[0];
   if (collaborator) return { project, level: levelFromRole(collaborator.role) };
 
+  // Last, so an invitation always wins over the public grant. Someone invited
+  // as an editor to a project that later became public must keep their editor
+  // access, not be demoted to what any stranger gets.
+  if (project.visibility === ProjectVisibility.PUBLIC) {
+    return { project, level: "visitor" };
+  }
+
   return { project, level: "none" };
+}
+
+/** Makes a project readable by anybody signed in, or private again.
+ *
+ *  Owner only, and no other side effects. In particular this does NOT touch
+ *  the share token, the collaborator list, or the environment variables:
+ *  publishing is a decision about who may read the source, and quietly
+ *  revoking someone's invitation because of it would be the platform making a
+ *  second decision the owner did not ask for.
+ */
+export async function setProjectVisibility(
+  projectId: string,
+  ownerId: string,
+  visibility: ProjectVisibility,
+): Promise<Project> {
+  await assertProjectAccess(projectId, ownerId, "owner");
+
+  return prisma.project.update({
+    where: { id: projectId },
+    data: { visibility },
+  });
+}
+
+/** The gallery: public projects, newest first.
+ *
+ *  Returns a deliberately narrow shape rather than the row. A `Project` carries
+ *  `envVars` and `shareToken`, and this list is readable by anybody with an
+ *  account -- so the columns are named explicitly here, where forgetting one is
+ *  a compile error, instead of being stripped by a caller who might not.
+ */
+export async function listPublicProjects(limit = 50): Promise<PublicProject[]> {
+  const rows = await prisma.project.findMany({
+    where: { visibility: ProjectVisibility.PUBLIC },
+    select: {
+      id: true,
+      name: true,
+      template: true,
+      createdAt: true,
+      owner: { select: { email: true } },
+      _count: { select: { forks: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: Math.min(Math.max(limit, 1), 100),
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    template: row.template,
+    createdAt: row.createdAt.toISOString(),
+    // The local part only. A gallery is a public page and the whole address is
+    // more than it needs to say who made something.
+    ownerName: row.owner.email.split("@")[0] ?? "someone",
+    forks: row._count.forks,
+  }));
 }
 
 /** Asserts at least `required`, or reports the project as missing.
@@ -224,4 +308,4 @@ export async function redeemShareToken(
   return project;
 }
 
-export { ProjectRole };
+export { ProjectRole, ProjectVisibility };

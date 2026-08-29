@@ -38,6 +38,7 @@ import { useAuth } from "../hooks/useAuth.ts";
 import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx";
 import { GithubConnectionCard } from "../components/organisms/GithubConnectionCard/GithubConnectionCard.tsx";
 import { ImportRepoDialog } from "../components/organisms/ImportRepoDialog/ImportRepoDialog.tsx";
+import { ExploreSection } from "../components/organisms/ExploreSection/ExploreSection.tsx";
 
 /** Relative time for the card footer -- "3 days ago" reads better than a date
  *  when you're scanning a list of things you made recently. */
@@ -461,6 +462,11 @@ export const Dashboard = () => {
             </Empty>
           </div>
         )}
+
+        {/* Other people's published work, and a Fork button. Below your own
+            projects rather than beside them: this is somewhere to go when you
+            have finished with what you came for. */}
+        <ExploreSection />
       </main>
 
       <GithubConnectionCard
@@ -487,6 +493,16 @@ export const Dashboard = () => {
         <ShareDialog
           projectId={sharing.id}
           projectName={sharing.name}
+          isPublic={sharing.visibility === "PUBLIC"}
+          // Kept locally as well as refetched, so the switch does not flick
+          // back to its old position while the list query is in flight.
+          onVisibilityChange={(isPublic) => {
+            setSharing((current) =>
+              current
+                ? { ...current, visibility: isPublic ? "PUBLIC" : "PRIVATE" }
+                : current,
+            );
+          }}
           open
           onClose={() => setSharing(null)}
         />

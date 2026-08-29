@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { io } from "socket.io-client";
+import { useMutation } from "@tanstack/react-query";
 import { loader } from "@monaco-editor/react";
 import { Button, Flex, Tooltip, Typography, message } from "antd";
 import {
@@ -16,6 +17,7 @@ import {
   VscCloudUpload,
   VscSettingsGear,
   VscSparkle,
+  VscRepoForked,
 } from "react-icons/vsc";
 import {
   ArrowLeftOutlined,
@@ -55,6 +57,7 @@ import { PackagesPanel } from "../components/organisms/PackagesPanel/PackagesPan
 import { DeployPanel } from "../components/organisms/DeployPanel/DeployPanel.tsx";
 import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
 import { getAiStatusApi } from "../apis/ai.ts";
+import { forkProjectApi } from "../apis/projects.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { useGitGutterStore } from "../store/gitGutterStore.ts";
 import {
@@ -107,6 +110,19 @@ export const ProjectPlayground = () => {
   /** Owner rather than merely editor: pushing spends the owner's credential,
    *  so the panel offers it to nobody else. */
   const accessLevel = useEditorSocketStore((state) => state.accessLevel);
+
+  /** Forking the project currently open, for a visitor reading a public one. */
+  const forkMutation = useMutation({
+    mutationFn: () => forkProjectApi(projectIdFromUrl ?? ""),
+    onSuccess: (project) => {
+      // Straight into the copy: what a visitor wanted was somewhere they can
+      // actually type.
+      void navigate(`/project/${project.id}`);
+    },
+    onError: () => {
+      void message.error("Could not fork this project.");
+    },
+  });
   const { restored, remember } = useWorkspaceSession(projectIdFromUrl, editorSocket);
 
   // Seeded from the remembered arrangement, so a reload comes back to the
@@ -724,6 +740,26 @@ export const ProjectPlayground = () => {
         </Flex>
 
         <Flex align="center" gap={12}>
+          {/* Somebody reading a project nobody invited them to. Offered here
+              rather than in a banner because it is the ONE action available to
+              them, and the rest of this toolbar is about to refuse everything
+              else they try. */}
+          {accessLevel === "visitor" && (
+            <Tooltip title="Take your own copy. Nothing is shared with the original — and it starts with no environment variables.">
+              <Button
+                size="small"
+                type="primary"
+                icon={<VscRepoForked size={12} />}
+                loading={forkMutation.isPending}
+                onClick={() => {
+                  forkMutation.mutate();
+                }}
+              >
+                Fork
+              </Button>
+            </Tooltip>
+          )}
+
           <RunControl />
 
           <Flex align="center" gap={2}>

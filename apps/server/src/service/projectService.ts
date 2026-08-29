@@ -183,23 +183,103 @@ export async function duplicateProjectService(
     },
   });
 
-  const destination = projectDir(copy.id);
-
   try {
-    await fs.mkdir(destination, { recursive: true });
-    const sourceRoot = projectDir(projectId);
-    await fs.cp(sourceRoot, destination, {
-      recursive: true,
-      filter: (entrySource) => !excludedFromCopy(sourceRoot, entrySource),
-    });
-    await claimForSandbox(destination).catch(() => {});
+    await copyProjectFiles(projectId, copy.id);
   } catch (error) {
     await prisma.project.delete({ where: { id: copy.id } }).catch(() => {});
-    await fs.rm(destination, { recursive: true, force: true }).catch(() => {});
+    await fs
+      .rm(projectDir(copy.id), { recursive: true, force: true })
+      .catch(() => {});
     throw error;
   }
 
   return copy;
+}
+
+/** Takes a copy of somebody else's public project.
+ *
+ *  The near-neighbour of `duplicateProjectService`, and the two differences
+ *  are the entire feature:
+ *
+ *  1. **It is allowed at `visitor`.** Forking a stranger's project without
+ *     asking anybody is what makes a gallery or a shared tutorial link work at
+ *     all; requiring an invitation first is the thing that stops it being a
+ *     social mechanic.
+ *  2. **The environment variables do NOT come along.** A duplicate keeps them
+ *     because the project was already yours and they were already your
+ *     secrets. A fork is a stranger's copy of somebody else's work, and
+ *     copying an API key into it -- silently, on a button press, into a
+ *     project the original owner cannot see or delete -- would be handing out
+ *     credentials as a feature. The fork starts with none and says so.
+ *
+ *  What travels: the files, the template, and the start command. Not the git
+ *  history (a remote URL can carry a token, and `.git` is excluded from every
+ *  copy here anyway), not the collaborators, not the share link, not the
+ *  database, not the deployment. A fork is the code, and nothing that was
+ *  arranged around it.
+ */
+export async function forkProjectService(
+  projectId: string,
+  userId: string,
+  name?: string,
+): Promise<Project> {
+  const source = await assertAccess(projectId, userId, "visitor");
+
+  // Their own quota, like any project they create. A fork is cheap to ask for
+  // and exactly as expensive to host as anything else.
+  await assertCanCreateProject(userId);
+
+  const fork = await prisma.project.create({
+    data: {
+      name: name?.trim() || source.name,
+      ownerId: userId,
+      template: source.template,
+      startCommand: source.startCommand,
+      // Provenance, not ownership: deleting the original leaves this null and
+      // the fork untouched.
+      forkedFromId: source.id,
+      // Never inherited. A copy of a public project starts private, whatever
+      // the original was -- publishing is a decision, and making it on
+      // somebody's behalf because they pressed Fork is not one they made.
+      visibility: "PRIVATE",
+      // Empty, deliberately. See the note above: this is the line between a
+      // fork and a credential leak.
+      envVars: {},
+    },
+  });
+
+  try {
+    await copyProjectFiles(projectId, fork.id);
+  } catch (error) {
+    await prisma.project.delete({ where: { id: fork.id } }).catch(() => {});
+    await fs
+      .rm(projectDir(fork.id), { recursive: true, force: true })
+      .catch(() => {});
+    throw error;
+  }
+
+  return fork;
+}
+
+/** The file half of a duplicate or a fork.
+ *
+ *  Shared so the two cannot drift on what they exclude -- which matters most
+ *  for `.git`, whose absence is what keeps a remote URL (and any token in it)
+ *  out of a stranger's copy.
+ */
+async function copyProjectFiles(
+  sourceProjectId: string,
+  targetProjectId: string,
+): Promise<void> {
+  const destination = projectDir(targetProjectId);
+  const sourceRoot = projectDir(sourceProjectId);
+
+  await fs.mkdir(destination, { recursive: true });
+  await fs.cp(sourceRoot, destination, {
+    recursive: true,
+    filter: (entrySource) => !excludedFromCopy(sourceRoot, entrySource),
+  });
+  await claimForSandbox(destination).catch(() => {});
 }
 
 /** Directories a copy or an export has no business carrying.

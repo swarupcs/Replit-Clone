@@ -1,5 +1,7 @@
 import type {
   ApiSuccess,
+  ProjectVisibility,
+  PublicProject,
   DevcontainerState,
   GitBranch,
   GitRemote,
@@ -94,6 +96,43 @@ export const duplicateProjectApi = async (
   const response = await axios.post<CreateProjectResponse>(
     `/api/v1/projects/${projectId}/duplicate`,
     { name },
+  );
+  return response.data.data;
+};
+
+/** Takes a copy of somebody else's public project.
+ *
+ *  Not `duplicateProjectApi` with a different name: a fork needs no invitation
+ *  and carries none of the original's environment variables, and the server
+ *  keeps them separate for exactly that reason.
+ */
+export const forkProjectApi = async (
+  projectId: string,
+  name?: string,
+): Promise<Project> => {
+  const response = await axios.post<CreateProjectResponse>(
+    `/api/v1/projects/${projectId}/fork`,
+    { name },
+  );
+  return response.data.data;
+};
+
+/** Publishes a project's source, or takes it back. Owner only. */
+export const setProjectVisibilityApi = async (
+  projectId: string,
+  visibility: ProjectVisibility,
+): Promise<Project> => {
+  const response = await axios.patch<CreateProjectResponse>(
+    `/api/v1/projects/${projectId}/visibility`,
+    { visibility },
+  );
+  return response.data.data;
+};
+
+/** The gallery of public projects. */
+export const listPublicProjectsApi = async (): Promise<PublicProject[]> => {
+  const response = await axios.get<ApiSuccess<PublicProject[]>>(
+    "/api/v1/projects/public",
   );
   return response.data.data;
 };

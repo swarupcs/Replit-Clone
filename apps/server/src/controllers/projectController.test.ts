@@ -177,7 +177,11 @@ describe("listTemplatesController", () => {
 });
 
 describe("getProjectTree", () => {
-  it("checks viewer access, then returns the tree", async () => {
+  it("checks visitor access, then returns the tree", async () => {
+    // `visitor`, not `viewer`, and deliberately: reading the files is exactly
+    // what a PUBLIC project offers a stranger. Every other project endpoint
+    // still asks for viewer or higher, so this is the narrow opening rather
+    // than a general one.
     fileTreeService.buildFileTree.mockResolvedValue({ name: "app", children: [] });
 
     const response = await request(app)
@@ -188,7 +192,7 @@ describe("getProjectTree", () => {
     expect(projectService.assertProjectAccess).toHaveBeenCalledWith(
       TEST_PROJECT,
       TEST_USER.sub,
-      "viewer",
+      "visitor",
     );
   });
 

@@ -227,6 +227,32 @@ can see rather than anything on the network
   The public origin proxies these without parsing a cookie, as it serves static
   sites without parsing one: there is no identity on that origin, and an app's
   own cookies belong to its own subdomain.
+- **A public project grants `visitor`, which ranks BELOW `viewer`.** This one
+  ordering decision is the whole security design of public projects. Every
+  access check already written in this codebase asks for `viewer` or higher, so
+  adding a level underneath opens nothing by default -- each of them keeps
+  refusing a stranger until somebody deliberately lowers it, which three
+  endpoints do (the file tree, the start command, and the zip export).
+
+  Had PUBLIC granted `viewer` instead, making a project public would silently
+  have handed every signed-in stranger the project's **database query editor**
+  (`databaseController` is viewer-level throughout) and its **git history,
+  remote URLs and any token in them** (`gitController` likewise). Neither is
+  what a person means by "public". A visitor also gets no preview, which is
+  deliberate twice over: it would start a container on a stranger's request.
+
+  Environment variables were already gated at `editor` rather than `viewer`, so
+  no secret was ever one level away from this.
+
+- **A fork carries the files and nothing arranged around them.** No environment
+  variables (the original's secrets are not the forker's), no `.git` (a remote
+  can be `https://x-access-token:<token>@github.com/...`, and copying it would
+  hand over push access to somebody else's repository), no collaborators, no
+  share link, no database, no deployment. A fork also starts PRIVATE whatever
+  its source was: publishing is a decision, and pressing Fork is not that
+  decision. The gallery query names its columns explicitly rather than
+  returning rows, so `envVars` and `shareToken` cannot reach it by being
+  forgotten.
 - The terminal is a shell *inside that container*, reached by a WebSocket
   whose token travels in the subprotocol list (never the query string, which
   lands in access logs). It requires editor access and is closed on

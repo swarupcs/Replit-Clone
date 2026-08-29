@@ -291,7 +291,8 @@ export interface ServerToClientEvents {
 export interface SocketData {
   userId: string;
   projectId: string;
-  /** What this connection may do. A viewer may read and watch; anything that
-   *  changes the project or runs code needs at least editor. */
-  accessLevel: "viewer" | "editor" | "owner";
+  /** What this connection may do. A visitor is reading a PUBLIC project and
+   *  was invited by nobody; a viewer was invited. Both may read and watch, and
+   *  anything that changes the project or runs code needs at least editor. */
+  accessLevel: "visitor" | "viewer" | "editor" | "owner";
 }

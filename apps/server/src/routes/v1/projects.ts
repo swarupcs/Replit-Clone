@@ -5,6 +5,9 @@ import {
   createProjectController,
   deleteProjectController,
   duplicateProjectController,
+  forkProjectController,
+  listPublicProjectsController,
+  setVisibilityController,
   exportProjectController,
   getProjectEnvController,
   getStartCommandController,
@@ -127,6 +130,10 @@ const upload = multer({
 router.use(requireAuth);
 
 router.get("/templates", asyncHandler(listTemplatesController));
+// The gallery. Before "/:projectId/..." routes so "public" is never read as an
+// id -- and readable by anybody signed in, since it lists only what its owners
+// have already published.
+router.get("/public", asyncHandler(listPublicProjectsController));
 router.get("/", asyncHandler(listProjectsController));
 router.post("/", createLimiter, asyncHandler(createProjectController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
@@ -267,6 +274,10 @@ router.post(
 );
 router.patch("/:projectId", asyncHandler(renameProjectController));
 router.post("/:projectId/duplicate", createLimiter, asyncHandler(duplicateProjectController));
+// Forking a PUBLIC project needs no invitation from anybody, which is the
+// whole point of it -- so it is rate limited like any other project creation.
+router.post("/:projectId/fork", createLimiter, asyncHandler(forkProjectController));
+router.patch("/:projectId/visibility", asyncHandler(setVisibilityController));
 router.get("/:projectId/export", asyncHandler(exportProjectController));
 router.get("/:projectId/env", asyncHandler(getProjectEnvController));
 router.post(

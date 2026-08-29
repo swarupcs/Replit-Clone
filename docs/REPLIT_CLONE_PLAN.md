@@ -597,10 +597,26 @@ a project you already own; share invites a named collaborator. Taking a
 stranger's project, getting your own copy, and needing no permission to do it
 is what makes a template gallery or a shared tutorial link work at all.
 
-- **Blocked on:** a visibility model on `Project` and its consequences —
-  abuse (public projects are a spam and malware surface), quota accounting for
-  a fork, and whether secrets and git remotes are stripped on copy. The last
-  one is a security requirement, not a nicety.
+**Done.** _Added 2026-08-28._ `Project.visibility` is PRIVATE by default and
+PUBLIC by explicit choice of the owner alone. A public project grants a new
+access level, `visitor`, deliberately ranked BELOW `viewer` — see
+`docs/SECURITY.md`, but the short version is that every existing check asks for
+viewer or higher, so a level underneath opens nothing until an endpoint is
+lowered on purpose. Three were: the file tree, the start command and the zip
+export. `forkProjectService` copies the files for anybody who can see them, and
+`ExploreSection` on the dashboard is the gallery that makes them findable.
+
+The three questions this entry was blocked on, answered:
+
+- **Secrets and git remotes on copy** — stripped, as the entry says it must be.
+  `envVars` is `{}` on every fork and `.git` was already excluded from every
+  copy path, so no remote and no token in one travels.
+- **Quota** — a fork counts against the forker's own quota, like any project
+  they create. It is exactly as expensive to host.
+- **Abuse** — not yet addressed, and worth naming rather than implying it was.
+  There is no report mechanism, no rate limit on publishing (forking is rate
+  limited as project creation), and no review. A single-tenant or invite-only
+  deployment is fine; a public multi-tenant one would need those first.
 
 ### 8.6 Smaller, and each genuinely smaller
 
@@ -625,6 +641,10 @@ made yet:
 1. ~~**8.4 packages**~~ — done.
 2. ~~**8.2 warm containers**~~ — done as far as the install step goes; process
    snapshots remain.
-3. ~~**8.1 static deployments**~~ — done. Always-on compute and custom domains
-   remain, and both are blocked on a cost decision rather than on work.
-4. **8.3 persistent data**, then **8.5 fork** — both need a design round first.
+3. ~~**8.1 deployments**~~ — done, both shapes. Static output for the templates
+   that produce it, and an always-on container for the six that serve from a
+   process. Custom domains remain, blocked on a wildcard DNS record and a
+   wildcard certificate rather than on work here.
+4. ~~**8.3 persistent data**~~, ~~**8.5 fork**~~ — both done. What remains in
+   §8.6 is smaller and independent: language servers beyond Python, a CLI and
+   local sync, follow-mode, and scheduled jobs.

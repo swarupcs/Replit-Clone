@@ -22,6 +22,12 @@ export interface Project {
   ownerId: string;
   createdAt: string;
   lastActiveAt: string | null;
+  /** Whether anybody signed in may read this project and fork it. The row's
+   *  own spelling, since this is the project as the API returns it. */
+  visibility: "PRIVATE" | "PUBLIC";
+  /** The public project this was forked from, or null. Provenance only: it
+   *  grants nothing and survives the original being deleted. */
+  forkedFromId: string | null;
 }
 
 /** POST /api/v1/projects */

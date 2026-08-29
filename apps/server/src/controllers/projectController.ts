@@ -5,13 +5,19 @@ import {
   createProjectService,
   deleteProjectService,
   duplicateProjectService,
+  forkProjectService,
   EXCLUDED_GLOBS,
   projectDir,
   renameProjectService,
   assertProjectAccess,
 } from "../service/projectService.js";
 import { getEnvVars, setEnvVars } from "../service/projectEnvService.js";
-import { listAccessibleProjects } from "../service/projectAccessService.js";
+import {
+  listAccessibleProjects,
+  listPublicProjects,
+  setProjectVisibility,
+  ProjectVisibility,
+} from "../service/projectAccessService.js";
 import { logger } from "../lib/logger.js";
 import { prisma } from "../lib/prisma.js";
 import { buildFileTree } from "../service/fileTreeService.js";
@@ -64,7 +70,9 @@ export async function getProjectTree(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
-  await assertProjectAccess(projectId, getAuthContext(req).userId, "viewer");
+  // Visitor: reading the files IS what a public project offers. Everything
+  // else about the project stays at viewer or above.
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "visitor");
 
   // Paths in this tree are relative to the project root; the old
   // `directory-tree` output leaked absolute host paths.
@@ -170,6 +178,69 @@ export async function duplicateProjectController(
   res.status(201).json({ success: true, message: "Project duplicated", data: project });
 }
 
+const forkSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+});
+
+/** Takes a copy of a public project.
+ *
+ *  Separate from duplicate rather than a flag on it, because the two differ in
+ *  the two things that matter: the access level required, and whether the
+ *  environment variables come along. A flag would put both decisions in one
+ *  branch, which is where a mistake would be least visible.
+ */
+export async function forkProjectController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const { name } = forkSchema.parse(req.body ?? {});
+
+  const project = await forkProjectService(
+    assertValidProjectId(req.params.projectId),
+    getAuthContext(req).userId,
+    name,
+  );
+
+  res.status(201).json({ success: true, message: "Project forked", data: project });
+}
+
+const visibilitySchema = z.object({
+  visibility: z.enum(["private", "public"]),
+});
+
+/** Publishes a project's source, or takes it back. */
+export async function setVisibilityController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const { visibility } = visibilitySchema.parse(req.body ?? {});
+
+  const project = await setProjectVisibility(
+    assertValidProjectId(req.params.projectId),
+    getAuthContext(req).userId,
+    visibility === "public" ? ProjectVisibility.PUBLIC : ProjectVisibility.PRIVATE,
+  );
+
+  res.json({
+    success: true,
+    message: visibility === "public" ? "Project is public" : "Project is private",
+    data: project,
+  });
+}
+
+/** The gallery. Anybody signed in may read it; it names no project that is not
+ *  already public. */
+export async function listPublicProjectsController(
+  _req: Request,
+  res: Response,
+): Promise<void> {
+  res.json({
+    success: true,
+    message: "Public projects",
+    data: await listPublicProjects(),
+  });
+}
+
 /** Streams the project as a zip.
  *
  *  Streamed rather than buffered: a project can be far larger than is
@@ -182,10 +253,13 @@ export async function exportProjectController(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
+  // Visitor: a zip is a bulk read of files this caller may already read one at
+  // a time, so refusing it would protect nothing. The same exclusions apply --
+  // no .git, so no remote URL and no history.
   const project = await assertProjectAccess(
     projectId,
     getAuthContext(req).userId,
-    "viewer",
+    "visitor",
   );
 
   const filename = `${project.name.replace(/[^\w.-]+/g, "-").slice(0, 60) || "project"}.zip`;
@@ -265,7 +339,9 @@ export async function getStartCommandController(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
-  await assertProjectAccess(projectId, getAuthContext(req).userId, "viewer");
+  // Visitor: how a project is run is part of reading it, and the editor asks
+  // for this on open. It names a command, never a credential.
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "visitor");
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },

@@ -15,8 +15,12 @@ interface EditorSocketStore {
   editorSocket: EditorSocket | null;
   lastError: string | null;
   /** What this connection may do. Unknown until the server says, which is why
-   *  it starts null rather than assuming either answer. */
-  accessLevel: "viewer" | "editor" | "owner" | null;
+   *  it starts null rather than assuming either answer.
+   *
+   *  `visitor` is a public project opened by somebody nobody invited: read the
+   *  files, fork them, nothing else. It reads as read-only everywhere
+   *  `selectCanEdit` is consulted, which is the point of putting it here. */
+  accessLevel: "visitor" | "viewer" | "editor" | "owner" | null;
   /** Files that changed on disk while open — a terminal command, a build step.
    *  Reported rather than merged, so nobody's in-progress work vanishes. */
   externallyChanged: string[];

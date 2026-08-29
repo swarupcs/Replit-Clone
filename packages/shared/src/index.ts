@@ -8,3 +8,4 @@ export * from "./embeds.js";
 export * from "./auth.js";
 export * from "./socket-events.js";
 export * from "./network.js";
+export * from "./projects.js";
