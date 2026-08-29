@@ -58,8 +58,8 @@ const Row = ({
 /** The file's symbols as a tree.
  *
  *  Reads the same store the breadcrumbs do, rather than fetching its own
- *  copy — §2.2 asks for one provider behind both, and two would be able to
- *  disagree about the same file.
+ *  copy — one provider behind both, because two would be able to disagree
+ *  about the same file.
  */
 export const OutlinePanel = () => {
   const symbols = useSymbolStore((state) => state.symbols);

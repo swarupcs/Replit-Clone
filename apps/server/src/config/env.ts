@@ -299,9 +299,9 @@ const envSchema = z.object({
 
   /** Periodic file snapshots, so an uncommitted mistake is recoverable.
    *
-   *  On by default: §8 is right that "an uncommitted mistake is gone" is the
-   *  scarier half of this product, and the cost is bounded by the retention
-   *  window rather than open-ended. */
+   *  On by default: "an uncommitted mistake is gone" is the scarier half of
+   *  this product, and the cost is bounded by the retention window rather
+   *  than open-ended. */
   CHECKPOINTS_ENABLED: z
     .string()
     .optional()

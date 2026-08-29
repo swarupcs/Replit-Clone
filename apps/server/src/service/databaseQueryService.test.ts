@@ -156,8 +156,8 @@ describe("running a query", () => {
     query.mockResolvedValue({ rows: [], fields: [], rowCount: 0 });
   });
 
-  /** §7.5: classification may warn and must never permit. A viewer's session
-   *  is read-only because the database says so. */
+  /** Classification may warn and must never permit. A viewer's session is
+   *  read-only because the database says so. */
   it("runs a viewer's statement inside a read-only transaction", async () => {
     await service.runQuery("p1", "SELECT 1", { readOnly: true });
     expect(query).toHaveBeenCalledWith("BEGIN READ ONLY");

@@ -42,10 +42,10 @@ const CLIENT_IDLE_MS = 60_000;
 
 /** Aggregation stages that write.
  *
- *  This is a structural check on a parsed pipeline, not the SQL
- *  classification §7.5 rules out: a pipeline is an array of objects whose
- *  first key is the stage name, and `$out` and `$merge` are the complete set
- *  of stages that write. There is no CTE-with-RETURNING equivalent to hide
+ *  This is a structural check on a parsed pipeline, not the kind of text
+ *  classification ruled out on the SQL side: a pipeline is an array of
+ *  objects whose first key is the stage name, and `$out` and `$merge` are
+ *  the complete set of stages that write. There is no CTE-with-RETURNING equivalent to hide
  *  behind, and no other code path in this service calls anything but `find`
  *  and `aggregate`, so a read-only session genuinely cannot write. */
 const WRITING_STAGES = new Set(["$out", "$merge"]);
@@ -414,7 +414,7 @@ function serialisedSize(documents: unknown[]): number {
 /** Runs one find or aggregation.
  *
  *  There is deliberately no path here that updates, inserts or deletes.
- *  §7.6 keeps inline editing out of the first version because an update
+ *  Inline editing stays out of the first version because an update
  *  generated from a grid needs a reliable identity, and this service is the
  *  place that would have to have it.
  */
@@ -507,7 +507,7 @@ export async function runMongoQuery(
   } catch (error) {
     if (error instanceof DatabaseQueryError) throw error;
 
-    // Never the query text: it contains the user's data by definition. §7.5.
+    // Never the query text: it contains the user's data by definition.
     logger.warn("mongo query failed", {
       projectId,
       durationMs: Date.now() - started,

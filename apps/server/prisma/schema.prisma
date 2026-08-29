@@ -334,8 +334,8 @@ model ProjectDatabaseConnection {
 
 /// A database this platform runs for a project, in its own container.
 ///
-/// §7.3 chose a sidecar per project over a shared cluster because its
-/// isolation is structural — a separate container, a separate volume, its own
+/// A sidecar per project rather than a shared cluster, because its isolation
+/// is structural — a separate container, a separate volume, its own
 /// credentials — rather than a set of grants that all have to stay right, and
 /// every mistake in the shared version is cross-tenant.
 model ManagedDatabase {
@@ -344,8 +344,9 @@ model ManagedDatabase {
   projectId String  @unique
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  /// "postgres" for now. Mongo needs its own driver and its own editor; see
-  /// row 7b of the parity plan.
+  /// "postgres", and only that. A Mongo *sidecar* is deliberately out of
+  /// scope — see `docs/ROADMAP.md` §3.3. The Mongo client shipped on its
+  /// own, against a database the user already has.
   engine String
 
   /// The generated password, encrypted with AES-256-GCM under

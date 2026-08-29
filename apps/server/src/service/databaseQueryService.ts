@@ -212,10 +212,10 @@ function serialisedSize(rows: unknown[][]): number {
 /** Runs one statement.
  *
  *  `readOnly` is enforced by the database, inside a read-only transaction,
- *  not by inspecting the SQL. §7.5 is explicit about why: parsing SQL to
- *  decide whether something is "just a SELECT" is a losing game — CTEs with
- *  INSERT ... RETURNING, DO blocks, functions with side effects — so
- *  classification may warn and must never permit.
+ *  not by inspecting the SQL. Parsing SQL to decide whether something is
+ *  "just a SELECT" is a losing game — CTEs with INSERT ... RETURNING, DO
+ *  blocks, functions with side effects — so classification may warn and
+ *  must never permit.
  */
 export async function runQuery(
   projectId: string,
@@ -263,7 +263,7 @@ export async function runQuery(
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
 
-    // Never the query text: it contains the user's data by definition. §7.5.
+    // Never the query text: it contains the user's data by definition.
     logger.warn("database query failed", {
       projectId,
       durationMs: Date.now() - started,

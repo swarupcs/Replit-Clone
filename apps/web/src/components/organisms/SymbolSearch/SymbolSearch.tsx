@@ -12,12 +12,12 @@ interface Props {
 
 /** Go to symbol in the open file.
  *
- *  §2.2 asks for "go to symbol in workspace", and this is the file-scoped
- *  half of it. A workspace symbol index is a different feature — it needs
- *  every file parsed and kept current, which is what a language server is
- *  for — and Quick Open already answers "which file". Naming the narrower
- *  thing is better than shipping something that silently only searches one
- *  file while claiming the workspace.
+ *  The file-scoped half of "go to symbol in workspace". A workspace symbol
+ *  index is a different feature — it needs every file parsed and kept
+ *  current, which is what a language server is for — and Quick Open already
+ *  answers "which file". Naming the narrower thing is better than shipping
+ *  something that silently only searches one file while claiming the
+ *  workspace.
  */
 export const SymbolSearch = ({ open, onClose }: Props) => {
   const [query, setQuery] = useState("");

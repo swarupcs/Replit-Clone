@@ -69,8 +69,8 @@ describe("file decorations", () => {
 describe("folder decorations", () => {
   beforeEach(() => useGitDecorationStore.getState().clear());
 
-  /** §1.5: a collapsed folder containing a change shows the tint, which is
-   *  what makes a change findable without expanding anything. */
+  /** A collapsed folder containing a change shows the tint, which is what
+   *  makes a change findable without expanding anything. */
   it("inherits from a file somewhere beneath it", () => {
     set([{ path: "src/deep/nested/a.ts", unstaged: "modified" }]);
     expect(selectFolderDecoration("src")(state())?.state).toBe("modified");

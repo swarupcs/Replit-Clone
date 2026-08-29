@@ -46,8 +46,8 @@ export type LspRefusal =
 
 /** Whether a language server may be started, and if not, why.
  *
- *  §3.3 asks for the memory policy to be in place from the first commit
- *  rather than added after the first OOM, and this is it. The refusal
+ *  The memory policy of `docs/ROADMAP.md` §6, decision 3, in place from the
+ *  first commit rather than added after the first OOM. The refusal
  *  carries a message because the alternative — starting a server and letting
  *  the dev server be killed for memory — is a failure the user cannot
  *  diagnose and did not cause.

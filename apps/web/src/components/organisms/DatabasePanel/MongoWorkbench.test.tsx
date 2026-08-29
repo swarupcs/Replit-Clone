@@ -115,8 +115,8 @@ describe("MongoWorkbench", () => {
     renderPanel();
     fireEvent.click(await screen.findByRole("button", { name: "orders" }));
 
-    // The whole point of §7.6's wording: a sampled field list presented as
-    // truth is the way this view would lie.
+    // A sampled field list presented as truth is the way this view would
+    // lie, so it says what it is.
     expect(
       await screen.findByText(/inferred from 40 sampled documents/i),
     ).toBeTruthy();
@@ -188,7 +188,7 @@ describe("MongoWorkbench", () => {
     await screen.findByRole("button", { name: "orders" });
     fireEvent.click(screen.getByRole("button", { name: /^Run$/ }));
 
-    // §7.6: a document is not a row, and a grid flattens it badly — so the
+    // A document is not a row, and a grid flattens it badly — so the
     // document view is the primary one and the table is the alternative.
     expect(await screen.findByText(/total: 12.5/)).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();

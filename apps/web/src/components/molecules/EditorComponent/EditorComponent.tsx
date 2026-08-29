@@ -347,16 +347,16 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
 
   /** Document symbols, for the breadcrumbs and the outline.
    *
-   *  One read feeding both, which is what §2.2 asks for: two fetches of the
-   *  same symbols would be twice the work for something that can then
-   *  disagree with itself. Only the primary pane publishes, so two panes on
-   *  two files do not fight over one store.
+   *  One read feeding both: two fetches of the same symbols would be twice
+   *  the work for something that can then disagree with itself. Only the
+   *  primary pane publishes, so two panes on two files do not fight over one
+   *  store.
    *
    *  Read from the TypeScript worker directly. Standalone Monaco has no
    *  equivalent of VS Code's `executeDocumentSymbolProvider` command, and the
    *  worker's navigation tree is the same data the outline in VS Code shows.
    *  That confines this to TypeScript and JavaScript, which is exactly what
-   *  §2.2 says is available until §3 lands a language server.
+   *  is available without a language server.
    */
   useEffect(() => {
     if (pane !== "primary") return;
@@ -514,9 +514,9 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
 
   /** The git bars down the left margin.
    *
-   *  §5.1 calls this the most visible git feature the editor did not have,
-   *  and the data was already here — the source-control panel has been
-   *  reading these diffs all along. What was missing is the decoration layer.
+   *  The most visible git feature the editor did not have, and the data was
+   *  already here — the source-control panel has been reading these diffs all
+   *  along. What was missing is the decoration layer.
    *
    *  Decorations are replaced wholesale on every change rather than diffed
    *  against the previous set: Monaco's `deltaDecorations` already does that

@@ -3,9 +3,9 @@ import type { FileSymbol } from "../lib/documentSymbols.ts";
 
 /** Symbols for the file on screen.
  *
- *  One provider feeds both the breadcrumbs and the outline. §2.2 asks for
- *  that explicitly — two fetches of the same document symbols would be twice
- *  the work for a thing that can disagree with itself between panes.
+ *  One provider feeds both the breadcrumbs and the outline — two fetches of
+ *  the same document symbols would be twice the work for a thing that can
+ *  disagree with itself between panes.
  */
 interface SymbolStore {
   relPath: string | null;

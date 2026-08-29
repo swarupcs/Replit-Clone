@@ -51,12 +51,12 @@ The 149 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI.
 
-**Done: 70 items. Open: 7.** Six are blocked on a decision or on
+**Done: 71 items. Open: 6.** All six are blocked on a decision or on
 infrastructure — five in §3.3, plus report-and-review in §3.1, which needs
-somebody to decide who moderates. The seventh is new: an audit on 2026-08-29
-found 45 code comments citing sections of the planning documents this file
-replaced, none of which resolves to anything that still exists (§3.4). That one
-is unblocked, mechanical, and touches 31 files.
+somebody to decide who moderates. **Nothing on this page is unblocked.** The
+one item that was — the dangling section references found by the 2026-08-29
+audit — was closed the same day (§2.9), which is what empties this list of
+work anybody could simply pick up.
 
 Everything in §2 was re-verified against the source on 2026-08-29 rather than
 carried forward on trust. Three claims did not survive it — see §5.
@@ -219,13 +219,37 @@ Rows 1–13, all `done`:
 
 ### 2.9 Since (2026-08-29, later)
 
+- [x] **The dangling section references are gone.** Every code comment
+      citing a planning document deleted by the consolidation now either names
+      `docs/ROADMAP.md` and a section that exists, or carries the argument
+      itself. Of 47 sites, only **seven** became a pointer — six at §6
+      (`§7.4`→decision 4 twice, `§10.4`→decision 6, `§3.3`→decision 3 twice,
+      `§3.2`→decision 2) and the schema's Mongo note at §3.3. The other 40 had
+      no home in §6 and did not need one: they were comments appealing to a
+      section for authority while already stating the reason a line below, so
+      the citation came out and the reasoning stayed. That is the part the
+      debt entry got wrong: it assumed most would renumber, and most instead
+      turned out to be load-bearing prose wearing a footnote.
+
+      One correction to the debt entry itself: it said **none** of the 45
+      resolved, "checked, not assumed". One did — `lspPolicy.test.ts` already
+      cited §6, decision 3, and was left untouched here. So 44 were dangling,
+      not 45.
+
+      Three further references the audit missed, because it searched only
+      `apps/*/src`: two in `prisma/schema.prisma` (one of them a prose
+      reference to "row 7b of the parity plan" rather than a `§`) and one in
+      `githubService.ts` ("noted in the plan"). Counting only `§`, and only
+      under `src`, is what hid them.
+
 - [x] **`schema.prisma` was mojibake in nine places and nobody had noticed.**
-      Eight em-dashes and one `§` were double-encoded — UTF-8 bytes read once
-      as cp1252 and written back — so the file said `â€”` and `Â§` in its own
-      source. Repaired, and the rest of the repository scanned with the same
-      signature to confirm it was the only file affected. It reaches further
-      than it looks: `prisma generate` copies these comments verbatim into the
-      generated client, so every regeneration reproduced them.
+      Found while editing a comment there: eight em-dashes and one `§` were
+      double-encoded — UTF-8 bytes read once as cp1252 and written back — so
+      the file said `â€”` and `Â§` in its own source. Repaired, and the rest of
+      the repository scanned with the same signature to confirm it was the only
+      file affected. It reaches further than it looks: `prisma generate` copies
+      these comments verbatim into the generated client, so every regeneration
+      reproduced them.
 
 ---
 
@@ -295,20 +319,8 @@ text, was closed by giving it a real browser to assert against. The fourth, an
 undocumented test database, is now a section of `CONTRIBUTING.md` with the
 commands verified by running them — §2.8 for all three.
 
-- [ ] **45 code comments cite sections of documents that no longer exist.**
-      Across 31 files: `§7.6` (10), `§7.5` (6), `§2.2` (5), `§8` (4), `§7.4` (4),
-      `§7.3` (4), `§7.2` (3), `§3.3` (3), `§3` (3), and eight more. **None
-      resolves to any surviving document** — checked, not assumed. A reader who
-      hits "§7.4 is explicit that database containers have to be counted" has
-      nowhere to look it up.
-
-      Created by the consolidation itself, which is what makes it worth
-      recording rather than shrugging at: §6 exists precisely so those
-      arguments survived, and most of these do have a home there — `§7.4` is
-      now §6 decision 4, `§7.6` is decision 6, `§3.3`'s memory policy is
-      decision 3, `§10.4` is decisions 1 and 2. They point at the old numbering,
-      not at nothing. Renumbering them is mechanical but touches 31 files, so it
-      is its own change rather than a footnote to somebody else's.
+The fifth debt, the dangling section references, was closed on 2026-08-29 —
+§2.9. Nothing is open in this section.
 
 
 Not a debt but worth recording: **two `Project` rows have no working tree**
@@ -331,12 +343,13 @@ whoever owns the data, not to a cleanup script.
 5. ~~**§3.4 the remaining debts**.~~ Done 2026-08-29.
 6. ~~**§3.2 env vars and the dashboard list view**.~~ Done 2026-08-29.
 
-7. **§3.4 the dangling section references.** Mechanical, unblocked, and the
-   only thing on this page that is both. Worth doing while §6 is fresh, since
-   that is where most of them now point.
+7. ~~**§3.4 the dangling section references.**~~ Done 2026-08-29, and it was
+   worth doing while §6 was fresh — though §6 turned out to be the right home
+   for only six of them.
 
 Everything in §3.3 is blocked on a decision or on infrastructure and should not
-be started until that decision is made.
+be started until that decision is made. Item 4 needs a decision before it needs
+a developer. **There is nothing left on this page to simply start.**
 
 ---
 

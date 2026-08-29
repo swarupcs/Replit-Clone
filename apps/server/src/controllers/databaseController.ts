@@ -51,9 +51,9 @@ async function authorise(
 /** Whether this request may write.
  *
  *  Returned as a flag the service turns into `BEGIN READ ONLY`, rather than
- *  as a decision about which statements to allow: §7.5 is explicit that
- *  hiding a button is not a control and that classifying SQL is a losing
- *  game, so the refusal has to come from the database.
+ *  as a decision about which statements to allow: hiding a button is not a
+ *  control, and classifying SQL is a losing game, so the refusal has to come
+ *  from the database.
  */
 async function mayWrite(req: Request, projectId: string): Promise<boolean> {
   const { userId } = getAuthContext(req);
@@ -237,11 +237,11 @@ export async function destroyManagedDatabaseController(
  *  MongoDB
  *
  *  Separate endpoints rather than the SQL ones switching on engine: the
- *  request bodies have nothing in common. §7.6 is explicit that a Mongo
- *  editor takes a filter document or an aggregation pipeline against a
- *  chosen collection, and that papering over the difference produces
- *  something wrong about both databases — an endpoint taking `{ sql }` and
- *  quietly meaning `{ collection, filter }` is exactly that paper.
+ *  request bodies have nothing in common. A Mongo editor takes a filter
+ *  document or an aggregation pipeline against a chosen collection, and
+ *  papering over that difference produces something wrong about both
+ *  databases — an endpoint taking `{ sql }` and quietly meaning
+ *  `{ collection, filter }` is exactly that paper.
  * ------------------------------------------------------------------ */
 
 export async function mongoCollectionsController(

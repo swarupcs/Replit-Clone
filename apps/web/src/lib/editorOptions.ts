@@ -67,7 +67,7 @@ export const buildEditorOptions = (
 
   // Inferred parameter names and types inline. TypeScript and JavaScript
   // only for now — the worker already computes them and nothing consumed
-  // them. Every other language gets these when §3 lands a language server.
+  // them. Every other language would need a language server to supply them.
   inlayHints: { enabled: settings.inlayHints ? "on" : "off" },
 
   // Ghost text for the current completion, previewed in place rather than

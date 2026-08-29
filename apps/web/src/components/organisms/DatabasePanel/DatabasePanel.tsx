@@ -42,8 +42,8 @@ function errorMessage(error: unknown): string {
 /** The result grid.
  *
  *  Server-paged and capped upstream, so this never receives a whole table.
- *  Rendering is by type rather than by `String(value)` — §7.6's point that
- *  telling NULL from an empty string is most of what a grid is for.
+ *  Rendering is by type rather than by `String(value)`: telling NULL from
+ *  an empty string is most of what a grid is for.
  */
 const ResultGrid = ({ result }: { result: QueryResult }) => {
   if (result.columns.length === 0) {
@@ -98,9 +98,9 @@ const ResultGrid = ({ result }: { result: QueryResult }) => {
 /** Schema tree, query editor and result grid.
  *
  *  Pointed at a database the user already has — a Neon, Supabase, Atlas or
- *  Railway one — which is §0.3's second decision: the client ships before any
- *  managed-database infrastructure, because it is useful alone and it is what
- *  makes the managed database worth paying for later.
+ *  Railway one. The client shipped before any managed-database
+ *  infrastructure, because it is useful alone and it is what makes the
+ *  managed database worth paying for later.
  */
 export const DatabasePanel = ({ projectId, isOwner }: Props) => {
   const [connection, setConnection] = useState<DatabaseConnection | null>(null);
@@ -284,10 +284,10 @@ export const DatabasePanel = ({ projectId, isOwner }: Props) => {
     );
   }
 
-  // Routed on engine rather than switching labels inside one workbench. §7.6
-  // is explicit that a Mongo editor takes filter documents and pipelines
-  // rather than statements, and a shared component would have to pretend
-  // otherwise in every branch.
+  // Routed on engine rather than switching labels inside one workbench. A
+  // Mongo editor takes filter documents and pipelines rather than
+  // statements, and a shared component would have to pretend otherwise in
+  // every branch.
   if (connection.engine === "mongodb") {
     return (
       <MongoWorkbench

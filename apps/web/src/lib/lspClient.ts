@@ -1,12 +1,13 @@
 /** A small LSP client for Monaco.
  *
- *  §3.2 suggests `monaco-languageclient`, and this is deliberately not it.
- *  That library pins peer versions of Monaco and of the vscode shim, and
- *  taking it on means letting it decide which Monaco this app runs — for a
- *  set of features that is, in the end, four provider registrations and a
- *  diagnostics push. When the language surface grows past what is here
- *  (rename, code actions, formatting, semantic tokens) the trade flips, and
- *  the seam to swap is this module.
+ *  `monaco-languageclient` is the obvious thing to reach for, and this is
+ *  deliberately not it — `docs/ROADMAP.md` §6, decision 2. That library pins
+ *  peer versions of Monaco and of the vscode shim, and taking it on means
+ *  letting it decide which Monaco this app runs, for a set of features that
+ *  is, in the end, four provider registrations and a diagnostics push. When
+ *  the language surface grows past what is here (rename, code actions,
+ *  formatting, semantic tokens) the trade flips, and the seam to swap is
+ *  this module.
  *
  *  Speaks JSON-RPC 2.0 over the WebSocket the gateway serves. The framing is
  *  the server's problem: it sends one whole message per WebSocket frame.

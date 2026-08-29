@@ -33,8 +33,8 @@ function tokenFromRequest(req: IncomingMessage): string | null {
  *
  *  The same shape as `terminalGateway` — an authorised upgrade attached to a
  *  process inside the container with a bidirectional stream — with two
- *  differences §3.2 names. The framing is LSP's `Content-Length` headers
- *  rather than raw PTY bytes, so a chunk boundary is not a message boundary.
+ *  differences. The framing is LSP's `Content-Length` headers rather than
+ *  raw PTY bytes, so a chunk boundary is not a message boundary.
  *  And there is no TTY, which is what lets stdout and stderr be told apart:
  *  a server's diagnostics on stderr must not be spliced into the JSON-RPC
  *  stream on stdout.
@@ -71,9 +71,9 @@ export function installLspGateway(server: Server): void {
           getTemplate(project.template).image,
         );
         if (!verdict.allowed) {
-          // Refused with the reason, before any container work. §3.3 is
-          // explicit that this must say so rather than starting a server and
-          // letting the dev server be killed for memory.
+          // Refused with the reason, before any container work. It has to
+          // say so rather than start a server and let the dev server be
+          // killed for memory — `docs/ROADMAP.md` §6, decision 3.
           socket.write(
             `HTTP/1.1 503 Service Unavailable\r\n` +
               `Content-Type: text/plain\r\n\r\n${verdict.message}`,

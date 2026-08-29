@@ -72,9 +72,9 @@ export const selectDecoration =
 
 /** What a folder inherits from the files under it.
  *
- *  §1.5 is the reason this exists: a collapsed folder containing a change
- *  shows the tint in VS Code, and that is what makes a change findable
- *  without expanding anything.
+ *  The reason this exists: a collapsed folder containing a change shows the
+ *  tint in VS Code, and that is what makes a change findable without
+ *  expanding anything.
  *
  *  Derived on read rather than stored. The alternative — precomputing a
  *  folder map when the status arrives — is a second copy of the same fact,

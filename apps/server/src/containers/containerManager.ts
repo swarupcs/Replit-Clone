@@ -243,11 +243,11 @@ function projectIdFromNames(names: string[]): string | undefined {
 
 /** Every container this platform runs, projects and their databases both.
  *
- *  §7.4 is explicit that database containers have to be counted: they are a
- *  full container against a budget chosen for three, and leaving them out
- *  would silently double the effective cap on the VM the defaults were
- *  picked for. A database-backed project costs two slots, and an operator
- *  who wants more raises the cap deliberately.
+ *  `docs/ROADMAP.md` §6, decision 4 is explicit that database containers
+ *  have to be counted: they are a full container against a budget chosen for
+ *  three, and leaving them out would silently double the effective cap on
+ *  the VM the defaults were picked for. A database-backed project costs two
+ *  slots, and an operator who wants more raises the cap deliberately.
  */
 async function runningCount(): Promise<number> {
   const containers = await docker.listContainers({
@@ -717,11 +717,12 @@ export function startIdleReaper(): void {
           increment("containers_reaped");
           await docker.getContainer(info.Id).stop({ t: 5 }).catch(() => {});
 
-          // §7.4: the pair is one unit. A project's container stopping while
-          // its database keeps running is a memory leak with extra steps —
-          // and the reverse, stopping the database under a running app, is
-          // an outage the user did not cause. Only this direction is safe,
-          // and only because the app has already gone.
+          // The pair is one unit — `docs/ROADMAP.md` §6, decision 4. A
+          // project's container stopping while its database keeps running is
+          // a memory leak with extra steps — and the reverse, stopping the
+          // database under a running app, is an outage the user did not
+          // cause. Only this direction is safe, and only because the app has
+          // already gone.
           await onProjectReaped?.(name);
         }
       } catch (error) {

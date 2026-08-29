@@ -18,8 +18,8 @@ function checkpointRoot(projectId: string): string {
 
 /** How many versions of one file are kept.
  *
- *  §8's point is that Replit can recover a file from before the first commit
- *  and here an uncommitted mistake is simply gone. A window rather than a
+ *  Replit can recover a file from before the first commit; without this an
+ *  uncommitted mistake is simply gone. A window rather than a
  *  history: this is an "undo that survives a reload", not version control,
  *  and git is the thing that already does the other job. */
 const KEEP_PER_FILE = 20;
