@@ -1,8 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-import { platform, env } from "node:process";
+import { dirname } from "node:path";
+import { platform } from "node:process";
 
 /** One command, two terminals.
  *
@@ -30,22 +29,26 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
  */
 function terminalFor(command) {
   if (platform === "win32") {
-    // Windows Terminal if it is installed. It ships with Windows 11 but is a
-    // Store app, so it is often absent from PATH in a non-interactive shell
-    // even though `wt` works when typed -- hence the explicit path.
-    const wt = join(
-      env["LOCALAPPDATA"] ?? "",
-      "Microsoft",
-      "WindowsApps",
-      "wt.exe",
-    );
-    if (env["LOCALAPPDATA"] && existsSync(wt)) {
-      return [wt, ["-d", root, "--title", "web", "cmd", "/k", command]];
-    }
-
-    // Every Windows has this. `start` needs a title argument first, or it
-    // treats a quoted path as the title and opens the wrong thing.
-    return ["cmd.exe", ["/c", "start", "web", "cmd", "/k", command]];
+    // `start` opens the machine's DEFAULT terminal application, which on
+    // Windows 11 is Windows Terminal. Going through it beats locating wt.exe
+    // ourselves: the WindowsApps copy is an app-execution-alias reparse
+    // point, and existsSync reports it absent on machines where typing `wt`
+    // works perfectly well -- so a path check quietly takes the fallback on
+    // exactly the machines it was written to skip, and the fallback is then
+    // the only branch anyone actually runs.
+    //
+    // The title MUST be quoted. `start web cmd /k ...` reads `web` as the
+    // thing to OPEN rather than as a window title, and Windows resolves it to
+    // C:\Windows\Web -- so this opened an Explorer window on a system folder
+    // and never started the web app at all.
+    //
+    // One verbatim string rather than an args array, because Node re-quotes
+    // array arguments on Windows and the nested quotes do not survive it.
+    return [
+      "cmd.exe",
+      [`/c start "web" cmd /k ${command}`],
+      { windowsVerbatimArguments: true },
+    ];
   }
 
   if (platform === "darwin") {
@@ -78,7 +81,7 @@ const webCommand = "pnpm run dev:web";
 const opener = terminalFor(webCommand);
 
 if (opener) {
-  const [file, args] = opener;
+  const [file, args, extra] = opener;
   const child = spawn(file, args, {
     cwd: root,
     // Detached and ignoring our streams: the new terminal must outlive this
@@ -86,6 +89,8 @@ if (opener) {
     detached: true,
     stdio: "ignore",
     windowsHide: false,
+    // Windows needs its argv passed through unquoted; nothing else sets any.
+    ...extra,
   });
 
   child.on("error", () => {
