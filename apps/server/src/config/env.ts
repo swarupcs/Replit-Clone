@@ -259,10 +259,14 @@ const envSchema = z.object({
 
   /** Whether language servers may be started inside project containers.
    *
-   *  Off by default. §3.3's image cost — pyright pulls Node into the Python
-   *  image — is paid on every cold start, including by people who never open
-   *  a .py file, so switching this on is an operator's decision about their
-   *  own images and their own VM. */
+   *  Off by default, though the cost turned out smaller than the note that
+   *  used to be here claimed. It assumed pyright, which pulls Node into the
+   *  Python image; the implementation uses `pylsp`, which is pure Python.
+   *  Measured: the Python image grows 307 MB to 338 MB, and the Go image
+   *  1.31 GB to 1.36 GB for `gopls`. Still paid on every cold start by people
+   *  who never open a .py or .go file, so switching it on stays an operator's
+   *  decision about their own images and their own VM — but it is 31 MB, not
+   *  a runtime. */
   LSP_ENABLED: z
     .string()
     .optional()
@@ -270,7 +274,7 @@ const envSchema = z.object({
 
   /** Below this, a language server is refused rather than started.
    *
-   *  §3.3: pyright idles at 150-300 MB on a real project and
+   *  A language server idles in the low hundreds of MB on a real project and
    *  CONTAINER_MEMORY_MB defaults to 512 in a deployment, so a server started
    *  unconditionally would be competing with the dev server it exists to
    *  help. 1024 rather than 512+300 because the app needs headroom too —

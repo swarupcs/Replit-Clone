@@ -21,6 +21,20 @@ RUN useradd --create-home --shell /bin/bash --uid 1001 --gid 0 sandbox \
     && chown -R sandbox:0 /home/sandbox \
     && chmod -R g=u /home/sandbox
 
+# The language server, installed into the image rather than on demand.
+#
+# `go install` as the sandbox user would write into a GOPATH under a home
+# that a bind mount can mask, and would need egress to proxy.golang.org on a
+# network that may be filtered -- so it is built here, as root, into a
+# directory already on PATH. GOFLAGS is cleared for this one command because
+# the image sets -buildvcs=false for user projects and `go install` rejects
+# it.
+RUN GOFLAGS= GOPATH=/tmp/gopath GOCACHE=/tmp/gocache \
+    go install golang.org/x/tools/gopls@v0.16.2 \
+    && mv /tmp/gopath/bin/gopls /usr/local/bin/gopls \
+    && chmod 0755 /usr/local/bin/gopls \
+    && rm -rf /tmp/gopath /tmp/gocache
+
 USER 1001:0
 ENV HOME=/home/sandbox \
     GOPATH=/home/sandbox/.cache/go \

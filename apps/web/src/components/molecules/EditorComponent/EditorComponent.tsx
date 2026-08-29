@@ -35,6 +35,8 @@ import {
   useGitGutterStore,
 } from "../../../store/gitGutterStore.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
+import { useLanguageServer } from "../../../hooks/useLanguageServer.ts";
+import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
 import {
   buildDiffOptions,
@@ -402,6 +404,30 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
       cancelled = true;
     };
   }, [pane, activeTab?.relPath, activeTab?.value, mountTick]);
+
+  /** Diagnostics from a real language server, for the languages that have one.
+   *
+   *  The effect above reaches into Monaco's bundled TypeScript worker, which
+   *  is why TypeScript and JavaScript have had squiggles all along and Python
+   *  and Go have had none: there is no worker in the browser that understands
+   *  them. This is the other half — an actual `pylsp` or `gopls` running in
+   *  the project's own container, where the imports resolve and the toolchain
+   *  already lives.
+   *
+   *  Primary pane only. Two panes on the same file would open two connections
+   *  and publish the same markers twice; the markers are set on the model, so
+   *  the second pane displays them regardless of which pane asked. */
+  const lspProjectId = useTreeStructureStore((state) => state.projectId);
+  useLanguageServer({
+    monaco: pane === "primary" ? monacoRef.current : null,
+    editor: pane === "primary" ? editorRef.current : null,
+    projectId: lspProjectId ?? "",
+    relPath: activeTab?.relPath,
+    language: activeTab
+      ? extensionToFileType(activeTab.extension, activeTab.name)
+      : undefined,
+    mountTick,
+  });
 
   /** Keep the breadcrumb's symbol half pointed at the cursor. */
   useEffect(() => {

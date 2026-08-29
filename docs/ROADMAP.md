@@ -43,15 +43,15 @@ about it:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1379 passing**, 149 skipped (81 files) |
-| `pnpm --filter web test` | **834 passing** (63 files) |
+| `pnpm --filter server test` | **1390 passing**, 149 skipped (82 files) |
+| `pnpm --filter web test` | **846 passing** (64 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
 The 149 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI.
 
-**Done: 63 items. Open: 10.** Of the 10, one is a defect, three are unblocked
+**Done: 66 items. Open: 8.** Of the 8, one is a defect, one is unblocked
 work, five are blocked on a decision or on infrastructure, and one is a
 documentation debt.
 
@@ -168,6 +168,26 @@ Rows 1–13, all `done`:
       background off a real Monaco instance. The source-text greps it replaced
       are deleted; what stays is the theme polarity (data, not source) and the
       three editors the browser flow never opens.
+- [x] **Language servers work, and there are two of them.** Go joins Python.
+      This was listed as "a registry entry and an image that carries it" and
+      was not: the gateway exec'd with `WorkingDir: "/app"`, which exists in
+      none of the sandbox images, so Docker refused to start the process and
+      **no language server had ever run**. Invisible because the feature ships
+      behind `LSP_ENABLED`, default off. Three further gaps behind it: `pylsp`
+      was not installed in the Python image at all; a bare `python-lsp-server`
+      publishes an empty diagnostics list because the checkers are separate
+      packages; and `LspClient` was complete but no component ever constructed
+      one, so nothing on the page would have connected. All four fixed, and
+      both servers verified against real containers — `pylsp` reporting an
+      undefined name and an unused import, `gopls` reporting an undefined
+      symbol and an unused variable, at the right lines and severities.
+- [x] **A language its container cannot serve is refused with a sentence.**
+      `LANGUAGE_SERVERS[…].image` was declared and never read, so a `.py` file
+      opened in a Node project reached `exec` and failed with "executable file
+      not found" mid-handshake. Checked up front now.
+- [x] **Every env var the schema accepts is in `.env.example`** — 41 of 41,
+      audited rather than eyeballed. The four that were missing included
+      `LSP_ENABLED`, which is how the feature above stayed undiscoverable.
 
 ---
 
@@ -186,18 +206,6 @@ moved to §2.8. One remains.
 
 ### 3.2 Unblocked — work, not decisions
 
-- [ ] **Language servers beyond Python.** `LANGUAGE_SERVERS`
-      (`lsp/lspPolicy.ts:4`) still has exactly one entry, `pylsp`. Everything
-      underneath is built and shipping — the gateway with `Content-Length`
-      framing, lazy start, idle stop, and the memory refusal that names its
-      reason. Adding `gopls` is a registry entry and an image that carries it.
-      Development's container default is now 2048 MB, which clears
-      `LSP_MIN_CONTAINER_MEMORY_MB` on its own. **The cheapest real win left.**
-- [ ] **Four env vars are undocumented.** `CHECKPOINTS_ENABLED`,
-      `DATABASE_DISK_QUOTA_MB`, `LSP_ENABLED`, `LSP_MIN_CONTAINER_MEMORY_MB`
-      are accepted by the schema and absent from `apps/server/.env.example`.
-      `LSP_ENABLED` is the one that matters — the feature is off by default and
-      undiscoverable.
 - [ ] **A dashboard list view.** The last open Tier 3 UI item. Cards only; past
       roughly thirty projects a compact list beats scrolling.
 
@@ -259,13 +267,14 @@ whoever owns the data, not to a cleanup script.
 1. ~~**§3.1's first three defects.**~~ Done 2026-08-29.
 2. ~~**§3.2 E2E in CI**, with the `monacoSetup` debt folded in.~~ Done
    2026-08-29.
-3. **§3.2 language servers.** The cheapest remaining *feature*, and unblocked
-   twice over now that the container default is 2048 MB.
+3. ~~**§3.2 language servers.**~~ Done 2026-08-29 — and it was not cheap,
+   because nothing underneath it had ever run.
 4. **§3.1 abuse handling** — before any deployment that is both public and
    multi-tenant, and not before that.
 5. **§3.4 the two remaining debts**, whenever they are cheaper than the
    confusion they cause.
-6. **§3.2 env vars and the dashboard list view**, which are both an afternoon.
+6. **§3.2 the dashboard list view**, which is an afternoon. (The env vars
+   half of this line is done.)
 
 Everything in §3.3 is blocked on a decision or on infrastructure and should not
 be started until that decision is made.
@@ -279,11 +288,12 @@ Specifically:
 
 - `deploymentState` read the row and returned — **no reconcile**. Fixed.
 - `assertServiceBudget(subdomain)` took no user and counted host-wide. Fixed.
-- `LANGUAGE_SERVERS` has one key, `python`. Confirmed open.
+- `LANGUAGE_SERVERS` had one key, `python`. Fixed — and the mechanism under
+  it had never started a process, which reading the registry alone did not
+  show. Found by exec'ing the gateway's own options against a real container.
 - `checkpointService.ts` and `PresenceStack.tsx`'s follow affordance both exist
   — so the old §8.6's claim that they were missing was confirmed **stale**, and
   the document making it has since been deleted.
-- `.env.example` against the env schema — four keys missing, listed above.
 - `CONTRIBUTING.md` mentions `TEST_DATABASE_URL` once and never says how to
   create the database. Confirmed open.
 - Every file named as a deliverable in §2 exists, bar `forkProjectService.ts`,
