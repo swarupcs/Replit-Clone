@@ -44,16 +44,16 @@ about it:
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm --filter server test` | **1379 passing**, 149 skipped (81 files) |
-| `pnpm --filter web test` | **831 passing** (62 files) |
+| `pnpm --filter web test` | **834 passing** (63 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
 The 149 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI.
 
-**Done: 61 items. Open: 12.** Of the 12, one is a defect, four are unblocked
-work, five are blocked on a decision or on infrastructure, and two are
-documentation debts.
+**Done: 63 items. Open: 10.** Of the 10, one is a defect, three are unblocked
+work, five are blocked on a decision or on infrastructure, and one is a
+documentation debt.
 
 ---
 
@@ -157,6 +157,17 @@ Rows 1–13, all `done`:
       up, so `deployContainer` stays a Docker module with no opinion about
       ownership. A full host is a 503; a full account is a 429 that names the
       number, because that one the reader can act on.
+- [x] **The end-to-end flows run in CI.** A job of its own: Postgres service,
+      `sandbox-node` built, migrations applied, the API and the built web app
+      started and health-waited, then Playwright against the real stack.
+      `E2E_REQUIRE=1` turns the suite's quiet skip into a hard failure, because
+      a job that skips all four specs and reports green claims the real stack
+      was exercised when nothing was.
+- [x] **`monacoSetup.test.ts` asserts on behaviour.** The white-editor guard is
+      now an assertion in `playground-flow.spec.ts` that reads the computed
+      background off a real Monaco instance. The source-text greps it replaced
+      are deleted; what stays is the theme polarity (data, not source) and the
+      three editors the browser flow never opens.
 
 ---
 
@@ -182,13 +193,6 @@ moved to §2.8. One remains.
       reason. Adding `gopls` is a registry entry and an image that carries it.
       Development's container default is now 2048 MB, which clears
       `LSP_MIN_CONTAINER_MEMORY_MB` on its own. **The cheapest real win left.**
-- [ ] **E2E never runs in CI.** `.github/workflows/ci.yml` has zero mentions of
-      playwright or `pnpm e2e`. The specs under `apps/web/e2e/` are the only
-      tests that exercise the real stack — Docker, sockets, the preview proxy —
-      and they run only when somebody remembers. For a system this
-      integration-shaped that is the largest hole in the safety net, and every
-      bug the last two months of notes describe as "invisible to the unit tests"
-      was of exactly that kind.
 - [ ] **Four env vars are undocumented.** `CHECKPOINTS_ENABLED`,
       `DATABASE_DISK_QUOTA_MB`, `LSP_ENABLED`, `LSP_MIN_CONTAINER_MEMORY_MB`
       are accepted by the schema and absent from `apps/server/.env.example`.
@@ -230,19 +234,14 @@ Postgres); the user's own VS Code extensions, which Monaco cannot reach at all.
 
 ### 3.4 Documentation debts
 
-Two debts that were open this morning are closed by the consolidation rather
-than by any work: `REPLIT_CLONE_PLAN` §8.6 listed follow-mode and checkpoint
-history as missing when both had shipped, and §8.5 named a `forkProjectService`
-module that does not exist (the function lives in `service/projectService.ts`).
-The document that was wrong is gone. The lesson it taught is §7.
+Three of the four debts once on this list are closed. Two went with the
+consolidation rather than with any work: `REPLIT_CLONE_PLAN` §8.6 listed
+follow-mode and checkpoint history as missing when both had shipped, and §8.5
+named a `forkProjectService` module that does not exist (the function lives in
+`service/projectService.ts`). The document that was wrong is gone; the lesson
+it taught is §7. The third, `monacoSetup.test.ts` asserting on its own source
+text, was closed by giving it a real browser to assert against — §2.8.
 
-- [ ] **`monacoSetup.test.ts` asserts on source text** rather than behaviour.
-      The last item from the 2026-08-22 list never actioned. The reason it
-      matters was demonstrated twice on 2026-08-28: the nginx CSP bug and the
-      `sh -lc` PATH bug were both invisible to source-reading checks and both
-      caught only by running the real thing. It should become an assertion in
-      `apps/web/e2e` — which is also §3.2's E2E-in-CI item, and the two are
-      worth doing together.
 - [ ] **The `rc_test` database is undocumented.** `CONTRIBUTING.md` mentions
       `TEST_DATABASE_URL` and says the suites skip without it, but never says
       the database exists or how to make one. The next person sees 149 silently
@@ -258,9 +257,8 @@ whoever owns the data, not to a cleanup script.
 ## 4. Recommended order
 
 1. ~~**§3.1's first three defects.**~~ Done 2026-08-29.
-2. **§3.2 E2E in CI**, with the `monacoSetup` debt folded in. It is the
-   cheapest way to stop shipping the class of bug the notes keep describing as
-   "only a real run could have caught it".
+2. ~~**§3.2 E2E in CI**, with the `monacoSetup` debt folded in.~~ Done
+   2026-08-29.
 3. **§3.2 language servers.** The cheapest remaining *feature*, and unblocked
    twice over now that the container default is 2048 MB.
 4. **§3.1 abuse handling** — before any deployment that is both public and
@@ -285,9 +283,7 @@ Specifically:
 - `checkpointService.ts` and `PresenceStack.tsx`'s follow affordance both exist
   — so the old §8.6's claim that they were missing was confirmed **stale**, and
   the document making it has since been deleted.
-- `monacoSetup.test.ts` still reads its own source with `readFileSync`. Confirmed open.
 - `.env.example` against the env schema — four keys missing, listed above.
-- `ci.yml` — no playwright, no `e2e`. Confirmed open.
 - `CONTRIBUTING.md` mentions `TEST_DATABASE_URL` once and never says how to
   create the database. Confirmed open.
 - Every file named as a deliverable in §2 exists, bar `forkProjectService.ts`,

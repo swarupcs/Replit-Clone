@@ -8,6 +8,13 @@
  *
  *  The runner's process env is inherited by every worker, so each spec file's
  *  `test.skip` sees the same verdict.
+ *
+ *  **E2E_REQUIRE turns every skip into a failure**, and CI sets it. A suite
+ *  whose default is to skip quietly is the right default for a laptop and a
+ *  catastrophic one for a pipeline: a job that skips all four specs and
+ *  reports green is worse than no job at all, because it says the real stack
+ *  was exercised when nothing was. The flag makes "the stack was not up" the
+ *  failure it is when CI was supposed to have started it.
  */
 export default async function globalSetup(): Promise<void> {
   const web = process.env["E2E_BASE_URL"] ?? "http://localhost:15273";
@@ -30,7 +37,20 @@ export default async function globalSetup(): Promise<void> {
     })
     .catch(() => ({ database: false, docker: false }));
 
+  const required = process.env["E2E_REQUIRE"] === "1";
+
   if (!webUp || !health.database) {
+    if (required) {
+      // Thrown rather than recorded: a global setup that throws fails the
+      // run before a single spec is collected, which is the only outcome
+      // that cannot be mistaken for a pass.
+      throw new Error(
+        `E2E_REQUIRE is set and the stack is not up (${web}, ${api}). ` +
+          "Refusing to skip: a run that skips everything and reports " +
+          "success is worse than no run at all.",
+      );
+    }
+
     process.env["E2E_SKIP"] = "1";
     process.env["E2E_SKIP_CONTAINERS"] = "1";
     console.log(
@@ -40,6 +60,18 @@ export default async function globalSetup(): Promise<void> {
   }
 
   if (!health.docker) {
+    if (required) {
+      // The subtler failure of the two: the specs that need no container
+      // still run and still pass, so the job goes green having quietly
+      // dropped exactly the flows that justify having an E2E suite.
+      throw new Error(
+        "E2E_REQUIRE is set and the API reports no Docker daemon. The " +
+          "container flows are the ones worth running end to end, and " +
+          "skipping them while the rest pass reports a green run for " +
+          "half a suite.",
+      );
+    }
+
     // A flow that starts a container would otherwise fail halfway through and
     // look like a bug in the feature rather than a missing daemon.
     process.env["E2E_SKIP_CONTAINERS"] = "1";
