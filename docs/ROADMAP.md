@@ -51,7 +51,7 @@ The 149 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI.
 
-**Done: 69 items. Open: 7.** Six are blocked on a decision or on
+**Done: 70 items. Open: 7.** Six are blocked on a decision or on
 infrastructure — five in §3.3, plus report-and-review in §3.1, which needs
 somebody to decide who moderates. The seventh is new: an audit on 2026-08-29
 found 45 code comments citing sections of the planning documents this file
@@ -214,6 +214,18 @@ Rows 1–13, all `done`:
       rationed, because that is the remedy for having published it, and the
       person most likely to be at their limit is the person who has been
       publishing.
+
+---
+
+### 2.9 Since (2026-08-29, later)
+
+- [x] **`schema.prisma` was mojibake in nine places and nobody had noticed.**
+      Eight em-dashes and one `§` were double-encoded — UTF-8 bytes read once
+      as cp1252 and written back — so the file said `â€”` and `Â§` in its own
+      source. Repaired, and the rest of the repository scanned with the same
+      signature to confirm it was the only file affected. It reaches further
+      than it looks: `prisma generate` copies these comments verbatim into the
+      generated client, so every regeneration reproduced them.
 
 ---
 
