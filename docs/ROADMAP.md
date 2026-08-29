@@ -43,7 +43,7 @@ about it:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1390 passing**, 149 skipped (82 files) |
+| `pnpm --filter server test` | **1397 passing**, 149 skipped (83 files) |
 | `pnpm --filter web test` | **858 passing** (64 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
@@ -51,10 +51,10 @@ The 149 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI.
 
-**Done: 68 items. Open: 6.** One is a defect — the abuse story, which is a
-product decision as much as a task — and the other five are blocked on a
-decision or on infrastructure. **Nothing on this page is both unblocked and
-undone.**
+**Done: 69 items. Open: 6.** Every one of the six is blocked on a decision or
+on infrastructure — five in §3.3, plus report-and-review in §3.1, which needs
+somebody to decide who moderates before it can be built. **Nothing on this
+page is both unblocked and undone.**
 
 ---
 
@@ -202,6 +202,13 @@ Rows 1–13, all `done`:
       would be the worst possible trade. The action menu was extracted into one
       `ProjectActions` shared by both layouts: two copies of a menu whose
       entries depend on ownership is exactly the pair that drifts.
+- [x] **Publishing a project is rate limited.** Forking was, as project
+      creation; publishing never was, and publishing is the action on that
+      route whose cost lands on people other than the person taking it.
+      Limited **in one direction only** — making a project private is never
+      rationed, because that is the remedy for having published it, and the
+      person most likely to be at their limit is the person who has been
+      publishing.
 
 ---
 
@@ -210,13 +217,17 @@ Rows 1–13, all `done`:
 ### 3.1 Defects — code that is merged and wrong
 
 The three deployment defects listed here were fixed on 2026-08-29 and have
-moved to §2.8. One remains.
+moved to §2.8, along with the rate-limiting third of the item below. What is
+left is not a defect any more so much as an unmade decision.
 
-- [ ] **Public projects have no abuse story.** No report mechanism, no review,
-      no rate limit on *publishing* (forking is rate limited as project
-      creation). Single-tenant or invite-only is unaffected; a public
-      multi-tenant deployment needs all three before `visibility = PUBLIC` is
-      safe to expose.
+- [ ] **Public projects have no report mechanism and no review.** The third
+      part of this — no rate limit on *publishing* — was closed on 2026-08-29
+      (§2.8). The two that remain are a **product decision, not a task**: they
+      need somebody to review reports and an authority to act on them, and this
+      app has no notion of an administrator to hang either on. Single-tenant
+      and invite-only deployments are unaffected. A public multi-tenant one
+      needs both before `visibility = PUBLIC` is safe to expose, and deciding
+      who moderates comes first.
 
 ### 3.2 Unblocked — work, not decisions
 
@@ -283,8 +294,9 @@ whoever owns the data, not to a cleanup script.
    2026-08-29.
 3. ~~**§3.2 language servers.**~~ Done 2026-08-29 — and it was not cheap,
    because nothing underneath it had ever run.
-4. **§3.1 abuse handling** — before any deployment that is both public and
-   multi-tenant, and not before that.
+4. **§3.1 report and review** — before any deployment that is both public and
+   multi-tenant, and not before that. Decide who moderates first; the rate
+   limit that needed no such decision is done.
 5. ~~**§3.4 the remaining debts**.~~ Done 2026-08-29.
 6. ~~**§3.2 env vars and the dashboard list view**.~~ Done 2026-08-29.
 
