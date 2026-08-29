@@ -31,9 +31,12 @@ describe("canStartLanguageServer", () => {
     });
   });
 
-  /** §3.3's central point: pyright idles at 150-300 MB and
-   *  CONTAINER_MEMORY_MB defaults to 512, so an unconditional start would
-   *  have the server competing with the dev server it exists to help. */
+  /** The point of the whole policy, and the one number in it worth knowing:
+   *  a language server idles in the low hundreds of MB while
+   *  CONTAINER_MEMORY_MB defaults to 512, so an unconditional start would have
+   *  the server competing with the dev server it exists to help. See
+   *  `docs/ROADMAP.md` §6, decision 3 -- which was originally argued from
+   *  pyright, and pyright is not what shipped. */
   it("refuses rather than risking the dev server for memory", () => {
     env.CONTAINER_MEMORY_MB = 512;
     expect(canStartLanguageServer("python")).toMatchObject({

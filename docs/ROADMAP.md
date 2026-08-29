@@ -51,10 +51,15 @@ The 149 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI.
 
-**Done: 69 items. Open: 6.** Every one of the six is blocked on a decision or
-on infrastructure — five in §3.3, plus report-and-review in §3.1, which needs
-somebody to decide who moderates before it can be built. **Nothing on this
-page is both unblocked and undone.**
+**Done: 69 items. Open: 7.** Six are blocked on a decision or on
+infrastructure — five in §3.3, plus report-and-review in §3.1, which needs
+somebody to decide who moderates. The seventh is new: an audit on 2026-08-29
+found 45 code comments citing sections of the planning documents this file
+replaced, none of which resolves to anything that still exists (§3.4). That one
+is unblocked, mechanical, and touches 31 files.
+
+Everything in §2 was re-verified against the source on 2026-08-29 rather than
+carried forward on trust. Three claims did not survive it — see §5.
 
 ---
 
@@ -95,7 +100,7 @@ page is both unblocked and undone.**
 - [x] **Package management UI** — a panel per ecosystem, driven through the container
 - [x] **Warm containers**, install half — `warmStart.ts` fingerprints manifests and skips a redundant install
 - [x] **Static deployments** — build in the container, copy out, serve from a third origin at a generated subdomain
-- [x] **Always-on deployments** — the six templates that serve from a process get a long-lived container of their own, budgeted by `MAX_DEPLOYED_SERVICES`
+- [x] **Always-on deployments** — the six templates that serve from a process get a long-lived container of their own, budgeted by `MAX_DEPLOYED_SERVICES` and, since §2.8, `MAX_DEPLOYED_SERVICES_PER_USER`
 - [x] **Persistent data** — a managed Postgres sidecar per project, sealed generated password, nothing published to the host
 - [x] **Fork and public projects** — `Project.visibility`, a `visitor` level ranked *below* viewer, and an explore gallery
 
@@ -126,12 +131,12 @@ Rows 1–13, all `done`:
 - [x] 9 — merge conflict resolution
 - [x] 10 — managed sidecar database and the templates *(Postgres engine only, by decision)*
 - [x] 11 — keybinding registry, chords, user editing
-- [x] 12 — language servers, Python first, behind `LSP_ENABLED`
+- [x] 12 — language servers behind `LSP_ENABLED`; Python first, Go since (§2.8)
 - [x] 13 — checkpoint history, then follow mode
 
 ### 2.7 GitHub workflow (`GITHUB_WORKFLOW_PLAN` §5)
 
-- [x] 1 — keep the connection (AES-256-GCM under `GITHUB_TOKEN_KEY`)
+- [x] 1 — keep the connection (AES-256-GCM under `SECRET_ENCRYPTION_KEY`)
 - [x] 2 — see the repositories
 - [x] 3 — import one, cloned **inside a container**, never on the host
 - [x] 4 — push without retyping the token
@@ -267,7 +272,8 @@ Postgres); the user's own VS Code extensions, which Monaco cannot reach at all.
 
 ### 3.4 Documentation debts
 
-All four debts once on this list are closed. Two went with the
+All four debts once on this list are closed, and the audit of 2026-08-29 found
+a fifth that nobody had recorded. Two of the four went with the
 consolidation rather than with any work: `REPLIT_CLONE_PLAN` §8.6 listed
 follow-mode and checkpoint history as missing when both had shipped, and §8.5
 named a `forkProjectService` module that does not exist (the function lives in
@@ -277,7 +283,20 @@ text, was closed by giving it a real browser to assert against. The fourth, an
 undocumented test database, is now a section of `CONTRIBUTING.md` with the
 commands verified by running them — §2.8 for all three.
 
-Nothing is open here.
+- [ ] **45 code comments cite sections of documents that no longer exist.**
+      Across 31 files: `§7.6` (10), `§7.5` (6), `§2.2` (5), `§8` (4), `§7.4` (4),
+      `§7.3` (4), `§7.2` (3), `§3.3` (3), `§3` (3), and eight more. **None
+      resolves to any surviving document** — checked, not assumed. A reader who
+      hits "§7.4 is explicit that database containers have to be counted" has
+      nowhere to look it up.
+
+      Created by the consolidation itself, which is what makes it worth
+      recording rather than shrugging at: §6 exists precisely so those
+      arguments survived, and most of these do have a home there — `§7.4` is
+      now §6 decision 4, `§7.6` is decision 6, `§3.3`'s memory policy is
+      decision 3, `§10.4` is decisions 1 and 2. They point at the old numbering,
+      not at nothing. Renumbering them is mechanical but touches 31 files, so it
+      is its own change rather than a footnote to somebody else's.
 
 
 Not a debt but worth recording: **two `Project` rows have no working tree**
@@ -300,6 +319,10 @@ whoever owns the data, not to a cleanup script.
 5. ~~**§3.4 the remaining debts**.~~ Done 2026-08-29.
 6. ~~**§3.2 env vars and the dashboard list view**.~~ Done 2026-08-29.
 
+7. **§3.4 the dangling section references.** Mechanical, unblocked, and the
+   only thing on this page that is both. Worth doing while §6 is fresh, since
+   that is where most of them now point.
+
 Everything in §3.3 is blocked on a decision or on infrastructure and should not
 be started until that decision is made.
 
@@ -321,9 +344,34 @@ Specifically:
 - Every file named as a deliverable in §2 exists, bar `forkProjectService.ts`,
   which the old plan invented; `forkProject` is in `service/projectService.ts`.
 
-Not verified, and flagged rather than assumed: the two `Project` rows without
-working trees are carried over as reported on 2026-08-28 and were not re-checked
-against the database.
+**Verified 2026-08-29**, having been carried as unverified since 2026-08-28:
+the two `Project` rows without working trees are real. Twenty rows in the
+database, eighteen directories under `PROJECTS_DIR`, and the two with no tree
+are exactly "P" and "site" (created 2026-08-27) as reported. There are **no
+orphan directories** in the other direction. Still deliberately left alone:
+deleting rows and recreating trees are judgment calls belonging to whoever owns
+the data.
+
+### What the 2026-08-29 audit changed
+
+Every claim above was re-checked against the source rather than re-read. All
+seven commit hashes in §2.1 resolve and match their subjects; the headline
+numbers reproduce exactly; every file and symbol named as a deliverable in §2
+exists; and every item in §3.1 and §3.3 is genuinely absent, including the
+follow-mode blocker — the awareness transport carries a name and a colour and
+no cursor position, so "needs cursor positions and scroll sync" is accurate.
+
+Three claims were wrong and are corrected above:
+
+- **`GITHUB_TOKEN_KEY` does not exist.** §2.7 named it as the key the GitHub
+  token is encrypted under. The code uses `SECRET_ENCRYPTION_KEY`, and the
+  invented name appeared in exactly one place in the entire repository: this
+  file. Someone configuring GitHub integration from the roadmap would have set
+  a variable nothing reads.
+- **§6 decision 3 was argued from pyright**, which is not what shipped. See the
+  correction there.
+- **§3.4 said "nothing is open here"** while 45 dangling section references sat
+  in the code. Now recorded as the debt it is.
 
 ---
 
@@ -348,13 +396,21 @@ it; nothing else here is a standing decision.
    growing past diagnostics, completion and hover. `lib/lspClient.ts` is the seam.
 
 3. **Refuse a language server below 1024 MB of container memory, and say so.**
-   `CONTAINER_MEMORY_MB` defaults to 512 and pyright idles at 150–300 MB, so an
-   unconditional start has the server and the app competing for the same half
-   gigabyte — and an OOM-killed dev server is far worse than an editor saying
-   "not enough memory for Python intelligence here". Ships behind `LSP_ENABLED`,
-   default off, because the image cost is paid by every cold start including for
-   people who never open a `.py` file. *Changes it:* per-project memory limits,
-   which would make the threshold a fraction rather than a constant.
+   `CONTAINER_MEMORY_MB` defaults to 512 and a language server idles in the low
+   hundreds of MB, so an unconditional start has the server and the app
+   competing for the same half gigabyte — and an OOM-killed dev server is far
+   worse than an editor saying "not enough memory for Python intelligence here".
+   Ships behind `LSP_ENABLED`, default off, because the image cost is paid by
+   every cold start including for people who never open a `.py` file.
+   *Changes it:* per-project memory limits, which would make the threshold a
+   fraction rather than a constant.
+
+   *Corrected 2026-08-29.* This decision was argued from **pyright**, which
+   pulls Node into the Python image. The implementation is `pylsp`, which is
+   pure Python, and the cost was measured rather than assumed: sandbox-python
+   307 MB → 338 MB, sandbox-go 1.31 GB → 1.36 GB for `gopls`. The threshold
+   still stands — the idle figure is what it turns on, not the image size —
+   but the number it was argued from was never checked.
 
 4. **A managed database counts as a full container against both caps, and
    `MAX_CONCURRENT_CONTAINERS` stays at 3.** A `postgres:17-alpine` sidecar idles
