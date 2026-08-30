@@ -11,6 +11,13 @@ import { dbScope } from "../test/dbScope.js";
  *  one reported for SECRETS went on serving its source through its embed
  *  token, and the owner could publish it again in one request.
  *
+ *  Four more surfaces were added later, from reading `takenDownAt`'s three
+ *  call sites against the rest of the product: copying a project, redeeming
+ *  its share link, its scheduled jobs, and deploying it again. The first two
+ *  matter most — a fork produced an identical project with the column null,
+ *  which is a guard defeated by a button, and the share link was the embed's
+ *  twin with only one of the two ever closed.
+ *
  *  These are database claims — a WHERE clause is either there or it is not —
  *  so they are checked against real rows.
  *
@@ -32,6 +39,12 @@ vi.mock("../middlewares/requireAdmin.js", () => ({
   adminEmails: () => new Set<string>(),
 }));
 
+// Nothing below should ever reach Docker: every assertion here is that a run
+// was refused or never started. Mocked so that "it started a container" fails
+// loudly rather than hanging.
+const ensureContainer = vi.hoisted(() => vi.fn());
+vi.mock("../containers/containerManager.js", () => ({ ensureContainer }));
+
 describe.skipIf(!TEST_DATABASE_URL)("a moderator's takedown", () => {
   const scope = dbScope("takedown");
 
@@ -40,6 +53,8 @@ describe.skipIf(!TEST_DATABASE_URL)("a moderator's takedown", () => {
   let embeds: typeof import("./embedService.js");
   let deploys: typeof import("./deployService.js");
   let access: typeof import("./projectAccessService.js");
+  let projects: typeof import("./projectService.js");
+  let jobs: typeof import("./scheduleService.js");
   let projectRoot: typeof import("../utils/projectPaths.js").projectRoot;
   let visibility: typeof import("../generated/prisma/enums.js").ProjectVisibility;
 
@@ -54,6 +69,8 @@ describe.skipIf(!TEST_DATABASE_URL)("a moderator's takedown", () => {
     embeds = await import("./embedService.js");
     deploys = await import("./deployService.js");
     access = await import("./projectAccessService.js");
+    projects = await import("./projectService.js");
+    jobs = await import("./scheduleService.js");
     ({ ProjectVisibility: visibility } = await import(
       "../generated/prisma/enums.js"
     ));
@@ -62,6 +79,9 @@ describe.skipIf(!TEST_DATABASE_URL)("a moderator's takedown", () => {
 
   beforeEach(async () => {
     unpublish.mockReset().mockResolvedValue(undefined);
+    ensureContainer.mockReset().mockRejectedValue(
+      new Error("no run should have got this far"),
+    );
 
     const owner = await prisma.user.create({
       data: { email: scope.email("owner"), passwordHash: "x" },
@@ -184,6 +204,186 @@ describe.skipIf(!TEST_DATABASE_URL)("a moderator's takedown", () => {
       await expect(
         access.setProjectVisibility(projectId, ownerId, visibility.PUBLIC),
       ).resolves.toMatchObject({ visibility: "PUBLIC" });
+    });
+  });
+
+  describe("copying it", () => {
+    /** The one that made the other three guards irrelevant. All of them read
+     *  `takenDownAt`, and a fork produced a project where it is null holding
+     *  exactly the files that were reported. */
+    it("cannot be forked", async () => {
+      await takeDown();
+
+      await expect(
+        projects.forkProjectService(projectId, ownerId, "Malware again"),
+      ).rejects.toMatchObject({ code: "TAKEN_DOWN" });
+
+      expect(
+        await prisma.project.count({ where: { forkedFromId: projectId } }),
+      ).toBe(0);
+    });
+
+    it("cannot be duplicated", async () => {
+      await takeDown();
+
+      await expect(
+        projects.duplicateProjectService(projectId, ownerId),
+      ).rejects.toMatchObject({ code: "TAKEN_DOWN" });
+    });
+
+    /** The refusal has to be about the takedown and not about copying, or the
+     *  fix would have removed a feature rather than closed a hole. */
+    it("copies fine while nobody has taken it down", async () => {
+      const copy = await projects.duplicateProjectService(projectId, ownerId);
+      expect(copy.id).not.toBe(projectId);
+      await rm(projectRoot(copy.id), { recursive: true, force: true });
+    });
+  });
+
+  describe("the share link", () => {
+    const linked = async () =>
+      access.rotateShareToken(projectId, ownerId, "VIEWER");
+
+    it("stops redeeming", async () => {
+      const token = await linked();
+      await takeDown();
+
+      await expect(
+        access.redeemShareToken(token, strangerId),
+      ).rejects.toMatchObject({ statusCode: 404 });
+
+      expect(
+        await prisma.projectCollaborator.count({ where: { projectId } }),
+      ).toBe(0);
+    });
+
+    /** The clause, not the cleanup. The token is also cleared when a moderator
+     *  acts, but that is a write and writes fail; putting the row back here is
+     *  the only way to test which of the two is load-bearing. */
+    it("stops redeeming even if the token was never cleared", async () => {
+      const token = await linked();
+      await takeDown();
+      await prisma.project.update({
+        where: { id: projectId },
+        data: { shareToken: token },
+      });
+
+      await expect(
+        access.redeemShareToken(token, strangerId),
+      ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it("is cleared by the takedown as well, like the embed beside it", async () => {
+      await linked();
+      await takeDown();
+
+      const row = await prisma.project.findUnique({ where: { id: projectId } });
+      expect(row?.shareToken).toBeNull();
+    });
+
+    it("still redeems for a project nobody took down", async () => {
+      const token = await linked();
+
+      await expect(
+        access.redeemShareToken(token, strangerId),
+      ).resolves.toMatchObject({ id: projectId });
+    });
+  });
+
+  describe("its scheduled jobs", () => {
+    const nightly = async () =>
+      jobs.createJob(projectId, {
+        name: "Backup",
+        schedule: "30 2 * * *",
+        command: "npm run backup",
+      });
+
+    /** The worst of the four: not who may read the project, but what this
+     *  machine goes on doing on its behalf, on a schedule, with nothing in the
+     *  product that would ever show it. */
+    it("stop being swept", async () => {
+      const due = new Date(Date.now() - 60_000);
+      const job = await nightly();
+      await prisma.scheduledJob.update({
+        where: { id: job.id },
+        data: { nextRunAt: due },
+      });
+
+      await takeDown();
+
+      const { finished } = await jobs.runDueJobs();
+      await finished;
+
+      // The claim, not the run. `runDueJobs` advances `nextRunAt` BEFORE
+      // starting anything, so an untouched firing is the only evidence the
+      // sweep never selected this job -- and it is the evidence that
+      // distinguishes the two guards. The refusal inside `runJobNow` would
+      // leave the run count at zero on its own, so asserting on that would
+      // have each guard cover for the other and neither be tested.
+      const row = await prisma.scheduledJob.findUniqueOrThrow({
+        where: { id: job.id },
+      });
+      expect(row.nextRunAt?.getTime()).toBe(due.getTime());
+
+      // Scoped to this job rather than read off the sweep's total, which
+      // counts whatever else vitest is running in parallel -- how three
+      // suites here came to pass for the wrong reason (2.17, 2.19).
+      expect(
+        await prisma.scheduledRun.count({ where: { jobId: job.id } }),
+      ).toBe(0);
+      expect(ensureContainer).not.toHaveBeenCalled();
+    });
+
+    /** Held, not cancelled. The row and its schedule survive, so lifting the
+     *  takedown brings the job back rather than leaving the owner to notice
+     *  their schedules were deleted on their behalf. */
+    it("are held rather than deleted", async () => {
+      const job = await nightly();
+      await takeDown();
+
+      const row = await prisma.scheduledJob.findUnique({ where: { id: job.id } });
+      expect(row).not.toBeNull();
+      expect(row?.enabled).toBe(true);
+      expect(row?.schedule).toBe("30 2 * * *");
+    });
+
+    it("refuse to be run by hand either", async () => {
+      const job = await nightly();
+      await takeDown();
+
+      await expect(jobs.runJobNow(job.id)).rejects.toMatchObject({
+        code: "TAKEN_DOWN",
+      });
+      expect(ensureContainer).not.toHaveBeenCalled();
+    });
+
+    it("are swept as usual for a project nobody took down", async () => {
+      const job = await nightly();
+      await prisma.scheduledJob.update({
+        where: { id: job.id },
+        data: { nextRunAt: new Date(Date.now() - 60_000) },
+      });
+
+      const { finished } = await jobs.runDueJobs();
+      await finished;
+
+      expect(
+        await prisma.scheduledRun.count({ where: { jobId: job.id } }),
+      ).toBe(1);
+    });
+  });
+
+  describe("deploying it again", () => {
+    /** The mildest of the four -- `resolveSite` refuses to serve whatever this
+     *  built -- and still a container and a build spent on a site that 404s,
+     *  after which the deploy panel reports a live deployment nobody can
+     *  reach. */
+    it("is refused at the door", async () => {
+      await takeDown();
+
+      await expect(deploys.publish(projectId)).rejects.toMatchObject({
+        code: "TAKEN_DOWN",
+      });
     });
   });
 

@@ -304,7 +304,18 @@ export async function revokeShareToken(
   ownerId: string,
 ): Promise<void> {
   await assertProjectAccess(projectId, ownerId, "owner");
+  await clearShareToken(projectId);
+}
 
+/** The same, with no access check, for a caller that is not the owner.
+ *
+ *  Moderation's teardown. Its counterpart on the embed is `revokeEmbed`, which
+ *  a takedown has called since 2.16 -- and a share token is the same kind of
+ *  object: a bearer string that was pasted somewhere. Only one of the two was
+ *  closed. This is the cleanup half; the clause in `redeemShareToken` is the
+ *  half that is a guarantee (6, decision 13).
+ */
+export async function clearShareToken(projectId: string): Promise<void> {
   await prisma.project.update({
     where: { id: projectId },
     data: { shareToken: null },
@@ -320,8 +331,20 @@ export async function redeemShareToken(
   token: string,
   userId: string,
 ): Promise<Project> {
-  const project = await prisma.project.findUnique({ where: { shareToken: token } });
+  // `takenDownAt` is in the WHERE, not checked afterwards, for the reason 6
+  // decision 13 gives: the token is also cleared when a moderator acts, but
+  // that is a write which can fail, and a takedown that depends on a
+  // successful cleanup is a takedown that usually works. A project taken down
+  // for SECRETS must stop handing its source to whoever holds the link, and
+  // one taken down for MALWARE must stop handing them a container to run it
+  // in -- neither of which redeeming was refusing.
+  const project = await prisma.project.findFirst({
+    where: { shareToken: token, takenDownAt: null },
+  });
 
+  // Deliberately the same sentence a revoked link gets. Somebody holding a
+  // link is not owed the news that a project was moderated, and telling them
+  // would make the link a way to ask.
   if (!project) throw new NotFoundError("That share link is no longer valid");
 
   if (project.ownerId === userId) return project;

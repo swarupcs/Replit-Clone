@@ -280,23 +280,30 @@ describe.skipIf(!TEST_DATABASE_URL)("scheduled jobs", () => {
     it("starts a job whose time has passed", async () => {
       const id = await due();
 
-      const { started, finished } = await jobs.runDueJobs();
+      const { finished } = await jobs.runDueJobs();
       await finished;
 
-      expect(started).toBe(1);
+      // This job's own runs, not the sweep's total. `runDueJobs` is global by
+      // design, so `started` counts whatever every other suite happened to
+      // leave due -- the fourth time a DB suite here has asserted on a global
+      // query and passed on the schedule vitest chose (2.17, 2.19).
       expect(await prisma.scheduledRun.count({ where: { jobId: id } })).toBe(1);
     });
 
     it("leaves a job whose time has not come", async () => {
-      await jobs.createJob(projectId, NIGHTLY);
+      const { id } = await jobs.createJob(projectId, NIGHTLY);
 
-      expect((await jobs.runDueJobs()).started).toBe(0);
+      await (await jobs.runDueJobs()).finished;
+
+      expect(await prisma.scheduledRun.count({ where: { jobId: id } })).toBe(0);
     });
 
     it("leaves a disabled job alone even if its firing is in the past", async () => {
-      await due({ enabled: false });
+      const id = await due({ enabled: false });
 
-      expect((await jobs.runDueJobs()).started).toBe(0);
+      await (await jobs.runDueJobs()).finished;
+
+      expect(await prisma.scheduledRun.count({ where: { jobId: id } })).toBe(0);
     });
 
     /** A server down for a day owes an hourly job twenty-four runs by the
@@ -309,10 +316,11 @@ describe.skipIf(!TEST_DATABASE_URL)("scheduled jobs", () => {
         data: { nextRunAt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
       });
 
-      const first = await jobs.runDueJobs();
-      await first.finished;
-      expect(first.started).toBe(1);
-      expect((await jobs.runDueJobs()).started).toBe(0);
+      await (await jobs.runDueJobs()).finished;
+      await (await jobs.runDueJobs()).finished;
+
+      // Two sweeps, one run. Counted on this job, for the reason above.
+      expect(await prisma.scheduledRun.count({ where: { jobId: job.id } })).toBe(1);
 
       const row = await prisma.scheduledJob.findUniqueOrThrow({ where: { id: job.id } });
       expect(row.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
@@ -327,7 +335,8 @@ describe.skipIf(!TEST_DATABASE_URL)("scheduled jobs", () => {
       const [first, second] = await Promise.all([jobs.runDueJobs(), jobs.runDueJobs()]);
       await Promise.all([first.finished, second.finished]);
 
-      expect(first.started + second.started).toBe(1);
+      // The run count is the claim: `started` is a global total, and only one
+      // of the two sweeps may have written a run for THIS job.
       expect(await prisma.scheduledRun.count({ where: { jobId: id } })).toBe(1);
     });
 

@@ -1,7 +1,12 @@
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
 import { increment } from "../lib/metrics.js";
-import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.js";
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from "../utils/errors.js";
 import { CronError, nextRunOf, parseCron, nextRun } from "../lib/cron.js";
 import { ensureContainer } from "../containers/containerManager.js";
 import { execCapture } from "../containers/execCapture.js";
@@ -359,8 +364,24 @@ async function prune(jobId: string): Promise<void> {
  *  anybody actually debugs.
  */
 export async function runJobNow(jobId: string): Promise<ApiRun> {
-  const job = await prisma.scheduledJob.findUnique({ where: { id: jobId } });
+  const job = await prisma.scheduledJob.findUnique({
+    where: { id: jobId },
+    include: { project: { select: { takenDownAt: true } } },
+  });
   if (!job) throw new NotFoundError("No such job.", "JOB_NOT_FOUND");
+
+  // The sweeper already filters these out, so this only catches the "run now"
+  // button -- but it is the same rule and it belongs beside the run, not in
+  // one of the two callers. A takedown that stops a project being read while
+  // this machine goes on executing its command on a schedule has stopped the
+  // wrong half.
+  if (job.project.takenDownAt) {
+    throw new ForbiddenError(
+      "A moderator took this project down after a report. Its jobs are held " +
+        "until that is lifted.",
+      "TAKEN_DOWN",
+    );
+  }
 
   const inFlight = await prisma.scheduledRun.findFirst({
     where: { jobId, status: "RUNNING" },
@@ -539,8 +560,20 @@ export async function runDueJobs(now = new Date()): Promise<{
   started: number;
   finished: Promise<void>;
 }> {
+  // The takedown is in the WHERE and the row is left untouched, which is what
+  // makes this "held" rather than "cancelled": the schedule survives, so a
+  // reinstatement brings the job back. `nextRunAt` is therefore not advanced
+  // while a project is down, and the existing catch-up rule then does the
+  // right thing by itself -- one run when it returns, not one per night
+  // missed. This clause is the only thing between a project taken down for
+  // MALWARE and its command running here every night indefinitely, which no
+  // screen in this product would ever have shown.
   const due = await prisma.scheduledJob.findMany({
-    where: { enabled: true, nextRunAt: { not: null, lte: now } },
+    where: {
+      enabled: true,
+      nextRunAt: { not: null, lte: now },
+      project: { takenDownAt: null },
+    },
     orderBy: { nextRunAt: "asc" },
     take: SWEEP_BATCH,
   });

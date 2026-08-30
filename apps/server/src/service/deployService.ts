@@ -36,7 +36,12 @@ import { getEnvVars, toDockerEnv } from "./projectEnvService.js";
 import { getTemplate, type StaticBuild } from "../templates/registry.js";
 import { assertValidProjectId, projectRoot } from "../utils/projectPaths.js";
 import { resolveCustomDomain, toCustomDomain } from "./customDomainService.js";
-import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.js";
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from "../utils/errors.js";
 
 /** Building a project and publishing the result to a public origin.
  *
@@ -568,6 +573,20 @@ export async function publish(rawProjectId: string): Promise<Deployment> {
     include: { deployment: true },
   });
   if (!project) throw new NotFoundError("Project not found");
+
+  // `resolveSite` already refuses to serve this, so nothing built here would
+  // reach anybody -- which is the mildest of the four surfaces the takedown
+  // never reached, and still worth refusing at the door. A build is a
+  // container and several minutes, and the deploy panel afterwards would
+  // report a live deployment that 404s for every visitor: wrong about the one
+  // thing it exists to say.
+  if (project.takenDownAt) {
+    throw new ForbiddenError(
+      "A moderator took this project down after a report. It cannot be " +
+        "deployed while that stands.",
+      "TAKEN_DOWN",
+    );
+  }
 
   const target = deployTarget(project.template);
   if (!target.deployable) {

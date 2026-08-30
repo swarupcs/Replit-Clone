@@ -6,6 +6,7 @@ import { notify, notifyAdmins } from "./notificationService.js";
 import { webUrl } from "../lib/mailer.js";
 import { unpublish } from "./deployService.js";
 import { revokeEmbed } from "./embedService.js";
+import { clearShareToken } from "./projectAccessService.js";
 import { recordModeration } from "./moderationLogService.js";
 import type {
   ProjectReportReason,
@@ -347,6 +348,19 @@ export async function reviewReport(input: {
       await revokeEmbed(report.projectId);
     } catch (error) {
       logger.error("could not revoke a taken-down project's embed", error, {
+        projectId: report.projectId,
+      });
+    }
+
+    // The share link, for the same reason as the embed beside it and never
+    // done until now: both are bearer strings that were pasted somewhere, and
+    // only one of the two was being closed. `redeemShareToken` filters on
+    // `takenDownAt` regardless of whether this succeeds -- that clause is the
+    // guarantee, this is the reclamation.
+    try {
+      await clearShareToken(report.projectId);
+    } catch (error) {
+      logger.error("could not revoke a taken-down project's share link", error, {
         projectId: report.projectId,
       });
     }

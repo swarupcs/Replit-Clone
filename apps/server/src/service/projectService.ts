@@ -30,6 +30,7 @@ import {
   forgetUserQuota,
 } from "./userQuotaService.js";
 import { unpublish } from "./deployService.js";
+import { ForbiddenError } from "../utils/errors.js";
 import { logger } from "../lib/logger.js";
 
 export function projectDir(projectId: string): string {
@@ -160,6 +161,30 @@ export async function renameProjectService(
   });
 }
 
+/** Refuses to make a second copy of a project a moderator took down.
+ *
+ *  The takedown is enforced by three queries filtering on `takenDownAt`, and a
+ *  guard that lives on a column is only as good as the operations that cannot
+ *  produce a row without it. Both of the ones below can: they build a fresh
+ *  `Project` from the source's template and files -- the files being the thing
+ *  that was reported -- and the new row's column is null, so the copy may be
+ *  published, deployed, embedded and scheduled exactly as the original may not.
+ *
+ *  Refused rather than sanitised. Copying `takenDownAt` across would have this
+ *  platform moderate a project nobody reported, and in the fork case against
+ *  somebody moderation never acted on. Saying no names the reason and leaves
+ *  the appeal as the route back, which is what it is for.
+ */
+function assertNotTakenDown(source: Project): void {
+  if (!source.takenDownAt) return;
+
+  throw new ForbiddenError(
+    "A moderator took this project down after a report. It cannot be copied " +
+      "while that stands.",
+    "TAKEN_DOWN",
+  );
+}
+
 /** Copies a project's files into a brand new project.
  *
  *  Dependencies are deliberately not copied: `node_modules` is the bulk of a
@@ -183,6 +208,7 @@ export async function duplicateProjectService(
   // A viewer may take a copy — the copy is theirs, and they could have done it
   // by hand from the file tree anyway. It still counts against their own quota.
   const source = await assertAccess(projectId, userId, "viewer");
+  assertNotTakenDown(source);
   await assertCanCreateProject(userId);
 
   // Re-read rather than infer from the level `assertAccess` was given: it was
@@ -241,6 +267,7 @@ export async function forkProjectService(
   name?: string,
 ): Promise<Project> {
   const source = await assertAccess(projectId, userId, "visitor");
+  assertNotTakenDown(source);
 
   // Their own quota, like any project they create. A fork is cheap to ask for
   // and exactly as expensive to host as anything else.

@@ -44,8 +44,8 @@ day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1759 passing**, 20 skipped (110 files) |
-| the same, with `TEST_DATABASE_URL` set | **run 2026-08-30 night — green** |
+| `pnpm --filter server test` | **1771 passing**, 20 skipped (110 files) |
+| the same, with `TEST_DATABASE_URL` set | **run 2026-08-31 evening, three times — green** |
 | `pnpm --filter web test` | **973 passing** (74 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
@@ -888,6 +888,78 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.20 Since (2026-08-31, evening)
+
+- [x] **The takedown now reaches all seven surfaces.** §2.16 made it stick by
+      writing `takenDownAt` and teaching three queries to read it. Four more
+      never were: copying the project, redeeming its share link, its scheduled
+      jobs, and deploying it again.
+
+      **Copying was the one that made the other three irrelevant.**
+      `forkProjectService` and `duplicateProjectService` both build a fresh
+      `Project` from the source's template and files — the files being what was
+      reported — with the column null on the new row. One button produced a
+      project that could be published, deployed, embedded and scheduled exactly
+      as the original could not. A guard living on a column is worth no more
+      than the operations that cannot produce a row without it, and there were
+      two.
+
+      Refused rather than sanitised. Copying `takenDownAt` across would have
+      this platform moderate a project nobody reported, and in the fork case
+      against somebody moderation never acted on. The refusal names the reason
+      and leaves the appeal as the route back, which is what it is for.
+
+      **The share link was the embed's twin and only one of the two was ever
+      closed.** Both are bearer strings that were pasted somewhere; a takedown
+      called `revokeEmbed` and nothing for the token, and `redeemShareToken`
+      joined the holder as a *collaborator* with no clause at all. A project
+      taken down for SECRETS went on handing its source to whoever held the
+      link; one taken down for MALWARE handed them a container to run it in.
+      Now both: the clause is the guarantee and the revocation is cleanup,
+      which is §6 decision 13 for the fourth time. The preview endpoint filters
+      too — otherwise it becomes the one place that confirms moderation acted,
+      to exactly the people holding the link. Existing collaborators are left
+      alone; they are not an anonymous surface, and an owner needs them to fix
+      whatever the report was about.
+
+      **The scheduled jobs were the worst of the four**, because the harm was
+      not who could read the project but what this machine went on *doing* on
+      its behalf: an arbitrary command in a container, every night,
+      indefinitely, with no screen anywhere in the product that would have
+      shown it. Held rather than cancelled — the rows and their schedules
+      survive, so a reinstatement restores them, and since `nextRunAt` is not
+      advanced while a project is down the existing catch-up rule then does the
+      right thing by itself: one run when it comes back, not one per night
+      missed.
+
+      **Deploying again was the mildest and is fixed anyway.** `resolveSite`
+      refuses to serve whatever `publish()` built, so nothing reached anybody
+      — decision 13 earning its keep a third time. It was still a build and a
+      container spent on a site that 404s, after which the deploy panel
+      reported a live deployment nobody could reach: wrong about the only thing
+      it exists to say.
+
+      **Two of the guards were covering for each other, and the mutation pass
+      is what found it.** Deleting the sweeper's clause changed nothing
+      observable at first, because `runJobNow`'s own refusal then stopped the
+      run and the run count stayed at zero. The test now asserts on
+      `nextRunAt` instead — the sweep advances it *before* starting anything,
+      so an untouched firing is the only evidence the job was never selected.
+      A pair of guards that each hide the other's absence is a pair where
+      neither is tested, and only a deliberately planted mutant says so.
+      Eight planted, eight caught.
+
+- [x] **A fourth DB suite was asserting on a global query.** `runDueJobs` sweeps
+      every due job in the database, so `started` is a count of whatever else
+      vitest scheduled alongside — and adding the suite above turned
+      `schedules.db.test.ts` red in a file nobody had touched, which is exactly
+      how §2.17 and §2.19 each found their own instance. Every assertion on the
+      sweep's total is now a count of the runs written for *that* job. Verified
+      by running the suite three times rather than once; §2.17 learned that the
+      hard way too.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -934,7 +1006,8 @@ looked lately" and never "the code is right". Read it that way.
       public again in one request. Together with the item above, ACTIONED was
       a decision with no mechanism behind it at all.
 
-- [ ] **The takedown reaches three surfaces and there are four it does not.**
+- [x] **The takedown reaches three surfaces and there are four it does not.**
+      Fixed 2026-08-31 — see §2.20.
       §2.16 made a takedown stick by writing `takenDownAt` and teaching three
       queries to filter on it: the gallery's `visibility`, `resolveSite`, and
       the embed's `resolveToken`. Reading those three against the rest of the
@@ -1150,11 +1223,10 @@ whoever owns the data, not to a cleanup script.
 15. ~~**§3.2 the test panel.**~~ Done 2026-08-31 (§2.18).
 16. ~~**§3.2 deployment history.**~~ Done 2026-08-31 (§2.19).
 
-17. **§3.1 — the four surfaces the takedown never reached.** First, because
-    it is the only open item where the gap between what the document claims
-    and what the code does is being exploited by nothing more exotic than a
-    Fork button. Server-only, and it touches four files that already know how
-    to say no.
+17. ~~**§3.1 — the four surfaces the takedown never reached.**~~ Done
+    2026-08-31 (§2.20). Chosen first because it was the only open item whose
+    gap between the document and the code was reachable by nothing more exotic
+    than a Fork button.
 18. **§3.2 — a client for §2.17.** After, and in a commit of its own,
     because the two are otherwise the same sentence twice: one is a guard
     that was never written and the other is a screen that was never built.

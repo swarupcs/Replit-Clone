@@ -64,6 +64,10 @@ const JOB = {
   projectId: "p1",
   name: "Nightly backup",
   command: "npm run backup",
+  // `runJobNow` includes the project so it can refuse a job whose project a
+  // moderator took down. Present here rather than left out, because a job on a
+  // live project is what every test below is about.
+  project: { takenDownAt: null },
 };
 
 /** The job's last verdict before this run, or null for a job that has never
