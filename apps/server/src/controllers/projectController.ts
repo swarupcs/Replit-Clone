@@ -11,7 +11,11 @@ import {
   renameProjectService,
   assertProjectAccess,
 } from "../service/projectService.js";
-import { getEnvVars, setEnvVars } from "../service/projectEnvService.js";
+import {
+  envVarsEncryptedAtRest,
+  getEnvVars,
+  setEnvVars,
+} from "../service/projectEnvService.js";
 import {
   listAccessibleProjects,
   listPublicProjects,
@@ -304,7 +308,14 @@ export async function getProjectEnvController(
   res.json({
     success: true,
     message: "Environment variables",
-    data: await getEnvVars(projectId),
+    // `encryptedAtRest` travels with the values rather than sitting on a
+    // status endpoint, because the only moment it changes what anybody does is
+    // the moment they are looking at the dialog deciding whether to paste a
+    // live key into it.
+    data: {
+      vars: await getEnvVars(projectId),
+      encryptedAtRest: envVarsEncryptedAtRest(),
+    },
   });
 }
 

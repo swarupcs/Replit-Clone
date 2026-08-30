@@ -63,6 +63,7 @@ import {
 import { ensureEgressGateway } from "./containers/egressGateway.js";
 import { restoreServices } from "./service/deployService.js";
 import { recheckDomains } from "./service/customDomainService.js";
+import { backfillSealedEnvVars } from "./service/projectEnvService.js";
 import { runDueJobs } from "./service/scheduleService.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
 import { SandboxNetworkMismatch } from "./containers/sandboxNetwork.js";
@@ -476,6 +477,15 @@ async function start(): Promise<void> {
   startDomainRecheck();
   startJobSweeper();
   startAccessWatch();
+
+  // Once, at boot, rather than on a timer: it is a migration, not a sweep. A
+  // SQL migration could not do it -- the key lives in the environment, which
+  // is the property that makes a leaked dump worthless -- and it cannot be
+  // lazy-on-read either, because reads do not write and a project nobody
+  // opens would keep its secrets in the clear indefinitely.
+  void backfillSealedEnvVars().catch((error: unknown) => {
+    logger.error("could not seal environment variables", error);
+  });
 
   // A `tsx watch` restart can race the previous process releasing the port on
   // Windows, which otherwise kills the dev server outright.

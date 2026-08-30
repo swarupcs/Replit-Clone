@@ -147,10 +147,18 @@ export const listPublicProjectsApi = async (): Promise<PublicProject[]> => {
 export const projectExportUrl = (projectId: string): string =>
   `${import.meta.env.VITE_BACKEND_URL}/api/v1/projects/${projectId}/export`;
 
+export interface ProjectEnv {
+  vars: Record<string, string>;
+  /** Whether this server seals these values before storing them. Travels with
+   *  the values because the only moment it changes anybody's behaviour is the
+   *  moment they are deciding whether to paste a live key in. */
+  encryptedAtRest: boolean;
+}
+
 export const getProjectEnvApi = async (
   projectId: string,
-): Promise<Record<string, string>> => {
-  const response = await axios.get<ApiSuccess<Record<string, string>>>(
+): Promise<ProjectEnv> => {
+  const response = await axios.get<ApiSuccess<ProjectEnv>>(
     `/api/v1/projects/${projectId}/env`,
   );
   return response.data.data;

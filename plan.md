@@ -43,28 +43,50 @@ about it:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1462 passing**, 214 skipped (88 files) |
+| `pnpm --filter server test` | **1478 passing**, 228 skipped (88 files) |
 | the same, with `TEST_DATABASE_URL` set | not re-run on 2026-08-30 — see below |
 | `pnpm --filter web test` | **941 passing** (71 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
-The 214 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
+The 228 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI. The DB-gated row was run rather than quoted for §2.11 and §2.12:
 both put load-bearing claims in a unique index, a foreign key and a
 transaction, and a mock cannot be wrong about those in any way worth trusting.
 
-**It was not run for §2.13.** The Docker daemon stopped part-way through that
-work and did not come back, which takes the test database with it. So the
-scheduled-job suite — 22 cron cases that do run, plus 19 DB-gated ones that do
-not — is verified only as far as typecheck and the non-DB suites reach, and
-the migration for it was written by hand rather than generated and diffed
-against a live database. **Run the DB-gated suite before trusting §2.13.**
+**It was not run for §2.13 or §2.14.** The Docker daemon stopped part-way
+through §2.13 and never came back, which takes the test database with it. Two
+consequences, both of which want clearing before either is trusted:
 
-**Done: 77 items. Open: 4.** All four are in §3.3 and none is a whole row any
+- §2.13's scheduled jobs are verified only as far as the 22 cron cases and the
+  non-DB suites reach; its 19 DB-gated tests did not run, and its migration was
+  written by hand rather than generated and diffed against a live database.
+- §2.14's env-var encryption has 12 unit tests that do run, and 11 DB-gated
+  ones that do not. The unit tests cover the reading logic — which is where the
+  dangerous mistake would be — but the *claim*, that this column no longer
+  holds anybody's credentials, is a claim about the database and is checked by
+  reading the column. The fix in §2.14's second half is DB-gated too.
+
+**Run the DB-gated suite before trusting §2.13 or §2.14.**
+
+There is also a flake worth knowing about, since it will otherwise be
+mistaken for a regression: under load the web suite fails 9–10 of its 941 at
+the default 5s timeout, always the *first* test in a file and always passing
+in isolation. Verified as environmental by running it on a clean checkout,
+which failed the same way. `--testTimeout=20000` is green at 71/71.
+
+**Done: 79 items. Open: 4.** All four are in §3.3 and none is a whole row any
 more — each is the blocked remainder of one, after the unblocked half shipped.
 A certificate, an autoscaler's cost model, a disk budget, and an architectural
 route. **Nothing on this page is unblocked.**
+
+The two newest done items (§2.14) came from neither §3 nor anybody's feature
+list. They came from reading the schema next to itself: three columns holding
+secrets were sealed and a fourth was not, and the endpoint that reads that
+fourth one draws an access line that another endpoint quietly crossed. Both
+were found by asking what this code already believes and where it stops
+believing it — which is a way of finding work that a list of open items does
+not produce.
 
 Two rows have now come off this list by being *split* rather than unblocked
 (§2.12, §2.13), which is the pattern worth naming. Both read as blocked
@@ -508,6 +530,61 @@ Rows 1–13, all `done`:
       is handed out with the first.
 
       Autoscaling stays open in §3.3, narrowed to what it always was.
+
+---
+
+### 2.14 Since (2026-08-30, evening)
+
+- [x] **A read-only collaborator could take a copy of a project and get its
+      secrets.** Reading `/env` requires **editor** access, on the stated
+      grounds that "read-only access to a project is not the same as being
+      trusted with its credentials". `duplicateProjectService` was open to a
+      **viewer** and copied `envVars` into the new project — which the viewer
+      then owned, and could therefore read through the same endpoint that had
+      just refused them.
+
+      Forking already got this right and says so in its own test: "the line
+      between a fork and a credential leak". Duplicating kept the variables on
+      the reasoning that a duplicate is your own copy of your own project, and
+      that reasoning is sound for the owner and for an editor. It was never
+      checked against who could actually reach the function.
+
+      Now the variables travel only for an editor or the owner. The
+      convenience the rule existed for — a copy that can actually run — is
+      preserved for everybody who was already entitled to the credentials, and
+      the copy is empty for everybody who was not.
+
+- [x] **Environment variables are encrypted at rest.** This column is where
+      people put `STRIPE_SECRET_KEY`, and it was the last secret in the schema
+      stored in the clear: the GitHub token, the stored connection string and
+      the managed database's password have all been sealed under
+      `SECRET_ENCRYPTION_KEY` since they were added, and §6 decision 7 writes
+      the rule down. A dump of `projects` was a list of live credentials.
+
+      Values are sealed one at a time rather than as an object, and names stay
+      readable. The name is not the secret, the platform validates it against
+      `RESERVED`, and an operator debugging a container has to be able to see
+      which variables exist — sealing per value keeps that true and means one
+      unreadable value costs one variable rather than all of them.
+
+      **Shape decides whether a stored value is ciphertext, not whether `open`
+      threw.** This is the part that is easy to get wrong: `open` throws both
+      for plain text and for a value sealed under a *different* key, so
+      "it threw, therefore it is plain text" would hand the ciphertext back as
+      though it were the secret — and a key rotation would quietly start
+      feeding containers base64 instead of failing. `looksSealed` answers the
+      first question and `open` answers the second.
+
+      The backfill runs once at boot rather than in SQL or on read. SQL cannot
+      reach a key that lives in the environment — which is the property that
+      makes a leaked dump worthless — and a lazy-on-read migration never
+      finishes, because reads do not write and the projects nobody opens are
+      exactly the ones nobody is watching.
+
+      A server with no key keeps working, in plain text, and **says so in the
+      dialog**. Refusing to save would break every install that never set a
+      key for a feature it does not use; looking identical either way would be
+      a panel that lies on one of the two servers.
 
 ---
 

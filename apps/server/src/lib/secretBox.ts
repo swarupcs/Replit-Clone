@@ -100,6 +100,31 @@ export function seal(plaintext: string): string {
   ].join(".");
 }
 
+/** Whether a string has the SHAPE of a sealed value, without trying to open it.
+ *
+ *  This exists to keep two failures apart that `open` throwing cannot. A column
+ *  that may hold either plaintext (written before it was encrypted) or
+ *  ciphertext has to decide which it is looking at, and "did `open` throw" is
+ *  the wrong test: it also throws for a value sealed under a DIFFERENT key.
+ *  Treating that as plaintext would hand the ciphertext back as though it were
+ *  the secret — so a key rotation would silently start serving garbage instead
+ *  of failing loudly.
+ *
+ *  So: shape says which branch, and `open` says whether the key is right.
+ */
+export function looksSealed(value: string): boolean {
+  const parts = value.split(".");
+  if (parts.length !== 4) return false;
+
+  const [version, ivPart, tagPart, bodyPart] = parts;
+  if (version !== VERSION || !ivPart || !tagPart || !bodyPart) return false;
+
+  return (
+    Buffer.from(ivPart, "base64url").length === IV_BYTES &&
+    Buffer.from(tagPart, "base64url").length === TAG_BYTES
+  );
+}
+
 /** Reverses `seal`. Throws if the value was tampered with, was sealed under a
  *  different key, or is not a sealed value at all. */
 export function open(sealed: string): string {

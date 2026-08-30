@@ -113,7 +113,7 @@ It has to come from the **shell**, not from `.env`: `config/env.ts` skips
 dotenv when `NODE_ENV=test` on purpose, so that your own `.env` — and the
 development database in it — cannot leak into a suite that writes rows.
 
-Without it: 1462 passing, 214 skipped. The paired figure for a run WITH the
+Without it: 1478 passing, 228 skipped. The paired figure for a run WITH the
 variable was last measured at 1602/20, before the scheduled-job suites were
 added; re-measure it rather than quoting it.
 (the remainder are shell-quoting round-trips that need `/bin/bash`, so they
