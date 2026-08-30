@@ -1621,6 +1621,170 @@ body {
   word-break: break-word;
 }
 
+/* Scheduled jobs.
+ *
+ *  A list of rows rather than a table: the panel is a sidebar, and the four
+ *  things worth knowing about a job -- what it is, what it runs, when it next
+ *  runs, and how it went last time -- do not line up into columns at this
+ *  width without becoming unreadable.
+ */
+.rc-jobs {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 10px 14px;
+}
+
+.rc-jobs-loading {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.rc-jobs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+}
+
+.rc-jobs-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--rc-text);
+}
+
+.rc-jobs-empty {
+  padding: 8px 0 4px;
+}
+
+.rc-jobs-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid var(--rc-border);
+  border-radius: 8px;
+  background: var(--rc-surface-2);
+}
+
+.rc-jobs-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--rc-text-subtle);
+}
+
+.rc-jobs-hint code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--rc-surface);
+  font-family: var(--rc-font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+}
+
+.rc-jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rc-job {
+  padding: 9px 10px;
+  border: 1px solid var(--rc-border);
+  border-radius: 8px;
+  background: var(--rc-surface-2);
+}
+
+.rc-job-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rc-job-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rc-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The outcome badge. A schedule's failure mode is silence, so the last
+ * outcome is given the same weight as the name -- a row that says only
+ * "enabled" looks fine for weeks while the backup exits 1 every night. */
+.rc-job-outcome {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--rc-border);
+  font-size: 10px;
+  color: var(--rc-text-subtle);
+}
+
+.rc-job-outcome[data-tone="ok"] {
+  border-color: color-mix(in srgb, var(--rc-success, #3fb950) 45%, transparent);
+  background: color-mix(in srgb, var(--rc-success, #3fb950) 12%, transparent);
+  color: var(--rc-success, #3fb950);
+}
+
+.rc-job-outcome[data-tone="bad"] {
+  border-color: color-mix(in srgb, var(--rc-danger, #ff6b6b) 45%, transparent);
+  background: color-mix(in srgb, var(--rc-danger, #ff6b6b) 12%, transparent);
+  color: var(--rc-danger, #ff6b6b);
+}
+
+.rc-job-outcome[data-tone="warn"] {
+  border-color: color-mix(in srgb, var(--rc-warning, #d29922) 45%, transparent);
+  background: color-mix(in srgb, var(--rc-warning, #d29922) 12%, transparent);
+  color: var(--rc-warning, #d29922);
+}
+
+.rc-job-command {
+  display: block;
+  margin: 5px 0 4px;
+  font-family: var(--rc-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--rc-text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rc-job-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 10.5px;
+  color: var(--rc-text-subtle);
+}
+
+.rc-job-output {
+  margin: 7px 0 0;
+  padding: 6px 8px;
+  max-height: 120px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--rc-surface);
+  font-family: var(--rc-font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--rc-text-subtle);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rc-job-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 7px;
+}
+
 /* Custom domains.
  *
  *  Set off from the deploy panel above it by a rule rather than by a card,

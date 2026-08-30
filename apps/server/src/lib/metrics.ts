@@ -58,7 +58,15 @@ export type CounterName =
   // counts names that were verified and are not any more, which is either
   // somebody's DNS breaking or a domain changing hands.
   | "domain_verified"
-  | "domain_unverified";
+  | "domain_unverified"
+  // Scheduled jobs. `jobs_skipped` is the one that says a schedule is wrong
+  // rather than a command: it counts firings that found the previous run still
+  // going, which is a job asked to run more often than it takes to run.
+  | "jobs_created"
+  | "jobs_started"
+  | "jobs_succeeded"
+  | "jobs_failed"
+  | "jobs_skipped";
 
 const counters = new Map<CounterName, number>();
 

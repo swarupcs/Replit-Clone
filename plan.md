@@ -43,22 +43,35 @@ about it:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1430 passing**, 192 skipped (86 files) |
-| the same, with `TEST_DATABASE_URL` set | **1602 passing**, 20 skipped |
-| `pnpm --filter web test` | **930 passing** (70 files) |
+| `pnpm --filter server test` | **1462 passing**, 214 skipped (88 files) |
+| the same, with `TEST_DATABASE_URL` set | not re-run on 2026-08-30 — see below |
+| `pnpm --filter web test` | **941 passing** (71 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
-The 192 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
+The 214 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
-run in CI. The DB-gated row is new to this table on 2026-08-30 and was run
-rather than quoted: the moderation work of §2.11 puts its load-bearing claims
-in a unique index, a foreign key and a transaction, and a mock cannot be wrong
-about those in any way worth trusting.
+run in CI. The DB-gated row was run rather than quoted for §2.11 and §2.12:
+both put load-bearing claims in a unique index, a foreign key and a
+transaction, and a mock cannot be wrong about those in any way worth trusting.
 
-**Done: 76 items. Open: 4.** All four are in §3.3. Three are blocked on
-something outside this repository — a cost model, an architectural route, and
-a decision about disk — and the fourth is a certificate, which is narrower
-than the item it replaced. **Nothing on this page is unblocked.**
+**It was not run for §2.13.** The Docker daemon stopped part-way through that
+work and did not come back, which takes the test database with it. So the
+scheduled-job suite — 22 cron cases that do run, plus 19 DB-gated ones that do
+not — is verified only as far as typecheck and the non-DB suites reach, and
+the migration for it was written by hand rather than generated and diffed
+against a live database. **Run the DB-gated suite before trusting §2.13.**
+
+**Done: 77 items. Open: 4.** All four are in §3.3 and none is a whole row any
+more — each is the blocked remainder of one, after the unblocked half shipped.
+A certificate, an autoscaler's cost model, a disk budget, and an architectural
+route. **Nothing on this page is unblocked.**
+
+Two rows have now come off this list by being *split* rather than unblocked
+(§2.12, §2.13), which is the pattern worth naming. Both read as blocked
+because they bundled something genuinely outside this repository with
+something that was only ever code: a certificate with the domain plumbing, an
+autoscaler's pricing decision with a cron table. Neither half needed the
+other. Before concluding a row is blocked, check whether it is one thing.
 
 Custom domains came off the list on 2026-08-30 by being split rather than by
 being unblocked (§2.12). The row said "infrastructure, not code" and that was
@@ -440,6 +453,64 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.13 Since (2026-08-30, later still)
+
+- [x] **A project can run a command on a schedule.** The half of §3.3's
+      "autoscale and scheduled jobs" that never needed a cost model. Deciding
+      how much compute to *buy* is a pricing question; deciding when to use the
+      compute that already exists is not, and the two were on one line.
+
+      Cron is parsed here rather than by a library — `lib/cron.ts` — for the
+      reason §6 decision 2 gives about the language client: a scheduler needs
+      exactly one thing from cron, "given this expression and this instant,
+      what is the next instant", and every library that answers it also brings
+      a timezone database, a job runner and an opinion about storage.
+      Everything is **UTC**, which is a promise this can keep; local time is
+      one it cannot, since a daylight-saving boundary turns "02:30 daily" into
+      a day with two of them and a day with none.
+
+      The dialect is deliberately small: `*`, `n`, `a-b`, steps, lists, and the
+      `@daily` shorthands. `L`, `W`, `#` and named months are refused rather
+      than half-implemented, because each is a dialect rather than cron and
+      accepting one silently means an expression whose meaning depends on which
+      library read it.
+
+      Four decisions carry the rest:
+
+      **The next firing is stored, not derived.** The sweeper is one indexed
+      query on `(enabled, nextRunAt)` rather than a scan that parses every
+      expression on the machine every minute.
+
+      **A missed window fires once, not once per miss.** A server down for a
+      day owes an hourly job twenty-four runs by the calendar, and running them
+      is never what anybody wanted — twenty-four backups at once, or
+      twenty-four identical emails.
+
+      **Overlap is recorded, not queued.** A firing that finds the previous run
+      still going is written `SKIPPED`. A queue would turn a job slower than
+      its own schedule into an unbounded backlog, which is the failure that
+      takes the machine with it.
+
+      **Six run states, not two.** "It did not run" and "it ran and failed" are
+      different problems with different fixes: `SKIPPED` means the schedule is
+      too frequent, `TIMED_OUT` means the budget is too small, `ERRORED` means
+      it never reached a container. A panel that collapses them into "failed"
+      sends people to read the wrong logs — which matters here more than
+      anywhere else in the product, because a schedule's failure mode is
+      silence and nobody is watching.
+
+      Refused at the moment somebody types it, not in a bill: an expression
+      that never fires (`0 0 30 2 *` is valid cron and February has no 30th),
+      one that fires more often than every five minutes, and more than ten jobs
+      per project. Writing a job is the owner's alone and not an editor's —
+      "may edit a file" and "may arrange for a command to run at 3am forever"
+      are not the same grant, and the second is the shape of a backdoor if it
+      is handed out with the first.
+
+      Autoscaling stays open in §3.3, narrowed to what it always was.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -472,9 +543,12 @@ Each is named with what blocks it, so none reads as ready to start.
       Resuming a running process is a mechanism nothing here resembles, and it
       needs a decision about how much disk a suspended project may hold. The
       last thing CodeSandbox does that this does not.
-- [ ] **Autoscale and scheduled jobs.** A different product with a different
-      cost model. Always-on compute exists in its smallest useful form; scaling
-      it is a separate decision, not an extension of that work.
+- [ ] **Autoscale.** What is left of the row that used to say "autoscale and
+      scheduled jobs", once the scheduling half shipped on 2026-08-30 (§2.13).
+      Still a different product with a different cost model: always-on compute
+      exists in its smallest useful form, and deciding how many copies of it to
+      buy in response to load is a pricing decision before it is an
+      engineering one.
 - [ ] **Debugging.** Deferred on purpose — see §6, decision 1 — and listed
       here so its absence is visible rather than forgotten. If
       debugging becomes the deciding feature, the answer is Route A

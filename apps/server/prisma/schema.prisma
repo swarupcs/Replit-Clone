@@ -186,6 +186,100 @@ enum ProjectReportStatus {
   ACTIONED
 }
 
+/// A command this project runs on a schedule, without anybody being here.
+///
+/// The unit of always-on compute that is NOT a server. A deployment answers
+/// requests and is therefore always running; a scheduled job runs for a minute
+/// and stops, which is the cheap half of "always on" and the half most people
+/// actually want — a nightly backup, an hourly fetch, a weekly digest.
+///
+/// The schedule is a five-field cron expression **in UTC**, parsed by
+/// `lib/cron.ts` rather than by a library, and `nextRunAt` is the answer to it.
+/// Storing the answer rather than re-deriving it every sweep is what lets the
+/// sweeper be one indexed query instead of a scan that parses every row.
+model ScheduledJob {
+  id String @id @default(uuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// What the owner calls it. Shown in the list and in the run history.
+  name String
+
+  /// Five cron fields, UTC. See `lib/cron.ts` for the dialect.
+  schedule String
+
+  /// Run through `/bin/sh -lc` inside the project's own container.
+  ///
+  /// A shell, deliberately: the sandbox is the security boundary here, not the
+  /// argv array. Whoever writes this already has a terminal in the same
+  /// container, so refusing them a pipe would buy nothing and cost every job
+  /// that is honestly `npm run x | tee log`.
+  command String
+
+  /// A disabled job keeps its history and its schedule and stops firing.
+  /// Deleting is the other thing, and it is not the same thing.
+  enabled Boolean @default(true)
+
+  /// When it next fires. Null when disabled, and null when the expression
+  /// parses but matches no reachable instant — `0 0 30 2 *` is valid cron and
+  /// will never happen.
+  nextRunAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  runs ScheduledRun[]
+
+  /// The sweeper's whole query: enabled jobs that are due.
+  @@index([enabled, nextRunAt])
+  @@index([projectId])
+  @@map("scheduled_jobs")
+}
+
+/// One execution of a scheduled job, kept so that "it did not run" and "it ran
+/// and failed" are different answers.
+///
+/// A row is written when the run *starts*, not when it finishes, because the
+/// interesting failure is the one that never finished — a run stuck in RUNNING
+/// is visible, where a run recorded only on completion would be indistinguishable
+/// from a run that never happened.
+model ScheduledRun {
+  id String @id @default(uuid())
+
+  jobId String
+  job   ScheduledJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  status   ScheduledRunStatus @default(RUNNING)
+  exitCode Int?
+
+  /// The tail of stdout and stderr, truncated. The tail rather than the head
+  /// because the useful line in a failed job is almost always the last one.
+  output String?
+
+  @@index([jobId, startedAt])
+  @@map("scheduled_runs")
+}
+
+enum ScheduledRunStatus {
+  RUNNING
+  SUCCEEDED
+  /// Exited non-zero.
+  FAILED
+  /// The previous run of the same job had not finished. Recorded rather than
+  /// silently passed over, so an overlapping schedule looks like the
+  /// misconfiguration it is instead of like a job that stopped firing.
+  SKIPPED
+  /// Gave up waiting. The command may still be running inside the container —
+  /// this abandons the exec, it does not kill it.
+  TIMED_OUT
+  /// Could not start at all: no container, no Docker, project has no tree.
+  ERRORED
+}
+
 model Project {
   id       String @id @default(uuid())
   name     String
@@ -247,6 +341,7 @@ model Project {
   databaseConnection ProjectDatabaseConnection?
   managedDatabase    ManagedDatabase?
   embed              Embed?
+  scheduledJobs      ScheduledJob[]
 
   @@index([ownerId])
   /// The gallery reads this, and only this.

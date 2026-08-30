@@ -85,6 +85,14 @@ import {
   getDeploymentController,
   undeployController,
 } from "../../controllers/deployController.js";
+import {
+  createJobController,
+  deleteJobController,
+  listJobsController,
+  listRunsController,
+  runJobController,
+  updateJobController,
+} from "../../controllers/scheduleController.js";
 import { getDevcontainerController } from "../../controllers/devcontainerController.js";
 import {
   createEmbedController,
@@ -226,6 +234,36 @@ router.post(
 router.delete(
   "/:projectId/deployment/domain",
   asyncHandler(releaseDomainController),
+);
+
+// Scheduled jobs. Reading is a viewer's; everything that changes what runs, or
+// runs it now, is the owner's -- see the controller for why that is not an
+// editor's.
+//
+// "Run now" carries the limiter and nothing else does, because it is the only
+// one of these that starts a container. Saving a job writes a row; pressing the
+// button is a build's worth of work on demand.
+const jobRunLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many manual runs. Try again later.",
+  },
+});
+
+router.get("/:projectId/jobs", asyncHandler(listJobsController));
+router.post("/:projectId/jobs", asyncHandler(createJobController));
+router.patch("/:projectId/jobs/:jobId", asyncHandler(updateJobController));
+router.delete("/:projectId/jobs/:jobId", asyncHandler(deleteJobController));
+router.get("/:projectId/jobs/:jobId/runs", asyncHandler(listRunsController));
+router.post(
+  "/:projectId/jobs/:jobId/run",
+  jobRunLimiter,
+  asyncHandler(runJobController),
 );
 
 // The query editor. Rate limited on the same reasoning as installs and

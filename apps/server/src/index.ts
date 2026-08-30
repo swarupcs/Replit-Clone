@@ -63,6 +63,7 @@ import {
 import { ensureEgressGateway } from "./containers/egressGateway.js";
 import { restoreServices } from "./service/deployService.js";
 import { recheckDomains } from "./service/customDomainService.js";
+import { runDueJobs } from "./service/scheduleService.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
 import { SandboxNetworkMismatch } from "./containers/sandboxNetwork.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
@@ -341,6 +342,37 @@ function startDomainRecheck(): void {
   setInterval(sweep, 60 * 60 * 1000).unref();
 }
 
+/** Starts the scheduled jobs that have come due.
+ *
+ *  Every minute, because cron's resolution is a minute and a sweeper that runs
+ *  less often than the smallest unit it schedules is a scheduler that is
+ *  quietly wrong — a job set for 03:00 firing at 03:04 is not what was asked
+ *  for, and nothing in the interface would say so.
+ *
+ *  The sweep itself is one indexed query on `(enabled, nextRunAt)` and returns
+ *  nothing almost every time it runs. That is the point of storing the next
+ *  firing rather than deriving it: a minute's tick costs a query, not a parse
+ *  of every expression on the machine.
+ *
+ *  NOT `unref`'d, unlike the hourly sweeps. A process whose only remaining
+ *  work is a scheduled job should stay alive to do it; the hourly ones are
+ *  housekeeping that can wait for the next boot.
+ */
+function startJobSweeper(): void {
+  const sweep = (): void => {
+    void runDueJobs()
+      .then(({ started }) => {
+        if (started > 0) logger.info("scheduled jobs started", { started });
+      })
+      .catch((error: unknown) => {
+        logger.error("could not sweep scheduled jobs", error);
+      });
+  };
+
+  sweep();
+  setInterval(sweep, 60 * 1000);
+}
+
 /** How long a Docker call at boot may take before we give up on it.
  *
  *  The daemon can accept a connection and then never answer -- it is
@@ -442,6 +474,7 @@ async function start(): Promise<void> {
   startIdleReaper();
   startTokenPrune();
   startDomainRecheck();
+  startJobSweeper();
   startAccessWatch();
 
   // A `tsx watch` restart can race the previous process releasing the port on
