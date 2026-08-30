@@ -4,6 +4,10 @@ import rateLimit from "express-rate-limit";
 import { createPublishLimiter } from "../../utils/publishBudget.js";
 import { reportProjectController } from "../../controllers/reportController.js";
 import {
+  appealController,
+  projectModerationController,
+} from "../../controllers/moderationController.js";
+import {
   createProjectController,
   deleteProjectController,
   duplicateProjectController,
@@ -387,6 +391,16 @@ router.post(
   "/:projectId/report",
   reportLimiter,
   asyncHandler(reportProjectController),
+);
+
+// The other side of moderation: what was done to this project, and the owner's
+// answer to it. Both are the owner's -- a decision taken against somebody that
+// only the decider can read is not a record, it is a file.
+router.get("/:projectId/moderation", asyncHandler(projectModerationController));
+router.post(
+  "/:projectId/appeal",
+  reportLimiter,
+  asyncHandler(appealController),
 );
 router.get("/:projectId/export", asyncHandler(exportProjectController));
 router.get("/:projectId/env", asyncHandler(getProjectEnvController));

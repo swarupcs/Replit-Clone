@@ -200,11 +200,24 @@ export async function setEnvVars(
  *  opens would keep its secrets in the clear forever, and those are precisely
  *  the projects nobody is watching.
  */
-export async function backfillSealedEnvVars(): Promise<{ sealed: number }> {
+export async function backfillSealedEnvVars(
+  projectIds?: string[],
+): Promise<{ sealed: number }> {
   if (!isSecretBoxConfigured()) return { sealed: 0 };
 
   const rows = await prisma.project.findMany({
-    where: { NOT: { envVars: { equals: {} } } },
+    where: {
+      NOT: { envVars: { equals: {} } },
+      // Boot passes nothing and sweeps everything, which is the point. The
+      // argument exists because a sweep over every row in the database is also
+      // the one thing a test cannot do politely: the suite covering this ran
+      // against a shared database and sealed OTHER suites' projects under a key
+      // only its own worker had, so their variables became unreadable and they
+      // failed somewhere else entirely. It is useful operationally too — a
+      // backfill that can be aimed at one project is what you want when one
+      // project is the problem.
+      ...(projectIds ? { id: { in: projectIds } } : {}),
+    },
     select: { id: true, envVars: true },
   });
 

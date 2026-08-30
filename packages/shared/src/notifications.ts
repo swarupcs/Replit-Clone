@@ -25,7 +25,9 @@ export type NotificationKind =
   /** ...and has started working again. News for the same reason. */
   | "JOB_RECOVERED"
   /** A moderator made this project private. */
-  | "PROJECT_UNPUBLISHED";
+  | "PROJECT_UNPUBLISHED"
+  /** ...and lifted it again, which the same person has to hear. */
+  | "PROJECT_REINSTATED";
 
 export interface Notification {
   id: string;

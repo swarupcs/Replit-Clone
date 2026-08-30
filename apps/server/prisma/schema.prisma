@@ -305,6 +305,8 @@ model Project {
   /// guarantee.
   takenDownAt DateTime?
 
+  moderationActions ModerationAction[]
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   /// Last time a socket or terminal attached; drives the idle container reaper.
@@ -664,4 +666,66 @@ enum NotificationKind {
   /// against a user rather than for them, which is exactly why it must not be
   /// something they discover by finding their own project missing.
   PROJECT_UNPUBLISHED
+
+  /// ...and the answer to an appeal, which is the same argument: the person a
+  /// decision was made against is the person who has to hear it reversed.
+  PROJECT_REINSTATED
+}
+
+/// Everything that has happened to one project's moderation state, in order.
+///
+/// The queue records the report and its status. It did not record who acted,
+/// when, or why — and unpublishing somebody's project is the one power in this
+/// system exercised AGAINST a user rather than for them. A moderator could not
+/// demonstrate they were fair and could not be shown to have been unfair.
+///
+/// The owner's appeal is in the same table as the operator's decisions, rather
+/// than in one of its own. It is the same story and it only makes sense read
+/// in order: taken down, appealed, reinstated. Two tables would be two halves
+/// of one conversation.
+model ModerationAction {
+  id String @id @default(uuid())
+
+  /// SetNull, not Cascade — for the reason `ProjectReport.reporterId` gives
+  /// about its author. An audit trail that vanishes with its subject can be
+  /// erased by deleting the subject, which is exactly the move it exists to
+  /// make visible. `projectName` is copied for the same reason.
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectName String
+
+  /// Which report occasioned this, when one did. A reinstatement follows an
+  /// appeal rather than a report, and an appeal follows neither.
+  reportId String?
+
+  action ModerationActionType
+
+  /// The email of whoever did it: an operator from `ADMIN_EMAILS` for a
+  /// decision, the owner for an appeal. Stored rather than joined, because the
+  /// record has to survive the account and because `ADMIN_EMAILS` is config —
+  /// an operator removed from that list still did what they did.
+  actor String
+
+  /// Why. Optional for a decision and required by the API for a reinstatement,
+  /// because "we put it back" without a reason is the half of the record that
+  /// makes the other half unfalsifiable.
+  reason String?
+
+  createdAt DateTime @default(now())
+
+  /// The trail for one project, oldest first, is the whole read pattern.
+  @@index([projectId, createdAt])
+  @@map("moderation_actions")
+}
+
+enum ModerationActionType {
+  /// A moderator made the project private and took it down.
+  ACTIONED
+  /// A moderator looked and found nothing wrong.
+  DISMISSED
+  /// The owner asked for the takedown to be looked at again.
+  APPEALED
+  /// A moderator lifted a takedown. Restores the owner's CONTROL, not the
+  /// project's visibility: what to do next is theirs to decide again.
+  REINSTATED
 }

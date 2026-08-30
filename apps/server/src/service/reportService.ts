@@ -6,6 +6,7 @@ import { notify, notifyAdmins } from "./notificationService.js";
 import { webUrl } from "../lib/mailer.js";
 import { unpublish } from "./deployService.js";
 import { revokeEmbed } from "./embedService.js";
+import { recordModeration } from "./moderationLogService.js";
 import type {
   ProjectReportReason,
   ProjectReportStatus,
@@ -228,7 +229,14 @@ export async function reviewReport(input: {
 }): Promise<ReportSummary> {
   const report = await prisma.projectReport.findUnique({
     where: { id: input.reportId },
-    select: { id: true, projectId: true, status: true },
+    select: {
+      id: true,
+      projectId: true,
+      status: true,
+      // Copied into the trail, so the record still names the project after it
+      // is deleted -- see `ModerationAction.projectName`.
+      project: { select: { name: true } },
+    },
   });
 
   if (!report) throw new NotFoundError("No such report.", "REPORT_NOT_FOUND");
@@ -270,6 +278,18 @@ export async function reviewReport(input: {
         },
       });
 
+      // In the SAME transaction as the decision. An audit log that can be
+      // missing the entry for the action it describes is not one, and the gap
+      // would open exactly when a write failed -- which is when somebody most
+      // wants to know what happened.
+      await recordModeration(tx, {
+        projectId: report.projectId,
+        projectName: report.project.name,
+        reportId: report.id,
+        action: "ACTIONED",
+        actor: input.reviewerEmail,
+      });
+
       return;
     }
 
@@ -283,6 +303,18 @@ export async function reviewReport(input: {
         reviewedAt,
         reviewedBy: input.reviewerEmail,
       },
+    });
+
+    // Recorded as well as an ACTIONED. A moderator who looks and finds nothing
+    // has done something worth being able to show they did -- and a project
+    // reported and cleared ten times reads differently from one never reported
+    // only if the clearings are written down too.
+    await recordModeration(tx, {
+      projectId: report.projectId,
+      projectName: report.project.name,
+      reportId: report.id,
+      action: "DISMISSED",
+      actor: input.reviewerEmail,
     });
   });
 

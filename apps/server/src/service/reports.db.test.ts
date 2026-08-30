@@ -30,6 +30,21 @@ describe.skipIf(!TEST_DATABASE_URL)("reporting a public project", () => {
     reports = await import("./reportService.js");
   });
 
+  /** The queue, restricted to this suite's own rows.
+   *
+   *  `listReports` is global, as the operator's queue has to be — so asserting
+   *  on its length couples this file to whatever else is running. Every owner
+   *  here is named through `scope`, so its suffix is the filter. Without this
+   *  the suite passes or fails depending on which other DB file vitest happens
+   *  to schedule alongside it.
+   */
+  const queue = async (status: Parameters<typeof reports.listReports>[0]) => {
+    const rows = await reports.listReports(status);
+    return rows.filter((row) =>
+      row.ownerEmail.endsWith(scope.where.email.endsWith),
+    );
+  };
+
   beforeEach(async () => {
     const owner = await prisma.user.create({
       data: { email: scope.email("owner"), passwordHash: "x" },
@@ -173,7 +188,7 @@ describe.skipIf(!TEST_DATABASE_URL)("reporting a public project", () => {
       expect(refused[0]).toMatchObject({
         reason: { statusCode: 409, code: "ALREADY_REPORTED" },
       });
-      expect(await reports.listReports("OPEN")).toHaveLength(1);
+      expect(await queue("OPEN")).toHaveLength(1);
     });
 
     it("still takes a second person's", async () => {
@@ -192,7 +207,7 @@ describe.skipIf(!TEST_DATABASE_URL)("reporting a public project", () => {
         reason: "MALWARE",
       });
 
-      expect(await reports.listReports("OPEN")).toHaveLength(2);
+      expect(await queue("OPEN")).toHaveLength(2);
     });
 
     it("refuses a description longer than the cap", async () => {
@@ -215,7 +230,7 @@ describe.skipIf(!TEST_DATABASE_URL)("reporting a public project", () => {
         reason: "SECRETS",
       });
 
-      const [entry] = await reports.listReports("OPEN");
+      const [entry] = await queue("OPEN");
       expect(entry?.projectName).toBe("Published");
       expect(entry?.ownerEmail).toContain("owner-");
       expect(entry?.reporterEmail).toContain("stranger-");
@@ -317,8 +332,8 @@ describe.skipIf(!TEST_DATABASE_URL)("reporting a public project", () => {
         reviewerEmail: "ops@example.com",
       });
 
-      expect(await reports.listReports("OPEN")).toHaveLength(0);
-      expect(await reports.listReports("ACTIONED")).toHaveLength(2);
+      expect(await queue("OPEN")).toHaveLength(0);
+      expect(await queue("ACTIONED")).toHaveLength(2);
     });
 
     /** A dismissal speaks only for the report it was made about. Two people
@@ -342,7 +357,7 @@ describe.skipIf(!TEST_DATABASE_URL)("reporting a public project", () => {
         reviewerEmail: "ops@example.com",
       });
 
-      expect(await reports.listReports("OPEN")).toHaveLength(1);
+      expect(await queue("OPEN")).toHaveLength(1);
     });
 
     /** The bulk close is scoped to one project, and that scope is the only
@@ -372,7 +387,7 @@ describe.skipIf(!TEST_DATABASE_URL)("reporting a public project", () => {
         reviewerEmail: "ops@example.com",
       });
 
-      const open = await reports.listReports("OPEN");
+      const open = await queue("OPEN");
       expect(open).toHaveLength(1);
       expect(open[0]?.projectId).toBe(second.id);
 

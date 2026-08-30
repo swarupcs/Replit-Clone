@@ -138,7 +138,11 @@ describe.skipIf(!TEST_DATABASE_URL)("environment variables at rest", () => {
     it("seals what was already in the clear", async () => {
       await writePlaintext({ STRIPE_KEY: "sk_live_hunter2" });
 
-      expect(await envService.backfillSealedEnvVars()).toMatchObject({
+      // Aimed at this project. Unaimed it sweeps every row in the database,
+      // which against a shared test database means sealing other suites' rows
+      // under a key only this worker has -- they then fail somewhere else
+      // entirely, which is a long way to walk back from.
+      expect(await envService.backfillSealedEnvVars([projectId])).toMatchObject({
         sealed: 1,
       });
       expect(JSON.stringify(await stored())).not.toContain("sk_live_hunter2");
@@ -149,11 +153,15 @@ describe.skipIf(!TEST_DATABASE_URL)("environment variables at rest", () => {
 
     it("is idempotent", async () => {
       await writePlaintext({ A: "1" });
-      await envService.backfillSealedEnvVars();
+      await envService.backfillSealedEnvVars([projectId]);
+      const afterFirst = await stored();
 
       // Nothing left to do, and in particular nothing double-sealed: a second
       // pass that re-sealed would make the value unreadable in one step.
-      expect(await envService.backfillSealedEnvVars()).toMatchObject({ sealed: 0 });
+      expect(await envService.backfillSealedEnvVars([projectId])).toMatchObject({
+        sealed: 0,
+      });
+      expect(await stored()).toEqual(afterFirst);
       expect(await envService.getEnvVars(projectId)).toMatchObject({ A: "1" });
     });
 
@@ -163,7 +171,9 @@ describe.skipIf(!TEST_DATABASE_URL)("environment variables at rest", () => {
       await writePlaintext({ OLD: "plain", NEW: seal("already") });
       const before = (await stored())["NEW"];
 
-      expect(await envService.backfillSealedEnvVars()).toMatchObject({ sealed: 1 });
+      expect(await envService.backfillSealedEnvVars([projectId])).toMatchObject({
+        sealed: 1,
+      });
 
       expect((await stored())["NEW"]).toBe(before);
       expect(await envService.getEnvVars(projectId)).toMatchObject({
@@ -178,12 +188,14 @@ describe.skipIf(!TEST_DATABASE_URL)("environment variables at rest", () => {
 
       // Sealing under no key is not possible, and pretending otherwise would
       // throw at boot on every server that has not set one.
-      expect(await envService.backfillSealedEnvVars()).toMatchObject({ sealed: 0 });
+      expect(await envService.backfillSealedEnvVars([projectId])).toMatchObject({ sealed: 0 });
       expect(await stored()).toEqual({ A: "1" });
     });
 
     it("leaves a project with no variables alone", async () => {
-      expect(await envService.backfillSealedEnvVars()).toMatchObject({ sealed: 0 });
+      expect(await envService.backfillSealedEnvVars([projectId])).toMatchObject({
+        sealed: 0,
+      });
       expect(await stored()).toEqual({});
     });
   });

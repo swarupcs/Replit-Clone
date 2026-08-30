@@ -72,7 +72,13 @@ export type CounterName =
   // between them is people who have to open the app to find out, which is the
   // condition the feature was built to end.
   | "notifications_created"
-  | "notifications_mailed";
+  | "notifications_mailed"
+  // Moderation, after the fact. `moderation_appealed` climbing while
+  // `moderation_reinstated` stays flat is the number that says appeals are
+  // being filed and not read -- the same shape as a report queue nobody
+  // reviews, one step further along.
+  | "moderation_appealed"
+  | "moderation_reinstated";
 
 const counters = new Map<CounterName, number>();
 

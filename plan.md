@@ -44,7 +44,7 @@ day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1723 passing**, 20 skipped (107 files) |
+| `pnpm --filter server test` | **1735 passing**, 20 skipped (108 files) |
 | the same, with `TEST_DATABASE_URL` set | **run 2026-08-30 night — green** |
 | `pnpm --filter web test` | **951 passing** (72 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
@@ -74,13 +74,21 @@ With those fixed the whole suite is green against a live database, which also
 means §2.13's hand-written migration has now been applied and exercised rather
 than only read.
 
-There is also a flake worth knowing about, since it will otherwise be
-mistaken for a regression: under load the web suite fails 9–10 of its 941 at
-the default 5s timeout, always the *first* test in a file and always passing
-in isolation. Verified as environmental by running it on a clean checkout,
-which failed the same way. `--testTimeout=20000` is green at 71/71.
+Two flakes are worth knowing about, since both will otherwise be mistaken for
+regressions:
 
-**Done: 84 items. Open: 8 — four blocked, four not.**
+- Under load the **web** suite fails 9–10 at the default 5s timeout, always
+  the *first* test in a file and always passing in isolation. Verified as
+  environmental by running it on a clean checkout, which failed the same way.
+  `--testTimeout=20000` is green at 72/72.
+- `refreshTokenService.test.ts` — "lets exactly one of several concurrent
+  refreshes claim the row" — fails under load roughly one run in three, with
+  "Session was reused and has been revoked". It is timing against a reuse
+  grace window. Passes 3/3 in isolation, and the file has not been touched
+  since well before it was first seen. **Not investigated**, and recorded here
+  rather than left to be rediscovered.
+
+**Done: 87 items. Open: 6 — four blocked, two not.**
 
 The four blocked ones are §3.3, and none is a whole row any more: each is the
 blocked remainder of one, after the unblocked half shipped. A certificate, an
@@ -720,6 +728,73 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.17 Since (2026-08-31)
+
+- [x] **Moderation keeps a record, and a takedown can be appealed.** Both in
+      one table and one commit, because they are one conversation and only
+      read in order: taken down, appealed, reinstated. Two tables would have
+      been two halves of it.
+
+      The trail records who acted, on which report, when, and why — for
+      dismissals as well as takedowns, since a moderator who looks and finds
+      nothing has done something worth being able to show they did. **The
+      entry is written in the same transaction as the decision.** An audit log
+      that can be missing the entry for the action it exists to describe is
+      not one, and the gap would open exactly when a write failed, which is
+      when somebody most wants to know what happened.
+
+      `projectId` is **SetNull, not Cascade**, and the project's name is
+      copied alongside it. A trail that vanishes with its subject can be
+      erased by deleting the subject, which is precisely the move it exists to
+      make visible. Same reasoning `ProjectReport.reporterId` already used
+      about its author.
+
+      The appeal exists because §2.16 created the need for it. Making the
+      takedown stick removed the property §6 decision 11 leaned on when it
+      argued the moderation authority was safe *because* its subject could
+      undo a mistake — a right trade that left an unreviewed power with no
+      route back. One appeal per takedown, compared against the current
+      `takenDownAt` rather than "has ever appealed": a project taken down, put
+      back, and taken down again is a new case the owner is entitled to
+      answer. The limit is the report queue's scarce-resource argument again —
+      an owner who can file a hundred can bury everybody else's.
+
+      **Reinstating restores the owner's control, not the project's
+      visibility.** It clears `takenDownAt` and stops; the project stays
+      private and what to do with it is theirs to decide again. It does not
+      bring a site back either, because the files and container were removed.
+      Both are said in the notification rather than left to be discovered. A
+      reason is *required* to reinstate, unlike on a decision: "we put it
+      back" with no account of why is the half of the record that makes the
+      other half unfalsifiable, and of every action here it is the one an
+      operator has most reason to leave unexplained.
+
+- [x] **Three DB suites were asserting on global queries.** Not defects in
+      shipped code, but tests that passed for the wrong reason — and one of
+      them was actively corrupting its neighbours.
+
+      `dbScope` stopped these suites truncating each other's rows; it does not
+      stop them *reading* each other's. `listReports` and the backfill's total
+      are both global by design, so the assertions on them passed or failed
+      depending on which other file vitest happened to schedule alongside.
+      Adding §2.17's suite changed the scheduling and three failures appeared
+      in files nobody had touched.
+
+      The backfill was the interesting one. It sweeps every project in the
+      database — correct at boot, and the one thing a test cannot do politely:
+      it sealed other suites' rows under a key only its own worker had, so
+      their variables became unreadable and *they* failed, in a file with no
+      connection to encryption. `backfillSealedEnvVars` now takes an optional
+      list of projects to aim at. Boot still passes nothing and sweeps
+      everything, and aiming it at one project is a thing an operator wants
+      anyway.
+
+      **Verified by running the suite three times rather than once.** Once is
+      not evidence about a race; the first green run here was followed by a
+      red one.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -775,26 +850,10 @@ Listed in the order §4 recommends.
 
 - [x] **Nobody is ever told anything.** Shipped 2026-08-30 — see §2.15.
 
-- [ ] **Moderation has no audit log.** §2.11 gives a moderator the power to
-      unpublish somebody else's project. The schema records the report and its
-      status; it does not record who acted on it, when, or why. This is the
-      one power in the system exercised *against* a user rather than for them,
-      and it is the only one with no trail: a moderator cannot demonstrate
-      they were fair, and cannot be shown to have been unfair.
+- [x] **Moderation has no audit log.** Shipped 2026-08-30 — see §2.17.
 
-- [ ] **A taken-down project has no appeal.** Created by §2.16 rather than
-      discovered: making the takedown stick removed the property that
-      §6 decision 11 leaned on when it argued the moderation authority was
-      safe *because* its subject could undo a mistake. That was the right
-      trade — a reversible takedown is not one — but it leaves an unreviewed
-      power with no route back. The owner is told what happened (§2.15) and
-      can do nothing about it.
-
-      Nothing here is blocked; it is a decision about who hears an appeal,
-      and `ADMIN_EMAILS` already names them. The smallest honest version is a
-      reply address in the notification and a way for an operator to clear
-      `takenDownAt`. Worth doing before this is deployed anywhere with real
-      users, because the cost of a wrong takedown is now permanent.
+- [x] **A taken-down project has no appeal.** Shipped 2026-08-30 — see
+      §2.17, in the same work as the trail, because they are one conversation.
 
 - [ ] **The test command has no panel.** A project can run, deploy, and now
       schedule — but the command people type most often has nowhere to show
@@ -907,13 +966,10 @@ whoever owns the data, not to a cleanup script.
     needed no list, only reading `reviewReport` against what
     `setProjectVisibility` says about itself.
 
-14. **§3.2 the moderation audit log.** Next, and more pointed after §2.16:
-    the takedown now has permanent consequences and still records only
-    *that* it happened, not who decided or why.
-15. **§3.2 the appeal**, which §2.16 created and which wants doing before any
-    deployment with real users.
-16. **§3.2 the test panel**, then **deployment history**, which wants a
-    migration and so goes last.
+14. ~~**§3.2 the moderation audit log, and the appeal.**~~ Done 2026-08-31
+    (§2.17), together, because they are one conversation.
+15. **§3.2 the test panel.** Next.
+16. **§3.2 deployment history**, which wants a migration and so goes last.
 
 Everything still in §3.3 is blocked on a decision or on infrastructure and
 should not be started until that decision is made. **The four items in §3.2

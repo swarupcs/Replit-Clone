@@ -5,13 +5,23 @@ import {
   listReportsController,
   reviewReportController,
 } from "../../controllers/reportController.js";
+import {
+  recentModerationController,
+  reinstateController,
+} from "../../controllers/moderationController.js";
 
 /** The operator's surface. Small on purpose.
  *
- *  Two routes, and the only authority either of them grants is to take a
- *  project out of the gallery. An operator here cannot delete a project, edit
- *  one, or touch an account — the smallest power that resolves a complaint,
- *  and the one whose mistakes the person they were made against can undo.
+ *  The only authority here is over whether a project is public. An operator
+ *  cannot delete a project, edit one, or touch an account — the smallest power
+ *  that resolves a complaint.
+ *
+ *  This used to add "and the one whose mistakes the person they were made
+ *  against can undo". That stopped being true when the takedown was made to
+ *  stick (§2.16): the owner cannot publish again. So the mistakes are undone
+ *  from this side instead, by `reinstate`, and every decision is now written
+ *  down — an unreviewed power is survivable when it leaves a record and has a
+ *  route back, and was not before.
  *
  *  Mounted under `requireAuth` by the parent router, then `requireAdmin` here.
  *  Both, in that order: `requireAdmin` reads the auth context and a router
@@ -24,5 +34,11 @@ router.use(requireAdmin);
 
 router.get("/reports", asyncHandler(listReportsController));
 router.post("/reports/:reportId/review", asyncHandler(reviewReportController));
+
+router.get("/moderation", asyncHandler(recentModerationController));
+router.post(
+  "/projects/:projectId/reinstate",
+  asyncHandler(reinstateController),
+);
 
 export default router;
