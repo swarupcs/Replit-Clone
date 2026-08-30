@@ -62,6 +62,7 @@ import {
 } from "./containers/containerManager.js";
 import { ensureEgressGateway } from "./containers/egressGateway.js";
 import { restoreServices } from "./service/deployService.js";
+import { recheckDomains } from "./service/customDomainService.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
 import { SandboxNetworkMismatch } from "./containers/sandboxNetwork.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
@@ -314,6 +315,32 @@ function startTokenPrune(): void {
   setInterval(sweep, 60 * 60 * 1000).unref();
 }
 
+/** Re-checks the DNS record behind every verified custom domain.
+ *
+ *  A verification that happened once and is believed forever means somebody
+ *  who sold their domain keeps an address they no longer control, and the
+ *  buyer's visitors land on the seller's code. `recheckDomains` only looks at
+ *  rows whose last check has aged out, so this interval is how *often it can*
+ *  notice rather than how often it queries anything.
+ *
+ *  Hourly against a daily staleness window, for the same reason the token
+ *  prune is: it keeps the first sweep after a restart soon.
+ */
+function startDomainRecheck(): void {
+  const sweep = (): void => {
+    void recheckDomains()
+      .then(({ checked, cleared }) => {
+        if (checked > 0) logger.info("custom domains re-checked", { checked, cleared });
+      })
+      .catch((error: unknown) => {
+        logger.error("could not re-check custom domains", error);
+      });
+  };
+
+  sweep();
+  setInterval(sweep, 60 * 60 * 1000).unref();
+}
+
 /** How long a Docker call at boot may take before we give up on it.
  *
  *  The daemon can accept a connection and then never answer -- it is
@@ -414,6 +441,7 @@ async function start(): Promise<void> {
   });
   startIdleReaper();
   startTokenPrune();
+  startDomainRecheck();
   startAccessWatch();
 
   // A `tsx watch` restart can race the previous process releasing the port on

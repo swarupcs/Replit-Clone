@@ -78,7 +78,10 @@ import {
   removePackageController,
 } from "../../controllers/packageController.js";
 import {
+  claimDomainController,
   deployController,
+  releaseDomainController,
+  verifyDomainController,
   getDeploymentController,
   undeployController,
 } from "../../controllers/deployController.js";
@@ -198,6 +201,32 @@ router.post(
   asyncHandler(deployController),
 );
 router.delete("/:projectId/deployment", asyncHandler(undeployController));
+
+// Verification is rate limited and claiming is not. Claiming writes one row
+// the owner already owns; verifying makes an outbound DNS query per press,
+// which is somebody else's resolver being asked a question on our behalf.
+const domainVerifyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many verification attempts. Wait a minute and try again.",
+  },
+});
+
+router.put("/:projectId/deployment/domain", asyncHandler(claimDomainController));
+router.post(
+  "/:projectId/deployment/domain/verify",
+  domainVerifyLimiter,
+  asyncHandler(verifyDomainController),
+);
+router.delete(
+  "/:projectId/deployment/domain",
+  asyncHandler(releaseDomainController),
+);
 
 // The query editor. Rate limited on the same reasoning as installs and
 // deploys: each request holds a database connection open for as long as the

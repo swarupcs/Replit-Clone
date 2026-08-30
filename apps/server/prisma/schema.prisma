@@ -344,6 +344,29 @@ model Deployment {
   /// anything is published to it.
   deployedAt DateTime?
 
+  /// A hostname the owner claims to control, pointed here with a CNAME.
+  ///
+  /// Unique across every deployment, because it is an address and two sites
+  /// cannot answer at one. Unlike `subdomain` this is user-supplied, which is
+  /// the whole reason for the three columns below it: the server has no reason
+  /// to believe a claim about a name it did not generate.
+  customDomain String? @unique
+
+  /// The value the owner must publish in a TXT record to prove the claim.
+  /// Generated when the domain is claimed and regenerated on every re-claim,
+  /// so a token seen once cannot be replayed against a later claim.
+  domainToken String?
+
+  /// When the TXT record was last SEEN. Null means unverified, and an
+  /// unverified domain is never served -- a claim is not an address.
+  domainVerifiedAt DateTime?
+
+  /// When the record was last LOOKED FOR, whatever the answer. Distinct from
+  /// the line above because that is exactly the difference between "we have
+  /// never checked" and "we checked and it was gone", and a re-check that
+  /// cannot tell those apart cannot safely act on either.
+  domainCheckedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

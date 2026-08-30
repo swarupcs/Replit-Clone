@@ -1621,6 +1621,95 @@ body {
   word-break: break-word;
 }
 
+/* Custom domains.
+ *
+ *  Set off from the deploy panel above it by a rule rather than by a card,
+ *  because it is the same subject continued -- where this project answers --
+ *  and boxing it would read as a second, unrelated feature.
+ */
+.rc-domain {
+  margin: 2px 0 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rc-border);
+}
+
+.rc-domain-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--rc-text);
+}
+
+.rc-domain-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--rc-border);
+  background: var(--rc-surface-2);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--rc-text-subtle);
+}
+
+.rc-domain-badge.is-live {
+  border-color: color-mix(in srgb, var(--rc-success, #3fb950) 45%, transparent);
+  background: color-mix(in srgb, var(--rc-success, #3fb950) 12%, transparent);
+  color: var(--rc-success, #3fb950);
+}
+
+.rc-domain-name {
+  padding: 4px 2px 2px;
+  font-family: var(--rc-font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--rc-text);
+  overflow-wrap: anywhere;
+}
+
+.rc-domain-name a {
+  color: var(--rc-text);
+  text-decoration: none;
+}
+
+.rc-domain-name a:hover {
+  color: var(--rc-accent);
+  text-decoration: underline;
+}
+
+/* The record to publish. A grid rather than a flex row so the three labels
+ * line up their values, which is what makes it read as a record to copy out
+ * rather than as three sentences. */
+.rc-domain-record {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px;
+  font-size: 11px;
+}
+
+.rc-domain-record-label {
+  color: var(--rc-text-subtle);
+}
+
+.rc-domain-record code {
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--rc-surface-2);
+  font-family: var(--rc-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--rc-text);
+  /* The token is 32 characters and the panel is narrow. Truncated with the
+   * full value on the element's title and behind a copy button, so nothing
+   * depends on reading it off the screen. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Reduced motion.
  *
  *  A blanket rule rather than a per-rule audit, because the failure mode of

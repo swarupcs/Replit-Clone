@@ -53,7 +53,12 @@ export type CounterName =
   // report mechanism with no reviewer actually has.
   | "project_reported"
   | "report_actioned"
-  | "report_dismissed";
+  | "report_dismissed"
+  // Custom domains. `domain_unverified` climbing is the interesting one: it
+  // counts names that were verified and are not any more, which is either
+  // somebody's DNS breaking or a domain changing hands.
+  | "domain_verified"
+  | "domain_unverified";
 
 const counters = new Map<CounterName, number>();
 

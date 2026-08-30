@@ -43,21 +43,30 @@ about it:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1417 passing**, 169 skipped (85 files) |
-| the same, with `TEST_DATABASE_URL` set | **1566 passing**, 20 skipped |
-| `pnpm --filter web test` | **921 passing** (69 files) |
+| `pnpm --filter server test` | **1430 passing**, 192 skipped (86 files) |
+| the same, with `TEST_DATABASE_URL` set | **1602 passing**, 20 skipped |
+| `pnpm --filter web test` | **930 passing** (70 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
-The 169 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
+The 192 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
 run in CI. The DB-gated row is new to this table on 2026-08-30 and was run
 rather than quoted: the moderation work of §2.11 puts its load-bearing claims
 in a unique index, a foreign key and a transaction, and a mock cannot be wrong
 about those in any way worth trusting.
 
-**Done: 75 items. Open: 4.** All four are in §3.3, and each is blocked on
-something outside this repository — a DNS record, a certificate, a cost model,
-or an architectural route. **Nothing on this page is unblocked.**
+**Done: 76 items. Open: 4.** All four are in §3.3. Three are blocked on
+something outside this repository — a cost model, an architectural route, and
+a decision about disk — and the fourth is a certificate, which is narrower
+than the item it replaced. **Nothing on this page is unblocked.**
+
+Custom domains came off the list on 2026-08-30 by being split rather than by
+being unblocked (§2.12). The row said "infrastructure, not code" and that was
+half right: the DNS half is the owner's and the certificate half is the
+operator's, but claiming a name, proving it, serving it and re-checking it are
+all code, and none of them needed the certificate to exist. Splitting a row
+that bundles a blocked half with an unblocked one is worth doing before
+concluding a row is blocked.
 
 Three items have left the open list since the 2026-08-29 audit, and they did
 not leave it the same way. Two were never blocked: the dangling section
@@ -383,6 +392,54 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.12 Since (2026-08-30, later)
+
+- [x] **A project can be served at a domain its owner controls.** The code
+      half of §3.3's first row, which turned out to be most of it.
+
+      Every other address in this product is generated, and therefore trusted
+      by construction — the server made the name up, so nobody else has a
+      claim on it. A custom domain inverts that: the user supplies a name the
+      server has no reason to believe they own, and a server that believes
+      them anyway will serve one person's code at another person's address.
+      That is not a bug in a deployment, it is a phishing site with a valid
+      certificate.
+
+      So the whole design is one sentence: **a claim is not an address.** The
+      domain is stored the moment it is claimed, because the TXT record
+      somebody has to publish cannot be shown to them before the server has
+      generated it — and it is served only once that record has been seen.
+      `resolveSite` reads `domainVerifiedAt`, never `customDomain` alone, and
+      the check is in the WHERE clause rather than in a branch above it so
+      that there is no version of the function that forgets.
+
+      Claimed names are refused if they belong to the platform: the API
+      hostname, the web origin, and anything under the deploy origin's suffix,
+      which is handed out as generated subdomains on the assumption that
+      nothing else can occupy it. Two projects cannot hold one name, and that
+      is the unique index rather than a read before the write — the same race
+      as the report queue, with the same 409 rather than a 500 for the loser.
+
+      Re-claiming a domain rolls the token and clears the verification.
+      Otherwise re-claiming is a way to move a verified name onto a new token
+      without proving anything about it.
+
+      **Verification is re-checked daily, and this is the part that is easy to
+      leave out.** A domain can be sold. A verification believed forever means
+      the seller keeps an address they no longer control and the buyer's
+      visitors land on the seller's code. The sweep clears the verification
+      when the record is gone — the site stops answering at that name — but it
+      keeps the claim and the token, so an owner who broke their own DNS fixes
+      the record and presses verify rather than discovering the platform gave
+      their name away.
+
+      What is **not** here is a certificate. Over plain HTTP a verified domain
+      works the moment DNS points at the deploy listener. Over HTTPS the
+      operator needs a certificate for that name, which is ACME's job and a
+      deployment decision — §3.3 now says that and only that.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -401,10 +458,15 @@ Empty. Every item that was here on 2026-08-29 is now in §2.8.
 
 Each is named with what blocks it, so none reads as ready to start.
 
-- [ ] **Custom domains for deployments.** Needs a wildcard DNS record and, over
-      HTTPS, a wildcard certificate. Invisible in development because browsers
-      resolve every `*.localhost` to loopback themselves; absolute in
-      production. Infrastructure, not code.
+- [ ] **Certificates for custom domains.** What is left of the row that used
+      to say "custom domains", once the code half shipped on 2026-08-30
+      (§2.12). A verified domain is served over plain HTTP today. Over HTTPS
+      each one needs a certificate for its own name — not the wildcard that
+      covers the generated subdomains — which means ACME, an account key, a
+      challenge the deploy listener can answer, and renewal. That is a
+      deployment decision about what this platform is allowed to talk to and
+      where its keys live, and it is genuinely infrastructure in a way the
+      rest of that row was not.
 - [ ] **Process snapshots.** `warmStart.ts` skips the redundant install, so what
       remains is the dev server process, which still dies with its container.
       Resuming a running process is a mechanism nothing here resembles, and it

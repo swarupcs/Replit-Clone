@@ -29,6 +29,7 @@ import {
 import { getEnvVars, toDockerEnv } from "./projectEnvService.js";
 import { getTemplate, type StaticBuild } from "../templates/registry.js";
 import { assertValidProjectId, projectRoot } from "../utils/projectPaths.js";
+import { resolveCustomDomain, toCustomDomain } from "./customDomainService.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.js";
 
 /** Building a project and publishing the result to a public origin.
@@ -197,6 +198,10 @@ interface DeploymentRow {
   log: string;
   error: string | null;
   deployedAt: Date | null;
+  customDomain: string | null;
+  domainToken: string | null;
+  domainVerifiedAt: Date | null;
+  domainCheckedAt: Date | null;
 }
 
 const KIND_OUT = {
@@ -226,6 +231,7 @@ function toDeployment(row: DeploymentRow): Deployment {
     log: row.log,
     error: row.error,
     deployedAt: row.deployedAt?.toISOString() ?? null,
+    customDomain: toCustomDomain(row),
   };
 }
 
@@ -967,7 +973,12 @@ export interface ResolvedSite {
 export async function resolveSite(
   hostname: string,
 ): Promise<ResolvedSite | undefined> {
-  const subdomain = subdomainFromHost(hostname);
+  // The generated subdomain first, because it is the address every deployment
+  // has and the one that costs a string comparison rather than a query.
+  const subdomain =
+    subdomainFromHost(hostname) ??
+    (await resolveCustomDomain(hostname))?.subdomain;
+
   if (!subdomain) return undefined;
 
   const row = await prisma.deployment.findUnique({ where: { subdomain } });

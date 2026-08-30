@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Empty, Spin, Tooltip, message } from "antd";
+import { CustomDomain } from "../../molecules/CustomDomain/CustomDomain.tsx";
 import {
   VscCloudUpload,
   VscCopy,
@@ -270,6 +271,18 @@ export const DeployPanel = ({ projectId, isOwner }: DeployPanelProps) => {
               </Tooltip>
             )}
           </div>
+        )}
+
+        {/* Only once something is published. A domain pointed at a project
+            with no deployment behind it is a name that resolves to a 404,
+            and the server refuses the claim for that reason — so offering
+            the form first would be offering a button that cannot work. */}
+        {isOwner && deployment && (
+          <CustomDomain
+            projectId={projectId}
+            domain={deployment.customDomain}
+            onChange={refresh}
+          />
         )}
 
         {!isOwner && (

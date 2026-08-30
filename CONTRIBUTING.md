@@ -113,7 +113,7 @@ It has to come from the **shell**, not from `.env`: `config/env.ts` skips
 dotenv when `NODE_ENV=test` on purpose, so that your own `.env` — and the
 development database in it — cannot leak into a suite that writes rows.
 
-Without it: 1417 passing, 169 skipped. With it: **1566 passing, 20 skipped**
+Without it: 1430 passing, 192 skipped. With it: **1602 passing, 20 skipped**
 (the remainder are shell-quoting round-trips that need `/bin/bash`, so they
 skip on Windows and run in CI). If your numbers look like the first pair, the
 variable did not reach the runner.
