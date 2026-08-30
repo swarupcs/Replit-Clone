@@ -33,6 +33,7 @@ model User {
   reportsFiled   ProjectReport[]
   tokens        UserToken[]
   githubConnection GithubConnection?
+  notifications Notification[]
 
   @@map("users")
 }
@@ -580,4 +581,72 @@ model Embed {
   updatedAt DateTime @updatedAt
 
   @@map("embeds")
+}
+
+/// Something the platform needs to tell one person about.
+///
+/// A stored record FIRST, and mail only if mail happens to be configured. The
+/// obvious implementation -- call the mailer where the event happens -- is
+/// wrong here specifically: `lib/mailer.ts` falls back to a logging mailer
+/// that reports an ERROR per message in production, so an install without
+/// SMTP would turn every failing job into error spam and still leave its
+/// users knowing nothing. The row is the feature. The email is a transport
+/// that may not exist.
+///
+/// These are for USERS. Moderators are identified by `ADMIN_EMAILS` rather
+/// than by a role column (§2.11 chose that deliberately), so a moderator need
+/// not have a row in `users` at all and there is nothing here to hang their
+/// notifications on. The review queue notifies by mail instead.
+model Notification {
+  id String @id @default(uuid())
+
+  /// Cascade, unlike `ProjectReport.reporterId`: a report outlives its author
+  /// because somebody else still has to act on it, and news addressed to a
+  /// deleted account is addressed to nobody.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  kind NotificationKind
+
+  /// Written when the notification is created, not rendered on read. What a
+  /// message said must not change because the thing it described changed
+  /// afterwards -- "Nightly backup started failing" is a statement about a
+  /// moment, and a job later renamed or deleted does not make it untrue.
+  title String
+  body  String
+
+  /// Where to go about it: a path in the web app, already including any query
+  /// the destination needs. Null when there is nowhere useful to point.
+  link String?
+
+  readAt DateTime?
+
+  /// When this also went out as mail, or null -- which covers three different
+  /// cases deliberately left indistinguishable here: no mailer configured, an
+  /// unverified address, or a send that failed. All three mean the same thing
+  /// to the reader, and the log has the detail.
+  emailedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// The unread badge and the list are the same query with and without a
+  /// filter, newest first.
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+enum NotificationKind {
+  /// A job that was working has started failing. Sent on the TRANSITION, never
+  /// on the state: thirty consecutive failures are one piece of news, and a
+  /// message every night is how a feature meant to end silence earns itself a
+  /// filter rule and re-creates it.
+  JOB_FAILING
+
+  /// ...and the recovery, which is news for the same reason.
+  JOB_RECOVERED
+
+  /// A moderator made this project private. The one action in the system taken
+  /// against a user rather than for them, which is exactly why it must not be
+  /// something they discover by finding their own project missing.
+  PROJECT_UNPUBLISHED
 }

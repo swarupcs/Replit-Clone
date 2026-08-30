@@ -10,3 +10,4 @@ export * from "./socket-events.js";
 export * from "./network.js";
 export * from "./projects.js";
 export * from "./schedules.js";
+export * from "./notifications.js";

@@ -11,6 +11,7 @@ import {
   type ScheduledJob as ApiJob,
   type ScheduledRun as ApiRun,
 } from "@replit-clone/shared";
+import { notify } from "./notificationService.js";
 
 /** Cron jobs for a project: the cheap half of always-on compute.
  *
@@ -237,7 +238,13 @@ export async function updateJob(
   input: Partial<JobInput>,
   now = new Date(),
 ): Promise<ApiJob> {
-  const job = await prisma.scheduledJob.findFirst({ where: { id: jobId } });
+  // Scoped by BOTH, like `deleteJob` and `listRuns` beside it. Looking a job
+  // up by id alone let an owner of any project edit any job on the machine by
+  // guessing its id -- and the field that matters is `command`, so the reward
+  // was making somebody else's container run whatever you liked, on their
+  // schedule, under their name. `runJobController` says this in a comment; the
+  // one function that did not do it was this one.
+  const job = await prisma.scheduledJob.findFirst({ where: { id: jobId, projectId } });
   if (!job) throw new NotFoundError("No such job.", "JOB_NOT_FOUND");
 
   const schedule = input.schedule?.trim() ?? job.schedule;
@@ -301,7 +308,7 @@ function tail(text: string): string {
  *  Resolves rather than rejects on the timeout so the caller writes one row
  *  either way — a run that timed out is a result, not an exception. */
 function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | "timeout"> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       resolve("timeout");
     }, ms);
@@ -313,9 +320,18 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | "timeout"> {
         clearTimeout(timer);
         resolve(value);
       },
-      () => {
+      (error: unknown) => {
+        // Rejection is PASSED ON, not folded into "timeout". This used to
+        // resolve "timeout" here, which meant an exec that threw -- the daemon
+        // dropping the connection, the container disappearing underneath it --
+        // was recorded as TIMED_OUT and told the owner their command "may
+        // still be running inside the container". It was not running anywhere.
+        //
+        // That collapsed exactly the distinction the six run states exist to
+        // draw, and left ERRORED reachable only when `ensureContainer` threw.
+        // The caller's catch is what turns this into ERRORED.
         clearTimeout(timer);
-        resolve("timeout");
+        reject(error instanceof Error ? error : new Error(String(error)));
       },
     );
   });
@@ -363,6 +379,10 @@ export async function runJobNow(jobId: string): Promise<ApiRun> {
     increment("jobs_skipped");
     return toApiRun(skipped);
   }
+
+  // Read BEFORE this run exists, because the announcement below is about a
+  // change and needs the state that is about to be replaced.
+  const previous = await lastVerdict(jobId);
 
   const run = await prisma.scheduledRun.create({ data: { jobId, status: "RUNNING" } });
   increment("jobs_started");
@@ -413,8 +433,93 @@ export async function runJobNow(jobId: string): Promise<ApiRun> {
   });
 
   await prune(jobId);
+  await announce(job, previous, status);
 
   return toApiRun(finished);
+}
+
+/** Statuses that say something about the COMMAND.
+ *
+ *  `SKIPPED` means the job did not run, and `ERRORED` means the machine could
+ *  not run it -- neither is a verdict on what the command does, so neither
+ *  starts a failure and neither ends one. A week of Docker being down must not
+ *  read as a week of the backup being broken, and must not silently cancel the
+ *  fact that it was broken before.
+ */
+type Verdict = "SUCCEEDED" | "FAILED" | "TIMED_OUT";
+
+function isVerdict(status: ApiRun["status"]): status is Verdict {
+  return status === "SUCCEEDED" || status === "FAILED" || status === "TIMED_OUT";
+}
+
+/** The last thing this job said about its command, or null if it has never
+ *  said anything. */
+async function lastVerdict(jobId: string): Promise<Verdict | null> {
+  const row = await prisma.scheduledRun.findFirst({
+    where: { jobId, status: { in: ["SUCCEEDED", "FAILED", "TIMED_OUT"] } },
+    orderBy: { startedAt: "desc" },
+    select: { status: true },
+  });
+
+  return row ? (row.status as Verdict) : null;
+}
+
+/** Tells the owner when a job CHANGES state, and only then.
+ *
+ *  This is the whole point of the feature and the easiest part to get wrong. A
+ *  job that fails every night for a month is one piece of news, not thirty:
+ *  mailing every failure is how a notification people needed becomes a filter
+ *  rule, which restores the silence it was built to end and hides that it has.
+ *  So the second consecutive failure says nothing, and the recovery speaks.
+ *
+ *  A first-ever run that fails does notify. There is no previous verdict to
+ *  change from, but somebody has just set this up and it does not work, which
+ *  is the most useful moment there is to say so.
+ */
+async function announce(
+  job: { id: string; name: string; projectId: string },
+  previous: Verdict | null,
+  now: ApiRun["status"],
+): Promise<void> {
+  if (!isVerdict(now)) return;
+
+  const broke = now !== "SUCCEEDED" && previous !== "FAILED" && previous !== "TIMED_OUT";
+  const fixed = now === "SUCCEEDED" && (previous === "FAILED" || previous === "TIMED_OUT");
+  if (!broke && !fixed) return;
+
+  const project = await prisma.project.findUnique({
+    where: { id: job.projectId },
+    select: { ownerId: true, name: true },
+  });
+  if (!project) return;
+
+  const link = `/project/${job.projectId}?view=jobs`;
+
+  if (fixed) {
+    await notify({
+      userId: project.ownerId,
+      kind: "JOB_RECOVERED",
+      title: `"${job.name}" is working again`,
+      body:
+        `The scheduled job "${job.name}" in ${project.name} succeeded on its ` +
+        `latest run, after failing.`,
+      link,
+    });
+    return;
+  }
+
+  await notify({
+    userId: project.ownerId,
+    kind: "JOB_FAILING",
+    title: `"${job.name}" is failing`,
+    body:
+      now === "TIMED_OUT"
+        ? `The scheduled job "${job.name}" in ${project.name} ran out of time ` +
+          `and was given up on. You will not be told again until it changes.`
+        : `The scheduled job "${job.name}" in ${project.name} exited non-zero. ` +
+          `You will not be told again until it changes.`,
+    link,
+  });
 }
 
 /** Starts every job that is due, and re-arms it.

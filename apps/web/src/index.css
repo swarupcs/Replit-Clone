@@ -2600,3 +2600,85 @@ body {
   background: var(--rc-surface-sunken);
   border-bottom: 1px solid var(--rc-border);
 }
+
+/* Notifications ---------------------------------------------------------- */
+
+/* A dropdown, not a page. Bounded height on purpose: an inbox you can scroll
+   forever is a log, and the server prunes for the same reason. */
+.rc-notifs {
+  width: 340px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--rc-surface);
+  border: 1px solid var(--rc-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
+  overflow: hidden;
+}
+
+.rc-notifs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 6px 8px 12px;
+  border-bottom: 1px solid var(--rc-border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rc-text-subtle);
+}
+
+.rc-notifs-loading,
+.rc-notifs-empty {
+  display: flex;
+  justify-content: center;
+  padding: 22px 12px;
+}
+
+.rc-notifs-list {
+  overflow-y: auto;
+}
+
+.rc-notif {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--rc-border);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rc-notif:last-child {
+  border-bottom: 0;
+}
+
+.rc-notif:hover {
+  background: var(--rc-surface-hover, rgb(255 255 255 / 4%));
+}
+
+/* Unread is carried by a bar rather than by weight alone: the title is already
+   the heaviest thing in the row, so bolding it further reads as noise. */
+.rc-notif[data-unread="yes"] {
+  box-shadow: inset 2px 0 0 var(--rc-accent, #4c8dff);
+}
+
+.rc-notif-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rc-text);
+}
+
+.rc-notif-body {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--rc-text-subtle);
+}
+
+.rc-notif-when {
+  font-size: 11px;
+  color: var(--rc-text-faint, var(--rc-text-subtle));
+}

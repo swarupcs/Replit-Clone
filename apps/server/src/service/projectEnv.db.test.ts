@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { dbScope } from "../test/dbScope.js";
-import { env } from "../config/env.js";
+import type { env as EnvConfig } from "../config/env.js";
 
 /** What actually lands in the `envVars` column, and what a backfill does to
  *  what is already there.
@@ -20,7 +20,16 @@ describe.skipIf(!TEST_DATABASE_URL)("environment variables at rest", () => {
   let prisma: typeof import("../lib/prisma.js").prisma;
   let envService: typeof import("./projectEnvService.js");
 
-  const originalKey = env.SECRET_ENCRYPTION_KEY;
+  /** Imported in `beforeAll`, NOT at the top of the file.
+   *
+   *  `config/env.ts` parses `process.env` once, on first import, and
+   *  `setupEnv.ts` seeds a dummy `DATABASE_URL` so that importing it never
+   *  fails. Importing it up here would freeze that dummy before `beforeAll`
+   *  could put the real URL in place, and every query in the suite would
+   *  authenticate as `test` against a database that has no such user. Which is
+   *  exactly what happened the first time this file was run. */
+  let env: typeof EnvConfig;
+  let originalKey: string | undefined;
   const KEY = Buffer.alloc(32, 5).toString("base64");
 
   let ownerId: string;
@@ -28,6 +37,8 @@ describe.skipIf(!TEST_DATABASE_URL)("environment variables at rest", () => {
 
   beforeAll(async () => {
     process.env["DATABASE_URL"] = TEST_DATABASE_URL;
+    ({ env } = await import("../config/env.js"));
+    originalKey = env.SECRET_ENCRYPTION_KEY;
     ({ prisma } = await import("../lib/prisma.js"));
     envService = await import("./projectEnvService.js");
   });

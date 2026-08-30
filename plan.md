@@ -44,9 +44,9 @@ day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1478 passing**, 228 skipped (88 files) |
-| the same, with `TEST_DATABASE_URL` set | not re-run on 2026-08-30 — see below |
-| `pnpm --filter web test` | **941 passing** (71 files) |
+| `pnpm --filter server test` | **1716 passing**, 20 skipped (106 files) |
+| the same, with `TEST_DATABASE_URL` set | **run 2026-08-30 evening — green** |
+| `pnpm --filter web test` | **951 passing** (72 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
 The 228 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
@@ -55,20 +55,24 @@ run in CI. The DB-gated row was run rather than quoted for §2.11 and §2.12:
 both put load-bearing claims in a unique index, a foreign key and a
 transaction, and a mock cannot be wrong about those in any way worth trusting.
 
-**It was not run for §2.13 or §2.14.** The Docker daemon stopped part-way
-through §2.13 and never came back, which takes the test database with it. Two
-consequences, both of which want clearing before either is trusted:
+**The debt recorded here against §2.13 and §2.14 is now cleared**, and
+clearing it was not a formality. Docker came back on the evening of
+2026-08-30, the suite ran, and it failed 12 tests across two files. Every one
+of them was real:
 
-- §2.13's scheduled jobs are verified only as far as the 22 cron cases and the
-  non-DB suites reach; its 19 DB-gated tests did not run, and its migration was
-  written by hand rather than generated and diffed against a live database.
-- §2.14's env-var encryption has 12 unit tests that do run, and 11 DB-gated
-  ones that do not. The unit tests cover the reading logic — which is where the
-  dangerous mistake would be — but the *claim*, that this column no longer
-  holds anybody's credentials, is a claim about the database and is checked by
-  reading the column. The fix in §2.14's second half is DB-gated too.
+- **§2.14's 11 DB-gated tests could not connect at all.** The file imported
+  `config/env.ts` at its top, and that module parses `process.env` once on
+  first import while `setupEnv.ts` seeds a dummy `DATABASE_URL` so importing
+  it never fails. So the dummy was frozen in before `beforeAll` could put the
+  real URL in place, and every query authenticated as `test`. The suites that
+  pass all import it lazily. A test that has never been run is not a test, and
+  this one had been carried for a day as though it were evidence.
+- **§2.13's `updateJob` was not scoped to its project** — found by the one
+  DB-gated schedule test that had never run. See §2.15.
 
-**Run the DB-gated suite before trusting §2.13 or §2.14.**
+With those fixed the whole suite is green against a live database, which also
+means §2.13's hand-written migration has now been applied and exercised rather
+than only read.
 
 There is also a flake worth knowing about, since it will otherwise be
 mistaken for a regression: under load the web suite fails 9–10 of its 941 at
@@ -76,7 +80,7 @@ the default 5s timeout, always the *first* test in a file and always passing
 in isolation. Verified as environmental by running it on a clean checkout,
 which failed the same way. `--testTimeout=20000` is green at 71/71.
 
-**Done: 79 items. Open: 8 — four blocked, four not.**
+**Done: 82 items. Open: 7 — four blocked, three not.**
 
 The four blocked ones are §3.3, and none is a whole row any more: each is the
 blocked remainder of one, after the unblocked half shipped. A certificate, an
@@ -86,9 +90,18 @@ autoscaler's cost model, a disk budget, and an architectural route.
 nothing from 2026-08-29 until now, which this document read as "there is
 nothing left to simply start" — see §4, where that claim is made and has now
 been wrong five times. What had actually happened is that the page stopped
-being where work was found. The four items now in §3.2 came from reading the
-shipped features against each other rather than from any list, and none of
-them is blocked on anything.
+being where work was found. The four items that arrived in §3.2 came from
+reading the shipped features against each other rather than from any list, and
+none of them was blocked on anything. The first of them shipped the same day
+(§2.15); three remain.
+
+A pattern is now firm enough to state. **Building a thing that watches an
+existing feature finds defects in the feature it watches.** Notifications
+turned up two, neither of which anybody was looking for: a `withTimeout` that
+reported a crashed exec as a timeout, and an `updateJob` that never checked
+which project a job belonged to. Both had been merged, reviewed and passing
+for a day. Nothing makes a wrong state as visible as deciding to tell somebody
+about it.
 
 The two newest done items (§2.14) came from neither §3 nor anybody's feature
 list. They came from reading the schema next to itself: three columns holding
@@ -590,6 +603,75 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.15 Since (2026-08-30, night)
+
+- [x] **The platform tells people things.** The silence in §2.11 and §2.13 is
+      closed, and closed the same way for both: a notification is a stored
+      **record** first, and mail only if mail happens to work.
+
+      That ordering is forced by this codebase rather than preferred. The
+      obvious build — call the mailer where the event happens — fails here,
+      because `mailer.ts` falls back to a logging mailer that reports an
+      *error* per message in production. An install without SMTP would turn
+      every failing job into error spam and still leave its users knowing
+      nothing. The row is the feature; the email is a transport that may not
+      exist.
+
+      **The rule that carries the rest: notify on the CHANGE, not the state.**
+      A job that fails thirty nights running is one piece of news, not thirty.
+      The second consecutive failure says nothing and the recovery speaks.
+      Mailing every failure is how a notification somebody needed becomes a
+      filter rule — which restores the silence this was built to end, and
+      hides that it has. The comparison needs no new column: `ScheduledRun`
+      history was already kept and pruned.
+
+      `SKIPPED` and `ERRORED` are not verdicts on the command and neither
+      starts nor ends a failure. A week of Docker being down must not read as
+      a week of the backup being broken.
+
+      **Moderators get mail and no inbox**, because `requireAdmin` identifies
+      them by `ADMIN_EMAILS` and a configured address need not have a `User`
+      row at all. An empty `ADMIN_EMAILS` warns rather than passing quietly:
+      a queue nobody is told about is precisely the condition being fixed, and
+      it must not be reachable by leaving a variable unset and hearing nothing.
+
+      Mail goes only to a **verified** address. `emailVerifiedAt` exists
+      because signing up does not prove you own what you typed, and somebody
+      else's project news is not sent to an address that may not be theirs.
+      Nothing in `notify` throws at its caller: a notification is a side effect
+      of work that already happened, and failing that work because the
+      announcement could not be written would be the tail wagging the dog.
+
+- [x] **`withTimeout` reported a crashed exec as a timeout.** It resolved
+      `"timeout"` when the work *rejected*, so an exec that threw — the daemon
+      dropping the connection, the container vanishing underneath it — was
+      recorded `TIMED_OUT` and told the owner the command "may still be
+      running inside the container". It was not running anywhere. `ERRORED`
+      was reachable only when `ensureContainer` threw.
+
+      That collapsed exactly the distinction the six run states exist to draw
+      (§2.13), and it had been merged and passing for a day. It was invisible
+      while nothing acted on the difference; with notifications on, an hour of
+      Docker being down mails every owner on the machine to say their job is
+      failing — false, and the fastest way to teach people the channel is
+      noise. **Found by a test written for the notifier, not for the sweeper.**
+
+- [x] **`updateJob` did not check which project a job belonged to.** It took a
+      `projectId` and looked the job up by `id` alone, so an owner of any
+      project could edit any job on the machine by guessing its id. The field
+      that makes this serious is `command`: the reward was making somebody
+      else's container run whatever you liked, on their schedule, under their
+      name.
+
+      `deleteJob`, `listRuns` and `runJobController` all scope correctly, and
+      the last one carries a comment explaining exactly this risk. The one
+      function that did not do it was this one — a single lapse in a careful
+      file, which is the kind a reviewer's eye slides over precisely because
+      everything around it is right. Found by a DB-gated test from §2.13 that
+      had never been run, on the night the database came back.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -614,62 +696,7 @@ arrived on 2026-08-30, none of them from a feature list: they are what reading
 the shipped features against each other turned up. Nothing here is blocked.
 Listed in the order §4 recommends.
 
-- [ ] **Nobody is ever told anything.** The moderation queue (§2.11) and the
-      scheduled jobs (§2.13) have the same failure mode, and it is the worst
-      one available: silence. A report sits at `OPEN` until a moderator
-      happens to open the page. A nightly job exits 1 every night for a month
-      and looks exactly like one that works.
-
-      Both features already record everything a message would need — §2.13
-      went as far as keeping six run states apart *precisely* so that "it did
-      not run" and "it ran and failed" would stay legible — and then tell
-      nobody who is not looking. The panel in each case is honest to whoever
-      opens it, which is the one person who already knows.
-
-      The channel exists: `lib/mailer.ts` has a `Mailer` interface, a
-      `setMailer`/`getMailer` seam for tests, `hasRealMailer()` for the
-      install that has not configured one, and `webUrl` for linking back in.
-      What is missing is anything that decides a message is worth sending —
-      there is no notification model in the schema and nothing referencing
-      one.
-
-      **Design, settled 2026-08-30 before building.** Three decisions carry
-      it, and each came from something already in the tree rather than from
-      preference:
-
-      **A notification is a stored record first, and mail only if mail
-      happens to work.** The obvious build — call the mailer where the event
-      happens — fails on this codebase specifically: `mailer.ts` falls back to
-      `loggingMailer`, which in production logs an *error* per message. An
-      install without SMTP would turn every failing job into error spam and
-      still tell its user nothing. The row is the feature; the email is a
-      transport that may not exist.
-
-      **Notify on the CHANGE, not on the state.** A job that fails thirty
-      nights running is one piece of news, not thirty. The second consecutive
-      failure is not news; the recovery is. So the emitter compares a finished
-      run against the one before it and speaks only on a transition — which
-      needs no new column, because `ScheduledRun` history is already kept and
-      pruned. Sending on every failure is how a feature meant to end silence
-      produces a filter rule and re-creates it, with the added harm of looking
-      solved.
-
-      **Moderators get mail and no inbox, because they are not users.**
-      `requireAdmin` identifies them by `ADMIN_EMAILS`, a config list, and
-      §2.11 chose that deliberately over a role column. A configured address
-      need not have a `User` row at all, so there is nothing to hang an in-app
-      record on. In-app is therefore for users, and the queue notifies by mail
-      — and an empty `ADMIN_EMAILS` must say so loudly, for the same reason
-      the logging mailer shouts in production.
-
-      Scope: `Notification` + `NotificationKind` (`JOB_FAILING`,
-      `JOB_RECOVERED`, `PROJECT_UNPUBLISHED`), a `notificationService` whose
-      `notify` never throws into its caller — a message that cannot be stored
-      must not fail the job run or the moderation action that occasioned it —
-      the three emitters, `GET`/`POST` under `/v1/notifications`, and a bell
-      with an unread count. Mail goes only to a **verified** address:
-      `emailVerifiedAt` exists precisely so that an unconfirmed address, which
-      may belong to somebody else, is not sent somebody's project news.
+- [x] **Nobody is ever told anything.** Shipped 2026-08-30 — see §2.15.
 
 - [ ] **Moderation has no audit log.** §2.11 gives a moderator the power to
       unpublish somebody else's project. The schema records the report and its
@@ -779,11 +806,14 @@ whoever owns the data, not to a cleanup script.
 11. ~~**Env vars encrypted at rest, and the escalation found beside it.**~~
     Done 2026-08-30 (§2.14). From neither §3 nor any feature list — see §1.
 
-12. **§3.2 notifications.** Next, and first for a reason: it closes the same
-    silence in two already-shipped features at once, which is more leverage
-    than anything else on this page. The channel is already written.
-13. **§3.2 the moderation audit log**, then the test panel, then deployment
-    history — which wants a migration and so goes last.
+12. ~~**§3.2 notifications.**~~ Done 2026-08-30 (§2.15). Chosen first for
+    leverage — it closes the same silence in two shipped features — and it
+    returned more than that: building the thing that watches a feature is what
+    found two defects in the features it watches.
+13. **§3.2 the moderation audit log.** Next. The one power exercised against a
+    user, and still the only one with no trail.
+14. **§3.2 the test panel**, then **deployment history**, which wants a
+    migration and so goes last.
 
 Everything still in §3.3 is blocked on a decision or on infrastructure and
 should not be started until that decision is made. **The four items in §3.2

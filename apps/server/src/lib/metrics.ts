@@ -66,7 +66,13 @@ export type CounterName =
   | "jobs_started"
   | "jobs_succeeded"
   | "jobs_failed"
-  | "jobs_skipped";
+  | "jobs_skipped"
+  // Notifications. `notifications_created` against `notifications_mailed` is
+  // the honest measure of how much of this actually reaches anybody: the gap
+  // between them is people who have to open the app to find out, which is the
+  // condition the feature was built to end.
+  | "notifications_created"
+  | "notifications_mailed";
 
 const counters = new Map<CounterName, number>();
 

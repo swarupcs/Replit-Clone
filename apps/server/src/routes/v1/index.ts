@@ -9,6 +9,7 @@ import projectRouter from "./projects.js";
 import githubRouter from "./github.js";
 import embedRouter from "./embeds.js";
 import adminRouter from "./admin.js";
+import notificationRouter from "./notifications.js";
 
 const router = express.Router();
 
@@ -26,6 +27,9 @@ router.get("/ai/status", requireAuth, asyncHandler(aiStatusController));
 router.use("/auth", authRouter);
 router.use("/projects", projectRouter);
 router.use("/github", githubRouter);
+// Scoped entirely by the auth context -- there is no id in any path here,
+// which is the only kind of scoping nobody can forget to apply.
+router.use("/notifications", requireAuth, notificationRouter);
 // Behind requireAuth here, and behind requireAdmin inside. Both: the inner
 // guard reads the auth context, so a router that mounted it alone would fail
 // as an Unauthorized rather than as the wiring mistake it is.

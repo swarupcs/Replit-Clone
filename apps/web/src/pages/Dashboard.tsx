@@ -42,6 +42,7 @@ import {
   renameProjectApi,
 } from "../apis/projects.ts";
 import { TemplatePicker } from "../components/molecules/TemplatePicker/TemplatePicker.tsx";
+import { NotificationBell } from "../components/molecules/NotificationBell/NotificationBell.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
 import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx";
 import { GithubConnectionCard } from "../components/organisms/GithubConnectionCard/GithubConnectionCard.tsx";
@@ -359,6 +360,7 @@ export const Dashboard = () => {
               Reports
             </Button>
           )}
+          <NotificationBell />
           <Button
             icon={<VscGithub />}
             onClick={() => setGithubOpen(true)}

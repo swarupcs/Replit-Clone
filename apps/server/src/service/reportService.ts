@@ -2,6 +2,8 @@ import { prisma } from "../lib/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.js";
 import { increment } from "../lib/metrics.js";
 import { logger } from "../lib/logger.js";
+import { notify, notifyAdmins } from "./notificationService.js";
+import { webUrl } from "../lib/mailer.js";
 import type {
   ProjectReportReason,
   ProjectReportStatus,
@@ -71,7 +73,7 @@ export async function fileReport(input: {
 
   const project = await prisma.project.findUnique({
     where: { id: input.projectId },
-    select: { id: true, ownerId: true, visibility: true },
+    select: { id: true, name: true, ownerId: true, visibility: true },
   });
 
   // Not found and not public are answered identically on purpose. Otherwise
@@ -139,6 +141,25 @@ export async function fileReport(input: {
   logger.info("project reported", {
     projectId: input.projectId,
     reason: input.reason,
+  });
+
+  // Mail, and no in-app record: a moderator is an address in ADMIN_EMAILS and
+  // need not have an account here at all, so there is nothing to store this
+  // against. Awaited rather than fired off, so that a mailer which throws is
+  // caught by `notifyAdmins` rather than surfacing as an unhandled rejection --
+  // and it cannot fail the report, which is already written.
+  await notifyAdmins({
+    subject: `Project reported: ${project.name} (${input.reason})`,
+    text:
+      `"${project.name}" was reported for ${input.reason}.
+
+` +
+      `${details && details.length > 0 ? `What the reporter wrote:
+${details}
+
+` : ""}` +
+      `Review it here:
+${webUrl("/admin/reports", {})}`,
   });
 
   return report;
@@ -265,6 +286,30 @@ export async function reviewReport(input: {
     decision: input.decision,
     reviewer: input.reviewerEmail,
   });
+
+  // The one action in this system taken against a user rather than for them,
+  // which is exactly why it must not be something they discover by noticing
+  // their own project has gone. Told after the transaction commits: a message
+  // about something that did not happen is worse than a slow one.
+  if (input.decision === "ACTIONED") {
+    const project = await prisma.project.findUnique({
+      where: { id: report.projectId },
+      select: { ownerId: true, name: true },
+    });
+
+    if (project) {
+      await notify({
+        userId: project.ownerId,
+        kind: "PROJECT_UNPUBLISHED",
+        title: `"${project.name}" is no longer public`,
+        body:
+          `A moderator reviewed a report about "${project.name}" and made it ` +
+          `private. Nothing was deleted — it is still yours, and you can still ` +
+          `open it.`,
+        link: `/project/${report.projectId}`,
+      });
+    }
+  }
 
   const updated = await findReport(report.id);
   if (!updated) throw new NotFoundError("No such report.", "REPORT_NOT_FOUND");
