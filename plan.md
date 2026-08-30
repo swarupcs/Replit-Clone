@@ -616,7 +616,7 @@ Listed in the order §4 recommends.
 
 - [ ] **Nobody is ever told anything.** The moderation queue (§2.11) and the
       scheduled jobs (§2.13) have the same failure mode, and it is the worst
-      one available: silence. A report sits in `PENDING` until a moderator
+      one available: silence. A report sits at `OPEN` until a moderator
       happens to open the page. A nightly job exits 1 every night for a month
       and looks exactly like one that works.
 
@@ -632,6 +632,44 @@ Listed in the order §4 recommends.
       What is missing is anything that decides a message is worth sending —
       there is no notification model in the schema and nothing referencing
       one.
+
+      **Design, settled 2026-08-30 before building.** Three decisions carry
+      it, and each came from something already in the tree rather than from
+      preference:
+
+      **A notification is a stored record first, and mail only if mail
+      happens to work.** The obvious build — call the mailer where the event
+      happens — fails on this codebase specifically: `mailer.ts` falls back to
+      `loggingMailer`, which in production logs an *error* per message. An
+      install without SMTP would turn every failing job into error spam and
+      still tell its user nothing. The row is the feature; the email is a
+      transport that may not exist.
+
+      **Notify on the CHANGE, not on the state.** A job that fails thirty
+      nights running is one piece of news, not thirty. The second consecutive
+      failure is not news; the recovery is. So the emitter compares a finished
+      run against the one before it and speaks only on a transition — which
+      needs no new column, because `ScheduledRun` history is already kept and
+      pruned. Sending on every failure is how a feature meant to end silence
+      produces a filter rule and re-creates it, with the added harm of looking
+      solved.
+
+      **Moderators get mail and no inbox, because they are not users.**
+      `requireAdmin` identifies them by `ADMIN_EMAILS`, a config list, and
+      §2.11 chose that deliberately over a role column. A configured address
+      need not have a `User` row at all, so there is nothing to hang an in-app
+      record on. In-app is therefore for users, and the queue notifies by mail
+      — and an empty `ADMIN_EMAILS` must say so loudly, for the same reason
+      the logging mailer shouts in production.
+
+      Scope: `Notification` + `NotificationKind` (`JOB_FAILING`,
+      `JOB_RECOVERED`, `PROJECT_UNPUBLISHED`), a `notificationService` whose
+      `notify` never throws into its caller — a message that cannot be stored
+      must not fail the job run or the moderation action that occasioned it —
+      the three emitters, `GET`/`POST` under `/v1/notifications`, and a bell
+      with an unread count. Mail goes only to a **verified** address:
+      `emailVerifiedAt` exists precisely so that an unconfirmed address, which
+      may belong to somebody else, is not sent somebody's project news.
 
 - [ ] **Moderation has no audit log.** §2.11 gives a moderator the power to
       unpublish somebody else's project. The schema records the report and its
