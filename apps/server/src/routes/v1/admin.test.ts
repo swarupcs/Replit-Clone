@@ -2,7 +2,12 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 
-const settings = vi.hoisted(() => ({}));
+// The assertion is load-bearing: without it every `settings[...]` below is an
+// implicit `any` and typecheck fails. `no-unnecessary-type-assertion` reads
+// the hoisted factory's return and disagrees, so the rule is turned off for
+// this line rather than the file.
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+const settings = vi.hoisted(() => ({}) as Record<string, unknown>);
 vi.mock("../../config/env.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../config/env.js")>();
   Object.assign(settings, actual.env, { ADMIN_EMAILS: "" });

@@ -1003,6 +1003,15 @@ Rows 1–13, all `done`:
       read-only access does not carry. The columns are now named explicitly,
       where forgetting one is a compile error.
 
+- [x] **`pnpm -r lint` was red on this branch before any of the above**, with
+      seven errors nobody had run into. Six were auto-fixable and one was a
+      two-line reformat. One of the six auto-fixes then broke `typecheck`:
+      `no-unnecessary-type-assertion` looked into a `vi.hoisted` factory,
+      decided the cast on it did nothing, and removing it made every index of
+      that object an implicit `any`. Restored with a disable comment on the
+      line and a note saying which of the two tools is wrong — worth recording
+      because "the linter said so" is exactly the reasoning that removed it.
+
 - [x] **A fifth global-query assertion, and this one had a cliff.**
       `listReports` caps at two hundred rows, and `reports.db.test.ts` narrowed
       to its own rows by filtering the result — so past that cap its rows
