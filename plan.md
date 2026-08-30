@@ -37,8 +37,9 @@ than left in history where nobody would look for them.
 
 ## 1. Status at a glance
 
-Verified for this document on 2026-08-29, by running it rather than reading
-about it:
+Verified by running it rather than reading about it. The numbers are as of
+2026-08-30; the notes under the table say which rows were **not** re-run that
+day, and why that matters more than usual:
 
 | Check | Result |
 |---|---|
@@ -75,10 +76,19 @@ the default 5s timeout, always the *first* test in a file and always passing
 in isolation. Verified as environmental by running it on a clean checkout,
 which failed the same way. `--testTimeout=20000` is green at 71/71.
 
-**Done: 79 items. Open: 4.** All four are in §3.3 and none is a whole row any
-more — each is the blocked remainder of one, after the unblocked half shipped.
-A certificate, an autoscaler's cost model, a disk budget, and an architectural
-route. **Nothing on this page is unblocked.**
+**Done: 79 items. Open: 8 — four blocked, four not.**
+
+The four blocked ones are §3.3, and none is a whole row any more: each is the
+blocked remainder of one, after the unblocked half shipped. A certificate, an
+autoscaler's cost model, a disk budget, and an architectural route.
+
+**§3.2 is no longer empty, and that is the substantive change here.** It held
+nothing from 2026-08-29 until now, which this document read as "there is
+nothing left to simply start" — see §4, where that claim is made and has now
+been wrong five times. What had actually happened is that the page stopped
+being where work was found. The four items now in §3.2 came from reading the
+shipped features against each other rather than from any list, and none of
+them is blocked on anything.
 
 The two newest done items (§2.14) came from neither §3 nor anybody's feature
 list. They came from reading the schema next to itself: three columns holding
@@ -94,14 +104,6 @@ because they bundled something genuinely outside this repository with
 something that was only ever code: a certificate with the domain plumbing, an
 autoscaler's pricing decision with a cron table. Neither half needed the
 other. Before concluding a row is blocked, check whether it is one thing.
-
-Custom domains came off the list on 2026-08-30 by being split rather than by
-being unblocked (§2.12). The row said "infrastructure, not code" and that was
-half right: the DNS half is the owner's and the certificate half is the
-operator's, but claiming a name, proving it, serving it and re-checking it are
-all code, and none of them needed the certificate to exist. Splitting a row
-that bundles a blocked half with an unblocked one is worth doing before
-concluding a row is blocked.
 
 Three items have left the open list since the 2026-08-29 audit, and they did
 not leave it the same way. Two were never blocked: the dangling section
@@ -597,9 +599,58 @@ last entry here — public projects with no report mechanism and no review — w
 closed on 2026-08-30 (§2.11). It was never a defect so much as an unmade
 decision, which is why it outlasted the three that were.
 
+One defect has been fixed since **without ever appearing in this section**: a
+viewer could duplicate a project and receive its environment variables, which
+the `/env` endpoint would have refused to show them. Recorded in §2.14 rather
+than back-dated into here, but worth noting where this list failed. Nobody was
+going to write it down, because nobody knew — it was found by reading two
+endpoints' access rules against each other, and a list of *known* defects
+cannot prompt that.
+
 ### 3.2 Unblocked — work, not decisions
 
-Empty. Every item that was here on 2026-08-29 is now in §2.8.
+Emptied on 2026-08-29, when everything then in it moved to §2.8. Four items
+arrived on 2026-08-30, none of them from a feature list: they are what reading
+the shipped features against each other turned up. Nothing here is blocked.
+Listed in the order §4 recommends.
+
+- [ ] **Nobody is ever told anything.** The moderation queue (§2.11) and the
+      scheduled jobs (§2.13) have the same failure mode, and it is the worst
+      one available: silence. A report sits in `PENDING` until a moderator
+      happens to open the page. A nightly job exits 1 every night for a month
+      and looks exactly like one that works.
+
+      Both features already record everything a message would need — §2.13
+      went as far as keeping six run states apart *precisely* so that "it did
+      not run" and "it ran and failed" would stay legible — and then tell
+      nobody who is not looking. The panel in each case is honest to whoever
+      opens it, which is the one person who already knows.
+
+      The channel exists: `lib/mailer.ts` has a `Mailer` interface, a
+      `setMailer`/`getMailer` seam for tests, `hasRealMailer()` for the
+      install that has not configured one, and `webUrl` for linking back in.
+      What is missing is anything that decides a message is worth sending —
+      there is no notification model in the schema and nothing referencing
+      one.
+
+- [ ] **Moderation has no audit log.** §2.11 gives a moderator the power to
+      unpublish somebody else's project. The schema records the report and its
+      status; it does not record who acted on it, when, or why. This is the
+      one power in the system exercised *against* a user rather than for them,
+      and it is the only one with no trail: a moderator cannot demonstrate
+      they were fair, and cannot be shown to have been unfair.
+
+- [ ] **The test command has no panel.** A project can run, deploy, and now
+      schedule — but the command people type most often has nowhere to show
+      its results, and nothing named `testRunner` exists in either app. The
+      run output and the terminal are both already there to build on.
+
+- [ ] **A deployment cannot be rolled back, because no history is kept.**
+      `Deployment.projectId` is `@unique` — one row per project, mutated in
+      place on every publish. The previous build is not retained anywhere, so
+      "put back the one that worked" has nothing to put back. Last of the four
+      because it is the only one needing a migration rather than a service,
+      not because it is blocked.
 
 
 ### 3.3 Blocked on a decision or on infrastructure
@@ -683,14 +734,32 @@ whoever owns the data, not to a cleanup script.
    have been in §3.3 at all: its stated blocker was a feature the editor
    already had.
 
+9. ~~**§3.3 custom domains — the code half.**~~ Done 2026-08-30 (§2.12), by
+   splitting a row whose blocked half is still in §3.3.
+10. ~~**§3.3 scheduled jobs.**~~ Done 2026-08-30 (§2.13), the same way, out of
+    the row that also held autoscaling.
+11. ~~**Env vars encrypted at rest, and the escalation found beside it.**~~
+    Done 2026-08-30 (§2.14). From neither §3 nor any feature list — see §1.
+
+12. **§3.2 notifications.** Next, and first for a reason: it closes the same
+    silence in two already-shipped features at once, which is more leverage
+    than anything else on this page. The channel is already written.
+13. **§3.2 the moderation audit log**, then the test panel, then deployment
+    history — which wants a migration and so goes last.
+
 Everything still in §3.3 is blocked on a decision or on infrastructure and
-should not be started until that decision is made. **There is nothing left on
-this page to simply start** — and that claim has now been wrong three times, so
-it is still worth reading as "nothing found yet" rather than as a proof. Twice
-the blocker turned out not to exist. The third time it did exist and was an
-unmade decision, which is the cheapest kind there is: the remaining four need a
-DNS record, a certificate, a cost model, or a rewrite, and no afternoon
-produces any of those.
+should not be started until that decision is made. **The four items in §3.2
+are not**, and that is the first time this has been true since 2026-08-29.
+
+This section used to close by claiming **there is nothing left on this page to
+simply start**. That claim has now been wrong five times, which is enough to
+stop making it. Twice the blocker turned out not to exist. Once it existed and
+was an unmade decision — the cheapest kind there is. Twice a row was two things
+bundled together and came off by being split. And the two items in §2.14 were
+never on this page at all, which is the one worth keeping: an empty §3.2 meant
+"nothing has been written down", and this document read it as "there is nothing
+to do". Those are different sentences, and the gap between them turned out to
+be four items wide the moment anybody went looking.
 
 ---
 
