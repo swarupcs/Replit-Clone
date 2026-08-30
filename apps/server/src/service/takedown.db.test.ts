@@ -302,14 +302,18 @@ describe.skipIf(!TEST_DATABASE_URL)("a moderator's takedown", () => {
      *  machine goes on doing on its behalf, on a schedule, with nothing in the
      *  product that would ever show it. */
     it("stop being swept", async () => {
+      // Taken down BEFORE the job is armed. `runDueJobs` is global, so a job
+      // left due for even a moment can be claimed by another suite's sweep
+      // running in parallel -- and this test's evidence is that nothing
+      // touched the firing.
+      await takeDown();
+
       const due = new Date(Date.now() - 60_000);
       const job = await nightly();
       await prisma.scheduledJob.update({
         where: { id: job.id },
         data: { nextRunAt: due },
       });
-
-      await takeDown();
 
       const { finished } = await jobs.runDueJobs();
       await finished;
@@ -367,9 +371,11 @@ describe.skipIf(!TEST_DATABASE_URL)("a moderator's takedown", () => {
       const { finished } = await jobs.runDueJobs();
       await finished;
 
-      expect(
-        await prisma.scheduledRun.count({ where: { jobId: job.id } }),
-      ).toBe(1);
+      // Polled rather than read once: another suite's sweep may have claimed
+      // this job first, and its run row lands on its own clock, not ours.
+      await expect
+        .poll(() => prisma.scheduledRun.count({ where: { jobId: job.id } }))
+        .toBe(1);
     });
   });
 

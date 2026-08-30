@@ -20,6 +20,7 @@ import {
   EditOutlined,
   MoreOutlined,
   ShareAltOutlined,
+  SafetyCertificateOutlined,
   TeamOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -45,6 +46,7 @@ import { TemplatePicker } from "../components/molecules/TemplatePicker/TemplateP
 import { NotificationBell } from "../components/molecules/NotificationBell/NotificationBell.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
 import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx";
+import { ModerationDialog } from "../components/organisms/ModerationDialog/ModerationDialog.tsx";
 import { GithubConnectionCard } from "../components/organisms/GithubConnectionCard/GithubConnectionCard.tsx";
 import { ImportRepoDialog } from "../components/organisms/ImportRepoDialog/ImportRepoDialog.tsx";
 import { ExploreSection } from "../components/organisms/ExploreSection/ExploreSection.tsx";
@@ -84,6 +86,7 @@ function ProjectActions({
   onRename,
   onDuplicate,
   onDelete,
+  onModeration,
 }: {
   project: Project;
   isOwner: boolean;
@@ -91,6 +94,7 @@ function ProjectActions({
   onRename: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onModeration: () => void;
 }) {
   return (
     // Stop propagation so a menu click doesn't also open the project behind
@@ -122,12 +126,20 @@ function ProjectActions({
                   },
                 ]
               : []),
-            {
-              key: "duplicate",
-              icon: <CopyOutlined />,
-              label: "Duplicate",
-              onClick: onDuplicate,
-            },
+            // Refused by the server once a project is taken down, because a
+            // copy would hold the same files with none of the takedown. The
+            // menu says so by omission rather than offering something that
+            // will fail.
+            ...(project.takenDownAt
+              ? []
+              : [
+                  {
+                    key: "duplicate",
+                    icon: <CopyOutlined />,
+                    label: "Duplicate",
+                    onClick: onDuplicate,
+                  },
+                ]),
             {
               key: "export",
               icon: <DownloadOutlined />,
@@ -138,8 +150,18 @@ function ProjectActions({
                 window.location.assign(projectExportUrl(project.id));
               },
             },
+            // Offered whether or not anything was taken down. The trail holds
+            // dismissals as well, and "reported and cleared" is a fact about
+            // the project its owner is entitled to read.
             ...(isOwner
               ? [
+                  {
+                    key: "moderation",
+                    icon: <SafetyCertificateOutlined />,
+                    label: project.takenDownAt ? "Taken down" : "Moderation",
+                    danger: project.takenDownAt !== null,
+                    onClick: onModeration,
+                  },
                   { type: "divider" as const },
                   {
                     key: "delete",
@@ -257,6 +279,7 @@ export const Dashboard = () => {
   const [githubOpen, setGithubOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [sharing, setSharing] = useState<Project | null>(null);
+  const [moderating, setModerating] = useState<Project | null>(null);
 
   const { data: projects, isLoading } = useQuery({
     queryKey: ["projects"],
@@ -518,6 +541,7 @@ export const Dashboard = () => {
                   }}
                   onDuplicate={() => duplicateMutation.mutate(project.id)}
                   onDelete={() => setDeleting(project)}
+                  onModeration={() => setModerating(project)}
                 />
               );
 
@@ -545,6 +569,15 @@ export const Dashboard = () => {
                       {project.name}
                     </span>
                     <span className="rc-badge">{project.template}</span>
+                    {project.takenDownAt && (
+                      <span
+                        className="rc-badge"
+                        title="A moderator took this project down after a report"
+                        style={{ color: "var(--rc-danger, #ff4d4f)" }}
+                      >
+                        Taken down
+                      </span>
+                    )}
                     {!isOwner && (
                       <span
                         className="rc-badge"
@@ -581,6 +614,15 @@ export const Dashboard = () => {
                   >
                     <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <span className="rc-badge">{project.template}</span>
+                      {project.takenDownAt && (
+                        <span
+                          className="rc-badge"
+                          title="A moderator took this project down after a report"
+                          style={{ color: "var(--rc-danger, #ff4d4f)" }}
+                        >
+                          Taken down
+                        </span>
+                      )}
                       {!isOwner && (
                         <span
                           className="rc-badge"
@@ -683,6 +725,16 @@ export const Dashboard = () => {
           }}
           open
           onClose={() => setSharing(null)}
+        />
+      )}
+
+      {moderating && (
+        <ModerationDialog
+          projectId={moderating.id}
+          projectName={moderating.name}
+          takenDownAt={moderating.takenDownAt}
+          open
+          onClose={() => setModerating(null)}
         />
       )}
 

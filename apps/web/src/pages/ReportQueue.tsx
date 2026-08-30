@@ -4,14 +4,22 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Empty, Segmented, Typography, message } from "antd";
 import type { ProjectReport, ReportStatus } from "@replit-clone/shared";
 import { listReportsApi, reviewReportApi } from "../apis/projects.ts";
+import { ModerationActivity } from "../components/organisms/ModerationActivity/ModerationActivity.tsx";
 
 /** The operator's queue.
  *
  *  Two decisions and no others. Dismissing says the complaint was not one;
- *  actioning makes the project private. An operator here cannot delete a
- *  project, cannot edit it, and cannot touch the owner's account — the
- *  smallest power that resolves a complaint, and the only one whose mistakes
- *  the person they were made against can undo by themselves.
+ *  actioning takes the project down. An operator here cannot delete a project,
+ *  cannot edit it, and cannot touch the owner's account — the smallest power
+ *  that resolves a complaint.
+ *
+ *  This used to justify that smallness by saying a takedown was the only
+ *  decision its subject could undo by themselves. §2.16 deliberately removed
+ *  exactly that, so the page went on telling operators their decisions were
+ *  reversible by somebody else for as long as it took anybody to read it
+ *  against the code. What replaces it is the Activity tab: the appeal the
+ *  owner files, and the one action that undoes a takedown — which is an
+ *  operator giving authority up rather than exercising it.
  *
  *  Reachable by anybody who types the URL. That is fine and deliberate: the
  *  server checks the allowlist on every request, so a stranger who guesses the
@@ -28,6 +36,7 @@ const REASON_LABELS: Record<ProjectReport["reason"], string> = {
 type Filter = ReportStatus | "ALL";
 
 export const ReportQueue = () => {
+  const [tab, setTab] = useState<"reports" | "activity">("reports");
   const [filter, setFilter] = useState<Filter>("OPEN");
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
@@ -73,11 +82,26 @@ export const ReportQueue = () => {
           Reports
         </Typography.Title>
         <Typography.Text style={{ color: "var(--rc-text-subtle)", fontSize: 13 }}>
-          Making a project private is the only action here. Its owner can
-          publish it again, so nothing decided on this page is final.
+          Taking a project down makes it private, stops its site and its links,
+          and holds its jobs. Its owner cannot undo that — they can appeal it,
+          and appeals arrive under Activity.
         </Typography.Text>
       </div>
 
+      <Segmented<"reports" | "activity">
+        value={tab}
+        onChange={setTab}
+        style={{ marginBottom: 16, marginRight: 12 }}
+        options={[
+          { label: "Reports", value: "reports" },
+          { label: "Activity", value: "activity" },
+        ]}
+      />
+
+      {tab === "activity" ? (
+        <ModerationActivity />
+      ) : (
+        <>
       <Segmented<Filter>
         value={filter}
         onChange={setFilter}
@@ -192,6 +216,8 @@ export const ReportQueue = () => {
             </li>
           ))}
         </ul>
+      )}
+        </>
       )}
     </main>
   );

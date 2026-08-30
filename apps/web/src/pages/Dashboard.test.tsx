@@ -34,6 +34,10 @@ const api = vi.hoisted(() => ({
   listPublicProjectsApi: vi.fn().mockResolvedValue([]),
   forkProjectApi: vi.fn(),
   setProjectVisibilityApi: vi.fn(),
+  // The moderation dialog reads these. Mocked here because the module is
+  // replaced wholesale, so a missing export is a crash rather than a 403.
+  listProjectModerationApi: vi.fn().mockResolvedValue([]),
+  appealTakedownApi: vi.fn(),
 }));
 vi.mock("../apis/projects.ts", () => api);
 
@@ -521,5 +525,57 @@ describe("choosing a layout", () => {
     expect(document.querySelectorAll(".rc-project-row").length).toBe(2);
 
     setItem.mockRestore();
+  });
+});
+
+/** A takedown was a notification and then a dead end: nothing in `apps/web`
+ *  mentioned it, so the owner could not read the decision or answer it.
+ *  §2.17 shipped all three endpoints and no caller. */
+describe("Dashboard, a project taken down", () => {
+  const TAKEN_DOWN = "2026-08-30T09:00:00.000Z";
+
+  beforeEach(() => {
+    api.listProjectsApi.mockResolvedValue([
+      project({ id: "p9", name: "Leaky", takenDownAt: TAKEN_DOWN }),
+      project({ id: "p8", name: "Fine" }),
+    ]);
+  });
+
+  it("says so on the card, without the owner having to open anything", async () => {
+    renderDashboard();
+
+    expect(await screen.findByText("Taken down")).toBeDefined();
+  });
+
+  /** The server refuses this, because a copy would hold the same files with
+   *  none of the takedown. The menu says so by omission rather than offering
+   *  something that fails. */
+  it("does not offer to duplicate it", async () => {
+    renderDashboard();
+    fireEvent.click(await screen.findByLabelText("Actions for Leaky"));
+
+    // The menu opened -- the entry reads "Taken down" too, so wait on the
+    // menuitem rather than the card badge behind it.
+    expect(
+      await screen.findByRole("menuitem", { name: /taken down/i }),
+    ).toBeDefined();
+    expect(screen.queryByText("Duplicate")).toBeNull();
+  });
+
+  it("still offers to duplicate one nobody took down", async () => {
+    renderDashboard();
+    fireEvent.click(await screen.findByLabelText("Actions for Fine"));
+
+    expect(await screen.findByText("Duplicate")).toBeDefined();
+  });
+
+  it("opens the trail and the appeal", async () => {
+    renderDashboard();
+    fireEvent.click(await screen.findByLabelText("Actions for Leaky"));
+    // The menu entry, not the card badge: both read "Taken down", and the
+    // menu item is the one that is a button.
+    fireEvent.click(await screen.findByRole("menuitem", { name: /taken down/i }));
+
+    expect(await screen.findByLabelText("Your appeal")).toBeDefined();
   });
 });

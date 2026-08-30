@@ -33,17 +33,16 @@ describe.skipIf(!TEST_DATABASE_URL)("reporting a public project", () => {
   /** The queue, restricted to this suite's own rows.
    *
    *  `listReports` is global, as the operator's queue has to be — so asserting
-   *  on its length couples this file to whatever else is running. Every owner
-   *  here is named through `scope`, so its suffix is the filter. Without this
-   *  the suite passes or fails depending on which other DB file vitest happens
-   *  to schedule alongside it.
+   *  on its length couples this file to whatever else is running. It also caps
+   *  at two hundred rows, which is why the narrowing is an argument rather
+   *  than a `.filter()` on the result: past that cap this suite's rows never
+   *  reach a filter at all, and the suite reports "nothing here" instead of
+   *  failing honestly. Fifth instance of the same mistake in this codebase.
    */
-  const queue = async (status: Parameters<typeof reports.listReports>[0]) => {
-    const rows = await reports.listReports(status);
-    return rows.filter((row) =>
-      row.ownerEmail.endsWith(scope.where.email.endsWith),
-    );
-  };
+  const queue = async (
+    status: Parameters<typeof reports.listReports>[0],
+    projectId: string = publicId,
+  ) => reports.listReports(status, projectId);
 
   beforeEach(async () => {
     const owner = await prisma.user.create({
@@ -387,7 +386,9 @@ describe.skipIf(!TEST_DATABASE_URL)("reporting a public project", () => {
         reviewerEmail: "ops@example.com",
       });
 
-      const open = await queue("OPEN");
+      // This project's own queue is empty, and the other project's is not.
+      expect(await queue("OPEN")).toHaveLength(0);
+      const open = await queue("OPEN", second.id);
       expect(open).toHaveLength(1);
       expect(open[0]?.projectId).toBe(second.id);
 

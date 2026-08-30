@@ -190,7 +190,7 @@ export async function listNotifications(userId: string): Promise<{
   return {
     items: rows.map((row) => ({
       id: row.id,
-      kind: row.kind as NotificationKind,
+      kind: row.kind,
       title: row.title,
       body: row.body,
       link: row.link,

@@ -44,9 +44,9 @@ day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1771 passing**, 20 skipped (110 files) |
-| the same, with `TEST_DATABASE_URL` set | **run 2026-08-31 evening, three times — green** |
-| `pnpm --filter web test` | **973 passing** (74 files) |
+| `pnpm --filter server test` | **1772 passing**, 20 skipped (110 files) |
+| the same, with `TEST_DATABASE_URL` set | **run 2026-08-31 evening, four times — green** |
+| `pnpm --filter web test` | **994 passing** (76 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
 The 228 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
@@ -960,6 +960,59 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.21 Since (2026-08-31, evening, later)
+
+- [x] **§2.17's appeal has a client, on both sides of it.** Three endpoints
+      with a table behind them, tested, and `grep -rn "moderation\|appeal"
+      apps/web/src` returned one hit — a comment saying reporting has no
+      appeal. Neither the owner nor the operator could reach any of it.
+
+      The owner gets the trail and the appeal form from their project's menu,
+      offered whether or not anything was taken down: dismissals are in the
+      trail too, and "reported and a moderator found nothing" is a fact about
+      the project its owner is entitled to read. Where a takedown stands, the
+      dialog **enumerates what the takedown actually did** — private and
+      refused re-publication, no site, no embed, no share link, jobs held,
+      no copying and no deploy. Every line is a query in the server, all seven
+      of them after §2.20, and until now not one was written anywhere the
+      person it happened to could read it.
+
+      The operator gets an Activity tab beside the queue: decisions, appeals
+      and reinstatements in one stream, with an unanswered appeal marked and
+      the reinstatement offered on it. "Unanswered" is derived from the stream
+      rather than asked for separately — it is already ordered and already
+      carries both facts — and it is per project, so answering one appeal does
+      not silence another. Nothing here grants an operator authority they did
+      not have. The one action added is the one that gives authority up.
+
+      **The queue was also telling operators something false.** Its docblock
+      and its subtitle both said a takedown was safe because its owner could
+      publish the project again, which is precisely what §2.16 removed on
+      purpose. §6 decision 11 was amended that day and the screen quoting it
+      was not, so for two days the page justified the decision by a property
+      the code no longer had. Fixed, and asserted on, because it is the kind
+      of wrong that no test would ever have failed for.
+
+- [x] **The dashboard list was handing every collaborator the share token.**
+      `listAccessibleProjects` returned whole `Project` rows — to owners and
+      collaborators alike — which is the exact hazard the comment on
+      `listPublicProjects` twenty lines below it spells out. A read-only
+      viewer received `shareToken`, a bearer credential that redeems at the
+      link's role, so they could hand out access the owner never offered; and
+      the names of every environment variable, which §2.14 already settled
+      read-only access does not carry. The columns are now named explicitly,
+      where forgetting one is a compile error.
+
+- [x] **A fifth global-query assertion, and this one had a cliff.**
+      `listReports` caps at two hundred rows, and `reports.db.test.ts` narrowed
+      to its own rows by filtering the result — so past that cap its rows
+      never reach the filter and the suite reads "nothing here" rather than
+      failing. `listReports` now takes an optional project, which is what the
+      per-project surfaces want anyway, and the narrowing is in the query.
+      Verified across four consecutive full runs.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -1086,7 +1139,8 @@ Listed in the order §4 recommends.
 - [x] **A deployment cannot be rolled back.** Shipped 2026-08-31 — §2.19.
 
 
-- [ ] **§2.17 shipped an appeal nobody can file.** The moderation trail, the
+- [x] **§2.17 shipped an appeal nobody can file.** Shipped 2026-08-31 —
+      see §2.21. The moderation trail, the
       appeal and the reinstatement are all real: three endpoints, tested, with
       a table behind them. `grep -rn "moderation\|appeal\|takenDown" apps/web/src`
       returns one hit, and it is a comment in `ReportProject.tsx` saying that
@@ -1227,9 +1281,12 @@ whoever owns the data, not to a cleanup script.
     2026-08-31 (§2.20). Chosen first because it was the only open item whose
     gap between the document and the code was reachable by nothing more exotic
     than a Fork button.
-18. **§3.2 — a client for §2.17.** After, and in a commit of its own,
-    because the two are otherwise the same sentence twice: one is a guard
-    that was never written and the other is a screen that was never built.
+18. ~~**§3.2 — a client for §2.17.**~~ Done 2026-08-31 (§2.21), in a commit
+    of its own, because the two are otherwise the same sentence twice: one is
+    a guard that was never written and the other is a screen that was never
+    built. It turned up two more things on the way — a share token handed to
+    every viewer, and a screen still quoting a decision that had been
+    amended — neither of which was on any list.
 
 **§3.2 was empty when this section was last edited, and §3.1 said "Empty"
 alongside it.** Both were wrong within the hour, and neither needed a new
@@ -1237,6 +1294,13 @@ feature idea to become wrong — one item came from reading `takenDownAt`'s
 three call sites against the operations that copy a project, and the other
 from running `grep` for the word "appeal" over `apps/web/src`. That is the
 whole method, and it is cheaper than the list it keeps refuting.
+
+Building the two of them then turned up three more that were on no list at
+all: a share token handed to every viewer of every shared project, a screen
+still justifying a decision by a property §2.16 had deliberately removed, and
+a fifth suite asserting on a global query. All three are in §2.20–§2.21. The
+pattern is now consistent enough to state plainly: **the work found by
+looking is roughly twice the work written down.**
 
 Everything still in §3.3 is blocked on a decision or on infrastructure and
 should not be started until that decision is made. The two items above are

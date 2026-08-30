@@ -50,7 +50,7 @@ function isUniqueViolation(error: unknown): boolean {
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    (error as { code: unknown }).code === "P2002"
+    (error).code === "P2002"
   );
 }
 
@@ -172,9 +172,18 @@ ${webUrl("/admin/reports", {})}`,
 /** The queue, newest first. */
 export async function listReports(
   status: ProjectReportStatus | "ALL" = "OPEN",
+  projectId?: string,
 ): Promise<ReportSummary[]> {
   const rows = await prisma.projectReport.findMany({
-    where: status === "ALL" ? {} : { status },
+    // `take` below is a global cap, so narrowing after the query is not the
+    // same thing as narrowing in it: with two hundred newer reports in the
+    // table, a caller filtering the result would find nothing and conclude
+    // there was nothing. The operator's queue passes no project and sees
+    // everything, exactly as before.
+    where: {
+      ...(status === "ALL" ? {} : { status }),
+      ...(projectId ? { projectId } : {}),
+    },
     orderBy: { createdAt: "desc" },
     take: 200,
     include: {

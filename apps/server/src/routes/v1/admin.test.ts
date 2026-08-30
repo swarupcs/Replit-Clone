@@ -2,7 +2,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 
-const settings = vi.hoisted(() => ({}) as Record<string, unknown>);
+const settings = vi.hoisted(() => ({}));
 vi.mock("../../config/env.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../config/env.js")>();
   Object.assign(settings, actual.env, { ADMIN_EMAILS: "" });
@@ -61,8 +61,7 @@ describe("the report queue behind both guards", () => {
     it(`refuses ${route.path} for a signed-in stranger`, async () => {
       settings["ADMIN_EMAILS"] = "someone-else@example.com";
 
-      const response = await request(app())
-        [route.method](route.path)
+      const response = await request(app())[route.method](route.path)
         .set("Authorization", bearer())
         .send({ decision: "ACTIONED" });
 
@@ -73,8 +72,7 @@ describe("the report queue behind both guards", () => {
     it(`refuses ${route.path} when no allowlist is configured`, async () => {
       settings["ADMIN_EMAILS"] = "";
 
-      const response = await request(app())
-        [route.method](route.path)
+      const response = await request(app())[route.method](route.path)
         .set("Authorization", bearer())
         .send({ decision: "ACTIONED" });
 

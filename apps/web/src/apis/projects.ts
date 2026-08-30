@@ -1,5 +1,6 @@
 import type {
   ApiSuccess,
+  ModerationAction,
   ProjectVisibility,
   PublicProject,
   DevcontainerState,
@@ -751,4 +752,62 @@ export const reviewReportApi = async (
     { decision },
   );
   return response.data.data.report;
+};
+
+/** The moderation trail for one project, and the owner's reply to it.
+ *
+ *  §2.17 shipped all of this on the server and nothing that called it, so a
+ *  takedown was a notification and then a dead end: the owner could not read
+ *  what was decided and could not answer it, and the operator could not see
+ *  that they had. These six lines are the whole of what was missing.
+ *
+ *  Owner-only on the server. A collaborator trusted to edit files is not
+ *  party to what a moderator wrote about the project or what its owner wrote
+ *  back, so this 403s for anyone else and the panel says so.
+ */
+export const listProjectModerationApi = async (
+  projectId: string,
+): Promise<ModerationAction[]> => {
+  const response = await axios.get<ApiSuccess<{ actions: ModerationAction[] }>>(
+    `/api/v1/projects/${projectId}/moderation`,
+  );
+  return response.data.data.actions;
+};
+
+/** One appeal per takedown, compared against the current one -- a project
+ *  taken down, reinstated and taken down again is a new case the owner is
+ *  entitled to answer. The server enforces that; this reports what it says. */
+export const appealTakedownApi = async (
+  projectId: string,
+  text: string,
+): Promise<ModerationAction> => {
+  const response = await axios.post<ApiSuccess<{ action: ModerationAction }>>(
+    `/api/v1/projects/${projectId}/appeal`,
+    { text },
+  );
+  return response.data.data.action;
+};
+
+/** Everything recent, for an operator: decisions, appeals and reinstatements
+ *  in one stream. The queue shows the case that arrives; this shows what
+ *  happened afterwards, which is where an appeal turns up. */
+export const listRecentModerationApi = async (): Promise<ModerationAction[]> => {
+  const response = await axios.get<ApiSuccess<{ actions: ModerationAction[] }>>(
+    "/api/v1/admin/moderation",
+  );
+  return response.data.data.actions;
+};
+
+/** Lifting a takedown. The reason is required by the server, deliberately:
+ *  "we put it back" with no account of why is the half of the record that
+ *  makes the other half unfalsifiable. */
+export const reinstateProjectApi = async (
+  projectId: string,
+  reason: string,
+): Promise<ModerationAction> => {
+  const response = await axios.post<ApiSuccess<{ action: ModerationAction }>>(
+    `/api/v1/admin/projects/${projectId}/reinstate`,
+    { reason },
+  );
+  return response.data.data.action;
 };

@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vitest";
  *  case. And `env`'s other FIELDS have to survive too: `bearer()` signs a real
  *  token, which needs the real `JWT_ACCESS_SECRET`.
  */
-const settings = vi.hoisted(() => ({ ADMIN_EMAILS: "" }) as Record<string, unknown>);
+const settings = vi.hoisted(() => ({ ADMIN_EMAILS: "" }));
 
 vi.mock("../config/env.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../config/env.js")>();

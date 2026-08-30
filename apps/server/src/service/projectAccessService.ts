@@ -53,6 +53,22 @@ function levelFromRole(role: ProjectRole): AccessLevel {
   return role === ProjectRole.EDITOR ? "editor" : "viewer";
 }
 
+/** A project as the dashboard list returns it.
+ *
+ *  Deliberately not `Project`. See the select in `listAccessibleProjects`.
+ */
+export interface ListedProject {
+  id: string;
+  name: string;
+  template: string;
+  ownerId: string;
+  createdAt: Date;
+  lastActiveAt: Date | null;
+  visibility: ProjectVisibility;
+  forkedFromId: string | null;
+  takenDownAt: Date | null;
+}
+
 /** What this user may do with this project. */
 export async function getProjectAccess(
   projectId: string,
@@ -198,12 +214,34 @@ export async function assertProjectAccess(
 }
 
 /** Every project a user can open, theirs and shared with them alike. */
-export async function listAccessibleProjects(userId: string): Promise<Project[]> {
+export async function listAccessibleProjects(
+  userId: string,
+): Promise<ListedProject[]> {
   return prisma.project.findMany({
     where: {
       OR: [{ ownerId: userId }, { collaborators: { some: { userId } } }],
     },
-    orderBy: { createdAt: "desc" },
+    // Named explicitly, for the reason spelled out on `listPublicProjects`
+    // twenty lines below -- which this function did not follow. A `Project`
+    // row carries `shareToken`, and returning the row handed every viewer of
+    // every shared project a bearer credential that redeems at the link's
+    // role: a read-only collaborator could hand out access the owner never
+    // offered. It also carries `envVars`, whose values are sealed but whose
+    // NAMES are not, and 2.14 already settled that read-only access to a
+    // project is not access to its secrets.
+    select: {
+      id: true,
+      name: true,
+      template: true,
+      ownerId: true,
+      createdAt: true,
+      lastActiveAt: true,
+      visibility: true,
+      forkedFromId: true,
+      // The owner has to be able to see that this happened, and the dashboard
+      // is where they look. Not a secret: it is a fact about them.
+      takenDownAt: true,
+    },
   });
 }
 
