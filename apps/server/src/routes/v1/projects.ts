@@ -2,6 +2,7 @@ import express from "express";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 import { createPublishLimiter } from "../../utils/publishBudget.js";
+import { reportProjectController } from "../../controllers/reportController.js";
 import {
   createProjectController,
   deleteProjectController,
@@ -286,16 +287,39 @@ router.post("/:projectId/fork", createLimiter, asyncHandler(forkProjectControlle
 // Only in the publishing direction -- see `countsAgainstPublishBudget`, which
 // is where that asymmetry is explained and tested.
 //
-// Deliberately not a moderation system. Reporting and review are a product
-// decision about who reviews and with what authority, and this app has no
-// notion of an administrator to hang them on. This is the half that needs no
-// such decision.
+// The other half -- reporting and review -- shipped later, once there was a
+// decision about who reviews: an `ADMIN_EMAILS` allowlist. See
+// middlewares/requireAdmin.ts and routes/v1/admin.ts.
 const publishLimiter = createPublishLimiter();
+
+// Reporting is rate limited for the same reason publishing is, and for one
+// more. A report costs an operator's attention rather than a machine's, and
+// the review queue is the scarce resource here -- somebody who can file a
+// hundred reports an hour can bury every other complaint on the page. The
+// per-account duplicate rule in `fileReport` stops the same project being
+// reported twice; this stops a hundred DIFFERENT projects being reported in a
+// minute.
+const reportLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many reports filed. Try again later.",
+  },
+});
 
 router.patch(
   "/:projectId/visibility",
   publishLimiter,
   asyncHandler(setVisibilityController),
+);
+router.post(
+  "/:projectId/report",
+  reportLimiter,
+  asyncHandler(reportProjectController),
 );
 router.get("/:projectId/export", asyncHandler(exportProjectController));
 router.get("/:projectId/env", asyncHandler(getProjectEnvController));

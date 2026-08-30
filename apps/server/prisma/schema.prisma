@@ -30,6 +30,7 @@ model User {
   projects      Project[]
   refreshTokens RefreshToken[]
   collaborations ProjectCollaborator[]
+  reportsFiled   ProjectReport[]
   tokens        UserToken[]
   githubConnection GithubConnection?
 
@@ -126,6 +127,65 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+/// Somebody telling the operator that a public project should not be public.
+///
+/// Only public projects can be reported, because a private one is visible to
+/// nobody but its owner and the people they invited -- there is no audience to
+/// protect and nothing a stranger could have seen to object to.
+model ProjectReport {
+  id String @id @default(uuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Who reported it. SetNull rather than Cascade: a report outlives the
+  /// account that filed it, because deleting your account must not quietly
+  /// withdraw a complaint somebody has yet to act on. The report stays, and
+  /// stops naming anybody.
+  reporterId String?
+  reporter   User?   @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+
+  reason  ProjectReportReason
+  /// What the reporter wrote, if anything. Capped by the request schema rather
+  /// than by the column, so the limit can be explained in the error.
+  details String?
+
+  status     ProjectReportStatus @default(OPEN)
+  /// When an operator last acted on it, and which one.
+  reviewedAt    DateTime?
+  reviewedBy    String?
+
+  createdAt DateTime @default(now())
+
+  /// One open report per person per project. Without it, a single account can
+  /// file the same complaint a thousand times and bury every other report in
+  /// the queue -- the review queue is the scarce resource here, not the
+  /// database.
+  @@unique([projectId, reporterId])
+  @@index([status, createdAt])
+  @@map("project_reports")
+}
+
+enum ProjectReportReason {
+  /// Credentials, keys, or personal data the owner probably did not mean to
+  /// publish. First because it is the one where speed matters and where the
+  /// owner is usually grateful rather than aggrieved.
+  SECRETS
+  ABUSE
+  MALWARE
+  INFRINGEMENT
+  OTHER
+}
+
+enum ProjectReportStatus {
+  OPEN
+  /// Looked at, nothing wrong. Kept rather than deleted so that a project
+  /// reported and cleared ten times reads differently from one never reported.
+  DISMISSED
+  /// Acted on: the project was made private.
+  ACTIONED
+}
+
 model Project {
   id       String @id @default(uuid())
   name     String
@@ -182,6 +242,7 @@ model Project {
   forks        Project[] @relation("ProjectForks")
 
   collaborators ProjectCollaborator[]
+  reports       ProjectReport[]
   deployment    Deployment?
   databaseConnection ProjectDatabaseConnection?
   managedDatabase    ManagedDatabase?

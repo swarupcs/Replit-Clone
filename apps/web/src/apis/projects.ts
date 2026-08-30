@@ -28,6 +28,11 @@ import type {
   GithubPullResponse,
   GithubProjectRepoResponse,
   StartCommandResponse,
+  ProjectReport,
+  ReportReason,
+  ReportStatus,
+  ReportsResponse,
+  ReviewReportResponse,
 } from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
@@ -704,4 +709,38 @@ export const getDevcontainerApi = async (
     `/api/v1/projects/${projectId}/devcontainer`,
   );
   return response.data.data;
+};
+
+/** Reporting a published project, and the operator's queue.
+ *
+ *  Reporting is available to any signed-in user; the queue is not, and asking
+ *  for it without being on the server's allowlist answers 403. The client's
+ *  `user.isAdmin` decides whether the queue is OFFERED and nothing more.
+ */
+export const reportProjectApi = async (
+  projectId: string,
+  reason: ReportReason,
+  details?: string,
+): Promise<void> => {
+  await axios.post(`/api/v1/projects/${projectId}/report`, { reason, details });
+};
+
+export const listReportsApi = async (
+  status: ReportStatus | "ALL" = "OPEN",
+): Promise<ProjectReport[]> => {
+  const response = await axios.get<ReportsResponse>("/api/v1/admin/reports", {
+    params: { status },
+  });
+  return response.data.data.reports;
+};
+
+export const reviewReportApi = async (
+  reportId: string,
+  decision: "DISMISSED" | "ACTIONED",
+): Promise<ProjectReport> => {
+  const response = await axios.post<ReviewReportResponse>(
+    `/api/v1/admin/reports/${reportId}/review`,
+    { decision },
+  );
+  return response.data.data.report;
 };

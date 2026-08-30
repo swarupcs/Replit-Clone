@@ -350,6 +350,15 @@ export const Dashboard = () => {
           >
             {user?.email}
           </Typography.Text>
+          {/* Offered only to operators, and only as a convenience: the route
+              itself is not hidden and the server checks the allowlist on every
+              request. Hiding a link is not access control, and treating it as
+              though it were is how a check ends up existing only here. */}
+          {user?.isAdmin && (
+            <Button onClick={() => void navigate("/admin/reports")}>
+              Reports
+            </Button>
+          )}
           <Button
             icon={<VscGithub />}
             onClick={() => setGithubOpen(true)}

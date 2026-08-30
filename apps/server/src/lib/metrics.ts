@@ -46,7 +46,14 @@ export type CounterName =
   | "embeds_created"
   | "embeds_revoked"
   | "embed_views"
-  | "embed_path_rejected";
+  | "embed_path_rejected"
+  // Moderation. `project_reported` climbing while `report_actioned` and
+  // `report_dismissed` stay flat is the signal that matters most here: it says
+  // the queue is filling and nobody is reading it, which is the failure mode a
+  // report mechanism with no reviewer actually has.
+  | "project_reported"
+  | "report_actioned"
+  | "report_dismissed";
 
 const counters = new Map<CounterName, number>();
 

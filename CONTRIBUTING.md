@@ -88,8 +88,9 @@ when nothing had been started.
 
 Some suites exercise real rows rather than mocks — refresh-token rotation with
 its unique hashes and replay detection, project access, the stored GitHub
-connection. Those cannot be faithfully faked, so they skip unless you point
-them at a database. They will not touch your development one: give them a
+connection, and the moderation queue, whose whole argument is a unique index, a
+`SetNull` and a transaction. Those cannot be faithfully faked, so they skip
+unless you point them at a database. They will not touch your development one: give them a
 throwaway of their own.
 
 With `pnpm db:up` already running, create it once and migrate it:
@@ -112,7 +113,7 @@ It has to come from the **shell**, not from `.env`: `config/env.ts` skips
 dotenv when `NODE_ENV=test` on purpose, so that your own `.env` — and the
 development database in it — cannot leak into a suite that writes rows.
 
-Without it: 1390 passing, 149 skipped. With it: **1519 passing, 20 skipped**
+Without it: 1417 passing, 169 skipped. With it: **1566 passing, 20 skipped**
 (the remainder are shell-quoting round-trips that need `/bin/bash`, so they
 skip on Windows and run in CI). If your numbers look like the first pair, the
 variable did not reach the runner.

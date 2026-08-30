@@ -8,6 +8,7 @@ import authRouter from "./auth.js";
 import projectRouter from "./projects.js";
 import githubRouter from "./github.js";
 import embedRouter from "./embeds.js";
+import adminRouter from "./admin.js";
 
 const router = express.Router();
 
@@ -25,6 +26,10 @@ router.get("/ai/status", requireAuth, asyncHandler(aiStatusController));
 router.use("/auth", authRouter);
 router.use("/projects", projectRouter);
 router.use("/github", githubRouter);
+// Behind requireAuth here, and behind requireAdmin inside. Both: the inner
+// guard reads the auth context, so a router that mounted it alone would fail
+// as an Unauthorized rather than as the wiring mistake it is.
+router.use("/admin", requireAuth, adminRouter);
 // Deliberately NOT behind requireAuth: an embed is read by people who have
 // no account here and never will. See routes/v1/embeds.ts.
 router.use("/embeds", embedRouter);

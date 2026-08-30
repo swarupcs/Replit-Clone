@@ -1,15 +1,25 @@
 import argon2 from "argon2";
 import { prisma } from "../lib/prisma.js";
+import { isAdminEmail } from "../middlewares/requireAdmin.js";
 import { ConflictError, UnauthorizedError } from "../utils/errors.js";
 import { increment } from "../lib/metrics.js";
 
 export interface PublicUser {
   id: string;
   email: string;
+  /** Whether this account is on `ADMIN_EMAILS`.
+   *
+   *  A hint for the interface, not a permission: it decides whether the client
+   *  OFFERS the report queue. `requireAdmin` decides whether the queue opens,
+   *  and re-reads the allowlist on every request. */
+  isAdmin: boolean;
 }
 
-function toPublicUser(user: { id: string; email: string }): PublicUser {
-  return { id: user.id, email: user.email };
+export function toPublicUser(user: { id: string; email: string }): PublicUser {
+  // Read here rather than left for the client to guess. It only decides
+  // whether the report queue is OFFERED -- `requireAdmin` decides whether it
+  // opens -- so a stale or forged value costs a 403 and nothing else.
+  return { id: user.id, email: user.email, isAdmin: isAdminEmail(user.email) };
 }
 
 /** A real argon2id hash of a value nobody knows, so verifying against it costs

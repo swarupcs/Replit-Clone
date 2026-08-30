@@ -43,24 +43,32 @@ about it:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1397 passing**, 149 skipped (83 files) |
-| `pnpm --filter web test` | **903 passing** (67 files) |
+| `pnpm --filter server test` | **1417 passing**, 169 skipped (85 files) |
+| the same, with `TEST_DATABASE_URL` set | **1566 passing**, 20 skipped |
+| `pnpm --filter web test` | **921 passing** (69 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
-The 149 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
+The 169 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
 unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
-run in CI.
+run in CI. The DB-gated row is new to this table on 2026-08-30 and was run
+rather than quoted: the moderation work of §2.11 puts its load-bearing claims
+in a unique index, a foreign key and a transaction, and a mock cannot be wrong
+about those in any way worth trusting.
 
-**Done: 74 items. Open: 5.** All five are blocked on a decision or on
-infrastructure — four in §3.3, plus report-and-review in §3.1, which needs
-somebody to decide who moderates. **Nothing on this page is unblocked.**
-
-Two items left the open list on 2026-08-29 that the audit that day had passed
-over: the dangling section references (§2.9), and follow-mode's viewport sync
-(§2.10), which was recorded as blocked on cursor positions that turned out to
-have been on the wire the whole time. The remaining five are blocked on
+**Done: 75 items. Open: 4.** All four are in §3.3, and each is blocked on
 something outside this repository — a DNS record, a certificate, a cost model,
-or a decision about who moderates — and not on anybody's time.
+or an architectural route. **Nothing on this page is unblocked.**
+
+Three items have left the open list since the 2026-08-29 audit, and they did
+not leave it the same way. Two were never blocked: the dangling section
+references (§2.9), and follow-mode's viewport sync (§2.10), which was recorded
+as waiting on cursor positions that had been on the wire the whole time.
+Report-and-review (§2.11) genuinely was blocked, on a decision about who
+moderates — and it was closed by *making* that decision, not by finding it had
+already been made. The difference is worth keeping: an unmade decision reads
+like infrastructure on a list like this one, and it is not. Nobody can conjure
+a wildcard certificate, and one person can settle who moderates in an
+afternoon.
 
 Everything in §2 was re-verified against the source on 2026-08-29 rather than
 carried forward on trust. Three claims did not survive it — see §5.
@@ -313,22 +321,76 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.11 Since (2026-08-30)
+
+- [x] **Public projects can be reported, and the reports have somewhere to
+      go.** The last item in §3.1, and the only thing on this page blocked on a
+      decision anybody here could make. The decision is §6, decision 11: an
+      `ADMIN_EMAILS` allowlist rather than a role column on `User`. A role
+      column needs a way to appoint the *first* admin, which is its own
+      bootstrapping problem and ends in an environment variable anyway — so the
+      environment variable is the whole design rather than the scaffolding for
+      it.
+
+      Empty by default, and an empty allowlist means **nobody**. Stated as its
+      own branch in `isAdminEmail` rather than left to `Set.has` on an empty
+      set, because the bug it prevents — an unconfigured deployment handing the
+      report queue to every account that signed up — is one worth being unable
+      to introduce by accident.
+
+      The authority granted is the smallest one that resolves a complaint: an
+      operator can make a project private. They cannot delete it, edit it, or
+      touch the owner's account. That is the only power whose mistakes are
+      undoable by the person they were made against.
+
+      Three refusals on the reporting side, each for its own reason. A project
+      that is not public has no audience to protect — and answers identically
+      to one that does not exist, so the endpoint cannot be used to ask whether
+      a private project is there. A project you own is one you can make private
+      yourself, which is never rate limited. And a second report from the same
+      account is the same complaint again, refused by a unique index rather
+      than by a check, because the check is the one that loses a race.
+
+      Rate limited at ten an hour on top of that index. The index stops one
+      project being reported twice by one person; the limiter stops a hundred
+      *different* projects being reported in a minute. What is scarce here is
+      an operator's attention, not a database.
+
+      `ACTIONED` closes every other open report on the same project in the same
+      transaction. Without it a project nine people objected to sits in the
+      queue eight more times after it is already private, and the operator
+      working through it decides the same case repeatedly with no way to see
+      that it is the same case. A `DISMISSED` speaks only for its own report:
+      two people can object for different reasons, and finding one baseless
+      says nothing about the other.
+
+      Reports outlive their reporters — `SetNull` rather than `Cascade` —
+      because deleting an account must not quietly withdraw a complaint nobody
+      has acted on yet. The report stays and stops naming anybody.
+
+      The queue's route is not hidden from non-admins on the client; only the
+      link to it is. That asymmetry is the point. Hiding a route is a check
+      that looks like access control while enforcing nothing, so the server
+      checks the allowlist on every request and the client decides only whether
+      to *offer* the page. `PublicUser.isAdmin` is a hint for the interface: a
+      client that sets it true for itself gets a link to a page that answers
+      403.
+
+      Counters for all three transitions, because the failure mode a report
+      mechanism actually has is not being wrong — it is nobody reading it.
+      `project_reported` climbing while `report_actioned` and
+      `report_dismissed` stay flat is that failure, made visible.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
 
-The three deployment defects listed here were fixed on 2026-08-29 and have
-moved to §2.8, along with the rate-limiting third of the item below. What is
-left is not a defect any more so much as an unmade decision.
-
-- [ ] **Public projects have no report mechanism and no review.** The third
-      part of this — no rate limit on *publishing* — was closed on 2026-08-29
-      (§2.8). The two that remain are a **product decision, not a task**: they
-      need somebody to review reports and an authority to act on them, and this
-      app has no notion of an administrator to hang either on. Single-tenant
-      and invite-only deployments are unaffected. A public multi-tenant one
-      needs both before `visibility = PUBLIC` is safe to expose, and deciding
-      who moderates comes first.
+Empty. The three deployment defects were fixed on 2026-08-29 (§2.8), and the
+last entry here — public projects with no report mechanism and no review — was
+closed on 2026-08-30 (§2.11). It was never a defect so much as an unmade
+decision, which is why it outlasted the three that were.
 
 ### 3.2 Unblocked — work, not decisions
 
@@ -394,9 +456,9 @@ whoever owns the data, not to a cleanup script.
    2026-08-29.
 3. ~~**§3.2 language servers.**~~ Done 2026-08-29 — and it was not cheap,
    because nothing underneath it had ever run.
-4. **§3.1 report and review** — before any deployment that is both public and
-   multi-tenant, and not before that. Decide who moderates first; the rate
-   limit that needed no such decision is done.
+4. ~~**§3.1 report and review.**~~ Done 2026-08-30. It did need the decision
+   first, exactly as this line said — and that decision took an afternoon,
+   having sat on the list as though it were infrastructure.
 5. ~~**§3.4 the remaining debts**.~~ Done 2026-08-29.
 6. ~~**§3.2 env vars and the dashboard list view**.~~ Done 2026-08-29.
 
@@ -409,10 +471,13 @@ whoever owns the data, not to a cleanup script.
    already had.
 
 Everything still in §3.3 is blocked on a decision or on infrastructure and
-should not be started until that decision is made. Item 4 needs a decision
-before it needs a developer. **There is nothing left on this page to simply
-start** — and that claim has now been wrong twice in one day, so it is worth
-reading as "nothing found yet" rather than as a proof.
+should not be started until that decision is made. **There is nothing left on
+this page to simply start** — and that claim has now been wrong three times, so
+it is still worth reading as "nothing found yet" rather than as a proof. Twice
+the blocker turned out not to exist. The third time it did exist and was an
+unmade decision, which is the cheapest kind there is: the remaining four need a
+DNS record, a certificate, a cost model, or a rewrite, and no afternoon
+produces any of those.
 
 ---
 
@@ -553,6 +618,18 @@ it; nothing else here is a standing decision.
     user code, so it must not be same-origin with the API — and less obviously
     must not share the *preview* origin either, since a preview is authenticated
     by a cookie scoped to that origin.
+
+11. **Moderation authority is an `ADMIN_EMAILS` allowlist, and an operator's
+    only power is to make a project private.** A role column on `User` needs a
+    way to appoint the first admin, which is a bootstrapping problem that ends
+    in an environment variable anyway — so the environment variable is the
+    design, not the scaffolding for it. Empty means nobody, never everybody.
+    The authority is deliberately the smallest one that resolves a complaint:
+    deletion and account action are not granted, because unpublishing is the
+    only decision whose mistakes the person they were made against can undo.
+    *Changes it:* more than one operator per deployment, or a deployment whose
+    operators are not the people who can edit its environment.
+    `middlewares/requireAdmin.ts` is the one place to rewrite.
 
 ---
 
