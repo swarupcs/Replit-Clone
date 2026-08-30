@@ -38,8 +38,8 @@ than left in history where nobody would look for them.
 ## 1. Status at a glance
 
 Verified by running it rather than reading about it. The numbers are as of
-2026-08-30; the notes under the table say which rows were **not** re-run that
-day, and why that matters more than usual:
+2026-08-31 (night); the notes under the table say which rows were **not**
+re-run that day, and why that matters more than usual:
 
 | Check | Result |
 |---|---|
@@ -47,11 +47,17 @@ day, and why that matters more than usual:
 | `pnpm --filter server test` | **1772 passing**, 20 skipped (110 files) |
 | the same, with `TEST_DATABASE_URL` set | **run 2026-08-31 evening, four times — green** |
 | `pnpm --filter web test` | **994 passing** (76 files) |
-| Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
+| `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
+| Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
 
-The 228 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
-unset) and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both
-run in CI. The DB-gated row was run rather than quoted for §2.11 and §2.12:
+The skipped server tests are the DB-gated suites (`TEST_DATABASE_URL` unset)
+and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both run in
+CI. The count in that row is what remains skipped **with** the database
+configured; without it the figure is an order of magnitude larger, which is
+why the two rows are listed separately rather than as one number that would
+mean different things on different machines.
+
+The DB-gated row was run rather than quoted for §2.11 and §2.12:
 both put load-bearing claims in a unique index, a foreign key and a
 transaction, and a mock cannot be wrong about those in any way worth trusting.
 
@@ -1129,6 +1135,96 @@ looked lately" and never "the code is right". Read it that way.
         sweeper's existing catch-up rule then does the right thing by itself:
         one run when the project comes back, not one per night missed.
 
+---
+
+**Added 2026-08-31 (night), from a sweep of the whole tree** rather than from
+any list. What the sweep confirmed is worth saying before what it found: the
+guards this codebase is careful about are in place and hold up to reading.
+Every mutating socket event is behind `requiresEdit`, including the two
+collaborative-document handlers where a viewer writing through the CRDT path
+would have been invisible; every project route names its access level; the
+takedown now reaches all seven surfaces (§2.20); path confinement, the egress
+gateway, the third origin and the container limits are all where they claim to
+be; and `grep` for `TODO|FIXME|HACK` over ~51k lines of source still returns
+nothing. Of the ninety-odd endpoints, exactly one has no client, and it is
+`/metrics`, which is not supposed to have one.
+
+The five below are what a sweep at that altitude does turn up. Four of the
+five are one shape: **state that outlives the process, and a boot that
+reconciles containers but not rows.**
+
+- [ ] **A restart during a scheduled run kills that job permanently, and says
+      nothing.** The worst thing on this page, and it is reached by the most
+      ordinary operation there is.
+
+      `runJobNow` writes a `RUNNING` row before it starts, which is right —
+      §2.13 chose that deliberately so a stuck run is visible. Nothing ever
+      clears one that the process did not live to finish. `reconcileOnBoot`
+      exists and sweeps *containers and directories*; it has never looked at a
+      row. The overlap check is `findFirst({ jobId, status: "RUNNING" })` with
+      no age bound, so from the next firing onwards:
+
+      1. the sweep claims the job and calls `runJobNow`,
+      2. which finds the immortal `RUNNING` row and writes `SKIPPED`,
+      3. and `SKIPPED` is deliberately not a verdict (§6 decision 14), so
+         `lastVerdict` ignores it and **nobody is ever told**.
+
+      A nightly backup dies on the evening somebody deployed, and reports
+      `SKIPPED` every night thereafter forever. That is precisely the failure
+      §2.15 built the notification system to make visible, arriving through
+      the one status that system is designed to stay quiet about — two correct
+      decisions composing into a silence neither of them intended.
+
+      Three things are needed and the third is the one that matters: reconcile
+      orphaned `RUNNING` rows at boot; bound the overlap check by age so a row
+      from a process that is gone cannot hold a job hostage forever; and settle
+      what a run abandoned by a restart *is*. It is not `SKIPPED` — nothing
+      overlapped — and it is not `FAILED`, because the command never gave a
+      verdict. `ERRORED` already means "the machine could not run it", which is
+      exactly what happened, and it is already a non-verdict, so a job that
+      recovers on the next firing correctly says nothing.
+
+- [ ] **A deploy interrupted the same way leaves the row `BUILDING` forever.**
+      The same root cause with a milder ending. `Deployment.status` goes to
+      `BUILDING` before the build and nothing at boot puts it right, so the
+      panel reports a build in progress that no process is running. It
+      self-heals on the next publish, because `building` is in-memory and
+      `reserve()` overwrites the status — so unlike the job above nothing is
+      wedged, but until somebody deploys again the panel is simply wrong. Fix
+      it in the same pass and for the same reason: the boot reconcile should
+      know about rows.
+
+- [ ] **`POST /:projectId/test` starts a container and has no budget.** Every
+      other route that costs real compute carries one — `createLimiter`,
+      `installLimiter`, `deployLimiter`, `queryLimiter`, and `jobRunLimiter`,
+      which §2.13 added to "run now" on the stated grounds that it is the only
+      one of those routes that starts a container. §2.18 then shipped a second
+      route that starts a container, gave it three carefully argued access
+      levels, and no limiter. The argument for `jobRunLimiter` applies to it
+      word for word.
+
+      `GET /:projectId/export` is the same question one notch quieter: it walks
+      and zips an entire working tree per request, with no budget, at viewer
+      level.
+
+- [ ] **One project write takes its access level from a default argument.**
+      `assertProjectAccess`'s third parameter defaults to `"editor"`, and
+      `setProjectEnvController` is the only caller in the codebase that omits
+      it. Editor is very likely the right answer — an editor can already run
+      arbitrary code, so setting a variable grants them nothing new — but it is
+      the answer this endpoint gets by falling through rather than by anybody
+      choosing it. Every other write on the page names its level, and several
+      (§2.13, §2.18) exist specifically because naming it changed the answer.
+      A default that is load-bearing in exactly one place is a default that
+      will eventually be changed by somebody reasoning about the other ninety.
+
+- [ ] **A comment in `routes/v1/projects.ts` sits above the wrong routes.** The
+      paragraph introducing the moderation pair ("the other side of
+      moderation... both are the owner's") is immediately followed by the
+      *tests* block and its own comment, with the moderation routes below that.
+      Trivial to fix and recorded rather than fixed silently, because this file
+      is where somebody goes to find out what is guarded by what.
+
 ### 3.2 Unblocked — work, not decisions
 
 Emptied on 2026-08-29, when everything then in it moved to §2.8. Four items
@@ -1183,6 +1279,63 @@ Listed in the order §4 recommends.
       something finally becoming usable — not an argument for more of it.
 
 
+---
+
+**Added 2026-08-31 (night), from the same sweep.** None of these is a missing
+feature in the sense of a feature nobody built. Each is a capability the server
+already has and nobody can reach — the shape §2.21 just finished paying for
+once, found three more times.
+
+- [ ] **Quotas are enforced and never shown.** `getUserUsage` computes a
+      person's project count and disk against their limits;
+      `assertCanCreateProject` and `assertUserDiskQuota` refuse on it;
+      `diskUsageService` tracks the same per project. There is no endpoint and
+      no screen. The only way to learn where you stand is to be refused, and
+      the refusal names a limit without saying how close you were to it or
+      which project is eating it.
+
+      That is the worst possible moment to find out, and the fix is small: an
+      endpoint and a line on the dashboard. The per-project breakdown is the
+      half that makes it actionable — "you are out of space" is not a thing
+      anybody can act on, and "this project is 4 GB of the 5 you have" is.
+
+- [ ] **The operator can see the report queue and nothing about the machine.**
+      `/metrics` is the one endpoint in the product with no client, and unlike
+      the appeal that is a defensible choice — a scrape target is not a screen.
+      But it means the counters this codebase has been carefully incrementing
+      all along (`jobs_started`, `jobs_skipped`, `report_actioned`,
+      `notifications_created`, and the rest) are visible only to somebody who
+      curls the port.
+
+      What is actually missing is smaller than a monitoring stack and more
+      useful: how many containers are running against `MAX_CONCURRENT_CONTAINERS`,
+      how much disk the deployments and releases hold, and — given the defect
+      above — how many scheduled runs are sitting in `RUNNING`. An operator
+      today cannot answer "is this machine full" from any screen, which is the
+      question a three-container cap makes them ask most often.
+
+- [ ] **Nothing that returns a list is paginated, and they fail in two
+      different directions.** `listReports` takes 200, `listRecentModeration`
+      takes 100, `listPublicProjects` takes 50 — each silently, with no
+      indication that there was more and no way to ask for it. Meanwhile
+      `listAccessibleProjects` has no cap at all, so a user with five hundred
+      projects gets five hundred rows in one payload.
+
+      The §2.21 fix has already shown what the first kind costs: a test
+      narrowing after a capped query would have read "nothing here" rather than
+      failing, and only luck put that cap in view. A truncated list that says
+      it is complete is worse than a short one that says it is not.
+
+- [ ] **A run abandoned by a restart has no name.** Listed separately from the
+      defect above because it is a design question rather than a fix: `RUNNING`,
+      `SKIPPED`, `FAILED`, `TIMED_OUT` and `ERRORED` were chosen (§2.13) to
+      keep "your command is wrong" apart from "we could not run it", and the
+      sixth case — "we started it and then stopped existing" — was not among
+      them because nothing had thought about restarts. Settle it once, in the
+      same place §2.13's table lives, before writing the reconciler that
+      depends on the answer.
+
+
 ### 3.3 Blocked on a decision or on infrastructure
 
 Each is named with what blocks it, so none reads as ready to start.
@@ -1213,6 +1366,25 @@ Each is named with what blocks it, so none reads as ready to start.
       (openvscode-server), **not** a hand-built debug adapter client — and Route
       A puts the multiplayer layer, the assistant, the run control and the
       preview behind a rewrite. Revisit the route, not the row.
+
+- [ ] **Backup and restore.** Added 2026-08-31 after a sweep found no story
+      for either. Everything a user has lives in exactly one place: the working
+      tree on the host's disk, the rows in one Postgres, the published releases
+      in a sibling directory. `deleteProjectService` is thorough and
+      irreversible, the delete confirmation is a dialog, and there is nothing
+      behind it — no soft delete, no snapshot, no dump.
+
+      Placed here rather than in §3.2 because the code is the small half. Where
+      backups go is a deployment decision with a cost attached — object storage
+      off this VM, or a second disk, or nothing and a documented acceptance
+      that this platform loses data when its host does. That is the same class
+      of decision as the ACME row above it, and it should be made rather than
+      arrived at.
+
+      Worth noting what already exists and does not solve it: per-project
+      checkpoints (§2.x) are on the same disk as the thing they snapshot, and
+      `GET /:projectId/export` is a manual, per-project, user-initiated zip. A
+      backup is the one that runs when nobody remembers to.
 
 Also deliberately out of scope, recorded so nobody re-opens them by accident:
 a CLI and local sync; GitLab and Bitbucket; monorepo sub-directory imports; a
@@ -1297,6 +1469,32 @@ whoever owns the data, not to a cleanup script.
     every viewer, and a screen still quoting a decision that had been
     amended — neither of which was on any list.
 
+19. **§3.1 — the restart wedge, and the boot reconcile that should have caught
+    it.** First and not close: it is the only thing on this page that destroys
+    a working feature permanently, it is triggered by deploying, and the
+    product is built so that nobody is told. The stuck `BUILDING` row is the
+    same bug with a softer landing and belongs in the same commit — one boot
+    pass, two kinds of row. Settle §3.2's naming question first; it is an
+    afternoon and the reconciler depends on the answer.
+20. **§3.1 — the missing budget on `POST /test`, and the export beside it.**
+    Ten minutes, and the argument for it was already written down for the
+    identical route in §2.13.
+21. **§3.2 — showing people their quota.** The cheapest thing here with a user
+    on the other end of it: the numbers are already computed and already
+    enforced, and the only reason nobody can see them is that no endpoint
+    returns them.
+22. **§3.1 — the defaulted access level, and the stray comment.** Small, and
+    worth doing while §3.1 is open rather than leaving two lines that will read
+    as noise in six months.
+23. **§3.2 — pagination.** Last of the unblocked work because nothing is
+    currently over any of the caps, which is exactly why it should be done
+    before something is.
+
+**§3.3 gained a row rather than losing one**, for the first time since this
+file existed: backups. It is there because the sweep went looking for one and
+found that a `Project` exists in exactly one place on one disk, and that the
+delete path is thorough and has nothing behind it.
+
 **§3.2 was empty when this section was last edited, and §3.1 said "Empty"
 alongside it.** Both were wrong within the hour, and neither needed a new
 feature idea to become wrong — one item came from reading `takenDownAt`'s
@@ -1311,9 +1509,18 @@ a fifth suite asserting on a global query. All three are in §2.20–§2.21. The
 pattern is now consistent enough to state plainly: **the work found by
 looking is roughly twice the work written down.**
 
+A deliberate sweep of the whole tree the same night added nine more items and
+one §3.3 row — and, usefully, confirmed a great deal. What it did *not* find
+is the part worth keeping: no unguarded mutating socket event, no route
+without a named access level, no orphaned endpoint but `/metrics`, no debt
+markers in ~51k lines. The defects it did find cluster on one thing nobody had
+thought about, which is that **this process can stop while it is in the middle
+of something**, and the boot that puts the machine right has only ever looked
+at containers.
+
 Everything still in §3.3 is blocked on a decision or on infrastructure and
-should not be started until that decision is made. The two items above are
-not.
+should not be started until that decision is made. Everything in §3.1 and
+§3.2 is not.
 
 This section used to close by claiming **there is nothing left on this page to
 simply start**. That claim has now been wrong five times, which is enough to
@@ -1350,6 +1557,39 @@ are exactly "P" and "site" (created 2026-08-27) as reported. There are **no
 orphan directories** in the other direction. Still deliberately left alone:
 deleting rows and recreating trees are judgment calls belonging to whoever owns
 the data.
+
+### The 2026-08-31 sweep
+
+Everything in §3.1 and §3.2 dated that night came from reading the tree rather
+than running it, so it is worth saying exactly what was read and what was only
+inferred — a defect asserted from a grep is a hypothesis until something fails.
+
+**Read and cross-checked:** every route in `routes/v1` against every
+controller's access level; every `socket.on` in `editorHandler` against the
+`requiresEdit` flag, including the two document handlers whose flag sits far
+enough from the call to be missed by a naive scan; `takenDownAt`'s call sites
+against every operation that copies, serves, redeems or executes a project;
+`deleteProjectService` against every module that holds per-project state;
+`reconcileOnBoot` against every row a crash can leave non-terminal; the rate
+limiters against the routes that cost compute; every capped `findMany` against
+whether anything can page past it; and every server capability against whether
+`apps/web` calls it.
+
+**Confirmed by reading the code, not by executing it:** the restart wedge is
+argued from three facts each verified in the source — `runJobNow` writes
+`RUNNING` before it starts, the overlap check has no age bound, and
+`reconcileOnBoot` touches only containers and directories — plus one already
+covered by a passing test, that `lastVerdict` ignores `SKIPPED`. The chain is
+tight, and it has not been demonstrated end to end. **The first thing the fix
+should produce is the test that reproduces it**, which is also the only way to
+know the reconciler works: an assertion about what happens after a process
+dies cannot be written by the process that died.
+
+**Numbers as of that night:** ~25.8k lines of server source, ~23.8k of web,
+~1.7k shared, against ~38.4k lines of tests. 1772 server tests passing (four
+consecutive full runs against real Postgres), 994 web, `pnpm -r typecheck` and
+`pnpm -r lint` clean across all three packages — the lint row for the first
+time, having been red on seven pre-existing errors that nobody had run into.
 
 ### What the 2026-08-29 audit changed
 
