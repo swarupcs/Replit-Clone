@@ -44,9 +44,9 @@ day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1748 passing**, 20 skipped (109 files) |
+| `pnpm --filter server test` | **1759 passing**, 20 skipped (110 files) |
 | the same, with `TEST_DATABASE_URL` set | **run 2026-08-30 night — green** |
-| `pnpm --filter web test` | **965 passing** (73 files) |
+| `pnpm --filter web test` | **973 passing** (74 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
 The 228 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
@@ -80,7 +80,11 @@ regressions:
 - Under load the **web** suite fails 9–10 at the default 5s timeout, always
   the *first* test in a file and always passing in isolation. Verified as
   environmental by running it on a clean checkout, which failed the same way.
-  `--testTimeout=20000` is green at 73/73.
+  `--testTimeout=20000` is green at 74/74.
+- The server suite occasionally dies with `ERR_IPC_CHANNEL_CLOSED` / "Channel
+  closed" from tinypool, reporting no test failures at all. Seen three times
+  on 2026-08-31. It is the worker pool, not the tests: the next run passes.
+  **Not investigated.**
 - `refreshTokenService.test.ts` — "lets exactly one of several concurrent
   refreshes claim the row" — fails under load roughly one run in three, with
   "Session was reused and has been revoked". It is timing against a reuse
@@ -88,7 +92,7 @@ regressions:
   since well before it was first seen. **Not investigated**, and recorded here
   rather than left to be rediscovered.
 
-**Done: 88 items. Open: 5 — four blocked, one not.**
+**Done: 90 items. Open: 4 — all four blocked.**
 
 The four blocked ones are §3.3, and none is a whole row any more: each is the
 blocked remainder of one, after the unblocked half shipped. A certificate, an
@@ -832,6 +836,58 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.19 Since (2026-08-31, later still)
+
+- [x] **A deployment can be rolled back, because its builds are kept.**
+      `Deployment.projectId` is unique and the static path renamed a staging
+      directory over the live one, so every publish destroyed its own
+      predecessor and "put back the one that worked" had nothing to put back.
+
+      **The live release is a pointer, not a copy**, and that is the decision
+      the rest follows from. Every build lands in a directory of its own and
+      `Deployment.liveReleaseId` names the one being served, so a rollback is
+      a database write: nothing is rebuilt, nothing is copied, and what comes
+      back is exactly the bytes that were serving before.
+
+      That distinction is the whole feature rather than an optimisation. A
+      "rollback" that rebuilt from source would publish whatever the working
+      tree says *today*, which is not what anybody means by going back — and
+      it would be a different program with the same name. A test writes a
+      third, never-published version into the tree before rolling back, and
+      asserts the served bytes are still the first build's.
+
+      Falling out of it: the publish no longer deletes the live tree to make
+      room, so the window where a site 404s mid-deploy is gone too. And the
+      deployment takes the release's own account of itself back on a rollback
+      — command, output directory, size, log — because the row describes what
+      is *serving*, and leaving the newer build's numbers there would have the
+      panel describe a build nobody is being served.
+
+      A **service** deployment is refused, and told why rather than quietly
+      doing something else: what it published is a running container built
+      from a source tree that has since moved on, so there is no artifact to
+      go back to. Five builds are kept, and the live one is never pruned
+      however old it is — a rollback to a fortnight-old build must not make
+      that build the next thing deleted for being stale.
+
+      A deployment published before this existed has a null pointer and is
+      still served from the legacy directory. It must not start 404ing because
+      of a column it predates.
+
+- [x] **The gallery could 500 on an account being deleted.**
+      `listPublicProjects` read `row.owner.email` where `owner` is a required
+      relation — so "cannot happen", except that deleting an account cascades
+      its projects and a read landing mid-cascade observes the row without it.
+      The `?? "someone"` fallback for a missing name was already there; a null
+      owner threw straight past it and took the whole gallery down for
+      everybody over one project mid-deletion.
+
+      Found the way the last three were: by a full-suite run failing somewhere
+      unrelated to what had just been written. Its test also asserted on the
+      global list, which is the third suite this week to do that (§2.17).
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -894,12 +950,7 @@ Listed in the order §4 recommends.
 
 - [x] **The test command has no panel.** Shipped 2026-08-31 — see §2.18.
 
-- [ ] **A deployment cannot be rolled back, because no history is kept.**
-      `Deployment.projectId` is `@unique` — one row per project, mutated in
-      place on every publish. The previous build is not retained anywhere, so
-      "put back the one that worked" has nothing to put back. Last of the four
-      because it is the only one needing a migration rather than a service,
-      not because it is blocked.
+- [x] **A deployment cannot be rolled back.** Shipped 2026-08-31 — §2.19.
 
 
 ### 3.3 Blocked on a decision or on infrastructure
@@ -1003,8 +1054,11 @@ whoever owns the data, not to a cleanup script.
 14. ~~**§3.2 the moderation audit log, and the appeal.**~~ Done 2026-08-31
     (§2.17), together, because they are one conversation.
 15. ~~**§3.2 the test panel.**~~ Done 2026-08-31 (§2.18).
-16. **§3.2 deployment history.** The last unblocked item, and the only one
-    left that wants a migration.
+16. ~~**§3.2 deployment history.**~~ Done 2026-08-31 (§2.19).
+
+**§3.2 is empty again** — and this time the page says what that means. See
+§3.1: an empty list is "nobody has looked lately", not "there is nothing to
+do". Everything left in §3.3 is genuinely blocked.
 
 Everything still in §3.3 is blocked on a decision or on infrastructure and
 should not be started until that decision is made. **The four items in §3.2

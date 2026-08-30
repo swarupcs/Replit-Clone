@@ -13,6 +13,7 @@ import {
   releaseDomain,
   verifyDomain,
 } from "../service/customDomainService.js";
+import { listReleases, rollbackTo } from "../service/releaseService.js";
 
 /** Who may do what with a deployment.
  *
@@ -56,6 +57,42 @@ export async function deployController(
     success: true,
     message: "Deployed",
     data: deployment,
+  });
+}
+
+/** A project's published builds, newest first.
+ *
+ *  A viewer's, like reading the deployment itself: this is the history of a
+ *  thing that is public by construction.
+ */
+export async function listReleasesController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  res.json({
+    success: true,
+    message: "Releases",
+    data: { releases: await listReleases(projectId) },
+  });
+}
+
+/** Serving an earlier build again.
+ *
+ *  The owner's, exactly like publishing: this changes what strangers get at a
+ *  public address, and it is the same decision made in the other direction.
+ */
+export async function rollbackController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "owner");
+  const releaseId = z.string().uuid().parse(req.params["releaseId"]);
+
+  res.json({
+    success: true,
+    message: "Rolled back",
+    data: { releases: await rollbackTo(projectId, releaseId) },
   });
 }
 

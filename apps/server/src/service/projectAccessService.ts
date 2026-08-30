@@ -154,7 +154,14 @@ export async function listPublicProjects(limit = 50): Promise<PublicProject[]> {
     createdAt: row.createdAt.toISOString(),
     // The local part only. A gallery is a public page and the whole address is
     // more than it needs to say who made something.
-    ownerName: row.owner.email.split("@")[0] ?? "someone",
+    //
+    // The owner is a required relation, so `row.owner` is not supposed to be
+    // null -- but an account being deleted cascades its projects, and a read
+    // that lands in the middle of that can observe the row without it. The
+    // fallback below already existed for a missing name; without the optional
+    // access a null owner throws past it and takes the whole gallery down for
+    // everybody, which is a poor trade for one project mid-deletion.
+    ownerName: row.owner?.email.split("@")[0] ?? "someone",
     forks: row._count.forks,
   }));
 }

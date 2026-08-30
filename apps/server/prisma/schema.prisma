@@ -490,10 +490,66 @@ model Deployment {
   /// cannot tell those apart cannot safely act on either.
   domainCheckedAt DateTime?
 
+  /// Which release is being served, or null for a deployment published before
+  /// releases existed (its files are still in the legacy site directory).
+  ///
+  /// A pointer rather than a copy, and that is what makes a rollback a
+  /// database write instead of a file operation: every build keeps its own
+  /// directory, and going back to one is changing which directory this names.
+  /// Nothing is rebuilt, nothing is copied, and the previous build is exactly
+  /// the bytes that were serving before -- not a fresh build of a source tree
+  /// that has moved on since.
+  liveReleaseId String?
+
+  releases DeploymentRelease[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("deployments")
+}
+
+/// One published build, kept so it can be gone back to.
+///
+/// `Deployment` is the current state of a project's site and is mutated in
+/// place; this is the history it used to throw away. Before it, a publish
+/// overwrote its own predecessor and "put back the one that worked" had
+/// nothing to put back.
+///
+/// Static releases own a directory of files. A SERVICE release does not: what
+/// it published is a running container built from a source tree that has since
+/// moved on, so its row is a record and not something to roll back to. Saying
+/// that plainly is better than a rollback that silently rebuilds something
+/// else.
+model DeploymentRelease {
+  id String @id @default(uuid())
+
+  deploymentId String
+  deployment   Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  /// Copied from the deployment at publish time. A release has to keep naming
+  /// its own directory even if the deployment is later removed and the row is
+  /// read while its files are being cleaned up.
+  subdomain String
+
+  kind DeploymentKind
+
+  /// What produced it, recorded rather than looked up: rolling back to a build
+  /// means rolling back to what that build actually ran, and a template whose
+  /// defaults changed since must not rewrite history.
+  buildCommand String
+  outputDir    String
+
+  sizeBytes Int @default(0)
+
+  /// Tail of that build's output, bounded before it is written.
+  log String @default("")
+
+  createdAt DateTime @default(now())
+
+  /// Newest first, per deployment, is the whole read pattern.
+  @@index([deploymentId, createdAt])
+  @@map("deployment_releases")
 }
 
 enum DeploymentStatus {

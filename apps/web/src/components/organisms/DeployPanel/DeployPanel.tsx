@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Empty, Spin, Tooltip, message } from "antd";
 import { CustomDomain } from "../../molecules/CustomDomain/CustomDomain.tsx";
+import { ReleaseHistory } from "../../molecules/ReleaseHistory/ReleaseHistory.tsx";
 import {
   VscCloudUpload,
   VscCopy,
@@ -282,6 +283,17 @@ export const DeployPanel = ({ projectId, isOwner }: DeployPanelProps) => {
             projectId={projectId}
             domain={deployment.customDomain}
             onChange={refresh}
+          />
+        )}
+
+        {/* Reading the history is a viewer's -- it is the record of a thing
+            that is public by construction. Rolling back is the owner's, and
+            the component draws that line itself. */}
+        {deployment && (
+          <ReleaseHistory
+            projectId={projectId}
+            isOwner={isOwner}
+            refreshKey={deployment.deployedAt ? 1 : 0}
           />
         )}
 

@@ -157,3 +157,34 @@ export const MAX_DOMAIN = 253;
  */
 export const DOMAIN_PATTERN =
   /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+/** One published build, kept so it can be gone back to.
+ *
+ *  A publish used to overwrite its own predecessor, so "put back the one that
+ *  worked" had nothing to put back. The live release is a POINTER: every build
+ *  keeps its own directory and the deployment names the one being served, so a
+ *  rollback is a database write. What comes back is exactly the bytes that
+ *  were serving before, not a fresh build of a source tree that has moved on.
+ */
+export interface DeploymentRelease {
+  id: string;
+  kind: "static" | "service";
+  /** What produced it. Rolling back means rolling back to what that build
+   *  actually ran, so it is recorded rather than looked up. */
+  buildCommand: string;
+  outputDir: string;
+  sizeBytes: number;
+  log: string;
+  createdAt: string;
+  /** True for the one currently being served. */
+  live: boolean;
+}
+
+/** How many builds are kept per site.
+ *
+ *  Each is a full copy of its output, so this is a disk budget as much as a
+ *  history depth. The live release is never pruned however old it is — a
+ *  rollback to a fortnight-old build must not make that build the next thing
+ *  deleted for being old.
+ */
+export const RELEASES_KEPT = 5;

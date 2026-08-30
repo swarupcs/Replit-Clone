@@ -2774,3 +2774,61 @@ body {
   border: 1px solid var(--rc-border);
   border-radius: 6px;
 }
+
+/* Deployment history ------------------------------------------------------ */
+
+.rc-releases {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  margin-top: 4px;
+  border-top: 1px solid var(--rc-border);
+}
+
+.rc-releases-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--rc-text-subtle);
+}
+
+.rc-releases-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.rc-release {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 11px;
+  color: var(--rc-text-subtle);
+}
+
+.rc-release-when {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* The one being served is the only one worth picking out — everything else in
+   the list is a candidate to go back to, and they are all equal. */
+.rc-release-live {
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--rc-ok, #3fb950);
+  border: 1px solid currentcolor;
+}
+
+.rc-release-size {
+  flex: none;
+  color: var(--rc-text-faint, var(--rc-text-subtle));
+}

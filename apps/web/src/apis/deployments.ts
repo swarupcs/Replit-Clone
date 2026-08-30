@@ -3,6 +3,7 @@ import type {
   CustomDomain,
   Deployment,
   DeploymentState,
+  DeploymentRelease,
 } from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
@@ -60,4 +61,30 @@ export const releaseDomainApi = async (
     `/api/v1/projects/${projectId}/deployment/domain`,
   );
   return response.data.data;
+};
+
+/** The builds this project has published, newest first.
+ *
+ *  Reading is a viewer's; rolling back is the owner's, because it changes what
+ *  strangers get at a public address — the same decision as publishing, in the
+ *  other direction. Enforced on the server.
+ */
+export const listReleasesApi = async (
+  projectId: string,
+): Promise<DeploymentRelease[]> => {
+  const response = await axios.get<ApiSuccess<{ releases: DeploymentRelease[] }>>(
+    `/api/v1/projects/${projectId}/releases`,
+  );
+  return response.data.data.releases;
+};
+
+export const rollbackApi = async (
+  projectId: string,
+  releaseId: string,
+): Promise<DeploymentRelease[]> => {
+  const response = await axios.post<ApiSuccess<{ releases: DeploymentRelease[] }>>(
+    `/api/v1/projects/${projectId}/releases/${releaseId}/rollback`,
+    {},
+  );
+  return response.data.data.releases;
 };

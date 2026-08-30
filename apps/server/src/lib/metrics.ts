@@ -84,7 +84,10 @@ export type CounterName =
   | "test_runs_started"
   | "test_runs_passed"
   | "test_runs_failed"
-  | "test_runs_errored";
+  | "test_runs_errored"
+  // A rollback is a publish that undoes one. Climbing against
+  // `deploys_succeeded` says builds are going out that should not have.
+  | "deploys_rolled_back";
 
 const counters = new Map<CounterName, number>();
 

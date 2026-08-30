@@ -58,6 +58,19 @@ describe.skipIf(!TEST_DATABASE_URL)("publishing a project", () => {
     await rm(projectRoot(projectId), { recursive: true, force: true });
   });
 
+  /** Where this subdomain is actually served from.
+   *
+   *  Asked of `resolveSite` rather than computed, because since releases
+   *  shipped the answer is a pointer: each build keeps its own directory and
+   *  the deployment names the live one. A test that recomputed the path would
+   *  be asserting on where files used to go.
+   */
+  const servedRoot = async (subdomain: string) => {
+    const site = await deployService.resolveSite(`${subdomain}.localhost`);
+    if (!site) throw new Error(`${subdomain} is not being served`);
+    return site.root;
+  };
+
   it("copies the output to an address of its own and reports it live", async () => {
     const deployment = await deployService.publish(projectId);
 
@@ -66,7 +79,7 @@ describe.skipIf(!TEST_DATABASE_URL)("publishing a project", () => {
     expect(deployment.sizeBytes).toBeGreaterThan(0);
 
     const served = await readFile(
-      path.join(deployService.siteDirectory(deployment.subdomain), "index.html"),
+      path.join(await servedRoot(deployment.subdomain), "index.html"),
       "utf8",
     );
     expect(served).toBe("<h1>version one</h1>");
@@ -76,7 +89,7 @@ describe.skipIf(!TEST_DATABASE_URL)("publishing a project", () => {
     const deployment = await deployService.publish(projectId);
 
     const asset = path.join(
-      deployService.siteDirectory(deployment.subdomain),
+      await servedRoot(deployment.subdomain),
       "assets",
       "style.css",
     );
@@ -108,7 +121,7 @@ describe.skipIf(!TEST_DATABASE_URL)("publishing a project", () => {
     );
 
     const second = await deployService.publish(projectId);
-    const root = deployService.siteDirectory(second.subdomain);
+    const root = await servedRoot(second.subdomain);
 
     expect(await readFile(path.join(root, "index.html"), "utf8")).toBe(
       "<h1>version two</h1>",
@@ -169,7 +182,7 @@ describe.skipIf(!TEST_DATABASE_URL)("publishing a project", () => {
 
   it("takes the site down, files and all", async () => {
     const deployment = await deployService.publish(projectId);
-    const root = deployService.siteDirectory(deployment.subdomain);
+    const root = await servedRoot(deployment.subdomain);
 
     await deployService.unpublish(projectId);
 

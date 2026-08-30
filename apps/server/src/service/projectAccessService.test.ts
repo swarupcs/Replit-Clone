@@ -370,8 +370,16 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
         service.ProjectVisibility.PUBLIC,
       );
 
-      const listed = await service.listPublicProjects();
+      // Restricted to this suite's own rows. `listPublicProjects` is global,
+      // as a gallery has to be, so serialising the whole list here would make
+      // the assertion depend on what every other suite happens to have
+      // published at that moment.
+      const listed = (await service.listPublicProjects()).filter(
+        (row) => row.id === projectId,
+      );
       const serialised = JSON.stringify(listed);
+
+      expect(listed).toHaveLength(1);
 
       expect(serialised).not.toContain("hunter2");
       expect(serialised).not.toContain("s3cret-token");

@@ -93,6 +93,8 @@ import {
   verifyDomainController,
   getDeploymentController,
   undeployController,
+  listReleasesController,
+  rollbackController,
 } from "../../controllers/deployController.js";
 import {
   createJobController,
@@ -218,6 +220,16 @@ router.post(
   asyncHandler(deployController),
 );
 router.delete("/:projectId/deployment", asyncHandler(undeployController));
+
+// The builds this project has published, and going back to one. Reading is a
+// viewer's; rolling back is the owner's, because it changes what strangers get
+// at a public address -- the same decision as publishing, in the other
+// direction.
+router.get("/:projectId/releases", asyncHandler(listReleasesController));
+router.post(
+  "/:projectId/releases/:releaseId/rollback",
+  asyncHandler(rollbackController),
+);
 
 // Verification is rate limited and claiming is not. Claiming writes one row
 // the owner already owns; verifying makes an outbound DNS query per press,
