@@ -4,6 +4,8 @@ import { increment } from "../lib/metrics.js";
 import { logger } from "../lib/logger.js";
 import { notify, notifyAdmins } from "./notificationService.js";
 import { webUrl } from "../lib/mailer.js";
+import { unpublish } from "./deployService.js";
+import { revokeEmbed } from "./embedService.js";
 import type {
   ProjectReportReason,
   ProjectReportStatus,
@@ -242,9 +244,16 @@ export async function reviewReport(input: {
 
   await prisma.$transaction(async (tx) => {
     if (input.decision === "ACTIONED") {
+      // `takenDownAt` as well as the visibility, and the two are not the same
+      // statement. Visibility is the owner's switch -- documented on
+      // `setProjectVisibility` as "a decision about who may read the source" --
+      // so a takedown written only there was one the person it was applied to
+      // could reverse in a single request. `takenDownAt` is what actually
+      // stops the deployment being served, the embed resolving, and the
+      // project being published again.
       await tx.project.update({
         where: { id: report.projectId },
-        data: { visibility: "PRIVATE" },
+        data: { visibility: "PRIVATE", takenDownAt: reviewedAt },
       });
 
       // Everybody else who reported this project reported the thing that has
@@ -286,6 +295,30 @@ export async function reviewReport(input: {
     decision: input.decision,
     reviewer: input.reviewerEmail,
   });
+
+  if (input.decision === "ACTIONED") {
+    // Reclaiming what the WHERE clauses have already made unreachable: the
+    // published files, the container behind a service, and the embed row.
+    // Deliberately AFTER the commit and deliberately not fatal -- these touch
+    // the filesystem and Docker, so they can fail in ways a database cannot,
+    // and a takedown that depended on them would be a takedown that usually
+    // works. The guarantee is in the queries; this is the cleanup.
+    try {
+      await unpublish(report.projectId);
+    } catch (error) {
+      logger.error("could not tear down a taken-down project's deployment", error, {
+        projectId: report.projectId,
+      });
+    }
+
+    try {
+      await revokeEmbed(report.projectId);
+    } catch (error) {
+      logger.error("could not revoke a taken-down project's embed", error, {
+        projectId: report.projectId,
+      });
+    }
+  }
 
   // The one action in this system taken against a user rather than for them,
   // which is exactly why it must not be something they discover by noticing

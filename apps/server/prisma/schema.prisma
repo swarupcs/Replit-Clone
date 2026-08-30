@@ -290,6 +290,21 @@ model Project {
   ownerId String
   owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
+  /// When a moderator took this project down, or null.
+  ///
+  /// Distinct from `visibility` on purpose, and the distinction is the whole
+  /// point. Visibility is the OWNER's switch -- `setProjectVisibility` calls it
+  /// "a decision about who may read the source" -- so a takedown expressed as
+  /// `visibility: PRIVATE` is a decision the person it was applied to can
+  /// reverse in one request, which is what used to happen.
+  ///
+  /// Set, it does three things nothing else was doing: the owner cannot
+  /// publish again, the deployment is not served, and the embed is not
+  /// resolved. The last two are WHERE clauses rather than cleanup steps,
+  /// because a guarantee that depends on a teardown having succeeded is not a
+  /// guarantee.
+  takenDownAt DateTime?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   /// Last time a socket or terminal attached; drives the idle container reaper.

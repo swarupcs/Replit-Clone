@@ -44,8 +44,8 @@ day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1716 passing**, 20 skipped (106 files) |
-| the same, with `TEST_DATABASE_URL` set | **run 2026-08-30 evening — green** |
+| `pnpm --filter server test` | **1723 passing**, 20 skipped (107 files) |
+| the same, with `TEST_DATABASE_URL` set | **run 2026-08-30 night — green** |
 | `pnpm --filter web test` | **951 passing** (72 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
@@ -80,7 +80,7 @@ the default 5s timeout, always the *first* test in a file and always passing
 in isolation. Verified as environmental by running it on a clean checkout,
 which failed the same way. `--testTimeout=20000` is green at 71/71.
 
-**Done: 82 items. Open: 7 — four blocked, three not.**
+**Done: 84 items. Open: 7 — four blocked, three not.**
 
 The four blocked ones are §3.3, and none is a whole row any more: each is the
 blocked remainder of one, after the unblocked half shipped. A certificate, an
@@ -102,6 +102,14 @@ reported a crashed exec as a timeout, and an `updateJob` that never checked
 which project a job belonged to. Both had been merged, reviewed and passing
 for a day. Nothing makes a wrong state as visible as deciding to tell somebody
 about it.
+
+The related one, from §2.16: **a remedy is not a mechanism.** Moderation's
+ACTIONED was written as `visibility: PRIVATE` — a column this codebase
+documents as the owner's own switch — and so the takedown left the site
+serving, left the embed resolving, and could be undone by the person it was
+applied to. Every piece of what it needed already existed. Nobody had asked
+what the action actually reached, because the queue looked finished from the
+moderator's end: the button worked, the row changed, the page updated.
 
 The two newest done items (§2.14) came from neither §3 nor anybody's feature
 list. They came from reading the schema next to itself: three columns holding
@@ -672,22 +680,91 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.16 Since (2026-08-30, night, later)
+
+- [x] **A moderator's takedown now takes the project down.** Three things were
+      wrong and they were one mistake: ACTIONED was expressed as
+      `visibility: PRIVATE`, and that column belongs to the owner.
+      `setProjectVisibility` says so in as many words — "a decision about who
+      may read the source" — and deliberately leaves the share token, the
+      collaborators and the deployment alone.
+
+      That reasoning is correct for somebody toggling their own project. It
+      does not survive being borrowed as a remedy against them. A project
+      reported for MALWARE went on being **served** at its public deploy URL;
+      one reported for SECRETS went on serving its source through its embed
+      token, which is precisely the link that would have been pasted around.
+      And `setProjectVisibility` checks only ownership, so the owner could
+      publish it again in one request. What a moderator actually achieved was
+      removing it from the gallery.
+
+      `takenDownAt` is a separate column for that reason: a takedown is a
+      different fact from a visibility setting, made by a different person,
+      and storing them in one place is what let one overwrite the other.
+
+      **The enforcement is in the WHERE clauses, not in the cleanup.**
+      `resolveSite` and the embed's `resolveToken` both filter on
+      `takenDownAt: null`, and `unpublish()` and `revokeEmbed()` are called
+      afterwards to reclaim the files, the container and the row. That order
+      matters: the teardown touches Docker and the filesystem, so it can fail
+      in ways a database cannot, and a takedown that only holds when the
+      cleanup succeeded is a takedown that usually works. Same lesson as
+      `resolveCustomDomain` in §2.12 — put the condition in the query.
+
+      Only re-publishing is refused, not going private. A moderator wanting a
+      project non-public cannot object to the owner making it more so, and the
+      alternative has a failure mode that reads "you may not make your own
+      project private".
+
+      Both halves already existed as functions. Moderation called neither.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
 
-Empty. The three deployment defects were fixed on 2026-08-29 (§2.8), and the
-last entry here — public projects with no report mechanism and no review — was
-closed on 2026-08-30 (§2.11). It was never a defect so much as an unmade
-decision, which is why it outlasted the three that were.
+The three deployment defects were fixed on 2026-08-29 (§2.8), and the last
+entry here — public projects with no report mechanism and no review — was
+closed on 2026-08-30 (§2.11).
 
-One defect has been fixed since **without ever appearing in this section**: a
-viewer could duplicate a project and receive its environment variables, which
-the `/env` endpoint would have refused to show them. Recorded in §2.14 rather
-than back-dated into here, but worth noting where this list failed. Nobody was
-going to write it down, because nobody knew — it was found by reading two
-endpoints' access rules against each other, and a list of *known* defects
-cannot prompt that.
+**This section has now read "Empty" three times while merged code was wrong**,
+and it is worth being precise about why, because the pattern is not bad luck.
+Five defects have been found since it was emptied, and not one of them arrived
+by being written down first:
+
+- a viewer could duplicate a project and take its environment variables (§2.14)
+- `withTimeout` reported a crashed exec as a timeout (§2.15)
+- `updateJob` never checked which project a job belonged to (§2.15)
+- and the two below.
+
+Every one was found by reading two shipped things against each other. A list
+of *known* defects cannot prompt that, so an empty §3.1 means "nobody has
+looked lately" and never "the code is right". Read it that way.
+
+- [x] **A moderator's takedown did not take anything down.** Fixed
+      2026-08-30 — see §2.16. `reviewReport`'s ACTIONED branch set
+      `visibility: PRIVATE` and stopped, and this codebase says plainly what
+      that does: `setProjectVisibility` is documented as "a decision about who
+      may read the source", and deliberately leaves the share token, the
+      collaborators and the deployment alone.
+
+      That reasoning is right for an owner toggling their own project, and it
+      does not survive being reused as a remedy. A project reported for
+      MALWARE went on being **served** at its public deploy URL; one reported
+      for SECRETS went on serving its source through its embed token. Both are
+      anonymous surfaces, and the embed link is exactly the thing that would
+      have been pasted around. What the moderator actually achieved was
+      removing it from the gallery.
+
+      `unpublish()` and `revokeEmbed()` both already existed. Moderation
+      called neither.
+
+- [x] **And the owner could undo it instantly.** Fixed 2026-08-30 — see
+      §2.16. `setProjectVisibility` requires owner access and checks nothing
+      else, so the person a takedown was applied to could set the project
+      public again in one request. Together with the item above, ACTIONED was
+      a decision with no mechanism behind it at all.
 
 ### 3.2 Unblocked — work, not decisions
 

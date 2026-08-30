@@ -981,8 +981,20 @@ export async function resolveSite(
 
   if (!subdomain) return undefined;
 
-  const row = await prisma.deployment.findUnique({ where: { subdomain } });
-  if (!row || row.deployedAt === null) return undefined;
+  // The takedown is part of the QUERY, like the verified check in
+  // `resolveCustomDomain`. `unpublish` is also called when a moderator acts,
+  // but that removes files and stops a container, and a public site that stays
+  // up whenever a teardown half-failed is not a takedown -- it is a takedown
+  // that usually works. This clause is true whether or not anything was
+  // cleaned up.
+  const row = await prisma.deployment.findFirst({
+    where: {
+      subdomain,
+      deployedAt: { not: null },
+      project: { takenDownAt: null },
+    },
+  });
+  if (!row) return undefined;
 
   return {
     subdomain,

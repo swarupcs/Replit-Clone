@@ -97,6 +97,28 @@ export async function setProjectVisibility(
 ): Promise<Project> {
   await assertProjectAccess(projectId, ownerId, "owner");
 
+  // Everything above this line is about the owner's own decision. A takedown
+  // is somebody else's, and it used to be expressed in the same column -- so
+  // the person it was applied to could reverse it here, in one request.
+  //
+  // Only re-publishing is refused. Going private is still theirs: a moderator
+  // wanting it non-public cannot object, and refusing would make the failure
+  // mode of this check "you may not make your own project more private".
+  if (visibility === ProjectVisibility.PUBLIC) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { takenDownAt: true },
+    });
+
+    if (project?.takenDownAt) {
+      throw new ForbiddenError(
+        "A moderator made this project private after a report. You cannot " +
+          "publish it again.",
+        "TAKEN_DOWN",
+      );
+    }
+  }
+
   return prisma.project.update({
     where: { id: projectId },
     data: { visibility },
