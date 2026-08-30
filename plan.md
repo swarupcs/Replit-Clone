@@ -934,6 +934,66 @@ looked lately" and never "the code is right". Read it that way.
       public again in one request. Together with the item above, ACTIONED was
       a decision with no mechanism behind it at all.
 
+- [ ] **The takedown reaches three surfaces and there are four it does not.**
+      §2.16 made a takedown stick by writing `takenDownAt` and teaching three
+      queries to filter on it: the gallery's `visibility`, `resolveSite`, and
+      the embed's `resolveToken`. Reading those three against the rest of the
+      surface finds four more that were never told.
+
+      1. **Copying launders it.** `forkProjectService` and
+         `duplicateProjectService` both build a fresh `Project` row from the
+         source's template and files, and neither carries `takenDownAt`. The
+         files are the thing that was reported. One button produces an
+         identical project with the column null, which defeats all three
+         existing guards at once — the copy can be published, deployed,
+         embedded and scheduled. A guard that lives on a column is only as
+         good as the operations that cannot produce a copy without it, and
+         there are two.
+
+      2. **The share link still redeems.** `redeemShareToken` looks the token
+         up and joins the caller as a collaborator with no takedown clause,
+         and the takedown revokes the embed but not the token. Those two are
+         the same kind of object — a bearer string that was pasted somewhere —
+         and only one of them was closed. A project taken down for SECRETS
+         goes on handing its source to anybody holding the link; one taken
+         down for MALWARE hands them a container to run it in.
+
+      3. **Scheduled jobs keep running.** `runDueJobs` selects on `enabled`
+         and `nextRunAt` and nothing else, so a taken-down project executes
+         its command in a container every night, indefinitely. This is the
+         one surface where the harm is not who may read the project but what
+         this machine goes on *doing* on its behalf, which makes it the worst
+         of the four and the least visible: nothing in the product would ever
+         show it.
+
+      4. **The owner can rebuild the deployment.** `publish()` checks the
+         template, the feature flag and an in-flight build, but not the
+         takedown. The site is still not *served* — `resolveSite` filters, and
+         that is §6 decision 13 earning its keep for the third time — so this
+         is the mildest of the four. It is still a container and a build
+         spent on a project that will 404, and a deploy panel afterwards
+         reporting a live deployment nobody can reach, which makes the panel
+         wrong about the only thing it exists to say.
+
+      The fixes belong where decision 13 puts them: in the queries and at the
+      operations, not in the takedown's cleanup. Three choices worth naming
+      before writing them, because each has a plausible wrong answer:
+
+      - **A copy is refused, not sanitised.** Carrying `takenDownAt` onto the
+        copy would have this platform moderate a project nobody reported,
+        against an owner who in the fork case is not the one moderation acted
+        on. Refusing says what happened and leaves the appeal as the route
+        back.
+      - **The token is revoked *and* the redeem query filters.** Both, for the
+        reason decision 13 gives: revocation is cleanup that touches a row and
+        can be missed, the clause is the guarantee. Existing collaborators are
+        left alone — they are not an anonymous surface, and an owner needs
+        them to fix whatever the report was about.
+      - **Held, not deleted.** A taken-down project's jobs stay in the table
+        with their schedules intact, so reinstatement restores them. The
+        sweeper's existing catch-up rule then does the right thing by itself:
+        one run when the project comes back, not one per night missed.
+
 ### 3.2 Unblocked — work, not decisions
 
 Emptied on 2026-08-29, when everything then in it moved to §2.8. Four items
@@ -951,6 +1011,40 @@ Listed in the order §4 recommends.
 - [x] **The test command has no panel.** Shipped 2026-08-31 — see §2.18.
 
 - [x] **A deployment cannot be rolled back.** Shipped 2026-08-31 — §2.19.
+
+
+- [ ] **§2.17 shipped an appeal nobody can file.** The moderation trail, the
+      appeal and the reinstatement are all real: three endpoints, tested, with
+      a table behind them. `grep -rn "moderation\|appeal\|takenDown" apps/web/src`
+      returns one hit, and it is a comment in `ReportProject.tsx` saying that
+      reporting has no appeal. Nothing on either side of the transaction can
+      reach any of it.
+
+      For the **owner**, that means the notification telling them their
+      project was taken down is the entire feature. `GET /:projectId/moderation`
+      would show them what was decided and when; `POST /:projectId/appeal`
+      would let them answer it. Neither has a caller. The appeal was built
+      because §2.16 removed the property §6 decision 11 leaned on — that the
+      subject of a wrong decision could undo it — and an appeal that cannot be
+      filed restores exactly none of that.
+
+      For the **operator**, `ReportQueue.tsx` lists reports and reviews them
+      and stops there. `GET /admin/moderation` and
+      `POST /admin/projects/:id/reinstate` have no caller either, so an appeal
+      that could be filed could not then be read, and a takedown that was
+      wrong could not be lifted. The queue shows the case that arrives and
+      nothing that happens afterwards.
+
+      This is not a missing feature so much as a missing half of a shipped
+      one, and it is the sharpest instance yet of the thing §3.1 keeps saying:
+      the server suite is green, every endpoint has a test, and the feature
+      does not exist for any person who would use it. **A test that calls the
+      controller directly cannot notice that nothing else does.**
+
+      Deliberately not in scope: giving operators any authority they do not
+      already have. §6 decision 11 says the power stays small *because* it is
+      unreviewed, and must not grow until something reviews it. This is that
+      something finally becoming usable — not an argument for more of it.
 
 
 ### 3.3 Blocked on a decision or on infrastructure
@@ -1056,13 +1150,25 @@ whoever owns the data, not to a cleanup script.
 15. ~~**§3.2 the test panel.**~~ Done 2026-08-31 (§2.18).
 16. ~~**§3.2 deployment history.**~~ Done 2026-08-31 (§2.19).
 
-**§3.2 is empty again** — and this time the page says what that means. See
-§3.1: an empty list is "nobody has looked lately", not "there is nothing to
-do". Everything left in §3.3 is genuinely blocked.
+17. **§3.1 — the four surfaces the takedown never reached.** First, because
+    it is the only open item where the gap between what the document claims
+    and what the code does is being exploited by nothing more exotic than a
+    Fork button. Server-only, and it touches four files that already know how
+    to say no.
+18. **§3.2 — a client for §2.17.** After, and in a commit of its own,
+    because the two are otherwise the same sentence twice: one is a guard
+    that was never written and the other is a screen that was never built.
+
+**§3.2 was empty when this section was last edited, and §3.1 said "Empty"
+alongside it.** Both were wrong within the hour, and neither needed a new
+feature idea to become wrong — one item came from reading `takenDownAt`'s
+three call sites against the operations that copy a project, and the other
+from running `grep` for the word "appeal" over `apps/web/src`. That is the
+whole method, and it is cheaper than the list it keeps refuting.
 
 Everything still in §3.3 is blocked on a decision or on infrastructure and
-should not be started until that decision is made. **The four items in §3.2
-are not**, and that is the first time this has been true since 2026-08-29.
+should not be started until that decision is made. The two items above are
+not.
 
 This section used to close by claiming **there is nothing left on this page to
 simply start**. That claim has now been wrong five times, which is enough to
