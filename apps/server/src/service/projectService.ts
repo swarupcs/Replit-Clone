@@ -2,7 +2,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Project } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
-import { assertProjectAccess as assertAccess } from "./projectAccessService.js";
+import {
+  assertProjectAccess as assertAccess,
+  getProjectAccess,
+} from "./projectAccessService.js";
 import { claimForSandbox, projectRoot } from "../utils/projectPaths.js";
 import {
   DEFAULT_TEMPLATE_ID,
@@ -161,8 +164,16 @@ export async function renameProjectService(
  *
  *  Dependencies are deliberately not copied: `node_modules` is the bulk of a
  *  project's bytes, is reproducible from the manifest, and copying it would
- *  make a duplicate slower than a fresh install. Environment variables come
- *  along, because a copy that cannot run is not much of a copy.
+ *  make a duplicate slower than a fresh install.
+ *
+ *  Environment variables come along **only for an editor or the owner**, and
+ *  that condition is the whole of the difference between a convenience and a
+ *  credential leak. Reading `/env` requires editor access, on the stated
+ *  grounds that read-only access to a project is not access to its secrets —
+ *  so a viewer who could copy them here would be reading, through a duplicate
+ *  they own, exactly what that endpoint refuses them. A copy that cannot run
+ *  is not much of a copy, but a copy that launders somebody else's
+ *  credentials is worse.
  */
 export async function duplicateProjectService(
   projectId: string,
@@ -174,12 +185,18 @@ export async function duplicateProjectService(
   const source = await assertAccess(projectId, userId, "viewer");
   await assertCanCreateProject(userId);
 
+  // Re-read rather than infer from the level `assertAccess` was given: it was
+  // asked for "viewer or better" and answers only that it was satisfied.
+  const access = await getProjectAccess(projectId, userId);
+  const trustedWithSecrets =
+    access?.level === "editor" || access?.level === "owner";
+
   const copy = await prisma.project.create({
     data: {
       name: name?.trim() || `${source.name} copy`,
       ownerId: userId,
       template: source.template,
-      envVars: source.envVars ?? {},
+      envVars: trustedWithSecrets ? (source.envVars ?? {}) : {},
     },
   });
 
