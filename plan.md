@@ -80,7 +80,7 @@ the default 5s timeout, always the *first* test in a file and always passing
 in isolation. Verified as environmental by running it on a clean checkout,
 which failed the same way. `--testTimeout=20000` is green at 71/71.
 
-**Done: 84 items. Open: 7 — four blocked, three not.**
+**Done: 84 items. Open: 8 — four blocked, four not.**
 
 The four blocked ones are §3.3, and none is a whole row any more: each is the
 blocked remainder of one, after the unblocked half shipped. A certificate, an
@@ -782,6 +782,20 @@ Listed in the order §4 recommends.
       and it is the only one with no trail: a moderator cannot demonstrate
       they were fair, and cannot be shown to have been unfair.
 
+- [ ] **A taken-down project has no appeal.** Created by §2.16 rather than
+      discovered: making the takedown stick removed the property that
+      §6 decision 11 leaned on when it argued the moderation authority was
+      safe *because* its subject could undo a mistake. That was the right
+      trade — a reversible takedown is not one — but it leaves an unreviewed
+      power with no route back. The owner is told what happened (§2.15) and
+      can do nothing about it.
+
+      Nothing here is blocked; it is a decision about who hears an appeal,
+      and `ADMIN_EMAILS` already names them. The smallest honest version is a
+      reply address in the notification and a way for an operator to clear
+      `takenDownAt`. Worth doing before this is deployed anywhere with real
+      users, because the cost of a wrong takedown is now permanent.
+
 - [ ] **The test command has no panel.** A project can run, deploy, and now
       schedule — but the command people type most often has nowhere to show
       its results, and nothing named `testRunner` exists in either app. The
@@ -887,9 +901,18 @@ whoever owns the data, not to a cleanup script.
     leverage — it closes the same silence in two shipped features — and it
     returned more than that: building the thing that watches a feature is what
     found two defects in the features it watches.
-13. **§3.2 the moderation audit log.** Next. The one power exercised against a
-    user, and still the only one with no trail.
-14. **§3.2 the test panel**, then **deployment history**, which wants a
+13. ~~**§3.1, by going and looking.**~~ Done 2026-08-30 (§2.16). The section
+    said "Empty"; it was not. Both defects were one mistake — moderation's
+    remedy was written into a column the owner controls — and finding them
+    needed no list, only reading `reviewReport` against what
+    `setProjectVisibility` says about itself.
+
+14. **§3.2 the moderation audit log.** Next, and more pointed after §2.16:
+    the takedown now has permanent consequences and still records only
+    *that* it happened, not who decided or why.
+15. **§3.2 the appeal**, which §2.16 created and which wants doing before any
+    deployment with real users.
+16. **§3.2 the test panel**, then **deployment history**, which wants a
     migration and so goes last.
 
 Everything still in §3.3 is blocked on a decision or on infrastructure and
@@ -1052,11 +1075,51 @@ it; nothing else here is a standing decision.
     in an environment variable anyway — so the environment variable is the
     design, not the scaffolding for it. Empty means nobody, never everybody.
     The authority is deliberately the smallest one that resolves a complaint:
-    deletion and account action are not granted, because unpublishing is the
-    only decision whose mistakes the person they were made against can undo.
+    deletion and account action are not granted.
+
+    **Amended 2026-08-30.** This decision used to justify that smallness by
+    saying unpublishing is "the only decision whose mistakes the person they
+    were made against can undo" — and §2.16 deliberately removed exactly that.
+    A takedown the owner can reverse in one request is not a takedown, so the
+    safety property this reasoning leaned on is gone on purpose.
+
+    The conclusion survives and the argument for it does not. What kept a
+    wrong decision survivable was that its subject could undo it; now nothing
+    does, because there is no appeal and no second operator to ask. That is
+    recorded as open work in §3.2 rather than left implied here. Read this
+    decision as: the authority is small because it is unreviewed, and it must
+    not grow until something reviews it.
     *Changes it:* more than one operator per deployment, or a deployment whose
     operators are not the people who can edit its environment.
     `middlewares/requireAdmin.ts` is the one place to rewrite.
+
+12. **A takedown is a different fact from a visibility setting, and gets its
+    own column.** `visibility` is the owner's switch —
+    `setProjectVisibility` calls it "a decision about who may read the
+    source" — and moderation wrote its decision into it. One person's
+    decision then sat in the other's control, which is how ACTIONED came to
+    be undoable by the person it was applied to (§2.16). Two parties, two
+    columns. *Changes it:* nothing short of moderation and ownership becoming
+    the same authority.
+
+13. **Removing public access belongs in the QUERY, not in the cleanup.**
+    `resolveSite` and the embed's `resolveToken` filter on `takenDownAt`;
+    `unpublish()` and `revokeEmbed()` run afterwards only to reclaim files,
+    containers and rows. Teardown touches Docker and the filesystem and can
+    fail in ways a database cannot, so a rule enforced by cleanup is a rule
+    that usually holds. Learned twice before it was written down: the
+    verified-domain check in §2.12 and the takedown in §2.16.
+    *Changes it:* nothing. A third instance would only confirm it.
+
+14. **Notify on the change of state, never on the state.** A job that fails
+    thirty nights running is one piece of news; the second consecutive
+    failure says nothing and the recovery speaks (§2.15). Sending on every
+    occurrence is how a notification somebody needed becomes a filter rule,
+    which restores the silence the feature was built to end while looking
+    like it was fixed. Outcomes that are not verdicts on the thing being
+    watched — `SKIPPED`, `ERRORED` — neither start a failure nor end one.
+    *Changes it:* a class of event where every occurrence is independently
+    actionable. Job runs are not one.
 
 ---
 
