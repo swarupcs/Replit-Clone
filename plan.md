@@ -44,9 +44,9 @@ day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1735 passing**, 20 skipped (108 files) |
+| `pnpm --filter server test` | **1748 passing**, 20 skipped (109 files) |
 | the same, with `TEST_DATABASE_URL` set | **run 2026-08-30 night — green** |
-| `pnpm --filter web test` | **951 passing** (72 files) |
+| `pnpm --filter web test` | **965 passing** (73 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** |
 
 The 228 skipped server tests are the DB-gated suites (`TEST_DATABASE_URL`
@@ -80,7 +80,7 @@ regressions:
 - Under load the **web** suite fails 9–10 at the default 5s timeout, always
   the *first* test in a file and always passing in isolation. Verified as
   environmental by running it on a clean checkout, which failed the same way.
-  `--testTimeout=20000` is green at 72/72.
+  `--testTimeout=20000` is green at 73/73.
 - `refreshTokenService.test.ts` — "lets exactly one of several concurrent
   refreshes claim the row" — fails under load roughly one run in three, with
   "Session was reused and has been revoked". It is timing against a reuse
@@ -88,7 +88,7 @@ regressions:
   since well before it was first seen. **Not investigated**, and recorded here
   rather than left to be rediscovered.
 
-**Done: 87 items. Open: 6 — four blocked, two not.**
+**Done: 88 items. Open: 5 — four blocked, one not.**
 
 The four blocked ones are §3.3, and none is a whole row any more: each is the
 blocked remainder of one, after the unblocked half shipped. A certificate, an
@@ -795,6 +795,43 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.18 Since (2026-08-31, later)
+
+- [x] **A project's tests have a panel.** The loop this product did not have:
+      it could run, deploy and schedule, and the command people type most
+      often had nowhere to show its results, so "did I break anything" was a
+      terminal tab and scrollback.
+
+      `testCommand` sits beside `startCommand` and means the same thing by
+      being null: use the template's. Twelve templates carry a default;
+      `static-html` deliberately carries none, and a project on it is told
+      there is no test command rather than being handed a guess — running
+      `npm test` in a project with no test script fails for a reason its
+      author cannot act on.
+
+      **Four outcomes, not two**, for the reason §2.13 keeps six: "the tests
+      failed", "they took too long" and "we could not run them at all" send
+      the reader to three different places, and a panel that says *failed* for
+      the third sends somebody to read their own code for a Docker outage. The
+      output is always shown and always scrollable — "failed" with nothing
+      under it is exactly what sends people back to the terminal this
+      replaces.
+
+      Deliberately **not a second scheduler**: no history, no cron, no sweeper.
+      One command, run when somebody asks. The moment it wants to run on a
+      schedule it should be a scheduled job, which already exists and already
+      reports outcomes properly. And its `withTimeout` passes a rejection on
+      rather than folding it into "timeout" — the defect §2.15 had to repair
+      in the scheduler's copy, not reintroduced by copying it.
+
+      Three grants, not one: reading the command is a viewer's, running it
+      needs what `Run` needs because it executes code in the container, and
+      changing it is the owner's — "may edit a file" and "may choose the
+      command this project executes" are different, and the second is the
+      shape of a backdoor.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -855,10 +892,7 @@ Listed in the order §4 recommends.
 - [x] **A taken-down project has no appeal.** Shipped 2026-08-30 — see
       §2.17, in the same work as the trail, because they are one conversation.
 
-- [ ] **The test command has no panel.** A project can run, deploy, and now
-      schedule — but the command people type most often has nowhere to show
-      its results, and nothing named `testRunner` exists in either app. The
-      run output and the terminal are both already there to build on.
+- [x] **The test command has no panel.** Shipped 2026-08-31 — see §2.18.
 
 - [ ] **A deployment cannot be rolled back, because no history is kept.**
       `Deployment.projectId` is `@unique` — one row per project, mutated in
@@ -968,8 +1002,9 @@ whoever owns the data, not to a cleanup script.
 
 14. ~~**§3.2 the moderation audit log, and the appeal.**~~ Done 2026-08-31
     (§2.17), together, because they are one conversation.
-15. **§3.2 the test panel.** Next.
-16. **§3.2 deployment history**, which wants a migration and so goes last.
+15. ~~**§3.2 the test panel.**~~ Done 2026-08-31 (§2.18).
+16. **§3.2 deployment history.** The last unblocked item, and the only one
+    left that wants a migration.
 
 Everything still in §3.3 is blocked on a decision or on infrastructure and
 should not be started until that decision is made. **The four items in §3.2

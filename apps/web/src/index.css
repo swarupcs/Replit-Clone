@@ -2682,3 +2682,95 @@ body {
   font-size: 11px;
   color: var(--rc-text-faint, var(--rc-text-subtle));
 }
+
+/* Tests ------------------------------------------------------------------ */
+
+.rc-tests {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 10px 14px;
+  gap: 8px;
+}
+
+.rc-tests-loading {
+  display: flex;
+  justify-content: center;
+  padding: 20px 0;
+}
+
+.rc-tests-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rc-tests-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rc-text-subtle);
+}
+
+.rc-tests-command {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rc-tests-command code {
+  font-size: 12px;
+  color: var(--rc-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Said quietly, but said: "from this template" and "the owner chose this" are
+   different facts, and only one of them is anybody's decision. */
+.rc-tests-source {
+  flex: none;
+  font-size: 11px;
+  color: var(--rc-text-faint, var(--rc-text-subtle));
+}
+
+.rc-tests-form {
+  display: flex;
+  gap: 6px;
+}
+
+.rc-tests-empty {
+  padding: 6px 0;
+}
+
+.rc-tests-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rc-tests-outcome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rc-tests-took {
+  font-size: 11px;
+  color: var(--rc-text-faint, var(--rc-text-subtle));
+}
+
+/* Bounded and scrollable rather than clipped: the failure is usually at the
+   bottom, and a box that hides it is the reason somebody opens a terminal. */
+.rc-tests-output {
+  max-height: 340px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--rc-surface-sunken, rgb(0 0 0 / 18%));
+  border: 1px solid var(--rc-border);
+  border-radius: 6px;
+}

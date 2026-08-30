@@ -78,7 +78,13 @@ export type CounterName =
   // being filed and not read -- the same shape as a report queue nobody
   // reviews, one step further along.
   | "moderation_appealed"
-  | "moderation_reinstated";
+  | "moderation_reinstated"
+  // Test runs. `test_runs_errored` is the one that is never about the user's
+  // code: it counts runs that never reached a container.
+  | "test_runs_started"
+  | "test_runs_passed"
+  | "test_runs_failed"
+  | "test_runs_errored";
 
 const counters = new Map<CounterName, number>();
 

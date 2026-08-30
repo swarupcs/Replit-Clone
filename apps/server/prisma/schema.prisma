@@ -320,6 +320,16 @@ model Project {
   /// from its package.json at import and can be corrected afterwards.
   startCommand String?
 
+  /// What the test panel runs, when the template's default is not right.
+  ///
+  /// Null means "use the template's", exactly like `startCommand`, and for the
+  /// same reason: an imported repository's own test script is not in a fixed
+  /// registry. A template with no default and a project with no override means
+  /// this project has no test command, which the panel says rather than
+  /// guessing -- running `npm test` in a Go project is a worse answer than
+  /// asking.
+  testCommand String?
+
   /// Environment variables injected into this project's container, as a JSON
   /// object of string values. Stored per project rather than in a file so they
   /// are not committed, exported, or visible in the file tree.

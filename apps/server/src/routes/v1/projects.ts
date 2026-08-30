@@ -8,6 +8,11 @@ import {
   projectModerationController,
 } from "../../controllers/moderationController.js";
 import {
+  getTestCommandController,
+  runTestsController,
+  setTestCommandController,
+} from "../../controllers/testRunController.js";
+import {
   createProjectController,
   deleteProjectController,
   duplicateProjectController,
@@ -396,6 +401,12 @@ router.post(
 // The other side of moderation: what was done to this project, and the owner's
 // answer to it. Both are the owner's -- a decision taken against somebody that
 // only the decider can read is not a record, it is a file.
+// Tests. Reading the command is a viewer's, running it needs the same grant
+// `Run` does, and changing it is the owner's -- see the controller.
+router.get("/:projectId/test-command", asyncHandler(getTestCommandController));
+router.put("/:projectId/test-command", asyncHandler(setTestCommandController));
+router.post("/:projectId/test", asyncHandler(runTestsController));
+
 router.get("/:projectId/moderation", asyncHandler(projectModerationController));
 router.post(
   "/:projectId/appeal",
