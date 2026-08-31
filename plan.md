@@ -98,6 +98,10 @@ regressions:
   since well before it was first seen. **Not investigated**, and recorded here
   rather than left to be rediscovered.
 
+**§8 is new and is counted separately**, because it is not the same kind of
+line as the rest of this file: it is the product around the platform rather
+than another thing wrong with the platform. Its first item ships in §2.22.
+
 **Done: 90 items. Open: 4 — all four blocked.**
 
 The four blocked ones are §3.3, and none is a whole row any more: each is the
@@ -1518,6 +1522,16 @@ thought about, which is that **this process can stop while it is in the middle
 of something**, and the boot that puts the machine right has only ever looked
 at containers.
 
+**A new section exists below this one, and it is not more of the same work.**
+§8 is the commercial layer — plans, entitlements, an account screen, billing,
+teams — and it is there because a sweep for defects will never find it. Nothing
+is wrong with the code; there is simply no product wrapped around it. It has
+its own order at the end of §8, and its first item is the one that unblocks
+every other: **every limit in this codebase is a constant in `env`, and a SaaS
+product is one where those numbers differ per customer.** That item also closes
+§3.2's "quotas are enforced and never shown", so it is not additional work so
+much as the same work done once, properly.
+
 Everything still in §3.3 is blocked on a decision or on infrastructure and
 should not be started until that decision is made. Everything in §3.1 and
 §3.2 is not.
@@ -1766,3 +1780,192 @@ updated separately is a ledger that will eventually disagree with the tree —
 which is precisely how the old plan came to list two shipped features as
 missing, and how this file came to exist. It is the only rule here, and the
 consolidation buys nothing if it is not followed.
+
+---
+
+## 8. The SaaS layer
+
+_Added 2026-08-31 (night). Everything above this line is about whether the
+platform works. This section is about whether anybody can buy it._
+
+What is in the tree today is a working multi-tenant development platform:
+containers with limits, path confinement, a third origin for user code, auth,
+collaboration, deployments, scheduled jobs, moderation with an audit trail and
+an appeal. What is not in the tree is a **product**. There is no plan, no
+price, no account page, no way for the operator to tell two customers apart,
+and no way for a customer to find out what they are allowed to do except by
+being refused.
+
+Nothing in this section is a new capability. It is the commercial layer around
+capabilities that already work, and it is worth being clear that this is the
+smaller half of the remaining work — which is exactly why it has never been
+started.
+
+### 8.0 The observation that orders everything else
+
+**Every limit in this product is a constant in `env`.**
+
+| Constant | Default | Who it is really about |
+|---|---|---|
+| `MAX_PROJECTS_PER_USER` | 20 | the account |
+| `USER_DISK_QUOTA_MB` | 2048 | the account |
+| `PROJECT_DISK_QUOTA_MB` | 512 | the account |
+| `AI_REQUESTS_PER_HOUR` | 60 | the account |
+| `LSP_ENABLED`, managed databases, custom domains, scheduled jobs | flags | the account |
+| `MAX_CONCURRENT_CONTAINERS` | 3 | **the machine** |
+| `CONTAINER_MEMORY_MB` | 512 | **the machine** |
+| `DEPLOY_MEMORY_MB` | 512 | **the machine** |
+
+A SaaS product is precisely one in which the top group differs per customer.
+So the foundation of this section is **not billing** — it is entitlements.
+Billing, when it arrives, is only the thing that writes one column.
+
+That is the sequencing insight and it is worth stating plainly, because the
+obvious order is the wrong one: reaching for Stripe first produces a payment
+flow that has nothing to change. Entitlements first produces something useful
+on day one with a single free tier and no payment flow at all — it is what
+§3.2's "quotas are enforced and never shown" needs anyway, and it is what makes
+comping an account, running a beta, or grandfathering an early user possible
+without a deploy.
+
+**The split in that table is itself a decision** (§6, decision 15): a plan may
+promise more of the first group and must never promise more of the second. The
+host has three container slots and half a gigabyte apiece; a "Pro" tier that
+claims more memory per container than `CONTAINER_MEMORY_MB` is a promise the
+machine cannot keep, and the failure mode is an OOM kill in somebody's terminal
+rather than an honest refusal. Sell capability and capacity, not the hardware.
+
+### 8.1 Entitlements — the keystone
+
+**Unblocked. Everything else in this section depends on it.**
+
+- A `Plan` catalogue with a stable string id (`free`, `pro`, `team`), a label, a
+  price in minor units, and the limit columns above. In the database rather
+  than in code, so an operator can change a number without a deploy — and
+  seeded by a migration, so a fresh deployment has a `free` plan before its
+  first signup.
+- `User.planId` defaulting to `free`, plus **per-account overrides**. The
+  override column is not a nicety: comping a customer, extending a trial and
+  grandfathering an early user are all the same operation, and without it every
+  one of them ends in somebody inventing a plan row for one person.
+- `resolveEntitlements(userId)` returning the effective limits — plan, then
+  override on top — cached the way `userQuotaService` already caches usage, and
+  failing **open** to the free plan for the same reason that file gives: a
+  quota lookup must never be why somebody's save fails.
+- Every site in the table above reads it instead of `env`. `env` stays as the
+  free plan's defaults, so the whole change ships as a behavioural no-op and
+  can be verified as one.
+
+The verification that matters is that nothing changes: same suite, same
+numbers, with limits arriving by a different route.
+
+### 8.2 The account screen
+
+**Unblocked. Closes §3.2's "quotas are enforced and never shown", and is the
+reason 8.1 is worth anything.**
+
+`GET /account` returning usage, effective entitlements and the per-project
+breakdown; a screen showing them. The breakdown is the half that makes it
+actionable — "you are out of space" is not something anybody can act on, and
+"this project is 4 GB of the 5 you have" is.
+
+You cannot sell a plan without a screen that says what the current one gives
+you, and the screen is worth building even if nothing is ever sold.
+
+### 8.3 Warning before the wall
+
+Small, and governed by §6 decision 14. Crossing 80% of disk or project count
+is a **change of state** and notifies once; being over it is a state and says
+nothing further. The existing notification system takes this with a new kind
+and no new mechanism.
+
+### 8.4 Billing — Stripe Checkout and the Customer Portal
+
+**Blocked on a Stripe account and its keys, which are the operator's to
+create.** The code is small; the decisions are not, and three of them have a
+plausible wrong answer that is also the easier one to write.
+
+- **No card data ever touches this server.** Checkout and the Portal are
+  hosted by Stripe; this codebase never sees a card number, which removes PCI
+  scope rather than answering it. The Portal also covers cancel, resume, card
+  update, invoice history and receipts — every one of which is otherwise a
+  screen somebody has to build and get right.
+- **The webhook is the only writer of subscription state.** The post-checkout
+  redirect is a browser event: it can be dropped, replayed, or hit by somebody
+  who never paid. The webhook is the fact. This is §6 decision 13 in another
+  costume — the guarantee lives where it cannot be skipped — and the wrong
+  version, granting the plan on redirect, is the one most tutorials show.
+  Webhooks are at-least-once, so events are recorded by Stripe's event id in a
+  table and re-deliveries are dropped on the unique index rather than trusted
+  to be rare.
+- **A downgrade never deletes and never seizes.** An account that drops below
+  its usage — cancelled, expired, or failed payment after its grace period —
+  becomes blocked at the boundary: no new projects, no growth past the free
+  quota. Existing projects keep working and stay exportable. Deleting a
+  customer's work at the moment they stop paying is both the obvious
+  implementation and the one that would end this product, and the reason to
+  write it down here is that the obvious implementation is a `WHERE` clause
+  somebody adds in an afternoon.
+
+Sequenced after 8.2 on purpose: a checkout button that leads to a plan nobody
+can see the effect of is a worse first version than a free tier with an honest
+account page.
+
+### 8.5 Teams
+
+**Blocked on 8.1, and on a pricing decision.**
+
+A team is not sharing — sharing shipped, and `ProjectCollaborator` is what it
+is made of. A team is **ownership by an organisation**: the project belongs to
+the org, seats belong to the org, and a person leaving takes nothing with them.
+That means every `ownerId === userId` comparison in the codebase becomes a
+membership question, which is the honest cost of this item and the reason it is
+last rather than first. Per-seat versus per-usage is a pricing decision, and it
+is the same class as the autoscale row in §3.3: it should be made rather than
+arrived at.
+
+### 8.6 API keys and a public API
+
+**Unblocked.** `UserToken` is single-use and arrives by email; an API key is a
+different object with a different lifetime — a displayed-once secret stored as
+a prefix plus a hash, with scopes, a last-used timestamp and revocation. It is
+what makes this platform something other systems can drive: CI that pushes a
+deploy, a script that creates a project from a template, the CLI that §3.3
+rules out building by hand.
+
+### 8.7 An operator console
+
+Overlaps §3.2's `/metrics` item and extends it: find an account, read its plan
+and usage, comp or suspend it.
+
+**This grows operator authority, and §6 decision 11 says that must not happen
+until something reviews it.** So the audit trail is not a follow-up commit: any
+action here is written to the moderation log — which already exists, already
+survives the deletion of its subject, and is already readable from a screen —
+in the same transaction as the change, from the first commit. An operator who
+can silently change what a customer paid for is a worse position than this
+product is in today.
+
+### 8.8 Compute is the real cost and nothing meters it
+
+Recorded rather than decided. What is limited is disk and project count; what
+is expensive is container-hours, and the idle reaper is the only thing standing
+between a free tier and an unbounded bill. Before any price is set, settle
+whether this sells capability (a plan buys features and quotas, compute is
+best-effort behind the reaper) or meters compute (minutes counted, which needs
+a meter, a budget and a story about what happens when it runs out). The first
+is what the code is shaped for today. The second is what the hosting invoice
+will eventually argue for.
+
+### 8.9 Deliberately out of scope
+
+So nobody reopens them by accident: metered invoicing beyond a counter; tax,
+which is a Stripe checkbox and not a feature written here; SSO and SAML, which
+are enterprise features that need 8.5 first; a template marketplace; and
+referral or affiliate mechanics.
+
+### Order
+
+8.1 → 8.2 → 8.3 → 8.6 → 8.4 → 8.7 → 8.5. The first three are one week of
+work, land as one coherent change, and leave the product sellable-shaped
+without a payment processor in it.
