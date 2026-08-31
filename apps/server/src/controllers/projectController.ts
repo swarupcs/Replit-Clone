@@ -324,7 +324,13 @@ export async function setProjectEnvController(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
-  await assertProjectAccess(projectId, getAuthContext(req).userId);
+  // Named rather than taken from the default, which this was the only caller
+  // in the codebase to rely on. Editor is the right answer -- an editor can
+  // already run arbitrary code in this container, so setting a variable it
+  // will read grants them nothing they did not have -- but it is the answer
+  // this endpoint should get by somebody choosing it, since the next person
+  // to change that default will be reasoning about the other ninety routes.
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "editor");
 
   const body = req.body as { vars?: unknown } | undefined;
   const saved = await setEnvVars(projectId, body?.vars ?? {});

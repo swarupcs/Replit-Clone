@@ -104,22 +104,22 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 108 items. Open: 9 — four of them unblocked.**
+**Done: 111 items. Open: 6 — one of them unblocked.**
 
-Open, in full, so the shape is visible without scrolling: **three defects**
-(§3.1 — an unbudgeted route that starts a container, an access level taken from
-a default argument, and a comment above the wrong routes), **one piece of work**
-(§3.2 — pagination), and **five blocked** (§3.3 — a certificate, an autoscaler's
+Open, in full, so the shape is visible without scrolling: **no defects**
+(§3.1 is empty again, and read the paragraph at the top of it before believing
+that), **one piece of work** (§3.2 — pagination), and **five blocked** (§3.3 — a certificate, an autoscaler's
 cost model, a disk budget for snapshots, a backup destination, and an
 architectural route). §8.4 and §8.5 are blocked too, on a Stripe account and on
 a pricing decision respectively, and are listed there rather than duplicated
 here.
 
-The three that came off since this line was last written are one item: the
-restart wedge, the `BUILDING` row beside it, and the naming question they both
-depended on (§2.26). What is left unblocked is now genuinely small — and §4's
-closing paragraph is the standing warning against reading that as "there is
-nothing to do".
+Six items came off in two commits (§2.26, §2.27), which is what a sweep's
+findings look like once they are worked through rather than what they looked
+like when they arrived. **One unblocked item left is the state this file has
+been in four times, and it has been wrong every time** — §4's closing paragraph
+is the standing warning, and §3.1's opening paragraph is the sharper one: an
+empty defect list means nobody has looked lately.
 
 **These two numbers had drifted, and the drift is worth a sentence** because
 this file's one rule (§7) is that a line is updated in the commit that changes
@@ -1342,6 +1342,40 @@ rests on reading, as it does for the eight other things called there.
 1598 server tests and 1030 web tests pass. **This migration has not been
 applied either**, and it is another `ALTER TYPE ... ADD VALUE` — see §5.
 
+### 2.27 Since (2026-08-31, night, after §8) — the three small ones
+
+Two of §3.1's remaining three and one habit, in one commit because they are one
+file and one argument.
+
+**`POST /:projectId/test` and `GET /:projectId/export` now carry budgets.**
+§2.13 gave "run now" a limiter on the stated grounds that it is the only route
+that starts a container on demand; §2.18 then shipped a second one, argued its
+three access levels carefully, and gave it no budget. Same limit as the job
+run, deliberately: one person's manual runs are the same cost to this machine
+whichever button started them. Export is the quieter half — no container, but a
+walk and a zip of an entire working tree per request, at viewer level, on a
+project allowed to be gigabytes — so it gets a looser one rather than none.
+
+**No test, and that is the local convention rather than an omission.** Nothing
+in this codebase tests an `express-rate-limit` middleware; the three files that
+assert on `RATE_LIMITED` are all testing service-level budgets. Exercising one
+of these would mean thirty-one authenticated requests to prove a constant.
+
+**The defaulted access level is now named.** `assertProjectAccess`'s third
+parameter defaults to `"editor"` and `setProjectEnvController` was the only
+caller in the codebase omitting it. Editor is the right answer — an editor can
+already run arbitrary code in the container that reads these variables — and
+the point is that it is now the answer somebody chose. §2.13 and §2.18 both
+exist because naming the level changed it.
+
+**And the comment that sat above the wrong routes** has the moderation pair
+under it again. Recorded rather than fixed silently when it was found, because
+`routes/v1/projects.ts` is where somebody goes to learn what is guarded by
+what, and a paragraph pointing at the wrong block is worse there than nowhere.
+
+1598 server tests pass, unchanged: nothing here has a behavioural test, which
+is exactly what makes them small.
+
 ---
 
 ## 3. Open
@@ -1516,7 +1550,8 @@ reconciles containers but not rows.**
       it in the same pass and for the same reason: the boot reconcile should
       know about rows.
 
-- [ ] **`POST /:projectId/test` starts a container and has no budget.** Every
+- [x] **`POST /:projectId/test` starts a container and has no budget.** Fixed
+      2026-08-31 — see §2.27, with the export beside it. Every
       other route that costs real compute carries one — `createLimiter`,
       `installLimiter`, `deployLimiter`, `queryLimiter`, and `jobRunLimiter`,
       which §2.13 added to "run now" on the stated grounds that it is the only
@@ -1529,7 +1564,8 @@ reconciles containers but not rows.**
       and zips an entire working tree per request, with no budget, at viewer
       level.
 
-- [ ] **One project write takes its access level from a default argument.**
+- [x] **One project write takes its access level from a default argument.**
+      Fixed 2026-08-31 — see §2.27.
       `assertProjectAccess`'s third parameter defaults to `"editor"`, and
       `setProjectEnvController` is the only caller in the codebase that omits
       it. Editor is very likely the right answer — an editor can already run
@@ -1540,7 +1576,8 @@ reconciles containers but not rows.**
       A default that is load-bearing in exactly one place is a default that
       will eventually be changed by somebody reasoning about the other ninety.
 
-- [ ] **A comment in `routes/v1/projects.ts` sits above the wrong routes.** The
+- [x] **A comment in `routes/v1/projects.ts` sits above the wrong routes.**
+      Fixed 2026-08-31 — see §2.27. The
       paragraph introducing the moderation pair ("the other side of
       moderation... both are the owner's") is immediately followed by the
       *tests* block and its own comment, with the moderation routes below that.
@@ -1810,16 +1847,17 @@ whoever owns the data, not to a cleanup script.
     same bug with a softer landing and belongs in the same commit — one boot
     pass, two kinds of row. Settle §3.2's naming question first; it is an
     afternoon and the reconciler depends on the answer.
-20. **§3.1 — the missing budget on `POST /test`, and the export beside it.**
-    Ten minutes, and the argument for it was already written down for the
-    identical route in §2.13.
+20. ~~**§3.1 — the missing budget on `POST /test`, and the export beside
+    it.**~~ Done 2026-08-31 (§2.27). Ten minutes, as billed, and the argument
+    for it was already written down for the identical route in §2.13.
 21. **§3.2 — showing people their quota.** The cheapest thing here with a user
     on the other end of it: the numbers are already computed and already
     enforced, and the only reason nobody can see them is that no endpoint
     returns them.
-22. **§3.1 — the defaulted access level, and the stray comment.** Small, and
-    worth doing while §3.1 is open rather than leaving two lines that will read
-    as noise in six months.
+22. ~~**§3.1 — the defaulted access level, and the stray comment.**~~ Done
+    2026-08-31 (§2.27), in the same commit as 20 rather than after 21: they are
+    one file and the same argument, and splitting them would have been two
+    commits to move a paragraph and name a constant.
 23. **§3.2 — pagination.** Last of the unblocked work because nothing is
     currently over any of the caps, which is exactly why it should be done
     before something is.
