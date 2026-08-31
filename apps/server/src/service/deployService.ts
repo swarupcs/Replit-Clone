@@ -931,6 +931,35 @@ async function publishService(
  *  never propagate, because one broken published app is not a reason for the
  *  platform not to start.
  */
+/** Settles rows the last process was in the middle of building.
+ *
+ *  `BUILDING` is written before the build starts and overwritten when it ends,
+ *  so a restart in between leaves a row claiming a build that no process is
+ *  running. Milder than the scheduled-job version of this bug -- nothing is
+ *  wedged, because `reserve()` overwrites the status on the next publish -- but
+ *  until somebody deploys again the panel reports progress that is not
+ *  happening, which is the only thing that panel exists to say.
+ *
+ *  FAILED rather than deleted: the row carries the subdomain, and a deployment
+ *  that has been published before must keep its address. The error text is
+ *  what makes it actionable, since a build interrupted this way did nothing
+ *  wrong and only needs asking again.
+ */
+export async function reconcileDeployments(): Promise<number> {
+  const { count } = await prisma.deployment.updateMany({
+    where: { status: "BUILDING" },
+    data: {
+      status: "FAILED",
+      error:
+        "The server restarted while this build was running. Nothing was " +
+        "wrong with it; deploy again.",
+    },
+  });
+
+  if (count > 0) logger.warn("builds abandoned by a restart", { count });
+  return count;
+}
+
 export async function restoreServices(): Promise<{ restored: number }> {
   if (!deploymentsEnabled) return { restored: 0 };
 

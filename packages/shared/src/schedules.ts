@@ -13,8 +13,8 @@
 
 /** What happened to one execution.
  *
- *  Six states rather than pass/fail, because the interesting answers here are
- *  the ones that are neither. "It did not run" and "it ran and failed" are
+ *  Seven states rather than pass/fail, because the interesting answers here
+ *  are the ones that are neither. "It did not run" and "it ran and failed" are
  *  different problems with different fixes, and a schedule that reports them
  *  identically sends people to read the wrong logs.
  */
@@ -32,7 +32,18 @@ export type ScheduledRunStatus =
   | "TIMED_OUT"
   /** Never started — no container, no Docker, no project tree. The
    *  platform's problem rather than the command's. */
-  | "ERRORED";
+  | "ERRORED"
+  /** The server stopped existing while this run was in progress.
+   *
+   *  Its own status rather than `ERRORED`, which says the machine never got
+   *  the command started: here it did, and the command may well have finished
+   *  — a backup that completed at 03:00 and a deploy at 03:01 produce this.
+   *  That is the same distinction `TIMED_OUT` is kept apart from `FAILED` for,
+   *  and it changes what the owner should do: re-run an `ERRORED` job, look at
+   *  what the command actually did before re-running an `ABANDONED` one.
+   *
+   *  Not a verdict, so a job that runs normally next time says nothing. */
+  | "ABANDONED";
 
 export interface ScheduledRun {
   id: string;

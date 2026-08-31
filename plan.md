@@ -44,8 +44,8 @@ re-run that day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1588 passing**, 280 skipped (116 files) — no database on this machine |
-| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds four migrations — see §5 |
+| `pnpm --filter server test` | **1598 passing**, 280 skipped (118 files) — no database on this machine |
+| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds five migrations — see §5 |
 | `pnpm --filter web test` | **1030 passing** (80 files) |
 | `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
@@ -104,15 +104,22 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 105 items. Open: 12 — seven of them unblocked.**
+**Done: 108 items. Open: 9 — four of them unblocked.**
 
-Open, in full, so the shape is visible without scrolling: **five defects**
-(§3.1, headed by the restart wedge), **two pieces of work** (§3.2 — pagination,
-and naming a run a restart abandoned), and **five blocked** (§3.3 — a
-certificate, an autoscaler's cost model, a disk budget for snapshots, a backup
-destination, and an architectural route). §8.4 and §8.5 are blocked too, on a
-Stripe account and on a pricing decision respectively, and are listed there
-rather than duplicated here.
+Open, in full, so the shape is visible without scrolling: **three defects**
+(§3.1 — an unbudgeted route that starts a container, an access level taken from
+a default argument, and a comment above the wrong routes), **one piece of work**
+(§3.2 — pagination), and **five blocked** (§3.3 — a certificate, an autoscaler's
+cost model, a disk budget for snapshots, a backup destination, and an
+architectural route). §8.4 and §8.5 are blocked too, on a Stripe account and on
+a pricing decision respectively, and are listed there rather than duplicated
+here.
+
+The three that came off since this line was last written are one item: the
+restart wedge, the `BUILDING` row beside it, and the naming question they both
+depended on (§2.26). What is left unblocked is now genuinely small — and §4's
+closing paragraph is the standing warning against reading that as "there is
+nothing to do".
 
 **These two numbers had drifted, and the drift is worth a sentence** because
 this file's one rule (§7) is that a line is updated in the commit that changes
@@ -1282,6 +1289,59 @@ believing it applied.
 1588 server tests and 1030 web tests pass. **This migration has not been
 applied either** — see §5.
 
+### 2.26 Since (2026-08-31, night, after §8) — the restart wedge
+
+The worst thing on §3.1, reached by the most ordinary operation there is:
+deploying. `runJobNow` writes a `RUNNING` row before it starts a job; nothing
+ever cleared one the process did not come back to; the overlap check was
+`findFirst({ jobId, status: "RUNNING" })` with no age bound. So from the next
+firing onwards the sweep claimed the job, found the immortal row, wrote
+`SKIPPED` — and `SKIPPED` is deliberately not a verdict (§6 decision 14), so
+nobody was ever told. A nightly backup died on the evening somebody deployed
+and reported nothing, forever.
+
+**Three things were needed and the third was the one that mattered.**
+
+**A name for it, settled before the reconciler that depends on it.** §3.2 was
+right to list this separately as a design question. The obvious answer was
+`ERRORED`, which §3.1 argued for on the grounds that it already means "the
+machine could not run it" — and that turns out to be exactly what it does not
+mean here. `ERRORED` says the command never started. An abandoned run *did*
+start, and may well have finished all of its work a second before the restart
+landed on it. Telling somebody "we could not run it" about a backup that in
+fact ran is the same class of lie `TIMED_OUT` exists to avoid, and it changes
+what they should do next: re-run an `ERRORED` job, look at what the command
+actually did before re-running an `ABANDONED` one. So the seventh status, with
+the precedent already in the file — `TIMED_OUT` is kept apart from `FAILED` for
+this reason and no other. Not a verdict, so a job that runs normally next time
+says nothing at all.
+
+**The boot reconcile now knows about rows.** `reconcileOnBoot` has always swept
+containers and directories and never looked at a table, which is the root cause
+of both defects here. `reconcileJobRuns` names every `RUNNING` row at boot —
+unconditionally, because nothing can be running in a process that has just
+started — and `reconcileDeployments` settles every `BUILDING` row the same way.
+The deploy half is the softer landing §3.1 described: nothing is wedged, since
+`reserve()` overwrites the status on the next publish, but until somebody
+deploys again the panel reports a build in progress that no process is running,
+which is the only thing that panel exists to say.
+
+**And the query is bounded, not just the cleanup.** §6 decision 13 for the
+fourth time: the reconcile is cleanup that touches rows and can be missed, and
+the clause is the guarantee. A `RUNNING` row older than twice the run timeout
+cannot hold a job hostage, and it is *named* rather than merely stepped over,
+so the history reads as what happened instead of showing a run eternally in
+progress.
+
+Two mutants, both caught: dropping the age bound fails "does not believe a
+RUNNING row of any age", and writing `ERRORED` where `ABANDONED` belongs fails
+two. **What is not covered is the wiring in `index.ts`** — a boot sequence has
+no test on this codebase, so the guarantee that these two are actually called
+rests on reading, as it does for the eight other things called there.
+
+1598 server tests and 1030 web tests pass. **This migration has not been
+applied either**, and it is another `ALTER TYPE ... ADD VALUE` — see §5.
+
 ---
 
 ## 3. Open
@@ -1409,8 +1469,12 @@ The five below are what a sweep at that altitude does turn up. Four of the
 five are one shape: **state that outlives the process, and a boot that
 reconciles containers but not rows.**
 
-- [ ] **A restart during a scheduled run kills that job permanently, and says
-      nothing.** The worst thing on this page, and it is reached by the most
+- [x] **A restart during a scheduled run kills that job permanently, and says
+      nothing.** Fixed 2026-08-31 — see §2.26. All three parts: the boot
+      reconcile now names orphaned `RUNNING` rows, the overlap check is bounded
+      by age, and the sixth case got a name of its own rather than being filed
+      under `ERRORED`.
+      The worst thing on this page, and it is reached by the most
       ordinary operation there is.
 
       `runJobNow` writes a `RUNNING` row before it starts, which is right —
@@ -1440,7 +1504,9 @@ reconciles containers but not rows.**
       exactly what happened, and it is already a non-verdict, so a job that
       recovers on the next firing correctly says nothing.
 
-- [ ] **A deploy interrupted the same way leaves the row `BUILDING` forever.**
+- [x] **A deploy interrupted the same way leaves the row `BUILDING` forever.**
+      Fixed 2026-08-31 — see §2.26, in the same commit and for the reason §4
+      gave: one boot pass, two kinds of row.
       The same root cause with a milder ending. `Deployment.status` goes to
       `BUILDING` before the build and nothing at boot puts it right, so the
       panel reports a build in progress that no process is running. It
@@ -1587,7 +1653,8 @@ once, found three more times.
       failing, and only luck put that cap in view. A truncated list that says
       it is complete is worse than a short one that says it is not.
 
-- [ ] **A run abandoned by a restart has no name.** Listed separately from the
+- [x] **A run abandoned by a restart has no name.** Settled 2026-08-31 —
+      `ABANDONED`, see §2.26. Listed separately from the
       defect above because it is a design question rather than a fix: `RUNNING`,
       `SKIPPED`, `FAILED`, `TIMED_OUT` and `ERRORED` were chosen (§2.13) to
       keep "your command is wrong" apart from "we could not run it", and the
@@ -1730,8 +1797,14 @@ whoever owns the data, not to a cleanup script.
     every viewer, and a screen still quoting a decision that had been
     amended — neither of which was on any list.
 
-19. **§3.1 — the restart wedge, and the boot reconcile that should have caught
-    it.** First and not close: it is the only thing on this page that destroys
+19. ~~**§3.1 — the restart wedge, and the boot reconcile that should have
+    caught it.**~~ Done 2026-08-31 (§2.26). Settling the naming question first
+    was the right order and it changed the answer: this section and §3.1 both
+    expected `ERRORED`, and writing it down was what showed that `ERRORED`
+    claims the command never started, which is the one thing an abandoned run
+    did do. Original note follows.
+
+    First and not close: it is the only thing on this page that destroys
     a working feature permanently, it is triggered by deploying, and the
     product is built so that nobody is told. The stuck `BUILDING` row is the
     same bug with a softer landing and belongs in the same commit — one boot
@@ -1834,7 +1907,7 @@ the data.
 `pnpm -r typecheck` clean 3/3, `pnpm -r lint` clean 3/3, 1536 server tests and
 1003 web tests passing — all run, not quoted.
 
-**None of the four migrations has been applied to any database.** Docker was not running
+**None of the five migrations has been applied to any database.** Docker was not running
 on this machine, so the DB-gated suites skipped, `plans` has never existed
 outside the `.sql` file, the seeded `free` row has never been read by anything,
 and neither has `users.quotaWarnedAt` or the new `QUOTA_WARNING` enum value.
@@ -1847,7 +1920,9 @@ insufficient for a claim about a schema: §2.14's eleven DB-gated tests had also
 never been run, and every one of them failed the first time they were.
 
 So the honest statement is: **the code is verified and the schema is not.**
-That covers §2.23, §2.24 and §2.25 as well — and §2.24 is the one where it matters
+That covers §2.23 through §2.26 as well — and §2.26 adds a second
+`ALTER TYPE ... ADD VALUE`, the statement named below as the one with a
+version-dependent rule about transactions — — and §2.24 is the one where it matters
 most, because `api_keys` carries a unique index on a hash and a `TEXT[]`
 column, and a unique index is exactly the kind of claim §1 already says a mock
 cannot be trusted about.

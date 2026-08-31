@@ -110,15 +110,18 @@ describe("listing jobs", () => {
   });
 
   it("shows the last outcome, including the ones that are not failures", async () => {
-    // SKIPPED, TIMED_OUT and ERRORED are three different problems with three
-    // different fixes, and collapsing them into "failed" sends people to read
-    // the wrong logs.
+    // SKIPPED, TIMED_OUT, ERRORED and ABANDONED are four different problems
+    // with four different fixes, and collapsing them into "failed" sends
+    // people to read the wrong logs. The last of them is the one where the
+    // platform genuinely does not know what the command managed to do, which
+    // is why it reads as "interrupted" and not as a failure.
     listJobs.mockResolvedValue([
       { ...NIGHTLY, id: "a", name: "A", lastRun: run("SUCCEEDED") },
       { ...NIGHTLY, id: "b", name: "B", lastRun: run("FAILED", 1) },
       { ...NIGHTLY, id: "c", name: "C", lastRun: run("SKIPPED") },
       { ...NIGHTLY, id: "d", name: "D", lastRun: run("TIMED_OUT") },
       { ...NIGHTLY, id: "e", name: "E", lastRun: run("ERRORED") },
+      { ...NIGHTLY, id: "f", name: "F", lastRun: run("ABANDONED") },
     ]);
     show();
 
@@ -127,6 +130,7 @@ describe("listing jobs", () => {
     expect(screen.getByText("skipped")).toBeTruthy();
     expect(screen.getByText("timed out")).toBeTruthy();
     expect(screen.getByText("could not start")).toBeTruthy();
+    expect(screen.getByText("interrupted")).toBeTruthy();
   });
 
   it("shows output only when there is some", async () => {
