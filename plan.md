@@ -44,9 +44,9 @@ re-run that day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1547 passing**, 280 skipped (113 files) — no database on this machine |
-| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds two migrations — see §5 |
-| `pnpm --filter web test` | **1003 passing** (77 files) |
+| `pnpm --filter server test` | **1568 passing**, 280 skipped (115 files) — no database on this machine |
+| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds three migrations — see §5 |
+| `pnpm --filter web test` | **1012 passing** (78 files) |
 | `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
 
@@ -1140,6 +1140,71 @@ failed. Neither guard is decoration.
 1547 server tests and 1003 web tests pass. **The migration for this has not
 been applied either** — same reason, same caveat, see §5.
 
+### 2.24 Since (2026-08-31, night, later still) — §8.6
+
+API keys, and a public API that is a *designed surface* rather than the
+signed-in one with a different token in front of it.
+
+- **`ApiKey` is not `UserToken` with a third purpose.** That table is
+  single-use, arrives by email and lives an hour. This object is presented on
+  every request, for months, from a CI runner nobody is looking at — the
+  opposite on every axis — so the questions it has to answer are different
+  ones: what it may do, how it is revoked, and whether anybody can tell it is
+  still in use. Hence `lastUsedAt`, which is the field that makes revoking an
+  unfamiliar key a safe act rather than a gamble, and a `revokedAt` timestamp
+  instead of a delete, because "that key was revoked on Tuesday" is the
+  sentence somebody needs after an incident and a deleted row answers nothing.
+
+- **The secret is shown once and stored as a hash**, with the public `prefix`
+  kept in the clear — it is in the presented string, it is what the lookup
+  keys on, and it is what lets a key be named in a list without the row holding
+  anything usable.
+
+- **The containment is a router, not a checklist**, and this is the load-bearing
+  decision. A key authenticates against `routes/v1/pub.ts` and nowhere else in
+  the product. Had it produced the same auth context a session does, it would
+  have inherited the entire signed-in surface — every project deletable, every
+  environment variable readable, the plan changeable — and the only thing
+  between a leaked CI secret and all of that would be a list of exceptions
+  somebody keeps complete by hand. **A route that is not written in that file
+  is not reachable by a key**, which is §6 decision 13's shape again: the
+  guarantee lives where it cannot be skipped. Now §6 decision 17.
+
+  Two exclusions follow and are tested as 404s rather than as refusals, because
+  the claim is that they were never written: **a key cannot manage keys**
+  (minting and revoking are on the session-only account router, so a stolen key
+  cannot issue itself a wider one — revocation a thief can undo is not
+  revocation), and **a key cannot delete anything** (no CI story needs it, and
+  §3.3 records that this platform has no backups).
+
+- **Four endpoints, three scopes.** `projects:read`, `projects:write`,
+  `deploy`. Publishing names its access level as `owner` rather than taking a
+  default — the thing §3.1 records one endpoint as failing to do — and both
+  write routes carry limiters, because a machine with a key in a loop is
+  exactly what discovers an unbudgeted route.
+
+- **Every refusal on a presented key says the same thing.** Distinguishing "no
+  such key" from "revoked" from "expired" tells somebody holding a stolen
+  string which of those it is, and tells the rightful owner nothing their own
+  list does not already say.
+
+**A real bug, caught by its own test:** the secret was first encoded
+`base64url`, whose alphabet contains `_` — the character the three parts of a
+key are split on. Roughly one key in three would have failed to verify
+immediately after being issued. Fixed by encoding hex, which removes the
+ambiguity rather than teaching the parser to cope with it.
+
+1568 server tests and 1012 web tests pass. **This migration has not been
+applied either** — see §5.
+
+**Noise found while running this, not caused by it:**
+`utils/publishBudget.test.ts` emits several unhandled
+`TypeError: Cannot read properties of undefined (reading 'catch')` from
+`asyncHandler`, on its own, on an untouched file. Every test in it passes and
+the run exits 0, so it is noise rather than a failure — recorded here so the
+next person to see it does not go looking for it in §8's work. **Not
+investigated.**
+
 ---
 
 ## 3. Open
@@ -1689,7 +1754,7 @@ the data.
 `pnpm -r typecheck` clean 3/3, `pnpm -r lint` clean 3/3, 1536 server tests and
 1003 web tests passing — all run, not quoted.
 
-**Neither migration has been applied to any database.** Docker was not running
+**None of the three migrations has been applied to any database.** Docker was not running
 on this machine, so the DB-gated suites skipped, `plans` has never existed
 outside the `.sql` file, the seeded `free` row has never been read by anything,
 and neither has `users.quotaWarnedAt` or the new `QUOTA_WARNING` enum value.
@@ -1702,7 +1767,10 @@ insufficient for a claim about a schema: §2.14's eleven DB-gated tests had also
 never been run, and every one of them failed the first time they were.
 
 So the honest statement is: **the code is verified and the schema is not.**
-That covers §2.23 as well.
+That covers §2.23 and §2.24 as well — and §2.24 is the one where it matters
+most, because `api_keys` carries a unique index on a hash and a `TEXT[]`
+column, and a unique index is exactly the kind of claim §1 already says a mock
+cannot be trusted about.
 The first thing to do with a database in front of you is `prisma migrate
 deploy` followed by the DB-gated suites, before anything else in §8 is built on
 top of it.
@@ -1927,6 +1995,19 @@ it; nothing else here is a standing decision.
     product. *Changes it:* nothing short of a legal obligation to stop
     serving something, which is what moderation is for and has its own path.
 
+17. **A credential that is not a person gets its own surface, not the
+    person's.** An API key authenticates against one router and nothing else
+    in the product. The alternative — a key that produces the same auth
+    context as a session, with a list of routes it is excluded from — fails in
+    the direction that costs everything: a route added later is reachable by
+    default, and the person adding it has no reason to think about a
+    credential sitting on somebody's build server. Default-deny here is
+    structural rather than enforced, which is the same property §6 decision 13
+    prefers in a query over a cleanup. Corollaries, both tested as absences:
+    a key cannot mint or revoke keys, and a key cannot delete anything.
+    *Changes it:* a use somebody actually has. Widening the surface means
+    writing a route into `pub.ts` deliberately, which is the point.
+
 ---
 
 ## 7. How to keep this file true
@@ -2082,7 +2163,7 @@ last rather than first. Per-seat versus per-usage is a pricing decision, and it
 is the same class as the autoscale row in §3.3: it should be made rather than
 arrived at.
 
-### 8.6 API keys and a public API
+### 8.6 API keys and a public API — **shipped 2026-08-31, see §2.24**
 
 **Unblocked.** `UserToken` is single-use and arrives by email; an API key is a
 different object with a different lifetime — a displayed-once secret stored as
@@ -2090,6 +2171,11 @@ a prefix plus a hash, with scopes, a last-used timestamp and revocation. It is
 what makes this platform something other systems can drive: CI that pushes a
 deploy, a script that creates a project from a template, the CLI that §3.3
 rules out building by hand.
+
+*What shipped added the part this description missed*: the surface a key can
+reach has to be **designed and separate**, not the signed-in one behind a
+different credential. That turned out to be the whole security content of the
+item, and it is §6 decision 17.
 
 ### 8.7 An operator console
 
@@ -2135,7 +2221,9 @@ the machine — and what a lapsed plan is allowed to do to work somebody has
 already done. Those two questions are §6 decisions 15 and 16, and everything
 after this point in §8 leans on them.
 
-Next is **8.6**, API keys, which is unblocked and needs nothing from anybody.
+**8.6 is now done too** (§2.24), which leaves §8 with nothing unblocked in it.
 8.4 needs a Stripe account and its keys, which are the operator's to create;
-until those exist the honest state of this deployment is a free tier with
-plans it can describe and cannot sell.
+8.7 is small but grows operator authority and should land with its audit trail
+in the same commit; 8.5 is the large one and needs a pricing decision first.
+Until a Stripe account exists the honest state of this deployment is a free
+tier with plans it can describe and cannot sell.

@@ -125,11 +125,67 @@ model User {
   tokens        UserToken[]
   githubConnection GithubConnection?
   notifications Notification[]
+  apiKeys       ApiKey[]
 
   /// "Which accounts are on this plan" is the operator's question, and the one
   /// a pricing change has to answer before it is made.
   @@index([planId])
   @@map("users")
+}
+
+/// A long-lived credential for something that is not a person.
+///
+/// `UserToken` is single-use, arrives by email and lives an hour; this is the
+/// opposite object on every axis, which is why it is not that table with a
+/// third purpose. It is presented on every request, for months, from a CI
+/// runner -- so the design questions are entirely different ones: what it may
+/// do, how it is revoked, and whether anybody can tell it was used.
+///
+/// The secret is shown once, at creation, and stored only as a hash. There is
+/// no route that returns it again, because there is nothing to return.
+model ApiKey {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// What its owner called it. The only way to know which runner to go and
+  /// change after revoking one.
+  label String
+
+  /// The public half, stored in the clear and shown in the list: it is in the
+  /// presented secret and is what the lookup keys on, so a key can be
+  /// identified without the database holding anything that would let it be
+  /// used. Unique because it is the lookup.
+  prefix String @unique
+
+  /// SHA-256 of the whole presented string. See `UserToken.tokenHash` for the
+  /// same reasoning: a leaked database must not hand over live credentials.
+  tokenHash String @unique
+
+  /// What this key may do, from a small closed set. Stored as a list rather
+  /// than as booleans so that adding a scope does not migrate every row.
+  scopes String[]
+
+  /// When it was last accepted. Written at most once a minute rather than on
+  /// every request -- the question it answers is "is anything still using
+  /// this", and that question does not need second-level resolution or a
+  /// database write per call.
+  lastUsedAt DateTime?
+
+  /// Optional. A key that expires is one nobody has to remember to remove.
+  expiresAt DateTime?
+
+  /// Revocation is a timestamp, not a delete: "this key was revoked on
+  /// Tuesday" is the answer somebody needs after an incident, and a deleted
+  /// row answers nothing.
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// The listing is one account's keys, newest first.
+  @@index([userId, createdAt])
+  @@map("api_keys")
 }
 
 /// One-time tokens for flows that arrive by email.

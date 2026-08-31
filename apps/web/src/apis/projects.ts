@@ -1,6 +1,9 @@
 import type {
   AccountSummary,
+  ApiKeyScope,
+  ApiKeySummary,
   ApiSuccess,
+  CreatedApiKey,
   ModerationAction,
   ProjectVisibility,
   PublicProject,
@@ -824,4 +827,31 @@ export const getAccountApi = async (): Promise<AccountSummary> => {
     "/api/v1/account",
   );
   return response.data.data;
+};
+
+/** The keys this account has issued, revoked ones included — "that key was
+ *  revoked on Tuesday" is the sentence somebody needs after an incident. */
+export const listApiKeysApi = async (): Promise<ApiKeySummary[]> => {
+  const response = await axios.get<ApiSuccess<ApiKeySummary[]>>(
+    "/api/v1/account/keys",
+  );
+  return response.data.data;
+};
+
+/** Mints one. The secret in the response is the only time it exists: the
+ *  server stores a hash, so a client that does not show it now has lost it. */
+export const createApiKeyApi = async (input: {
+  label: string;
+  scopes: ApiKeyScope[];
+  expiresInDays?: number;
+}): Promise<CreatedApiKey> => {
+  const response = await axios.post<ApiSuccess<CreatedApiKey>>(
+    "/api/v1/account/keys",
+    input,
+  );
+  return response.data.data;
+};
+
+export const revokeApiKeyApi = async (keyId: string): Promise<void> => {
+  await axios.delete(`/api/v1/account/keys/${keyId}`);
 };

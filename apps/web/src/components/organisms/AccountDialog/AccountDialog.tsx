@@ -1,11 +1,13 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Empty, Modal, Progress, Tag, Typography } from "antd";
+import { Empty, Modal, Progress, Segmented, Tag, Typography } from "antd";
 import {
   QUOTA_WARN_FRACTION,
   type AccountSummary,
   type Plan,
 } from "@replit-clone/shared";
 import { getAccountApi } from "../../../apis/projects.ts";
+import { ApiKeys } from "./ApiKeys.tsx";
 
 /** What this account is using, and what it is allowed.
  *
@@ -96,10 +98,14 @@ function PlanCard({ plan, current }: { plan: Plan; current: boolean }) {
 }
 
 export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
+  const [tab, setTab] = useState<"usage" | "keys">("usage");
+
   const { data, isLoading, error } = useQuery<AccountSummary>({
     queryKey: ["account"],
     queryFn: getAccountApi,
-    enabled: open,
+    // Only when it is being looked at: the summary walks every project's tree
+    // on the server, which is not a thing to do behind a closed dialog.
+    enabled: open && tab === "usage",
     retry: false,
   });
 
@@ -111,7 +117,19 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
       footer={null}
       width={620}
     >
-      {error ? (
+      <Segmented
+        options={[
+          { label: "Usage", value: "usage" },
+          { label: "API keys", value: "keys" },
+        ]}
+        value={tab}
+        onChange={(value) => setTab(value as "usage" | "keys")}
+        style={{ marginBottom: 16 }}
+      />
+
+      {tab === "keys" ? (
+        <ApiKeys />
+      ) : error ? (
         <Empty description="Could not load this account's usage." />
       ) : isLoading || !data ? (
         <div aria-label="Loading account usage" style={{ display: "grid", gap: 10 }}>

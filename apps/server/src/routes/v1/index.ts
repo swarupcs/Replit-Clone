@@ -11,6 +11,7 @@ import embedRouter from "./embeds.js";
 import adminRouter from "./admin.js";
 import notificationRouter from "./notifications.js";
 import accountRouter from "./account.js";
+import pubRouter from "./pub.js";
 
 const router = express.Router();
 
@@ -37,6 +38,12 @@ router.use("/account", requireAuth, accountRouter);
 // guard reads the auth context, so a router that mounted it alone would fail
 // as an Unauthorized rather than as the wiring mistake it is.
 router.use("/admin", requireAuth, adminRouter);
+// Deliberately NOT behind requireAuth: this is the API-key surface, and a key
+// is not a session. It authenticates itself, and the set of things it can
+// reach is the set of routes written in that file -- see routes/v1/pub.ts for
+// why that is the enforcement rather than a convenience.
+router.use("/pub", pubRouter);
+
 // Deliberately NOT behind requireAuth: an embed is read by people who have
 // no account here and never will. See routes/v1/embeds.ts.
 router.use("/embeds", embedRouter);
