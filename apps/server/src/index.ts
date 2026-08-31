@@ -61,10 +61,10 @@ import {
   setOnProjectReaped,
 } from "./containers/containerManager.js";
 import { ensureEgressGateway } from "./containers/egressGateway.js";
-import { restoreServices } from "./service/deployService.js";
+import { reconcileDeployments, restoreServices } from "./service/deployService.js";
 import { recheckDomains } from "./service/customDomainService.js";
 import { backfillSealedEnvVars } from "./service/projectEnvService.js";
-import { runDueJobs } from "./service/scheduleService.js";
+import { reconcileJobRuns, runDueJobs } from "./service/scheduleService.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
 import { SandboxNetworkMismatch } from "./containers/sandboxNetwork.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
@@ -459,6 +459,20 @@ async function start(): Promise<void> {
   // directories with no row. Neither used to be cleaned up, ever.
   const reconciled = await withTimeout(reconcileOnBoot(), "boot reconcile");
   if (reconciled) logger.info("reconciled state", { ...reconciled });
+
+  // ...and the same question asked of the database, which the sweep above has
+  // never asked: it reconciles CONTAINERS and directories, and a row that says
+  // a job is running or a build is in progress outlives the process that was
+  // doing it. The job half is the one that matters -- an unfinished RUNNING row
+  // makes every later firing write SKIPPED, and SKIPPED deliberately tells
+  // nobody anything, so an ordinary deploy could end a nightly backup in
+  // silence. Before the sweeper starts, so the first firing after boot sees a
+  // settled table.
+  const abandonedRuns = await withTimeout(reconcileJobRuns(), "job run reconcile");
+  const abandonedBuilds = await withTimeout(reconcileDeployments(), "deployment reconcile");
+  if (abandonedRuns || abandonedBuilds) {
+    logger.info("reconciled rows", { abandonedRuns, abandonedBuilds });
+  }
 
   // Published services, which the reconcile above deliberately does not touch:
   // it sweeps `rc-project-` containers, and a deployment is not one. Always-on

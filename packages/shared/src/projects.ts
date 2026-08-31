@@ -1,3 +1,4 @@
+import type { Page } from "./pagination.js";
 /** Projects, forks, and the idea of a public one.
  *
  *  Duplicating a project you already have and forking a stranger's are the
@@ -60,7 +61,7 @@ export interface ProjectReport {
 export interface ReportsResponse {
   success: true;
   message: string;
-  data: { reports: ProjectReport[] };
+  data: Page<ProjectReport>;
 }
 
 export interface ReviewReportResponse {

@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Button, Empty, Segmented, Typography, message } from "antd";
 import type { ProjectReport, ReportStatus } from "@replit-clone/shared";
 import { listReportsApi, reviewReportApi } from "../apis/projects.ts";
@@ -45,13 +49,27 @@ export const ReportQueue = () => {
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
 
-  const { data: reports, isLoading, error } = useQuery({
+  // The status filter is a QUERY parameter and the pages follow it, which is
+  // the arrangement §2.21 had to learn: narrowing after a capped read answers
+  // "nothing here" when the truth is "not on this page".
+  const {
+    data,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ["reports", filter],
-    queryFn: () => listReportsApi(filter),
+    queryFn: ({ pageParam }) => listReportsApi(filter, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     // A 403 is the answer for everybody not on the allowlist, and retrying it
     // three times changes nothing except how long the page takes to say so.
     retry: false,
   });
+
+  const reports = data?.pages.flatMap((page) => page.items);
 
   const review = useMutation({
     mutationFn: (input: { id: string; decision: "DISMISSED" | "ACTIONED" }) =>
@@ -226,6 +244,21 @@ export const ReportQueue = () => {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* Only when the queue is actually longer than what is on screen. The
+          old cap was two hundred rows and no indication of a two hundred and
+          first, which for a queue is the one number an operator needs. */}
+      {hasNextPage && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+          <Button
+            size="small"
+            loading={isFetchingNextPage}
+            onClick={() => void fetchNextPage()}
+          >
+            Show more
+          </Button>
+        </div>
       )}
         </>
       )}

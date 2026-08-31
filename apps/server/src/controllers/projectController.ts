@@ -64,9 +64,14 @@ export async function listProjectsController(
 ): Promise<void> {
   // Includes projects shared with this user, not only their own — a project
   // they can open but cannot see in the list would be unreachable.
-  const projects = await listAccessibleProjects(getAuthContext(req).userId);
+  //
+  // Paged, and the dashboard asks for every page: it searches and sorts the
+  // whole set in the browser, so a page break would mean a project that
+  // exists reading as one that does not. The page is a bound on the query,
+  // not on what the screen is allowed to show.
+  const page = await listAccessibleProjects(getAuthContext(req).userId, req.query);
 
-  res.json({ success: true, message: "Projects", data: projects });
+  res.json({ success: true, message: "Projects", data: page });
 }
 
 export async function getProjectTree(
@@ -235,13 +240,13 @@ export async function setVisibilityController(
 /** The gallery. Anybody signed in may read it; it names no project that is not
  *  already public. */
 export async function listPublicProjectsController(
-  _req: Request,
+  req: Request,
   res: Response,
 ): Promise<void> {
   res.json({
     success: true,
     message: "Public projects",
-    data: await listPublicProjects(),
+    data: await listPublicProjects(req.query),
   });
 }
 
@@ -324,7 +329,13 @@ export async function setProjectEnvController(
   res: Response,
 ): Promise<void> {
   const projectId = assertValidProjectId(req.params.projectId);
-  await assertProjectAccess(projectId, getAuthContext(req).userId);
+  // Named rather than taken from the default, which this was the only caller
+  // in the codebase to rely on. Editor is the right answer -- an editor can
+  // already run arbitrary code in this container, so setting a variable it
+  // will read grants them nothing they did not have -- but it is the answer
+  // this endpoint should get by somebody choosing it, since the next person
+  // to change that default will be reasoning about the other ninety routes.
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "editor");
 
   const body = req.body as { vars?: unknown } | undefined;
   const saved = await setEnvVars(projectId, body?.vars ?? {});

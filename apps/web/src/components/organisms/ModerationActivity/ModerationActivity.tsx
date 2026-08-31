@@ -1,5 +1,9 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Button, Empty, Input, Modal, Typography, message } from "antd";
 import { MAX_MODERATION_REASON, type ModerationAction } from "@replit-clone/shared";
 import {
@@ -31,13 +35,15 @@ const VERB: Record<ModerationAction["action"], string> = {
  *
  *  Derived from the stream rather than asked for separately, because the
  *  stream is already ordered and already carries both facts. The one thing it
- *  cannot see is an appeal older than the hundred most recent actions, which
- *  is a busier deployment than this has and would be a query, not a screen. */
+ *  cannot see is an appeal older than what has been loaded — which used to be
+ *  a hard hundred and is now as far back as somebody has pressed "show more". */
 function unansweredAppeals(actions: ModerationAction[]): Set<string> {
   const answered = new Set<string>();
   const open = new Set<string>();
 
-  // Newest first, so anything seen before an appeal came after it.
+  // Newest first, so anything seen before an appeal came after it. Reads
+  // whatever has been loaded, which now grows with the button at the foot of
+  // the list rather than stopping dead at a hundred.
   for (const action of actions) {
     if (!action.projectId) continue;
 
@@ -60,16 +66,23 @@ export const ModerationActivity = () => {
   const [reason, setReason] = useState("");
 
   const {
-    data: actions,
+    data,
     isLoading,
     error,
-  } = useQuery({
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ["moderation-activity"],
-    queryFn: listRecentModerationApi,
+    queryFn: ({ pageParam }) => listRecentModerationApi(pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     // A 403 is the answer for everybody not on the allowlist, and retrying it
     // changes nothing except how long the page takes to say so.
     retry: false,
   });
+
+  const actions = data?.pages.flatMap((page) => page.items);
 
   const open = useMemo(() => unansweredAppeals(actions ?? []), [actions]);
 
@@ -186,6 +199,21 @@ export const ModerationActivity = () => {
           );
         })}
       </ul>
+
+      {/* This table only grows: nothing prunes a moderation record, and
+          nothing should. The hundred-row cap was a cliff with an appeal
+          possibly just over it, and nothing on the screen said so. */}
+      {hasNextPage && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+          <Button
+            size="small"
+            loading={isFetchingNextPage}
+            onClick={() => void fetchNextPage()}
+          >
+            Show more
+          </Button>
+        </div>
+      )}
 
       <Modal
         open={reinstating !== null}

@@ -13,8 +13,15 @@ import type { ModerationAction } from "@replit-clone/shared";
 const listRecent = vi.fn();
 const reinstate = vi.fn();
 
+/** The endpoint is paged. Array fixtures below are wrapped into a single
+ *  complete page; a test that cares about paging returns a real one. */
+function asPage(value: unknown): unknown {
+  return Array.isArray(value) ? { items: value, nextCursor: null } : value;
+}
+
 vi.mock("../../../apis/projects.ts", () => ({
-  listRecentModerationApi: () => listRecent() as unknown,
+  listRecentModerationApi: async (cursor?: string) =>
+    asPage(await (listRecent(cursor) as Promise<unknown>)),
   reinstateProjectApi: (id: string, reason: string) =>
     reinstate(id, reason) as unknown,
 }));
@@ -161,5 +168,56 @@ describe("the trail itself", () => {
     show();
 
     expect(await screen.findByText(/nothing has been decided yet/i)).toBeTruthy();
+  });
+});
+
+/** Nothing prunes this table and nothing should, so "recent" was a hundred
+ *  rows and a cliff — with an appeal possibly just over it, unanswerable by
+ *  the only person who could answer it, and nothing on the screen saying so. */
+describe("more than one page of history", () => {
+  it("offers nothing to load when the log fits", async () => {
+    listRecent.mockResolvedValue([action()]);
+    show();
+
+    await screen.findByText("Leaky App");
+    expect(screen.queryByRole("button", { name: /show more/i })).toBeNull();
+  });
+
+  it("loads older entries and keeps the newer ones", async () => {
+    listRecent.mockResolvedValueOnce({ items: [action()], nextCursor: "a1" });
+    listRecent.mockResolvedValueOnce({
+      items: [action({ id: "a2", projectName: "Older Case" })],
+      nextCursor: null,
+    });
+
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: /show more/i }));
+
+    expect(await screen.findByText("Older Case")).toBeTruthy();
+    expect(screen.getByText("Leaky App")).toBeTruthy();
+    expect(listRecent).toHaveBeenLastCalledWith("a1");
+  });
+
+  /** The unanswered-appeal badge reads whatever has been loaded, so an appeal
+   *  that arrives with the second page has to be marked when it arrives. */
+  it("marks an unanswered appeal found on a later page", async () => {
+    listRecent.mockResolvedValueOnce({ items: [action()], nextCursor: "a1" });
+    listRecent.mockResolvedValueOnce({
+      items: [
+        action({
+          id: "a2",
+          action: "APPEALED",
+          projectId: "p2",
+          projectName: "Appealed Later",
+        }),
+      ],
+      nextCursor: null,
+    });
+
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: /show more/i }));
+
+    await screen.findByText("Appealed Later");
+    expect(screen.getByRole("button", { name: /put it back/i })).toBeTruthy();
   });
 });

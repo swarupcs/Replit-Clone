@@ -44,9 +44,9 @@ re-run that day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1588 passing**, 280 skipped (116 files) — no database on this machine |
-| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds four migrations — see §5 |
-| `pnpm --filter web test` | **1030 passing** (80 files) |
+| `pnpm --filter server test` | **1628 passing**, 280 skipped (120 files) — no database on this machine |
+| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds five migrations — see §5 |
+| `pnpm --filter web test` | **1042 passing** (81 files) |
 | `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
 
@@ -104,15 +104,24 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 105 items. Open: 12 — seven of them unblocked.**
+**Done: 112 items. Open: 5 — none of them unblocked.**
 
-Open, in full, so the shape is visible without scrolling: **five defects**
-(§3.1, headed by the restart wedge), **two pieces of work** (§3.2 — pagination,
-and naming a run a restart abandoned), and **five blocked** (§3.3 — a
-certificate, an autoscaler's cost model, a disk budget for snapshots, a backup
-destination, and an architectural route). §8.4 and §8.5 are blocked too, on a
-Stripe account and on a pricing decision respectively, and are listed there
-rather than duplicated here.
+Open, in full, so the shape is visible without scrolling: **no defects**
+(§3.1 is empty again, and read the paragraph at the top of it before believing
+that), **no unblocked work** (§3.2 is empty too), and **five blocked** (§3.3 — a certificate, an autoscaler's
+cost model, a disk budget for snapshots, a backup destination, and an
+architectural route). §8.4 and §8.5 are blocked too, on a Stripe account and on
+a pricing decision respectively, and are listed there rather than duplicated
+here.
+
+Seven items came off in three commits (§2.26–§2.28), which is what a sweep's
+findings look like once they are worked through rather than what they looked
+like when they arrived. **Nothing unblocked left is the state this file has
+been in five times, and it has been wrong every time** — §4's closing paragraph
+is the standing warning, and §3.1's opening paragraph is the sharper one: an
+empty defect list means nobody has looked lately, never that the code is right.
+The next entry in §2 will almost certainly come from reading two shipped things
+against each other, as the last eleven did.
 
 **These two numbers had drifted, and the drift is worth a sentence** because
 this file's one rule (§7) is that a line is updated in the commit that changes
@@ -1282,6 +1291,150 @@ believing it applied.
 1588 server tests and 1030 web tests pass. **This migration has not been
 applied either** — see §5.
 
+### 2.26 Since (2026-08-31, night, after §8) — the restart wedge
+
+The worst thing on §3.1, reached by the most ordinary operation there is:
+deploying. `runJobNow` writes a `RUNNING` row before it starts a job; nothing
+ever cleared one the process did not come back to; the overlap check was
+`findFirst({ jobId, status: "RUNNING" })` with no age bound. So from the next
+firing onwards the sweep claimed the job, found the immortal row, wrote
+`SKIPPED` — and `SKIPPED` is deliberately not a verdict (§6 decision 14), so
+nobody was ever told. A nightly backup died on the evening somebody deployed
+and reported nothing, forever.
+
+**Three things were needed and the third was the one that mattered.**
+
+**A name for it, settled before the reconciler that depends on it.** §3.2 was
+right to list this separately as a design question. The obvious answer was
+`ERRORED`, which §3.1 argued for on the grounds that it already means "the
+machine could not run it" — and that turns out to be exactly what it does not
+mean here. `ERRORED` says the command never started. An abandoned run *did*
+start, and may well have finished all of its work a second before the restart
+landed on it. Telling somebody "we could not run it" about a backup that in
+fact ran is the same class of lie `TIMED_OUT` exists to avoid, and it changes
+what they should do next: re-run an `ERRORED` job, look at what the command
+actually did before re-running an `ABANDONED` one. So the seventh status, with
+the precedent already in the file — `TIMED_OUT` is kept apart from `FAILED` for
+this reason and no other. Not a verdict, so a job that runs normally next time
+says nothing at all.
+
+**The boot reconcile now knows about rows.** `reconcileOnBoot` has always swept
+containers and directories and never looked at a table, which is the root cause
+of both defects here. `reconcileJobRuns` names every `RUNNING` row at boot —
+unconditionally, because nothing can be running in a process that has just
+started — and `reconcileDeployments` settles every `BUILDING` row the same way.
+The deploy half is the softer landing §3.1 described: nothing is wedged, since
+`reserve()` overwrites the status on the next publish, but until somebody
+deploys again the panel reports a build in progress that no process is running,
+which is the only thing that panel exists to say.
+
+**And the query is bounded, not just the cleanup.** §6 decision 13 for the
+fourth time: the reconcile is cleanup that touches rows and can be missed, and
+the clause is the guarantee. A `RUNNING` row older than twice the run timeout
+cannot hold a job hostage, and it is *named* rather than merely stepped over,
+so the history reads as what happened instead of showing a run eternally in
+progress.
+
+Two mutants, both caught: dropping the age bound fails "does not believe a
+RUNNING row of any age", and writing `ERRORED` where `ABANDONED` belongs fails
+two. **What is not covered is the wiring in `index.ts`** — a boot sequence has
+no test on this codebase, so the guarantee that these two are actually called
+rests on reading, as it does for the eight other things called there.
+
+1598 server tests and 1030 web tests pass. **This migration has not been
+applied either**, and it is another `ALTER TYPE ... ADD VALUE` — see §5.
+
+### 2.27 Since (2026-08-31, night, after §8) — the three small ones
+
+Two of §3.1's remaining three and one habit, in one commit because they are one
+file and one argument.
+
+**`POST /:projectId/test` and `GET /:projectId/export` now carry budgets.**
+§2.13 gave "run now" a limiter on the stated grounds that it is the only route
+that starts a container on demand; §2.18 then shipped a second one, argued its
+three access levels carefully, and gave it no budget. Same limit as the job
+run, deliberately: one person's manual runs are the same cost to this machine
+whichever button started them. Export is the quieter half — no container, but a
+walk and a zip of an entire working tree per request, at viewer level, on a
+project allowed to be gigabytes — so it gets a looser one rather than none.
+
+**No test, and that is the local convention rather than an omission.** Nothing
+in this codebase tests an `express-rate-limit` middleware; the three files that
+assert on `RATE_LIMITED` are all testing service-level budgets. Exercising one
+of these would mean thirty-one authenticated requests to prove a constant.
+
+**The defaulted access level is now named.** `assertProjectAccess`'s third
+parameter defaults to `"editor"` and `setProjectEnvController` was the only
+caller in the codebase omitting it. Editor is the right answer — an editor can
+already run arbitrary code in the container that reads these variables — and
+the point is that it is now the answer somebody chose. §2.13 and §2.18 both
+exist because naming the level changed it.
+
+**And the comment that sat above the wrong routes** has the moderation pair
+under it again. Recorded rather than fixed silently when it was found, because
+`routes/v1/projects.ts` is where somebody goes to learn what is guarded by
+what, and a paragraph pointing at the wrong block is worse there than nowhere.
+
+1598 server tests pass, unchanged: nothing here has a behavioural test, which
+is exactly what makes them small.
+
+### 2.28 Since (2026-08-31, night, last) — pagination
+
+The last unblocked item, and the one §4 put last on the grounds that nothing
+is currently over any of the caps — which is exactly why it should be done
+before something is.
+
+**The defect was never "lists are long".** It is that an array is the one
+shape that cannot say *there is more*. Three lists were silently truncated at
+a constant — 200 reports, 100 moderation actions, 50 public projects — and the
+fourth had no bound at all, so both failure modes were present at once: a list
+that lies about being complete, and a query with nothing stopping it.
+
+**One page shape, `{ items, nextCursor }`, for all four.** Cursor and not
+offset, because every one of these is `createdAt desc` on a table that takes
+new rows at the top: an offset shifts under insertion, so page two both repeats
+and skips. Three details each had a plausible wrong version that no screen
+would have shown for months, and each is now a test:
+
+- **`take: limit + 1`.** Reading one row more is what makes "is there another
+  page" a fact rather than a guess. A count query is a second scan; calling a
+  full page the last one gives a "show more" that loads nothing.
+- **The order breaks ties on `id`.** `createdAt` alone is not stable — one
+  project reported by two people at once shares a millisecond — and a cursor
+  into an unstable order drops rows silently. `listAccessibleProjects` had no
+  `orderBy` at all, which a cursor cannot be built on.
+- **The extra row is peeked at, never returned.** Otherwise one row appears on
+  two pages.
+
+**Who follows a cursor and who is handed one is the decision worth naming.**
+Three screens get a "Show more" that appears only when there is another page.
+The dashboard does not: it searches and sorts the whole set in the browser, so
+a page break there would mean typing a project's name and being told it does
+not exist because it is on page two — the §2.21 mistake, rebuilt deliberately.
+So `listProjectsApi` follows its own pages to the end. **Paging bounds the
+query; it must not silently bound the answer.** That loop is itself bounded at
+twenty pages, because a client loop with no stop is a client loop that hangs on
+a server bug, and stopping is visibly wrong where spinning is invisibly wrong.
+
+**`listModerationActions` is deliberately not paged.** One project's trail is
+bounded by what has been done to one project, it is read as a sequence rather
+than a feed, and a page break in the middle of "taken down, appealed,
+reinstated" would hide the ending. The rule is not "paginate everything"; it is
+that a list which can grow without bound must be able to say so.
+
+**Two response shapes changed** — `GET /api/v1/projects` and
+`GET /api/v1/admin/reports` no longer answer with an array, and `/admin/reports`
+lost its `reports` key for `items`. The public API's `GET /pub/projects` changed
+with them and is the one place the cursor is exposed rather than followed: a
+script is the one consumer that can be trusted to loop, and one response
+holding every project an account owns is the request most likely to end up in a
+cron job.
+
+One mutant, caught: dropping the `id` tiebreak from an order fails the test
+that asks for it by shape.
+
+1628 server tests and 1042 web tests pass.
+
 ---
 
 ## 3. Open
@@ -1409,8 +1562,12 @@ The five below are what a sweep at that altitude does turn up. Four of the
 five are one shape: **state that outlives the process, and a boot that
 reconciles containers but not rows.**
 
-- [ ] **A restart during a scheduled run kills that job permanently, and says
-      nothing.** The worst thing on this page, and it is reached by the most
+- [x] **A restart during a scheduled run kills that job permanently, and says
+      nothing.** Fixed 2026-08-31 — see §2.26. All three parts: the boot
+      reconcile now names orphaned `RUNNING` rows, the overlap check is bounded
+      by age, and the sixth case got a name of its own rather than being filed
+      under `ERRORED`.
+      The worst thing on this page, and it is reached by the most
       ordinary operation there is.
 
       `runJobNow` writes a `RUNNING` row before it starts, which is right —
@@ -1440,7 +1597,9 @@ reconciles containers but not rows.**
       exactly what happened, and it is already a non-verdict, so a job that
       recovers on the next firing correctly says nothing.
 
-- [ ] **A deploy interrupted the same way leaves the row `BUILDING` forever.**
+- [x] **A deploy interrupted the same way leaves the row `BUILDING` forever.**
+      Fixed 2026-08-31 — see §2.26, in the same commit and for the reason §4
+      gave: one boot pass, two kinds of row.
       The same root cause with a milder ending. `Deployment.status` goes to
       `BUILDING` before the build and nothing at boot puts it right, so the
       panel reports a build in progress that no process is running. It
@@ -1450,7 +1609,8 @@ reconciles containers but not rows.**
       it in the same pass and for the same reason: the boot reconcile should
       know about rows.
 
-- [ ] **`POST /:projectId/test` starts a container and has no budget.** Every
+- [x] **`POST /:projectId/test` starts a container and has no budget.** Fixed
+      2026-08-31 — see §2.27, with the export beside it. Every
       other route that costs real compute carries one — `createLimiter`,
       `installLimiter`, `deployLimiter`, `queryLimiter`, and `jobRunLimiter`,
       which §2.13 added to "run now" on the stated grounds that it is the only
@@ -1463,7 +1623,8 @@ reconciles containers but not rows.**
       and zips an entire working tree per request, with no budget, at viewer
       level.
 
-- [ ] **One project write takes its access level from a default argument.**
+- [x] **One project write takes its access level from a default argument.**
+      Fixed 2026-08-31 — see §2.27.
       `assertProjectAccess`'s third parameter defaults to `"editor"`, and
       `setProjectEnvController` is the only caller in the codebase that omits
       it. Editor is very likely the right answer — an editor can already run
@@ -1474,7 +1635,8 @@ reconciles containers but not rows.**
       A default that is load-bearing in exactly one place is a default that
       will eventually be changed by somebody reasoning about the other ninety.
 
-- [ ] **A comment in `routes/v1/projects.ts` sits above the wrong routes.** The
+- [x] **A comment in `routes/v1/projects.ts` sits above the wrong routes.**
+      Fixed 2026-08-31 — see §2.27. The
       paragraph introducing the moderation pair ("the other side of
       moderation... both are the owner's") is immediately followed by the
       *tests* block and its own comment, with the moderation routes below that.
@@ -1575,8 +1737,8 @@ once, found three more times.
       today cannot answer "is this machine full" from any screen, which is the
       question a three-container cap makes them ask most often.
 
-- [ ] **Nothing that returns a list is paginated, and they fail in two
-      different directions.** `listReports` takes 200, `listRecentModeration`
+- [x] **Nothing that returns a list is paginated, and they fail in two
+      different directions.** Fixed 2026-08-31 — see §2.28. `listReports` takes 200, `listRecentModeration`
       takes 100, `listPublicProjects` takes 50 — each silently, with no
       indication that there was more and no way to ask for it. Meanwhile
       `listAccessibleProjects` has no cap at all, so a user with five hundred
@@ -1587,7 +1749,8 @@ once, found three more times.
       failing, and only luck put that cap in view. A truncated list that says
       it is complete is worse than a short one that says it is not.
 
-- [ ] **A run abandoned by a restart has no name.** Listed separately from the
+- [x] **A run abandoned by a restart has no name.** Settled 2026-08-31 —
+      `ABANDONED`, see §2.26. Listed separately from the
       defect above because it is a design question rather than a fix: `RUNNING`,
       `SKIPPED`, `FAILED`, `TIMED_OUT` and `ERRORED` were chosen (§2.13) to
       keep "your command is wrong" apart from "we could not run it", and the
@@ -1730,26 +1893,39 @@ whoever owns the data, not to a cleanup script.
     every viewer, and a screen still quoting a decision that had been
     amended — neither of which was on any list.
 
-19. **§3.1 — the restart wedge, and the boot reconcile that should have caught
-    it.** First and not close: it is the only thing on this page that destroys
+19. ~~**§3.1 — the restart wedge, and the boot reconcile that should have
+    caught it.**~~ Done 2026-08-31 (§2.26). Settling the naming question first
+    was the right order and it changed the answer: this section and §3.1 both
+    expected `ERRORED`, and writing it down was what showed that `ERRORED`
+    claims the command never started, which is the one thing an abandoned run
+    did do. Original note follows.
+
+    First and not close: it is the only thing on this page that destroys
     a working feature permanently, it is triggered by deploying, and the
     product is built so that nobody is told. The stuck `BUILDING` row is the
     same bug with a softer landing and belongs in the same commit — one boot
     pass, two kinds of row. Settle §3.2's naming question first; it is an
     afternoon and the reconciler depends on the answer.
-20. **§3.1 — the missing budget on `POST /test`, and the export beside it.**
-    Ten minutes, and the argument for it was already written down for the
-    identical route in §2.13.
+20. ~~**§3.1 — the missing budget on `POST /test`, and the export beside
+    it.**~~ Done 2026-08-31 (§2.27). Ten minutes, as billed, and the argument
+    for it was already written down for the identical route in §2.13.
 21. **§3.2 — showing people their quota.** The cheapest thing here with a user
     on the other end of it: the numbers are already computed and already
     enforced, and the only reason nobody can see them is that no endpoint
     returns them.
-22. **§3.1 — the defaulted access level, and the stray comment.** Small, and
-    worth doing while §3.1 is open rather than leaving two lines that will read
-    as noise in six months.
-23. **§3.2 — pagination.** Last of the unblocked work because nothing is
-    currently over any of the caps, which is exactly why it should be done
-    before something is.
+22. ~~**§3.1 — the defaulted access level, and the stray comment.**~~ Done
+    2026-08-31 (§2.27), in the same commit as 20 rather than after 21: they are
+    one file and the same argument, and splitting them would have been two
+    commits to move a paragraph and name a constant.
+23. ~~**§3.2 — pagination.**~~ Done 2026-08-31 (§2.28). Last of the unblocked
+    work because nothing is currently over any of the caps, which is exactly
+    why it was worth doing before something is — every cap in it was a
+    constant nobody would have questioned until a list went quiet.
+
+    **That empties §3.1 and §3.2 both.** Read §3.1's opening paragraph before
+    reading that as good news: it has said "Empty" three times while merged
+    code was wrong, and the five defects found since were found by reading two
+    shipped things against each other rather than by consulting a list.
 
 **§3.3 gained a row rather than losing one**, for the first time since this
 file existed: backups. It is there because the sweep went looking for one and
@@ -1834,7 +2010,7 @@ the data.
 `pnpm -r typecheck` clean 3/3, `pnpm -r lint` clean 3/3, 1536 server tests and
 1003 web tests passing — all run, not quoted.
 
-**None of the four migrations has been applied to any database.** Docker was not running
+**None of the five migrations has been applied to any database.** Docker was not running
 on this machine, so the DB-gated suites skipped, `plans` has never existed
 outside the `.sql` file, the seeded `free` row has never been read by anything,
 and neither has `users.quotaWarnedAt` or the new `QUOTA_WARNING` enum value.
@@ -1847,7 +2023,9 @@ insufficient for a claim about a schema: §2.14's eleven DB-gated tests had also
 never been run, and every one of them failed the first time they were.
 
 So the honest statement is: **the code is verified and the schema is not.**
-That covers §2.23, §2.24 and §2.25 as well — and §2.24 is the one where it matters
+That covers §2.23 through §2.26 as well — and §2.26 adds a second
+`ALTER TYPE ... ADD VALUE`, the statement named below as the one with a
+version-dependent rule about transactions — — and §2.24 is the one where it matters
 most, because `api_keys` carries a unique index on a hash and a `TEXT[]`
 column, and a unique index is exactly the kind of claim §1 already says a mock
 cannot be trusted about.

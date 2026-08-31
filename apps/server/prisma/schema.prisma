@@ -487,6 +487,9 @@ enum ScheduledRunStatus {
   TIMED_OUT
   /// Could not start at all: no container, no Docker, project has no tree.
   ERRORED
+  /// The server stopped existing mid-run. Distinct from ERRORED, which says
+  /// the command never started: this one did, and may have finished.
+  ABANDONED
 }
 
 model Project {

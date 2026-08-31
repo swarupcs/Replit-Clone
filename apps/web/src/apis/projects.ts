@@ -42,6 +42,7 @@ import type {
   ReportStatus,
   ReportsResponse,
   ReviewReportResponse,
+  Page,
 } from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
@@ -63,9 +64,34 @@ export const listTemplatesApi = async (): Promise<TemplateSummary[]> => {
   return response.data.data;
 };
 
+/** Every project this account can open.
+ *
+ *  The endpoint is paged and this follows the pages to the end, which is the
+ *  deliberate choice for this one list: the dashboard searches and sorts the
+ *  whole set in the browser, so a "load more" there would mean typing a
+ *  project's name and being told it does not exist because it is on page two.
+ *  Paging bounds the QUERY; it must not silently bound the answer.
+ *
+ *  Bounded anyway, at twenty pages, because a client loop with no stop is a
+ *  client loop that hangs on a server bug. A thousand projects is far past
+ *  anything a plan allows, and stopping is visibly better than spinning.
+ */
 export const listProjectsApi = async (): Promise<Project[]> => {
-  const response = await axios.get<ListProjectsResponse>("/api/v1/projects");
-  return response.data.data;
+  const all: Project[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < 20; page += 1) {
+    const response = await axios.get<ListProjectsResponse>("/api/v1/projects", {
+      params: cursor ? { cursor } : {},
+    });
+    all.push(...response.data.data.items);
+
+    const next = response.data.data.nextCursor;
+    if (!next) break;
+    cursor = next;
+  }
+
+  return all;
 };
 
 export const deleteProjectApi = async (projectId: string): Promise<void> => {
@@ -143,10 +169,20 @@ export const setProjectVisibilityApi = async (
   return response.data.data;
 };
 
-/** The gallery of public projects. */
-export const listPublicProjectsApi = async (): Promise<PublicProject[]> => {
-  const response = await axios.get<ApiSuccess<PublicProject[]>>(
+/** The gallery of public projects, one page at a time.
+ *
+ *  Unlike the dashboard this one hands the cursor to the caller, because the
+ *  gallery is unbounded — it grows with every public project on the machine —
+ *  and a screen that quietly loads all of it is the same unbounded request the
+ *  page size was added to stop. It filters nothing locally, so a page boundary
+ *  hides nothing: there is a button, and it says there is more.
+ */
+export const listPublicProjectsApi = async (
+  cursor?: string,
+): Promise<Page<PublicProject>> => {
+  const response = await axios.get<ApiSuccess<Page<PublicProject>>>(
     "/api/v1/projects/public",
+    { params: cursor ? { cursor } : {} },
   );
   return response.data.data;
 };
@@ -744,11 +780,15 @@ export const reportProjectApi = async (
 
 export const listReportsApi = async (
   status: ReportStatus | "ALL" = "OPEN",
-): Promise<ProjectReport[]> => {
+  cursor?: string,
+): Promise<Page<ProjectReport>> => {
   const response = await axios.get<ReportsResponse>("/api/v1/admin/reports", {
-    params: { status },
+    // The status goes to the SERVER and not to a filter over the result, which
+    // is the whole lesson of §2.21: narrowing after a capped query reads as
+    // "nothing here" instead of as "there is more".
+    params: cursor ? { status, cursor } : { status },
   });
-  return response.data.data.reports;
+  return response.data.data;
 };
 
 export const reviewReportApi = async (
@@ -799,11 +839,14 @@ export const appealTakedownApi = async (
 /** Everything recent, for an operator: decisions, appeals and reinstatements
  *  in one stream. The queue shows the case that arrives; this shows what
  *  happened afterwards, which is where an appeal turns up. */
-export const listRecentModerationApi = async (): Promise<ModerationAction[]> => {
-  const response = await axios.get<ApiSuccess<{ actions: ModerationAction[] }>>(
+export const listRecentModerationApi = async (
+  cursor?: string,
+): Promise<Page<ModerationAction>> => {
+  const response = await axios.get<ApiSuccess<Page<ModerationAction>>>(
     "/api/v1/admin/moderation",
+    { params: cursor ? { cursor } : {} },
   );
-  return response.data.data.actions;
+  return response.data.data;
 };
 
 /** Lifting a takedown. The reason is required by the server, deliberately:

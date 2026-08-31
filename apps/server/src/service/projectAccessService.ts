@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { PublicProject } from "@replit-clone/shared";
+import { pageRequest, toPage, type Page, type PublicProject } from "@replit-clone/shared";
 import type { Project } from "../generated/prisma/client.js";
 import { ProjectRole, ProjectVisibility } from "../generated/prisma/enums.js";
 import { prisma } from "../lib/prisma.js";
@@ -148,7 +148,11 @@ export async function setProjectVisibility(
  *  account -- so the columns are named explicitly here, where forgetting one is
  *  a compile error, instead of being stripped by a caller who might not.
  */
-export async function listPublicProjects(limit = 50): Promise<PublicProject[]> {
+export async function listPublicProjects(
+  page: { cursor?: string; limit?: number } = {},
+): Promise<Page<PublicProject>> {
+  const { cursor, limit } = pageRequest(page);
+
   const rows = await prisma.project.findMany({
     where: { visibility: ProjectVisibility.PUBLIC },
     select: {
@@ -159,15 +163,20 @@ export async function listPublicProjects(limit = 50): Promise<PublicProject[]> {
       owner: { select: { email: true } },
       _count: { select: { forks: true } },
     },
-    orderBy: { createdAt: "desc" },
-    take: Math.min(Math.max(limit, 1), 100),
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });
 
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    template: row.template,
-    createdAt: row.createdAt.toISOString(),
+  const { items, nextCursor } = toPage(rows, limit);
+
+  return {
+    nextCursor,
+    items: items.map((row) => ({
+      id: row.id,
+      name: row.name,
+      template: row.template,
+      createdAt: row.createdAt.toISOString(),
     // The local part only. A gallery is a public page and the whole address is
     // more than it needs to say who made something.
     //
@@ -177,9 +186,10 @@ export async function listPublicProjects(limit = 50): Promise<PublicProject[]> {
     // fallback below already existed for a missing name; without the optional
     // access a null owner throws past it and takes the whole gallery down for
     // everybody, which is a poor trade for one project mid-deletion.
-    ownerName: row.owner?.email.split("@")[0] ?? "someone",
-    forks: row._count.forks,
-  }));
+      ownerName: row.owner?.email.split("@")[0] ?? "someone",
+      forks: row._count.forks,
+    })),
+  };
 }
 
 /** Asserts at least `required`, or reports the project as missing.
@@ -213,14 +223,34 @@ export async function assertProjectAccess(
   return access.project;
 }
 
-/** Every project a user can open, theirs and shared with them alike. */
+/** Every project a user can open, theirs and shared with them alike.
+ *
+ *  The one list here that had no cap at all, so a user with five hundred
+ *  projects got five hundred rows in one payload and one unbounded scan.
+ *
+ *  Paged like the rest, and the dashboard reads **every** page rather than
+ *  offering a "load more" -- deliberately, and it is the reason this is not a
+ *  UI change. That screen filters and sorts the whole set in the browser, so a
+ *  page break there would mean searching for a project and being told it does
+ *  not exist because it is on page two. This bounds the query; it does not
+ *  change what the screen is for, which is everything you can open.
+ */
 export async function listAccessibleProjects(
   userId: string,
-): Promise<ListedProject[]> {
-  return prisma.project.findMany({
+  page: { cursor?: string; limit?: number } = {},
+): Promise<Page<ListedProject>> {
+  const { cursor, limit } = pageRequest(page);
+
+  const rows = await prisma.project.findMany({
     where: {
       OR: [{ ownerId: userId }, { collaborators: { some: { userId } } }],
     },
+    // This query had no order either, which a cursor cannot be built on: the
+    // database was free to answer in a different order each time, and a page
+    // boundary in an unstable order drops rows silently.
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     // Named explicitly, for the reason spelled out on `listPublicProjects`
     // twenty lines below -- which this function did not follow. A `Project`
     // row carries `shareToken`, and returning the row handed every viewer of
@@ -243,6 +273,8 @@ export async function listAccessibleProjects(
       takenDownAt: true,
     },
   });
+
+  return toPage(rows, limit);
 }
 
 /** Adds or updates a collaborator, by email. */

@@ -2,7 +2,13 @@ import type {
   ModerationAction as ApiAction,
   ModerationActionType,
 } from "@replit-clone/shared";
-import { MAX_APPEAL, MAX_MODERATION_REASON } from "@replit-clone/shared";
+import {
+  MAX_APPEAL,
+  MAX_MODERATION_REASON,
+  pageRequest,
+  toPage,
+  type Page,
+} from "@replit-clone/shared";
 import { prisma } from "../lib/prisma.js";
 import { BadRequestError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import { logger } from "../lib/logger.js";
@@ -116,14 +122,31 @@ export async function listModerationActions(
   return rows.map(toApi);
 }
 
-/** Everything recent, for an operator with no particular project in mind. */
-export async function listRecentModeration(limit = 100): Promise<ApiAction[]> {
+/** Everything recent, for an operator with no particular project in mind.
+ *
+ *  Paged. This table only grows -- nothing prunes a moderation record, and
+ *  nothing should -- so "recent" was a hundred rows and a cliff, with an
+ *  appeal filed on the hundred-and-first invisible to the only person who
+ *  could answer it.
+ *
+ *  `listModerationActions` above is deliberately NOT paged: one project's
+ *  trail is bounded by what has been done to one project, it is read as a
+ *  sequence, and a page break in the middle of "taken down, appealed,
+ *  reinstated" would hide the ending.
+ */
+export async function listRecentModeration(
+  page: { cursor?: string; limit?: number } = {},
+): Promise<Page<ApiAction>> {
+  const { cursor, limit } = pageRequest(page);
+
   const rows = await prisma.moderationAction.findMany({
-    orderBy: { createdAt: "desc" },
-    take: limit,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });
 
-  return rows.map(toApi);
+  const result = toPage(rows, limit);
+  return { items: result.items.map(toApi), nextCursor: result.nextCursor };
 }
 
 /** The owner asking for a takedown to be looked at again.

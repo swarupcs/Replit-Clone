@@ -72,6 +72,20 @@ const KEEP_RUNS = 20;
  *  same machine-ending event whether a person or a schedule asked for it. */
 const SWEEP_BATCH = 10;
 
+/** How long a `RUNNING` row is believed before it is treated as abandoned.
+ *
+ *  A run cannot honestly outlive `RUN_TIMEOUT_MS` — the sweeper stops waiting
+ *  at that point and writes a status — so anything older than double it belongs
+ *  to a process that is no longer here. Generous on purpose: the cost of
+ *  waiting too long is one skipped run, and the cost of being too eager is two
+ *  copies of somebody's backup running at once.
+ *
+ *  The boot reconcile is what normally clears these. This bound exists because
+ *  a cleanup that touches rows can be missed and a clause in the query cannot
+ *  — §6 decision 13, applied to the row that decides whether a job may run.
+ */
+const STALE_RUN_MS = RUN_TIMEOUT_MS * 2;
+
 const MAX_NAME = 80;
 const MAX_COMMAND = 2000;
 
@@ -386,9 +400,25 @@ export async function runJobNow(jobId: string): Promise<ApiRun> {
     );
   }
 
+  // Bounded by age, and not only by status. An unbounded `RUNNING` check reads
+  // a row left behind by a restart as a run still in progress, and since every
+  // firing from then on writes SKIPPED -- which is deliberately not a verdict
+  // and so tells nobody anything -- the job stops forever in silence.
   const inFlight = await prisma.scheduledRun.findFirst({
-    where: { jobId, status: "RUNNING" },
+    where: {
+      jobId,
+      status: "RUNNING",
+      startedAt: { gte: new Date(Date.now() - STALE_RUN_MS) },
+    },
     select: { id: true },
+  });
+
+  // Anything older is named before this run starts, so the history says what
+  // happened to it rather than showing a run that is eternally in progress.
+  await abandonRuns({
+    jobId,
+    status: "RUNNING",
+    startedAt: { lt: new Date(Date.now() - STALE_RUN_MS) },
   });
 
   if (inFlight) {
@@ -460,6 +490,54 @@ export async function runJobNow(jobId: string): Promise<ApiRun> {
   await announce(job, previous, status);
 
   return toApiRun(finished);
+}
+
+/** What a run this process did not live to finish is called.
+ *
+ *  The status text is the point of it. A run abandoned by a restart is the one
+ *  case where the platform genuinely does not know what happened -- the command
+ *  may have completed all of its work a second before the process went away --
+ *  and saying so is more useful than any of the five statuses that would have
+ *  claimed to know.
+ */
+const ABANDONED_OUTPUT =
+  "The server restarted while this run was in progress. Whether the command " +
+  "finished its work is not recorded; nothing was killed on this side.";
+
+async function abandonRuns(where: {
+  jobId?: string;
+  status: "RUNNING";
+  startedAt?: { lt: Date };
+}): Promise<number> {
+  const { count } = await prisma.scheduledRun.updateMany({
+    where,
+    data: {
+      status: "ABANDONED",
+      finishedAt: new Date(),
+      output: ABANDONED_OUTPUT,
+    },
+  });
+
+  if (count > 0) increment("jobs_abandoned", count);
+  return count;
+}
+
+/** Names every run the last process was in the middle of, at boot.
+ *
+ *  `reconcileOnBoot` has always swept containers and directories and never
+ *  looked at a row, which is how an ordinary deploy could destroy a working
+ *  schedule permanently: the `RUNNING` row outlived the process, every firing
+ *  afterwards found it and wrote SKIPPED, and SKIPPED is designed to stay
+ *  quiet. Two correct decisions composing into a silence neither intended.
+ *
+ *  Deliberately not selective. Nothing can be running when this process has
+ *  just started -- there is exactly one server, and its execs died with it --
+ *  so every `RUNNING` row is by definition abandoned.
+ */
+export async function reconcileJobRuns(): Promise<number> {
+  const count = await abandonRuns({ status: "RUNNING" });
+  if (count > 0) logger.warn("runs abandoned by a restart", { count });
+  return count;
 }
 
 /** Statuses that say something about the COMMAND.

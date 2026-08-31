@@ -33,6 +33,12 @@ vi.mock("../../../apis/projects.ts", () => api);
 
 import { ExploreSection } from "./ExploreSection.tsx";
 
+/** One page of the gallery. The endpoint is paged, so a bare array is a shape
+ *  the component no longer speaks. */
+function page(items: unknown[], nextCursor: string | null = null) {
+  return { items, nextCursor };
+}
+
 const PUBLIC = [
   {
     id: "p1",
@@ -57,7 +63,7 @@ function renderSection() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  api.listPublicProjectsApi.mockResolvedValue(PUBLIC);
+  api.listPublicProjectsApi.mockResolvedValue(page(PUBLIC));
 });
 
 // This suite renders the same component repeatedly; without this the previous
@@ -81,14 +87,14 @@ describe("the explore section", () => {
   });
 
   it("counts one fork in the singular", async () => {
-    api.listPublicProjectsApi.mockResolvedValue([{ ...PUBLIC[0], forks: 1 }]);
+    api.listPublicProjectsApi.mockResolvedValue(page([{ ...PUBLIC[0], forks: 1 }]));
     renderSection();
 
     expect(await screen.findByText(/1 fork(?!s)/)).toBeTruthy();
   });
 
   it("says nothing about forks when there are none", async () => {
-    api.listPublicProjectsApi.mockResolvedValue([{ ...PUBLIC[0], forks: 0 }]);
+    api.listPublicProjectsApi.mockResolvedValue(page([{ ...PUBLIC[0], forks: 0 }]));
     renderSection();
 
     await screen.findByText("Tetris in 200 lines");
@@ -122,7 +128,7 @@ describe("the explore section", () => {
   it("renders nothing at all when nobody has published anything", async () => {
     // The ordinary state of a fresh install. An empty section headed
     // "Explore" is a worse answer than no section.
-    api.listPublicProjectsApi.mockResolvedValue([]);
+    api.listPublicProjectsApi.mockResolvedValue(page([]));
     const { container } = renderSection();
 
     await waitFor(() => {
@@ -136,5 +142,35 @@ describe("the explore section", () => {
     api.listPublicProjectsApi.mockRejectedValue(new Error("nope"));
 
     expect(() => renderSection()).not.toThrow();
+  });
+});
+
+/** The gallery grows with every public project on the machine, so it is the
+ *  one list here that hands the cursor to the person rather than following it
+ *  silently: a screen that quietly loads all of it is the unbounded request
+ *  the page size exists to stop. */
+describe("more than one page", () => {
+  it("offers to show more only when there is more", async () => {
+    renderSection();
+    await screen.findByText("Tetris in 200 lines");
+
+    expect(screen.queryByRole("button", { name: /show more/i })).toBeNull();
+  });
+
+  it("asks for the next page with the cursor it was given", async () => {
+    api.listPublicProjectsApi.mockResolvedValueOnce(page(PUBLIC, "p1"));
+    api.listPublicProjectsApi.mockResolvedValueOnce(
+      page([{ ...PUBLIC[0], id: "p2", name: "Second page project" }]),
+    );
+
+    renderSection();
+    fireEvent.click(await screen.findByRole("button", { name: /show more/i }));
+
+    expect(await screen.findByText("Second page project")).toBeTruthy();
+    expect(api.listPublicProjectsApi).toHaveBeenLastCalledWith("p1");
+    // Both pages, not the second one replacing the first.
+    expect(screen.getByText("Tetris in 200 lines")).toBeTruthy();
+    // And the offer is gone, because that page said there was no more.
+    expect(screen.queryByRole("button", { name: /show more/i })).toBeNull();
   });
 });

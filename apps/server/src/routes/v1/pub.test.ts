@@ -79,7 +79,10 @@ describe("a key with the right scope", () => {
       .set("Authorization", `Bearer ${SECRET}`);
 
     expect(response.status).toBe(200);
-    expect(access.listAccessibleProjects).toHaveBeenCalledWith(USER);
+    // The query reaches the service, so a script looping on `?cursor=` is
+    // paging rather than fetching the first page over and over. This is the
+    // one surface where the cursor is handed over rather than followed.
+    expect(access.listAccessibleProjects).toHaveBeenCalledWith(USER, {});
   });
 
   it("can create a project", async () => {

@@ -67,6 +67,10 @@ export type CounterName =
   | "jobs_succeeded"
   | "jobs_failed"
   | "jobs_skipped"
+  // Runs this process started and did not live to finish. Not zero after a
+  // deploy is normal; climbing while nobody is deploying is a server dying
+  // repeatedly, which no other counter here would say.
+  | "jobs_abandoned"
   // Notifications. `notifications_created` against `notifications_mailed` is
   // the honest measure of how much of this actually reaches anybody: the gap
   // between them is people who have to open the app to find out, which is the

@@ -34,15 +34,19 @@ describe.skipIf(!TEST_DATABASE_URL)("reporting a public project", () => {
    *
    *  `listReports` is global, as the operator's queue has to be — so asserting
    *  on its length couples this file to whatever else is running. It also caps
-   *  at two hundred rows, which is why the narrowing is an argument rather
-   *  than a `.filter()` on the result: past that cap this suite's rows never
-   *  reach a filter at all, and the suite reports "nothing here" instead of
-   *  failing honestly. Fifth instance of the same mistake in this codebase.
+   *  at a page, which is why the narrowing is an argument rather than a
+   *  `.filter()` on the result: past that page this suite's rows never reach a
+   *  filter at all, and the suite reports "nothing here" instead of failing
+   *  honestly. Fifth instance of the same mistake in this codebase.
+   *
+   *  Returns the items and drops the cursor: every assertion below is about
+   *  one narrow query that fits on a page, and the paging itself is tested
+   *  where it lives.
    */
   const queue = async (
     status: Parameters<typeof reports.listReports>[0],
     projectId: string = publicId,
-  ) => reports.listReports(status, projectId);
+  ) => (await reports.listReports(status, projectId)).items;
 
   beforeEach(async () => {
     const owner = await prisma.user.create({

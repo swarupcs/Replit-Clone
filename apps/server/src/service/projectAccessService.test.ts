@@ -173,7 +173,7 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
       service.ProjectRole.VIEWER,
     );
 
-    const [listed] = await service.listAccessibleProjects(mateId);
+    const [listed] = (await service.listAccessibleProjects(mateId)).items;
 
     expect(listed).toBeDefined();
     expect(listed).not.toHaveProperty("shareToken");
@@ -374,13 +374,13 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
         service.ProjectVisibility.PUBLIC,
       );
 
-      const listed = await service.listPublicProjects();
+      const listed = (await service.listPublicProjects()).items;
 
       expect(listed.map((row) => row.id)).toContain(projectId);
     });
 
     it("does not list a private one", async () => {
-      const listed = await service.listPublicProjects();
+      const listed = (await service.listPublicProjects()).items;
 
       expect(listed.map((row) => row.id)).not.toContain(projectId);
     });
@@ -403,7 +403,7 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
       // as a gallery has to be, so serialising the whole list here would make
       // the assertion depend on what every other suite happens to have
       // published at that moment.
-      const listed = (await service.listPublicProjects()).filter(
+      const listed = (await service.listPublicProjects()).items.filter(
         (row) => row.id === projectId,
       );
       const serialised = JSON.stringify(listed);
@@ -422,7 +422,7 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
         service.ProjectVisibility.PUBLIC,
       );
 
-      const listed = await service.listPublicProjects();
+      const listed = (await service.listPublicProjects()).items;
       const mine = listed.find((row) => row.id === projectId);
 
       expect(mine?.ownerName).not.toContain("@");

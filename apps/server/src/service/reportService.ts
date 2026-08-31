@@ -8,6 +8,7 @@ import { unpublish } from "./deployService.js";
 import { revokeEmbed } from "./embedService.js";
 import { clearShareToken } from "./projectAccessService.js";
 import { recordModeration } from "./moderationLogService.js";
+import { pageRequest, toPage, type Page } from "@replit-clone/shared";
 import type {
   ProjectReportReason,
   ProjectReportStatus,
@@ -169,30 +170,43 @@ ${webUrl("/admin/reports", {})}`,
   return report;
 }
 
-/** The queue, newest first. */
+/** The queue, newest first, one page at a time.
+ *
+ *  It used to take two hundred and say nothing about the two hundred and
+ *  first, which is the failure this file already documented one line further
+ *  down: narrowing AFTER a capped query reads as "nothing here" rather than
+ *  as "ask for more". The cap is still there -- it is now a page size, and the
+ *  caller is told whether it ran out of rows or out of page.
+ */
 export async function listReports(
   status: ProjectReportStatus | "ALL" = "OPEN",
   projectId?: string,
-): Promise<ReportSummary[]> {
+  page: { cursor?: string; limit?: number } = {},
+): Promise<Page<ReportSummary>> {
+  const { cursor, limit } = pageRequest(page);
+
   const rows = await prisma.projectReport.findMany({
-    // `take` below is a global cap, so narrowing after the query is not the
-    // same thing as narrowing in it: with two hundred newer reports in the
-    // table, a caller filtering the result would find nothing and conclude
-    // there was nothing. The operator's queue passes no project and sees
-    // everything, exactly as before.
+    // Narrowing in the query and not after it, for the reason above: the
+    // operator's queue passes no project and sees everything.
     where: {
       ...(status === "ALL" ? {} : { status }),
       ...(projectId ? { projectId } : {}),
     },
-    orderBy: { createdAt: "desc" },
-    take: 200,
+    // `id` breaks the tie. Two reports filed in the same millisecond -- one
+    // project reported by two people at once is exactly how that happens --
+    // would otherwise have no stable order, and a cursor into an unstable
+    // order skips rows and repeats others.
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     include: {
       project: { select: { name: true, owner: { select: { email: true } } } },
       reporter: { select: { email: true } },
     },
   });
 
-  return rows.map(toSummary);
+  const page_ = toPage(rows, limit);
+  return { items: page_.items.map(toSummary), nextCursor: page_.nextCursor };
 }
 
 /** A row as the queue reads it. One mapping, so a field added to the list and

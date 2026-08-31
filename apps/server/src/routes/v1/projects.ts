@@ -410,22 +410,58 @@ router.post(
   asyncHandler(reportProjectController),
 );
 
+// Tests. Reading the command is a viewer's, running it needs the same grant
+// `Run` does, and changing it is the owner's -- see the controller.
+//
+// The limiter is here for the reason `jobRunLimiter` is on "run now": this is
+// the second route in the product that starts a container on demand, and the
+// argument written down for the first applies to it word for word. Same
+// budget, deliberately -- one person's manual runs, of either kind, are the
+// same cost to this machine.
+const testRunLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many test runs. Try again later.",
+  },
+});
+
+router.get("/:projectId/test-command", asyncHandler(getTestCommandController));
+router.put("/:projectId/test-command", asyncHandler(setTestCommandController));
+router.post("/:projectId/test", testRunLimiter, asyncHandler(runTestsController));
+
 // The other side of moderation: what was done to this project, and the owner's
 // answer to it. Both are the owner's -- a decision taken against somebody that
 // only the decider can read is not a record, it is a file.
-// Tests. Reading the command is a viewer's, running it needs the same grant
-// `Run` does, and changing it is the owner's -- see the controller.
-router.get("/:projectId/test-command", asyncHandler(getTestCommandController));
-router.put("/:projectId/test-command", asyncHandler(setTestCommandController));
-router.post("/:projectId/test", asyncHandler(runTestsController));
-
 router.get("/:projectId/moderation", asyncHandler(projectModerationController));
 router.post(
   "/:projectId/appeal",
   reportLimiter,
   asyncHandler(appealController),
 );
-router.get("/:projectId/export", asyncHandler(exportProjectController));
+
+// Export starts no container and is not free either: it walks and zips an
+// entire working tree per request, at viewer level, and a project is allowed
+// to be gigabytes. Looser than the two container routes because it is a
+// smaller cost, tighter than nothing because a loop over it is disk and CPU
+// nobody is accounted for.
+const exportLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 60,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many downloads. Try again later.",
+  },
+});
+
+router.get("/:projectId/export", exportLimiter, asyncHandler(exportProjectController));
 router.get("/:projectId/env", asyncHandler(getProjectEnvController));
 router.post(
   "/:projectId/files",

@@ -32,6 +32,7 @@ const runCreate = vi.hoisted(() => vi.fn());
 const runUpdate = vi.hoisted(() => vi.fn());
 const runFindMany = vi.hoisted(() => vi.fn());
 const runDeleteMany = vi.hoisted(() => vi.fn());
+const runUpdateMany = vi.hoisted(() => vi.fn());
 const projectFindUnique = vi.hoisted(() => vi.fn());
 
 vi.mock("../lib/prisma.js", () => ({
@@ -43,6 +44,7 @@ vi.mock("../lib/prisma.js", () => ({
       update: runUpdate,
       findMany: runFindMany,
       deleteMany: runDeleteMany,
+      updateMany: runUpdateMany,
     },
     project: { findUnique: projectFindUnique },
   },
@@ -99,6 +101,7 @@ beforeEach(() => {
   );
   runFindMany.mockReset().mockResolvedValue([]);
   runDeleteMany.mockReset().mockResolvedValue({ count: 0 });
+  runUpdateMany.mockReset().mockResolvedValue({ count: 0 });
   projectFindUnique.mockReset().mockResolvedValue({
     ownerId: "u1",
     name: "My project",

@@ -38,12 +38,15 @@ const OUTCOME: Record<ScheduledRun["status"], { label: string; tone: string }> =
   RUNNING: { label: "running", tone: "busy" },
   SUCCEEDED: { label: "ok", tone: "ok" },
   FAILED: { label: "failed", tone: "bad" },
-  // Three ways of not running, kept apart because the fix differs: a skipped
-  // job is scheduled too often, a timed-out one is slower than its budget, and
-  // an errored one never reached the container at all.
+  // Four ways of not finishing, kept apart because the fix differs: a skipped
+  // job is scheduled too often, a timed-out one is slower than its budget, an
+  // errored one never reached the container at all, and an interrupted one
+  // started and was never seen again -- the only case where what the command
+  // managed to do is genuinely unknown, which is why it does not say "failed".
   SKIPPED: { label: "skipped", tone: "warn" },
   TIMED_OUT: { label: "timed out", tone: "warn" },
   ERRORED: { label: "could not start", tone: "bad" },
+  ABANDONED: { label: "interrupted", tone: "warn" },
 };
 
 function when(iso: string | null): string {
