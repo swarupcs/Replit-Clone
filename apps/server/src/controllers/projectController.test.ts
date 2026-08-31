@@ -146,13 +146,23 @@ describe("listProjectsController", () => {
    *  shared with you impossible to reach, since the dashboard is how you open
    *  one. */
   it("lists everything the user can reach, not only what they own", async () => {
-    projectAccessService.listAccessibleProjects.mockResolvedValue([PROJECT]);
+    projectAccessService.listAccessibleProjects.mockResolvedValue({
+      items: [PROJECT],
+      nextCursor: null,
+    });
 
     const response = await request(app).get("/projects").set("Authorization", bearer());
 
     expect(response.status).toBe(200);
-    expect(response.body.data).toEqual([PROJECT]);
-    expect(projectAccessService.listAccessibleProjects).toHaveBeenCalledWith(TEST_USER.sub);
+    // A page, not an array: an array is the one shape that cannot say there
+    // is more, which is what this list used to do with no cap at all.
+    expect(response.body.data).toEqual({ items: [PROJECT], nextCursor: null });
+    // The query object reaches the service, so `?cursor=` is not silently
+    // dropped on the one list a script is most likely to page through.
+    expect(projectAccessService.listAccessibleProjects).toHaveBeenCalledWith(
+      TEST_USER.sub,
+      {},
+    );
   });
 });
 

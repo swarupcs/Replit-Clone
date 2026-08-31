@@ -1,4 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Button, Empty, Typography, message } from "antd";
 import { VscRepoForked } from "react-icons/vsc";
@@ -25,10 +29,19 @@ export const ExploreSection = () => {
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
 
-  const { data: projects, isLoading } = useQuery({
-    queryKey: ["public-projects"],
-    queryFn: listPublicProjectsApi,
-  });
+  // Paged, with a button, rather than one request for the whole gallery. This
+  // list grows with every public project on the machine and has no natural
+  // bound; the dashboard's own list follows its pages silently because it is
+  // searched in the browser, and this one is not.
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteQuery({
+      queryKey: ["public-projects"],
+      queryFn: ({ pageParam }) => listPublicProjectsApi(pageParam),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (last) => last.nextCursor ?? undefined,
+    });
+
+  const projects = data?.pages.flatMap((page) => page.items);
 
   const forkMutation = useMutation({
     mutationFn: (projectId: string) => forkProjectApi(projectId),
@@ -150,6 +163,21 @@ export const ExploreSection = () => {
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description="Nobody has published a project yet."
         />
+      )}
+
+      {/* Shown only when there IS more. A button that is always there says
+          nothing; one that appears exactly when the list is incomplete is the
+          only honest way a list can admit to being cut off. */}
+      {hasNextPage && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+          <Button
+            size="small"
+            loading={isFetchingNextPage}
+            onClick={() => void fetchNextPage()}
+          >
+            Show more
+          </Button>
+        </div>
       )}
     </section>
   );

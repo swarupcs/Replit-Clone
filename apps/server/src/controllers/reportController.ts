@@ -60,7 +60,10 @@ export async function listReportsController(
   res.json({
     success: true,
     message: "Reports",
-    data: { reports: await listReports(status) },
+    // `{ items, nextCursor }`, the one page shape every list here answers
+    // with. The queue used to take two hundred rows and say nothing about the
+    // two hundred and first.
+    data: await listReports(status, undefined, req.query),
   });
 }
 

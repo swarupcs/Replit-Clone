@@ -19,7 +19,9 @@ vi.mock("../../config/env.js", async (importOriginal) => {
  *  gets a 200 with a marker in it, and no database is involved. */
 vi.mock("../../service/reportService.js", () => ({
   MAX_DETAILS: 2000,
-  listReports: () => Promise.resolve([{ id: "let-through" }]),
+  // A page, which is what every list here answers with now.
+  listReports: () =>
+    Promise.resolve({ items: [{ id: "let-through" }], nextCursor: null }),
   reviewReport: () => Promise.resolve({ id: "let-through" }),
   fileReport: () => Promise.resolve({ id: "let-through" }),
   findReport: () => Promise.resolve(null),
@@ -93,7 +95,7 @@ describe("the report queue behind both guards", () => {
       .set("Authorization", bearer());
 
     expect(response.status).toBe(200);
-    expect(response.body.data.reports).toEqual([{ id: "let-through" }]);
+    expect(response.body.data.items).toEqual([{ id: "let-through" }]);
   });
 
   it("lets an operator review one", async () => {

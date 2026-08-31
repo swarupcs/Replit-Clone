@@ -31,7 +31,9 @@ const api = vi.hoisted(() => ({
   // all, which keeps every assertion below about the user's OWN projects --
   // otherwise a public project and a personal one would both match a query
   // like "shows the projects once they load".
-  listPublicProjectsApi: vi.fn().mockResolvedValue([]),
+  // `{ items, nextCursor }`: the gallery is paged, and a bare array here
+  // would be a mock of a shape the app no longer speaks.
+  listPublicProjectsApi: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
   forkProjectApi: vi.fn(),
   setProjectVisibilityApi: vi.fn(),
   // The moderation dialog reads these. Mocked here because the module is

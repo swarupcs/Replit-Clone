@@ -1,3 +1,4 @@
+import type { Page } from "./pagination.js";
 import type { TreeNodeData } from "./tree.js";
 
 /** Every REST response uses this envelope. */
@@ -39,8 +40,8 @@ export interface Project {
 /** POST /api/v1/projects */
 export type CreateProjectResponse = ApiSuccess<Project>;
 
-/** GET /api/v1/projects */
-export type ListProjectsResponse = ApiSuccess<Project[]>;
+/** GET /api/v1/projects — one page of them; see `Page`. */
+export type ListProjectsResponse = ApiSuccess<Page<Project>>;
 
 /** GET /api/v1/projects/:projectId/tree */
 export type ProjectTreeResponse = ApiSuccess<TreeNodeData | null>;

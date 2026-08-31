@@ -76,7 +76,15 @@ router.get(
   requireScope("projects:read"),
   asyncHandler(async (req, res) => {
     const { userId } = getApiKeyContext(req);
-    res.json({ success: true, message: "Projects", data: await listAccessibleProjects(userId) });
+    // Paged, and here the cursor is exposed rather than followed for the
+    // caller: a script is the one consumer that can be trusted to loop, and
+    // the alternative -- one response holding every project an account owns --
+    // is the request most likely to be made in a cron job every minute.
+    res.json({
+      success: true,
+      message: "Projects",
+      data: await listAccessibleProjects(userId, req.query),
+    });
   }),
 );
 

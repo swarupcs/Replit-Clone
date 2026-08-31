@@ -64,13 +64,13 @@ export async function projectModerationController(
 
 /** Everything recent, for an operator. */
 export async function recentModerationController(
-  _req: Request,
+  req: Request,
   res: Response,
 ): Promise<void> {
   res.json({
     success: true,
     message: "Moderation history",
-    data: { actions: await listRecentModeration() },
+    data: await listRecentModeration(req.query),
   });
 }
 

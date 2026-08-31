@@ -44,9 +44,9 @@ re-run that day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1598 passing**, 280 skipped (118 files) — no database on this machine |
+| `pnpm --filter server test` | **1628 passing**, 280 skipped (120 files) — no database on this machine |
 | the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds five migrations — see §5 |
-| `pnpm --filter web test` | **1030 passing** (80 files) |
+| `pnpm --filter web test` | **1042 passing** (81 files) |
 | `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
 
@@ -104,22 +104,24 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 111 items. Open: 6 — one of them unblocked.**
+**Done: 112 items. Open: 5 — none of them unblocked.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
-that), **one piece of work** (§3.2 — pagination), and **five blocked** (§3.3 — a certificate, an autoscaler's
+that), **no unblocked work** (§3.2 is empty too), and **five blocked** (§3.3 — a certificate, an autoscaler's
 cost model, a disk budget for snapshots, a backup destination, and an
 architectural route). §8.4 and §8.5 are blocked too, on a Stripe account and on
 a pricing decision respectively, and are listed there rather than duplicated
 here.
 
-Six items came off in two commits (§2.26, §2.27), which is what a sweep's
+Seven items came off in three commits (§2.26–§2.28), which is what a sweep's
 findings look like once they are worked through rather than what they looked
-like when they arrived. **One unblocked item left is the state this file has
-been in four times, and it has been wrong every time** — §4's closing paragraph
+like when they arrived. **Nothing unblocked left is the state this file has
+been in five times, and it has been wrong every time** — §4's closing paragraph
 is the standing warning, and §3.1's opening paragraph is the sharper one: an
-empty defect list means nobody has looked lately.
+empty defect list means nobody has looked lately, never that the code is right.
+The next entry in §2 will almost certainly come from reading two shipped things
+against each other, as the last eleven did.
 
 **These two numbers had drifted, and the drift is worth a sentence** because
 this file's one rule (§7) is that a line is updated in the commit that changes
@@ -1376,6 +1378,63 @@ what, and a paragraph pointing at the wrong block is worse there than nowhere.
 1598 server tests pass, unchanged: nothing here has a behavioural test, which
 is exactly what makes them small.
 
+### 2.28 Since (2026-08-31, night, last) — pagination
+
+The last unblocked item, and the one §4 put last on the grounds that nothing
+is currently over any of the caps — which is exactly why it should be done
+before something is.
+
+**The defect was never "lists are long".** It is that an array is the one
+shape that cannot say *there is more*. Three lists were silently truncated at
+a constant — 200 reports, 100 moderation actions, 50 public projects — and the
+fourth had no bound at all, so both failure modes were present at once: a list
+that lies about being complete, and a query with nothing stopping it.
+
+**One page shape, `{ items, nextCursor }`, for all four.** Cursor and not
+offset, because every one of these is `createdAt desc` on a table that takes
+new rows at the top: an offset shifts under insertion, so page two both repeats
+and skips. Three details each had a plausible wrong version that no screen
+would have shown for months, and each is now a test:
+
+- **`take: limit + 1`.** Reading one row more is what makes "is there another
+  page" a fact rather than a guess. A count query is a second scan; calling a
+  full page the last one gives a "show more" that loads nothing.
+- **The order breaks ties on `id`.** `createdAt` alone is not stable — one
+  project reported by two people at once shares a millisecond — and a cursor
+  into an unstable order drops rows silently. `listAccessibleProjects` had no
+  `orderBy` at all, which a cursor cannot be built on.
+- **The extra row is peeked at, never returned.** Otherwise one row appears on
+  two pages.
+
+**Who follows a cursor and who is handed one is the decision worth naming.**
+Three screens get a "Show more" that appears only when there is another page.
+The dashboard does not: it searches and sorts the whole set in the browser, so
+a page break there would mean typing a project's name and being told it does
+not exist because it is on page two — the §2.21 mistake, rebuilt deliberately.
+So `listProjectsApi` follows its own pages to the end. **Paging bounds the
+query; it must not silently bound the answer.** That loop is itself bounded at
+twenty pages, because a client loop with no stop is a client loop that hangs on
+a server bug, and stopping is visibly wrong where spinning is invisibly wrong.
+
+**`listModerationActions` is deliberately not paged.** One project's trail is
+bounded by what has been done to one project, it is read as a sequence rather
+than a feed, and a page break in the middle of "taken down, appealed,
+reinstated" would hide the ending. The rule is not "paginate everything"; it is
+that a list which can grow without bound must be able to say so.
+
+**Two response shapes changed** — `GET /api/v1/projects` and
+`GET /api/v1/admin/reports` no longer answer with an array, and `/admin/reports`
+lost its `reports` key for `items`. The public API's `GET /pub/projects` changed
+with them and is the one place the cursor is exposed rather than followed: a
+script is the one consumer that can be trusted to loop, and one response
+holding every project an account owns is the request most likely to end up in a
+cron job.
+
+One mutant, caught: dropping the `id` tiebreak from an order fails the test
+that asks for it by shape.
+
+1628 server tests and 1042 web tests pass.
+
 ---
 
 ## 3. Open
@@ -1678,8 +1737,8 @@ once, found three more times.
       today cannot answer "is this machine full" from any screen, which is the
       question a three-container cap makes them ask most often.
 
-- [ ] **Nothing that returns a list is paginated, and they fail in two
-      different directions.** `listReports` takes 200, `listRecentModeration`
+- [x] **Nothing that returns a list is paginated, and they fail in two
+      different directions.** Fixed 2026-08-31 — see §2.28. `listReports` takes 200, `listRecentModeration`
       takes 100, `listPublicProjects` takes 50 — each silently, with no
       indication that there was more and no way to ask for it. Meanwhile
       `listAccessibleProjects` has no cap at all, so a user with five hundred
@@ -1858,9 +1917,15 @@ whoever owns the data, not to a cleanup script.
     2026-08-31 (§2.27), in the same commit as 20 rather than after 21: they are
     one file and the same argument, and splitting them would have been two
     commits to move a paragraph and name a constant.
-23. **§3.2 — pagination.** Last of the unblocked work because nothing is
-    currently over any of the caps, which is exactly why it should be done
-    before something is.
+23. ~~**§3.2 — pagination.**~~ Done 2026-08-31 (§2.28). Last of the unblocked
+    work because nothing is currently over any of the caps, which is exactly
+    why it was worth doing before something is — every cap in it was a
+    constant nobody would have questioned until a list went quiet.
+
+    **That empties §3.1 and §3.2 both.** Read §3.1's opening paragraph before
+    reading that as good news: it has said "Empty" three times while merged
+    code was wrong, and the five defects found since were found by reading two
+    shipped things against each other rather than by consulting a list.
 
 **§3.3 gained a row rather than losing one**, for the first time since this
 file existed: backups. It is there because the sweep went looking for one and

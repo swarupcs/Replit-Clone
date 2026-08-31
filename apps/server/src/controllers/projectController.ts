@@ -64,9 +64,14 @@ export async function listProjectsController(
 ): Promise<void> {
   // Includes projects shared with this user, not only their own — a project
   // they can open but cannot see in the list would be unreachable.
-  const projects = await listAccessibleProjects(getAuthContext(req).userId);
+  //
+  // Paged, and the dashboard asks for every page: it searches and sorts the
+  // whole set in the browser, so a page break would mean a project that
+  // exists reading as one that does not. The page is a bound on the query,
+  // not on what the screen is allowed to show.
+  const page = await listAccessibleProjects(getAuthContext(req).userId, req.query);
 
-  res.json({ success: true, message: "Projects", data: projects });
+  res.json({ success: true, message: "Projects", data: page });
 }
 
 export async function getProjectTree(
@@ -235,13 +240,13 @@ export async function setVisibilityController(
 /** The gallery. Anybody signed in may read it; it names no project that is not
  *  already public. */
 export async function listPublicProjectsController(
-  _req: Request,
+  req: Request,
   res: Response,
 ): Promise<void> {
   res.json({
     success: true,
     message: "Public projects",
-    data: await listPublicProjects(),
+    data: await listPublicProjects(req.query),
   });
 }
 

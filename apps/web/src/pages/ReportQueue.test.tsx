@@ -16,13 +16,23 @@ const reviewReport = vi.fn();
 
 const listRecentModeration = vi.fn();
 
+/** Both endpoints are paged. A mock that answers with a bare array is
+ *  answering in a shape the app no longer speaks, so the array fixtures below
+ *  are wrapped into a single complete page — and a test that cares about
+ *  paging returns a real one and is passed through untouched. */
+function asPage(value: unknown): unknown {
+  return Array.isArray(value) ? { items: value, nextCursor: null } : value;
+}
+
 vi.mock("../apis/projects.ts", () => ({
-  listReportsApi: (status: string) => listReports(status) as unknown,
+  listReportsApi: async (status: string, cursor?: string) =>
+    asPage(await (listReports(status, cursor) as Promise<unknown>)),
   reviewReportApi: (id: string, decision: string) =>
     reviewReport(id, decision) as unknown,
   // The Activity tab. Mocked here because the module is replaced wholesale,
   // so a missing export is a crash rather than a 403.
-  listRecentModerationApi: () => listRecentModeration() as unknown,
+  listRecentModerationApi: async (cursor?: string) =>
+    asPage(await (listRecentModeration(cursor) as Promise<unknown>)),
   reinstateProjectApi: vi.fn(),
 }));
 
@@ -75,7 +85,7 @@ describe("what the queue shows", () => {
     show();
 
     await waitFor(() => {
-      expect(listReports).toHaveBeenCalledWith("OPEN");
+      expect(listReports).toHaveBeenCalledWith("OPEN", undefined);
     });
   });
 
@@ -200,7 +210,7 @@ describe("the filter", () => {
     fireEvent.click(screen.getByText("Actioned"));
 
     await waitFor(() => {
-      expect(listReports).toHaveBeenCalledWith("ACTIONED");
+      expect(listReports).toHaveBeenCalledWith("ACTIONED", undefined);
     });
   });
 });
@@ -240,5 +250,36 @@ describe("the activity tab", () => {
 
     expect(await screen.findByText(/they can appeal it/i)).toBeTruthy();
     expect(screen.queryByText(/nothing decided on this page is final/i)).toBeNull();
+  });
+});
+
+/** The queue used to take two hundred rows and say nothing about the two
+ *  hundred and first, which for a queue is the one number an operator needs.
+ *  The filter goes to the server for the same reason: narrowing after a capped
+ *  read answers "nothing here" when the truth is "not on this page". */
+describe("a queue longer than one page", () => {
+  it("says nothing about more pages when there are none", async () => {
+    show();
+
+    await screen.findByText("Leaky App");
+    expect(screen.queryByRole("button", { name: /show more/i })).toBeNull();
+  });
+
+  it("fetches the next page with the cursor, keeping what is already shown", async () => {
+    listReports.mockResolvedValueOnce({
+      items: [report()],
+      nextCursor: "r1",
+    });
+    listReports.mockResolvedValueOnce({
+      items: [report({ id: "r2", projectName: "Older Report" })],
+      nextCursor: null,
+    });
+
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: /show more/i }));
+
+    expect(await screen.findByText("Older Report")).toBeTruthy();
+    expect(screen.getByText("Leaky App")).toBeTruthy();
+    expect(listReports).toHaveBeenLastCalledWith("OPEN", "r1");
   });
 });
