@@ -98,17 +98,32 @@ regressions:
   since well before it was first seen. **Not investigated**, and recorded here
   rather than left to be rediscovered.
 
-**§8's first two items shipped the same night it was written** — see §2.22,
-and §5 for the one claim in them that is not verified. The rest of §8 is
-counted separately, because it is not the same kind of
-line as the rest of this file: it is the product around the platform rather
-than another thing wrong with the platform. Its first item ships in §2.22.
+**Five of §8's seven items shipped the night it was written** — §2.22 to
+§2.25, with §5 for the claim in them that is not verified. §8 is the product
+around the platform rather than another thing wrong with the platform, which is
+why it is a section of its own; it is counted in the totals below like
+everything else.
 
-**Done: 90 items. Open: 4 — all four blocked.**
+**Done: 105 items. Open: 12 — seven of them unblocked.**
 
-The four blocked ones are §3.3, and none is a whole row any more: each is the
-blocked remainder of one, after the unblocked half shipped. A certificate, an
-autoscaler's cost model, a disk budget, and an architectural route.
+Open, in full, so the shape is visible without scrolling: **five defects**
+(§3.1, headed by the restart wedge), **two pieces of work** (§3.2 — pagination,
+and naming a run a restart abandoned), and **five blocked** (§3.3 — a
+certificate, an autoscaler's cost model, a disk budget for snapshots, a backup
+destination, and an architectural route). §8.4 and §8.5 are blocked too, on a
+Stripe account and on a pricing decision respectively, and are listed there
+rather than duplicated here.
+
+**These two numbers had drifted, and the drift is worth a sentence** because
+this file's one rule (§7) is that a line is updated in the commit that changes
+it. They last read "Done: 90. Open: 4 — all four blocked", which was true
+before the 2026-08-31 sweep and stayed on the page through nine new items and
+five shipped ones. Every individual entry was updated correctly in its own
+commit; the *summary of them* was not, because no single commit was obviously
+the one that owned it. That is the failure mode §7 does not currently cover:
+a derived figure belongs to whoever last invalidated it, and here that was five
+different commits in a row, each of which could reasonably think it was not
+the one.
 
 **§3.2 is no longer empty, and that is the substantive change here.** It held
 nothing from 2026-08-29 until now, which this document read as "there is
@@ -2095,6 +2110,17 @@ updated separately is a ledger that will eventually disagree with the tree —
 which is precisely how the old plan came to list two shipped features as
 missing, and how this file came to exist. It is the only rule here, and the
 consolidation buys nothing if it is not followed.
+
+**And the counts, which are lines nobody thinks they own.** Added
+2026-08-31 after §1's totals sat at "Done: 90. Open: 4" through nine new items
+and five shipped ones. Every entry had been updated correctly in its own
+commit; the figure summarising them had not, because no single commit was
+obviously the one that owned it — each could reasonably think it was somebody
+else's line. So: **a derived figure belongs to whoever last invalidated it.**
+If a commit adds or closes an item, it also fixes the count, even when the
+count was already wrong when that commit started. The alternative is what
+happened here, which is that a number stays wrong for as long as it keeps being
+somebody else's problem.
 
 ---
 
