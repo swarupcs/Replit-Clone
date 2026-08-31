@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { isSecretBoxConfigured, open, seal, secretsMatch } from "./secretBox.js";
+import {
+  isSecretBoxConfigured,
+  looksSealed,
+  open,
+  seal,
+  secretsMatch,
+} from "./secretBox.js";
 import { env } from "../config/env.js";
 
 const TOKEN = "gho_a-token-that-looks-real-enough";
@@ -96,5 +102,36 @@ describe("secretsMatch", () => {
   it("is false for different lengths rather than throwing", () => {
     // timingSafeEqual throws on a length mismatch, which would itself leak.
     expect(secretsMatch("abc", "abcd")).toBe(false);
+  });
+});
+
+describe("looksSealed", () => {
+  it("recognises what seal produced", () => {
+    expect(looksSealed(seal(TOKEN))).toBe(true);
+  });
+
+  it.each([
+    ["plain text", "sk_live_hunter2"],
+    ["an empty string", ""],
+    ["something with dots in it", "a.b.c"],
+    ["a value with the right shape but the wrong version", "v2.aaaa.bbbb.cccc"],
+    ["a URL, which has no dots in the right places", "postgres://u:p@h/db"],
+    ["a JWT, which is three parts rather than four", "eyJhbGc.eyJzdWI.sig"],
+  ])("rejects %s", (_label, value) => {
+    expect(looksSealed(value)).toBe(false);
+  });
+
+  it("still recognises a value sealed under a DIFFERENT key", () => {
+    // The distinction the whole function exists for. `open` throws for both a
+    // wrong key and plain text, so "did open throw" cannot tell them apart --
+    // and treating a wrong-key ciphertext as plain text would hand the
+    // ciphertext back as though it were the secret, so a key rotation would
+    // quietly start serving garbage instead of failing.
+    env.SECRET_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString("base64");
+    const sealed = seal(TOKEN);
+    env.SECRET_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+
+    expect(looksSealed(sealed)).toBe(true);
+    expect(() => open(sealed)).toThrow();
   });
 });

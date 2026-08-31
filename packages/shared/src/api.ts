@@ -28,6 +28,12 @@ export interface Project {
   /** The public project this was forked from, or null. Provenance only: it
    *  grants nothing and survives the original being deleted. */
   forkedFromId: string | null;
+  /** When a moderator took this project down after a report, or null.
+   *
+   *  Returned to the owner because it is a fact about them and the dashboard
+   *  is where they would look for it. What it stops is spelled out in
+   *  `packages/shared/src/moderation.ts`. */
+  takenDownAt: string | null;
 }
 
 /** POST /api/v1/projects */

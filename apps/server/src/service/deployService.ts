@@ -13,6 +13,12 @@ import type {
   DeploymentStatus,
 } from "../generated/prisma/enums.js";
 import { DEPLOYMENTS_ROOT, deployOrigin, deploymentsEnabled, env } from "../config/env.js";
+import {
+  pruneReleases,
+  recordRelease,
+  releaseDirectory,
+  removeAllReleases,
+} from "./releaseService.js";
 import { ensureContainer } from "../containers/containerManager.js";
 import { execCapture } from "../containers/execCapture.js";
 import { prisma } from "../lib/prisma.js";
@@ -29,7 +35,13 @@ import {
 import { getEnvVars, toDockerEnv } from "./projectEnvService.js";
 import { getTemplate, type StaticBuild } from "../templates/registry.js";
 import { assertValidProjectId, projectRoot } from "../utils/projectPaths.js";
-import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.js";
+import { resolveCustomDomain, toCustomDomain } from "./customDomainService.js";
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from "../utils/errors.js";
 
 /** Building a project and publishing the result to a public origin.
  *
@@ -197,6 +209,10 @@ interface DeploymentRow {
   log: string;
   error: string | null;
   deployedAt: Date | null;
+  customDomain: string | null;
+  domainToken: string | null;
+  domainVerifiedAt: Date | null;
+  domainCheckedAt: Date | null;
 }
 
 const KIND_OUT = {
@@ -226,6 +242,7 @@ function toDeployment(row: DeploymentRow): Deployment {
     log: row.log,
     error: row.error,
     deployedAt: row.deployedAt?.toISOString() ?? null,
+    customDomain: toCustomDomain(row),
   };
 }
 
@@ -557,6 +574,20 @@ export async function publish(rawProjectId: string): Promise<Deployment> {
   });
   if (!project) throw new NotFoundError("Project not found");
 
+  // `resolveSite` already refuses to serve this, so nothing built here would
+  // reach anybody -- which is the mildest of the four surfaces the takedown
+  // never reached, and still worth refusing at the door. A build is a
+  // container and several minutes, and the deploy panel afterwards would
+  // report a live deployment that 404s for every visitor: wrong about the one
+  // thing it exists to say.
+  if (project.takenDownAt) {
+    throw new ForbiddenError(
+      "A moderator took this project down after a report. It cannot be " +
+        "deployed while that stands.",
+      "TAKEN_DOWN",
+    );
+  }
+
   const target = deployTarget(project.template);
   if (!target.deployable) {
     throw new BadRequestError(target.reason ?? NOT_DEPLOYABLE, "NOT_DEPLOYABLE");
@@ -578,25 +609,49 @@ export async function publish(rawProjectId: string): Promise<Deployment> {
       target,
     );
 
+    // The release row is created BEFORE the build, because the build writes
+    // into a directory named after it. A release whose build then fails is
+    // pruned like any other -- and leaving the previous one live meanwhile is
+    // the behaviour that was wanted anyway.
+    const releaseId = await recordRelease({
+      deploymentId: row.id,
+      subdomain: row.subdomain,
+      kind: target.kind === "service" ? "SERVICE" : "STATIC",
+      buildCommand: build.command,
+      outputDir: build.outputDir,
+      sizeBytes: 0,
+      log: "",
+    });
+
     try {
       const published =
         target.kind === "service"
           ? await publishService(projectId, row.subdomain, project.template)
-          : await buildAndCopy(projectId, row.subdomain, build);
+          : await buildAndCopy(projectId, row.subdomain, build, releaseId);
       increment("deploys_succeeded");
 
-      return toDeployment(
-        await prisma.deployment.update({
-          where: { projectId },
-          data: {
-            status: "LIVE",
-            sizeBytes: published.bytes,
-            log: published.log,
-            error: null,
-            deployedAt: new Date(),
-          },
-        }),
-      );
+      await prisma.deploymentRelease.update({
+        where: { id: releaseId },
+        data: { sizeBytes: published.bytes, log: published.log },
+      });
+
+      const updated = await prisma.deployment.update({
+        where: { projectId },
+        data: {
+          status: "LIVE",
+          sizeBytes: published.bytes,
+          log: published.log,
+          error: null,
+          deployedAt: new Date(),
+          liveReleaseId: releaseId,
+        },
+      });
+
+      // After the pointer moves, so the build that just went live is never the
+      // one pruned for being surplus.
+      await pruneReleases(row.id, releaseId);
+
+      return toDeployment(updated);
     } catch (error) {
       increment("deploys_failed");
       const reason = error instanceof Error ? error.message : String(error);
@@ -641,11 +696,11 @@ async function reserve(
   existing: string | undefined,
   build: StaticBuild,
   target: DeployTarget,
-): Promise<{ subdomain: string }> {
+): Promise<{ id: string; subdomain: string }> {
   const shape = { kind: KIND_IN[target.kind], port: target.port };
 
   if (existing) {
-    await prisma.deployment.update({
+    const row = await prisma.deployment.update({
       where: { projectId },
       data: {
         status: "BUILDING",
@@ -658,7 +713,7 @@ async function reserve(
         ...shape,
       },
     });
-    return { subdomain: existing };
+    return { id: row.id, subdomain: existing };
   }
 
   // Retried on the unique constraint rather than checked first: a check is a
@@ -666,7 +721,7 @@ async function reserve(
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const subdomain = generateSubdomain();
     try {
-      await prisma.deployment.create({
+      const row = await prisma.deployment.create({
         data: {
           projectId,
           subdomain,
@@ -676,7 +731,7 @@ async function reserve(
           ...shape,
         },
       });
-      return { subdomain };
+      return { id: row.id, subdomain };
     } catch {
       // Only a collision is plausible here, and the next name will not
       // collide. Anything else fails again on the last attempt below.
@@ -692,6 +747,7 @@ async function buildAndCopy(
   projectId: string,
   subdomain: string,
   build: StaticBuild,
+  releaseId: string,
 ): Promise<{ bytes: number; log: string }> {
   const { log, failed } = await runBuild(projectId, build);
   if (failed) throw new BuildFailure(failed, log);
@@ -722,14 +778,14 @@ async function buildAndCopy(
     );
   }
 
-  const live = siteDirectory(subdomain);
-  // A sibling, so the swap below is a rename within one filesystem. Prefixed
+  // A sibling, so the move below is a rename within one filesystem. Prefixed
   // with a character the subdomain pattern forbids, so a staging directory can
   // never be addressed as a site.
   const staging = path.join(DEPLOYMENTS_ROOT, `.staging-${subdomain}`);
+  const destination = releaseDirectory(subdomain, releaseId);
 
   await rm(staging, { recursive: true, force: true });
-  await mkdir(DEPLOYMENTS_ROOT, { recursive: true });
+  await mkdir(path.dirname(destination), { recursive: true });
 
   try {
     const { bytes } = await copyTree(
@@ -738,11 +794,12 @@ async function buildAndCopy(
       env.DEPLOY_MAX_MB * 1024 * 1024,
     );
 
-    // The swap. Removing the old tree first leaves a window where the site
-    // 404s, which is the cost of not having two names to alternate between —
-    // brief, and far better than serving half of one build and half of another.
-    await rm(live, { recursive: true, force: true });
-    await rename(staging, live);
+    // Into a directory of its own rather than over the live one. The old build
+    // is left exactly where it was, which is what makes going back to it a
+    // pointer move instead of a rebuild — and it removes the window where the
+    // site 404s, because nothing is deleted to make room.
+    await rm(destination, { recursive: true, force: true });
+    await rename(staging, destination);
 
     return { bytes, log };
   } finally {
@@ -942,6 +999,10 @@ export async function unpublish(rawProjectId: string): Promise<void> {
   await removeService(row.subdomain);
 
   await rm(siteDirectory(row.subdomain), { recursive: true, force: true });
+  // Every retained build as well as the legacy directory. Missing these would
+  // leave a site's whole history on disk with no row referring to it, which is
+  // storage nothing would ever account for again.
+  await removeAllReleases(row.id, row.subdomain);
   await prisma.deployment.delete({ where: { projectId } });
   increment("deploys_removed");
 }
@@ -967,15 +1028,38 @@ export interface ResolvedSite {
 export async function resolveSite(
   hostname: string,
 ): Promise<ResolvedSite | undefined> {
-  const subdomain = subdomainFromHost(hostname);
+  // The generated subdomain first, because it is the address every deployment
+  // has and the one that costs a string comparison rather than a query.
+  const subdomain =
+    subdomainFromHost(hostname) ??
+    (await resolveCustomDomain(hostname))?.subdomain;
+
   if (!subdomain) return undefined;
 
-  const row = await prisma.deployment.findUnique({ where: { subdomain } });
-  if (!row || row.deployedAt === null) return undefined;
+  // The takedown is part of the QUERY, like the verified check in
+  // `resolveCustomDomain`. `unpublish` is also called when a moderator acts,
+  // but that removes files and stops a container, and a public site that stays
+  // up whenever a teardown half-failed is not a takedown -- it is a takedown
+  // that usually works. This clause is true whether or not anything was
+  // cleaned up.
+  const row = await prisma.deployment.findFirst({
+    where: {
+      subdomain,
+      deployedAt: { not: null },
+      project: { takenDownAt: null },
+    },
+  });
+  if (!row) return undefined;
 
   return {
     subdomain,
-    root: siteDirectory(subdomain),
+    // The pointer, falling back to the legacy location for a deployment
+    // published before releases existed -- those still have their files
+    // directly under the subdomain, and they must not start 404ing because a
+    // column they predate is null.
+    root: row.liveReleaseId
+      ? releaseDirectory(subdomain, row.liveReleaseId)
+      : siteDirectory(subdomain),
     kind: KIND_OUT[row.kind],
     port: row.port,
   };

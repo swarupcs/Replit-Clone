@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { env } from "../config/env.js";
 import { AppError } from "../utils/errors.js";
 import { projectRoot } from "../utils/projectPaths.js";
 import { increment } from "../lib/metrics.js";
+import { resolveProjectEntitlements } from "./entitlementService.js";
 
 /** Per-project storage accounting.
  *
@@ -16,8 +16,6 @@ import { increment } from "../lib/metrics.js";
  *  once it is stale. The cache tracks its own writes exactly and re-measures
  *  periodically to pick up whatever the container did behind our back.
  */
-
-const QUOTA_BYTES = env.PROJECT_DISK_QUOTA_MB * 1024 * 1024;
 
 /** How long a measurement is trusted before the tree is walked again. */
 const CACHE_TTL_MS = 30_000;
@@ -35,11 +33,13 @@ interface Measurement {
 const cache = new Map<string, Measurement>();
 
 export class QuotaExceededError extends AppError {
-  constructor(usedBytes: number) {
+  /** The limit is passed in rather than read from `env`, because it is the
+   *  owner's plan that decides it and this error is what says so. */
+  constructor(usedBytes: number, limitMb: number) {
     super(
       507,
       "QUOTA_EXCEEDED",
-      `This project has reached its ${String(env.PROJECT_DISK_QUOTA_MB)} MB limit ` +
+      `This project has reached its ${String(limitMb)} MB limit ` +
         `(${(usedBytes / 1024 / 1024).toFixed(1)} MB used). Delete some files and try again.`,
     );
   }
@@ -103,9 +103,14 @@ export async function assertWithinQuota(
   const used = await usedBytes(projectId);
   const projected = used - replacingBytes + incomingBytes;
 
-  if (projected > QUOTA_BYTES) {
+  // The owner's plan, not the deployment's constant: a collaborator writing
+  // into someone else's project spends the owner's allowance, which is the
+  // rule the user-level quota already followed.
+  const { projectDiskQuotaMb } = await resolveProjectEntitlements(projectId);
+
+  if (projected > projectDiskQuotaMb * 1024 * 1024) {
     increment("quota_rejections");
-    throw new QuotaExceededError(used);
+    throw new QuotaExceededError(used, projectDiskQuotaMb);
   }
 }
 

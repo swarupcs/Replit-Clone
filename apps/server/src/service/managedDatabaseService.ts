@@ -7,6 +7,7 @@ import { execCapture } from "../containers/execCapture.js";
 import { SANDBOX_NETWORK, ensureNetwork } from "../containers/sandboxNetwork.js";
 
 const docker = new Docker();
+import { assertFeature } from "./entitlementService.js";
 
 /** Prefix for a project's database container. Deliberately a sibling of
  *  `rc-project-` rather than a suffix on it, so the quota counters can tell
@@ -80,6 +81,10 @@ async function waitUntilReady(container: Docker.Container): Promise<void> {
 /** Provisions a database for a project, or returns the one it already has. */
 export async function provision(projectId: string): Promise<ManagedDatabaseInfo> {
   const existing = await prisma.managedDatabase.findUnique({ where: { projectId } });
+
+  // Checked on the way in, not on `start`: a plan that lapses leaves the
+  // database somebody already has, and its data, exactly where they are.
+  if (!existing) await assertFeature(projectId, "managedDatabases");
 
   const record =
     existing ??

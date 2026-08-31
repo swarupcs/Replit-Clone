@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Empty, Spin, Tooltip, message } from "antd";
+import { CustomDomain } from "../../molecules/CustomDomain/CustomDomain.tsx";
+import { ReleaseHistory } from "../../molecules/ReleaseHistory/ReleaseHistory.tsx";
 import {
   VscCloudUpload,
   VscCopy,
@@ -270,6 +272,29 @@ export const DeployPanel = ({ projectId, isOwner }: DeployPanelProps) => {
               </Tooltip>
             )}
           </div>
+        )}
+
+        {/* Only once something is published. A domain pointed at a project
+            with no deployment behind it is a name that resolves to a 404,
+            and the server refuses the claim for that reason — so offering
+            the form first would be offering a button that cannot work. */}
+        {isOwner && deployment && (
+          <CustomDomain
+            projectId={projectId}
+            domain={deployment.customDomain}
+            onChange={refresh}
+          />
+        )}
+
+        {/* Reading the history is a viewer's -- it is the record of a thing
+            that is public by construction. Rolling back is the owner's, and
+            the component draws that line itself. */}
+        {deployment && (
+          <ReleaseHistory
+            projectId={projectId}
+            isOwner={isOwner}
+            refreshKey={deployment.deployedAt ? 1 : 0}
+          />
         )}
 
         {!isOwner && (

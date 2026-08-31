@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Input, Modal, Typography, message } from "antd";
+import { Alert, Button, Input, Modal, Typography, message } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import {
   getProjectEnvApi,
@@ -81,7 +81,7 @@ export const EnvVarsDialog = ({ projectId, open, onClose }: EnvVarsDialogProps) 
   // Seeded from the server each time it opens, so a cancelled edit does not
   // linger into the next one.
   useEffect(() => {
-    if (open && data) setRows(toRows(data));
+    if (open && data) setRows(toRows(data.vars));
   }, [open, data]);
 
   useEffect(() => {
@@ -188,6 +188,25 @@ export const EnvVarsDialog = ({ projectId, open, onClose }: EnvVarsDialogProps) 
           Passed to the container when it starts. Restart the dev server after
           saving for a running process to see them.
         </Typography.Paragraph>
+
+        {/* Shown only when it is NOT true. A banner saying "encrypted" on every
+            open would be noise on the servers that are fine and would train
+            people to stop reading the one that is not -- and this is the
+            field people paste live API keys into, so the warning has to reach
+            them before they do it rather than afterwards. */}
+        {data && !data.encryptedAtRest && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="Not encrypted on this server"
+            description={
+              "SECRET_ENCRYPTION_KEY is not set, so these values are stored " +
+              "in plain text and are readable by anyone who can read the " +
+              "database. Set a key and restart to have them sealed."
+            }
+          />
+        )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {rows.map((row) => (

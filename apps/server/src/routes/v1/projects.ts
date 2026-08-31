@@ -2,6 +2,16 @@ import express from "express";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 import { createPublishLimiter } from "../../utils/publishBudget.js";
+import { reportProjectController } from "../../controllers/reportController.js";
+import {
+  appealController,
+  projectModerationController,
+} from "../../controllers/moderationController.js";
+import {
+  getTestCommandController,
+  runTestsController,
+  setTestCommandController,
+} from "../../controllers/testRunController.js";
 import {
   createProjectController,
   deleteProjectController,
@@ -77,10 +87,23 @@ import {
   removePackageController,
 } from "../../controllers/packageController.js";
 import {
+  claimDomainController,
   deployController,
+  releaseDomainController,
+  verifyDomainController,
   getDeploymentController,
   undeployController,
+  listReleasesController,
+  rollbackController,
 } from "../../controllers/deployController.js";
+import {
+  createJobController,
+  deleteJobController,
+  listJobsController,
+  listRunsController,
+  runJobController,
+  updateJobController,
+} from "../../controllers/scheduleController.js";
 import { getDevcontainerController } from "../../controllers/devcontainerController.js";
 import {
   createEmbedController,
@@ -198,6 +221,72 @@ router.post(
 );
 router.delete("/:projectId/deployment", asyncHandler(undeployController));
 
+// The builds this project has published, and going back to one. Reading is a
+// viewer's; rolling back is the owner's, because it changes what strangers get
+// at a public address -- the same decision as publishing, in the other
+// direction.
+router.get("/:projectId/releases", asyncHandler(listReleasesController));
+router.post(
+  "/:projectId/releases/:releaseId/rollback",
+  asyncHandler(rollbackController),
+);
+
+// Verification is rate limited and claiming is not. Claiming writes one row
+// the owner already owns; verifying makes an outbound DNS query per press,
+// which is somebody else's resolver being asked a question on our behalf.
+const domainVerifyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many verification attempts. Wait a minute and try again.",
+  },
+});
+
+router.put("/:projectId/deployment/domain", asyncHandler(claimDomainController));
+router.post(
+  "/:projectId/deployment/domain/verify",
+  domainVerifyLimiter,
+  asyncHandler(verifyDomainController),
+);
+router.delete(
+  "/:projectId/deployment/domain",
+  asyncHandler(releaseDomainController),
+);
+
+// Scheduled jobs. Reading is a viewer's; everything that changes what runs, or
+// runs it now, is the owner's -- see the controller for why that is not an
+// editor's.
+//
+// "Run now" carries the limiter and nothing else does, because it is the only
+// one of these that starts a container. Saving a job writes a row; pressing the
+// button is a build's worth of work on demand.
+const jobRunLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many manual runs. Try again later.",
+  },
+});
+
+router.get("/:projectId/jobs", asyncHandler(listJobsController));
+router.post("/:projectId/jobs", asyncHandler(createJobController));
+router.patch("/:projectId/jobs/:jobId", asyncHandler(updateJobController));
+router.delete("/:projectId/jobs/:jobId", asyncHandler(deleteJobController));
+router.get("/:projectId/jobs/:jobId/runs", asyncHandler(listRunsController));
+router.post(
+  "/:projectId/jobs/:jobId/run",
+  jobRunLimiter,
+  asyncHandler(runJobController),
+);
+
 // The query editor. Rate limited on the same reasoning as installs and
 // deploys: each request holds a database connection open for as long as the
 // statement runs, and the statement is somebody else's to write.
@@ -286,16 +375,55 @@ router.post("/:projectId/fork", createLimiter, asyncHandler(forkProjectControlle
 // Only in the publishing direction -- see `countsAgainstPublishBudget`, which
 // is where that asymmetry is explained and tested.
 //
-// Deliberately not a moderation system. Reporting and review are a product
-// decision about who reviews and with what authority, and this app has no
-// notion of an administrator to hang them on. This is the half that needs no
-// such decision.
+// The other half -- reporting and review -- shipped later, once there was a
+// decision about who reviews: an `ADMIN_EMAILS` allowlist. See
+// middlewares/requireAdmin.ts and routes/v1/admin.ts.
 const publishLimiter = createPublishLimiter();
+
+// Reporting is rate limited for the same reason publishing is, and for one
+// more. A report costs an operator's attention rather than a machine's, and
+// the review queue is the scarce resource here -- somebody who can file a
+// hundred reports an hour can bury every other complaint on the page. The
+// per-account duplicate rule in `fileReport` stops the same project being
+// reported twice; this stops a hundred DIFFERENT projects being reported in a
+// minute.
+const reportLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMITED",
+    message: "Too many reports filed. Try again later.",
+  },
+});
 
 router.patch(
   "/:projectId/visibility",
   publishLimiter,
   asyncHandler(setVisibilityController),
+);
+router.post(
+  "/:projectId/report",
+  reportLimiter,
+  asyncHandler(reportProjectController),
+);
+
+// The other side of moderation: what was done to this project, and the owner's
+// answer to it. Both are the owner's -- a decision taken against somebody that
+// only the decider can read is not a record, it is a file.
+// Tests. Reading the command is a viewer's, running it needs the same grant
+// `Run` does, and changing it is the owner's -- see the controller.
+router.get("/:projectId/test-command", asyncHandler(getTestCommandController));
+router.put("/:projectId/test-command", asyncHandler(setTestCommandController));
+router.post("/:projectId/test", asyncHandler(runTestsController));
+
+router.get("/:projectId/moderation", asyncHandler(projectModerationController));
+router.post(
+  "/:projectId/appeal",
+  reportLimiter,
+  asyncHandler(appealController),
 );
 router.get("/:projectId/export", asyncHandler(exportProjectController));
 router.get("/:projectId/env", asyncHandler(getProjectEnvController));

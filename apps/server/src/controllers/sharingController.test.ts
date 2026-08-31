@@ -12,9 +12,12 @@ const access = vi.hoisted(() => ({
   ProjectRole: { VIEWER: "VIEWER", EDITOR: "EDITOR" },
 }));
 const findUnique = vi.hoisted(() => vi.fn());
+const findFirst = vi.hoisted(() => vi.fn());
 
 vi.mock("../service/projectAccessService.js", () => access);
-vi.mock("../lib/prisma.js", () => ({ prisma: { project: { findUnique } } }));
+vi.mock("../lib/prisma.js", () => ({
+  prisma: { project: { findUnique, findFirst } },
+}));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   extendLogContext: vi.fn(),
@@ -290,7 +293,7 @@ describe("previewShareLinkController", () => {
   /** Deliberately minimal: enough to tell whether the link is the one you were
    *  expecting, and nothing else about the project or its owner. */
   it("returns only the project's name and template", async () => {
-    findUnique.mockResolvedValue({ name: "demo", template: "react-vite" });
+    findFirst.mockResolvedValue({ name: "demo", template: "react-vite" });
 
     const response = await request(app)
       .get("/p/share/preview")
@@ -299,14 +302,17 @@ describe("previewShareLinkController", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.data).toEqual({ name: "demo", template: "react-vite" });
-    expect(findUnique).toHaveBeenCalledWith({
-      where: { shareToken: SECRET },
+    // `takenDownAt` is in the WHERE, not applied afterwards. A preview that
+    // still named a moderated project would make this the one endpoint that
+    // confirms moderation acted, to anybody holding the link.
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { shareToken: SECRET, takenDownAt: null },
       select: { name: true, template: true },
     });
   });
 
   it("says the link is not valid rather than 404ing", async () => {
-    findUnique.mockResolvedValue(null);
+    findFirst.mockResolvedValue(null);
 
     const response = await request(app)
       .get("/p/share/preview")
@@ -326,6 +332,6 @@ describe("previewShareLinkController", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.data).toBeNull();
-    expect(findUnique).not.toHaveBeenCalled();
+    expect(findFirst).not.toHaveBeenCalled();
   });
 });

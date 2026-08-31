@@ -83,7 +83,13 @@ const budgets = new Map<string, Window>();
  *  one for what this actually is: a guard against a runaway client or one
  *  person leaning on the feature, on a deployment that runs a single server.
  */
-export function assertWithinAiBudget(userId: string): void {
+export function assertWithinAiBudget(
+  userId: string,
+  /** This account's hourly allowance. Defaulted rather than resolved here, so
+   *  the counter stays synchronous and the plan lookup stays on the async path
+   *  that already exists in the caller. The default is the free plan's. */
+  limit: number = env.AI_REQUESTS_PER_HOUR,
+): void {
   const now = Date.now();
   const existing = budgets.get(userId);
 
@@ -92,7 +98,7 @@ export function assertWithinAiBudget(userId: string): void {
     return;
   }
 
-  if (existing.count >= env.AI_REQUESTS_PER_HOUR) {
+  if (existing.count >= limit) {
     const minutes = Math.max(1, Math.ceil((existing.resetAt - now) / 60_000));
     throw new AppError(
       429,

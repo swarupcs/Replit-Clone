@@ -15,6 +15,14 @@ export type Credentials = z.infer<typeof credentialsSchema>;
 export interface PublicUser {
   id: string;
   email: string;
+  /** Whether this account is on the server's `ADMIN_EMAILS` allowlist.
+   *
+   *  A hint for the interface and nothing more: it decides whether the report
+   *  queue is offered, not whether it can be opened. Every admin route checks
+   *  the allowlist again server-side, so a client that sets this to true for
+   *  itself gets a link to a page that answers 403.
+   */
+  isAdmin: boolean;
 }
 
 export interface AuthResponse {

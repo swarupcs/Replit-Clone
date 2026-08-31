@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
@@ -20,6 +20,7 @@ import {
   EditOutlined,
   MoreOutlined,
   ShareAltOutlined,
+  SafetyCertificateOutlined,
   TeamOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -42,8 +43,11 @@ import {
   renameProjectApi,
 } from "../apis/projects.ts";
 import { TemplatePicker } from "../components/molecules/TemplatePicker/TemplatePicker.tsx";
+import { NotificationBell } from "../components/molecules/NotificationBell/NotificationBell.tsx";
+import { AccountDialog } from "../components/organisms/AccountDialog/AccountDialog.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
 import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx";
+import { ModerationDialog } from "../components/organisms/ModerationDialog/ModerationDialog.tsx";
 import { GithubConnectionCard } from "../components/organisms/GithubConnectionCard/GithubConnectionCard.tsx";
 import { ImportRepoDialog } from "../components/organisms/ImportRepoDialog/ImportRepoDialog.tsx";
 import { ExploreSection } from "../components/organisms/ExploreSection/ExploreSection.tsx";
@@ -83,6 +87,7 @@ function ProjectActions({
   onRename,
   onDuplicate,
   onDelete,
+  onModeration,
 }: {
   project: Project;
   isOwner: boolean;
@@ -90,6 +95,7 @@ function ProjectActions({
   onRename: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onModeration: () => void;
 }) {
   return (
     // Stop propagation so a menu click doesn't also open the project behind
@@ -121,12 +127,20 @@ function ProjectActions({
                   },
                 ]
               : []),
-            {
-              key: "duplicate",
-              icon: <CopyOutlined />,
-              label: "Duplicate",
-              onClick: onDuplicate,
-            },
+            // Refused by the server once a project is taken down, because a
+            // copy would hold the same files with none of the takedown. The
+            // menu says so by omission rather than offering something that
+            // will fail.
+            ...(project.takenDownAt
+              ? []
+              : [
+                  {
+                    key: "duplicate",
+                    icon: <CopyOutlined />,
+                    label: "Duplicate",
+                    onClick: onDuplicate,
+                  },
+                ]),
             {
               key: "export",
               icon: <DownloadOutlined />,
@@ -137,8 +151,18 @@ function ProjectActions({
                 window.location.assign(projectExportUrl(project.id));
               },
             },
+            // Offered whether or not anything was taken down. The trail holds
+            // dismissals as well, and "reported and cleared" is a fact about
+            // the project its owner is entitled to read.
             ...(isOwner
               ? [
+                  {
+                    key: "moderation",
+                    icon: <SafetyCertificateOutlined />,
+                    label: project.takenDownAt ? "Taken down" : "Moderation",
+                    danger: project.takenDownAt !== null,
+                    onClick: onModeration,
+                  },
                   { type: "divider" as const },
                   {
                     key: "delete",
@@ -233,6 +257,13 @@ export const Dashboard = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, logout } = useAuth();
+  // The quota warning links here. A notification that pointed at the dashboard
+  // and left the reader to find the button would be telling them where to look
+  // rather than showing them.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [accountOpen, setAccountOpen] = useState(
+    () => searchParams.get("view") === "account",
+  );
   const [messageApi, contextHolder] = message.useMessage();
 
   const [isCreating, setIsCreating] = useState(false);
@@ -256,6 +287,7 @@ export const Dashboard = () => {
   const [githubOpen, setGithubOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [sharing, setSharing] = useState<Project | null>(null);
+  const [moderating, setModerating] = useState<Project | null>(null);
 
   const { data: projects, isLoading } = useQuery({
     queryKey: ["projects"],
@@ -350,6 +382,20 @@ export const Dashboard = () => {
           >
             {user?.email}
           </Typography.Text>
+          {/* Offered only to operators, and only as a convenience: the route
+              itself is not hidden and the server checks the allowlist on every
+              request. Hiding a link is not access control, and treating it as
+              though it were is how a check ends up existing only here. */}
+          {user?.isAdmin && (
+            <Button onClick={() => void navigate("/admin/reports")}>
+              Reports
+            </Button>
+          )}
+          {/* The quota was enforced from the first release and shown from
+              none of them: the only way to learn where you stood was to be
+              refused. */}
+          <Button onClick={() => setAccountOpen(true)}>Plan</Button>
+          <NotificationBell />
           <Button
             icon={<VscGithub />}
             onClick={() => setGithubOpen(true)}
@@ -359,6 +405,18 @@ export const Dashboard = () => {
           <Button onClick={() => void logout()}>Sign out</Button>
         </div>
       </header>
+
+      <AccountDialog
+        open={accountOpen}
+        onClose={() => {
+          setAccountOpen(false);
+          // Otherwise the query outlives the dialog and reopens it on reload.
+          if (searchParams.has("view")) {
+            searchParams.delete("view");
+            setSearchParams(searchParams, { replace: true });
+          }
+        }}
+      />
 
       <main className="rc-page">
         <div
@@ -507,6 +565,7 @@ export const Dashboard = () => {
                   }}
                   onDuplicate={() => duplicateMutation.mutate(project.id)}
                   onDelete={() => setDeleting(project)}
+                  onModeration={() => setModerating(project)}
                 />
               );
 
@@ -534,6 +593,15 @@ export const Dashboard = () => {
                       {project.name}
                     </span>
                     <span className="rc-badge">{project.template}</span>
+                    {project.takenDownAt && (
+                      <span
+                        className="rc-badge"
+                        title="A moderator took this project down after a report"
+                        style={{ color: "var(--rc-danger, #ff4d4f)" }}
+                      >
+                        Taken down
+                      </span>
+                    )}
                     {!isOwner && (
                       <span
                         className="rc-badge"
@@ -570,6 +638,15 @@ export const Dashboard = () => {
                   >
                     <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <span className="rc-badge">{project.template}</span>
+                      {project.takenDownAt && (
+                        <span
+                          className="rc-badge"
+                          title="A moderator took this project down after a report"
+                          style={{ color: "var(--rc-danger, #ff4d4f)" }}
+                        >
+                          Taken down
+                        </span>
+                      )}
                       {!isOwner && (
                         <span
                           className="rc-badge"
@@ -672,6 +749,16 @@ export const Dashboard = () => {
           }}
           open
           onClose={() => setSharing(null)}
+        />
+      )}
+
+      {moderating && (
+        <ModerationDialog
+          projectId={moderating.id}
+          projectName={moderating.name}
+          takenDownAt={moderating.takenDownAt}
+          open
+          onClose={() => setModerating(null)}
         />
       )}
 

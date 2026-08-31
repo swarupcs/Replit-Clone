@@ -53,6 +53,22 @@ function levelFromRole(role: ProjectRole): AccessLevel {
   return role === ProjectRole.EDITOR ? "editor" : "viewer";
 }
 
+/** A project as the dashboard list returns it.
+ *
+ *  Deliberately not `Project`. See the select in `listAccessibleProjects`.
+ */
+export interface ListedProject {
+  id: string;
+  name: string;
+  template: string;
+  ownerId: string;
+  createdAt: Date;
+  lastActiveAt: Date | null;
+  visibility: ProjectVisibility;
+  forkedFromId: string | null;
+  takenDownAt: Date | null;
+}
+
 /** What this user may do with this project. */
 export async function getProjectAccess(
   projectId: string,
@@ -97,6 +113,28 @@ export async function setProjectVisibility(
 ): Promise<Project> {
   await assertProjectAccess(projectId, ownerId, "owner");
 
+  // Everything above this line is about the owner's own decision. A takedown
+  // is somebody else's, and it used to be expressed in the same column -- so
+  // the person it was applied to could reverse it here, in one request.
+  //
+  // Only re-publishing is refused. Going private is still theirs: a moderator
+  // wanting it non-public cannot object, and refusing would make the failure
+  // mode of this check "you may not make your own project more private".
+  if (visibility === ProjectVisibility.PUBLIC) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { takenDownAt: true },
+    });
+
+    if (project?.takenDownAt) {
+      throw new ForbiddenError(
+        "A moderator made this project private after a report. You cannot " +
+          "publish it again.",
+        "TAKEN_DOWN",
+      );
+    }
+  }
+
   return prisma.project.update({
     where: { id: projectId },
     data: { visibility },
@@ -132,7 +170,14 @@ export async function listPublicProjects(limit = 50): Promise<PublicProject[]> {
     createdAt: row.createdAt.toISOString(),
     // The local part only. A gallery is a public page and the whole address is
     // more than it needs to say who made something.
-    ownerName: row.owner.email.split("@")[0] ?? "someone",
+    //
+    // The owner is a required relation, so `row.owner` is not supposed to be
+    // null -- but an account being deleted cascades its projects, and a read
+    // that lands in the middle of that can observe the row without it. The
+    // fallback below already existed for a missing name; without the optional
+    // access a null owner throws past it and takes the whole gallery down for
+    // everybody, which is a poor trade for one project mid-deletion.
+    ownerName: row.owner?.email.split("@")[0] ?? "someone",
     forks: row._count.forks,
   }));
 }
@@ -169,12 +214,34 @@ export async function assertProjectAccess(
 }
 
 /** Every project a user can open, theirs and shared with them alike. */
-export async function listAccessibleProjects(userId: string): Promise<Project[]> {
+export async function listAccessibleProjects(
+  userId: string,
+): Promise<ListedProject[]> {
   return prisma.project.findMany({
     where: {
       OR: [{ ownerId: userId }, { collaborators: { some: { userId } } }],
     },
-    orderBy: { createdAt: "desc" },
+    // Named explicitly, for the reason spelled out on `listPublicProjects`
+    // twenty lines below -- which this function did not follow. A `Project`
+    // row carries `shareToken`, and returning the row handed every viewer of
+    // every shared project a bearer credential that redeems at the link's
+    // role: a read-only collaborator could hand out access the owner never
+    // offered. It also carries `envVars`, whose values are sealed but whose
+    // NAMES are not, and 2.14 already settled that read-only access to a
+    // project is not access to its secrets.
+    select: {
+      id: true,
+      name: true,
+      template: true,
+      ownerId: true,
+      createdAt: true,
+      lastActiveAt: true,
+      visibility: true,
+      forkedFromId: true,
+      // The owner has to be able to see that this happened, and the dashboard
+      // is where they look. Not a secret: it is a fact about them.
+      takenDownAt: true,
+    },
   });
 }
 
@@ -275,7 +342,18 @@ export async function revokeShareToken(
   ownerId: string,
 ): Promise<void> {
   await assertProjectAccess(projectId, ownerId, "owner");
+  await clearShareToken(projectId);
+}
 
+/** The same, with no access check, for a caller that is not the owner.
+ *
+ *  Moderation's teardown. Its counterpart on the embed is `revokeEmbed`, which
+ *  a takedown has called since 2.16 -- and a share token is the same kind of
+ *  object: a bearer string that was pasted somewhere. Only one of the two was
+ *  closed. This is the cleanup half; the clause in `redeemShareToken` is the
+ *  half that is a guarantee (6, decision 13).
+ */
+export async function clearShareToken(projectId: string): Promise<void> {
   await prisma.project.update({
     where: { id: projectId },
     data: { shareToken: null },
@@ -291,8 +369,20 @@ export async function redeemShareToken(
   token: string,
   userId: string,
 ): Promise<Project> {
-  const project = await prisma.project.findUnique({ where: { shareToken: token } });
+  // `takenDownAt` is in the WHERE, not checked afterwards, for the reason 6
+  // decision 13 gives: the token is also cleared when a moderator acts, but
+  // that is a write which can fail, and a takedown that depends on a
+  // successful cleanup is a takedown that usually works. A project taken down
+  // for SECRETS must stop handing its source to whoever holds the link, and
+  // one taken down for MALWARE must stop handing them a container to run it
+  // in -- neither of which redeeming was refusing.
+  const project = await prisma.project.findFirst({
+    where: { shareToken: token, takenDownAt: null },
+  });
 
+  // Deliberately the same sentence a revoked link gets. Somebody holding a
+  // link is not owed the news that a project was moderated, and telling them
+  // would make the link a way to ask.
   if (!project) throw new NotFoundError("That share link is no longer valid");
 
   if (project.ownerId === userId) return project;

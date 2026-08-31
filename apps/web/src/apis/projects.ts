@@ -1,5 +1,14 @@
 import type {
+  AccountAction,
+  AccountDetail,
+  AccountRow,
+  AccountSummary,
+  ApiKeyScope,
+  ApiKeySummary,
   ApiSuccess,
+  CreatedApiKey,
+  MachineStatus,
+  ModerationAction,
   ProjectVisibility,
   PublicProject,
   DevcontainerState,
@@ -28,6 +37,11 @@ import type {
   GithubPullResponse,
   GithubProjectRepoResponse,
   StartCommandResponse,
+  ProjectReport,
+  ReportReason,
+  ReportStatus,
+  ReportsResponse,
+  ReviewReportResponse,
 } from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
@@ -142,10 +156,18 @@ export const listPublicProjectsApi = async (): Promise<PublicProject[]> => {
 export const projectExportUrl = (projectId: string): string =>
   `${import.meta.env.VITE_BACKEND_URL}/api/v1/projects/${projectId}/export`;
 
+export interface ProjectEnv {
+  vars: Record<string, string>;
+  /** Whether this server seals these values before storing them. Travels with
+   *  the values because the only moment it changes anybody's behaviour is the
+   *  moment they are deciding whether to paste a live key in. */
+  encryptedAtRest: boolean;
+}
+
 export const getProjectEnvApi = async (
   projectId: string,
-): Promise<Record<string, string>> => {
-  const response = await axios.get<ApiSuccess<Record<string, string>>>(
+): Promise<ProjectEnv> => {
+  const response = await axios.get<ApiSuccess<ProjectEnv>>(
     `/api/v1/projects/${projectId}/env`,
   );
   return response.data.data;
@@ -702,6 +724,200 @@ export const getDevcontainerApi = async (
 ): Promise<DevcontainerState> => {
   const response = await axios.get<ApiSuccess<DevcontainerState>>(
     `/api/v1/projects/${projectId}/devcontainer`,
+  );
+  return response.data.data;
+};
+
+/** Reporting a published project, and the operator's queue.
+ *
+ *  Reporting is available to any signed-in user; the queue is not, and asking
+ *  for it without being on the server's allowlist answers 403. The client's
+ *  `user.isAdmin` decides whether the queue is OFFERED and nothing more.
+ */
+export const reportProjectApi = async (
+  projectId: string,
+  reason: ReportReason,
+  details?: string,
+): Promise<void> => {
+  await axios.post(`/api/v1/projects/${projectId}/report`, { reason, details });
+};
+
+export const listReportsApi = async (
+  status: ReportStatus | "ALL" = "OPEN",
+): Promise<ProjectReport[]> => {
+  const response = await axios.get<ReportsResponse>("/api/v1/admin/reports", {
+    params: { status },
+  });
+  return response.data.data.reports;
+};
+
+export const reviewReportApi = async (
+  reportId: string,
+  decision: "DISMISSED" | "ACTIONED",
+): Promise<ProjectReport> => {
+  const response = await axios.post<ReviewReportResponse>(
+    `/api/v1/admin/reports/${reportId}/review`,
+    { decision },
+  );
+  return response.data.data.report;
+};
+
+/** The moderation trail for one project, and the owner's reply to it.
+ *
+ *  §2.17 shipped all of this on the server and nothing that called it, so a
+ *  takedown was a notification and then a dead end: the owner could not read
+ *  what was decided and could not answer it, and the operator could not see
+ *  that they had. These six lines are the whole of what was missing.
+ *
+ *  Owner-only on the server. A collaborator trusted to edit files is not
+ *  party to what a moderator wrote about the project or what its owner wrote
+ *  back, so this 403s for anyone else and the panel says so.
+ */
+export const listProjectModerationApi = async (
+  projectId: string,
+): Promise<ModerationAction[]> => {
+  const response = await axios.get<ApiSuccess<{ actions: ModerationAction[] }>>(
+    `/api/v1/projects/${projectId}/moderation`,
+  );
+  return response.data.data.actions;
+};
+
+/** One appeal per takedown, compared against the current one -- a project
+ *  taken down, reinstated and taken down again is a new case the owner is
+ *  entitled to answer. The server enforces that; this reports what it says. */
+export const appealTakedownApi = async (
+  projectId: string,
+  text: string,
+): Promise<ModerationAction> => {
+  const response = await axios.post<ApiSuccess<{ action: ModerationAction }>>(
+    `/api/v1/projects/${projectId}/appeal`,
+    { text },
+  );
+  return response.data.data.action;
+};
+
+/** Everything recent, for an operator: decisions, appeals and reinstatements
+ *  in one stream. The queue shows the case that arrives; this shows what
+ *  happened afterwards, which is where an appeal turns up. */
+export const listRecentModerationApi = async (): Promise<ModerationAction[]> => {
+  const response = await axios.get<ApiSuccess<{ actions: ModerationAction[] }>>(
+    "/api/v1/admin/moderation",
+  );
+  return response.data.data.actions;
+};
+
+/** Lifting a takedown. The reason is required by the server, deliberately:
+ *  "we put it back" with no account of why is the half of the record that
+ *  makes the other half unfalsifiable. */
+export const reinstateProjectApi = async (
+  projectId: string,
+  reason: string,
+): Promise<ModerationAction> => {
+  const response = await axios.post<ApiSuccess<{ action: ModerationAction }>>(
+    `/api/v1/admin/projects/${projectId}/reinstate`,
+    { reason },
+  );
+  return response.data.data.action;
+};
+
+/** What this account is using, what it is allowed, and which project is
+ *  responsible for most of it.
+ *
+ *  One request rather than three: the number, its limit and the breakdown are
+ *  only meaningful together, and fetching them separately is how a screen
+ *  comes to show a usage figure against last minute's limit. */
+export const getAccountApi = async (): Promise<AccountSummary> => {
+  const response = await axios.get<ApiSuccess<AccountSummary>>(
+    "/api/v1/account",
+  );
+  return response.data.data;
+};
+
+/** The keys this account has issued, revoked ones included — "that key was
+ *  revoked on Tuesday" is the sentence somebody needs after an incident. */
+export const listApiKeysApi = async (): Promise<ApiKeySummary[]> => {
+  const response = await axios.get<ApiSuccess<ApiKeySummary[]>>(
+    "/api/v1/account/keys",
+  );
+  return response.data.data;
+};
+
+/** Mints one. The secret in the response is the only time it exists: the
+ *  server stores a hash, so a client that does not show it now has lost it. */
+export const createApiKeyApi = async (input: {
+  label: string;
+  scopes: ApiKeyScope[];
+  expiresInDays?: number;
+}): Promise<CreatedApiKey> => {
+  const response = await axios.post<ApiSuccess<CreatedApiKey>>(
+    "/api/v1/account/keys",
+    input,
+  );
+  return response.data.data;
+};
+
+export const revokeApiKeyApi = async (keyId: string): Promise<void> => {
+  await axios.delete(`/api/v1/account/keys/${keyId}`);
+};
+
+/** The operator's account lookup. Part of an address, which is what somebody
+ *  writing in gives you. */
+export const searchAccountsApi = async (
+  query: string,
+): Promise<AccountRow[]> => {
+  const response = await axios.get<ApiSuccess<AccountRow[]>>(
+    "/api/v1/admin/accounts",
+    { params: { q: query } },
+  );
+  return response.data.data;
+};
+
+export const getAdminAccountApi = async (
+  userId: string,
+): Promise<AccountDetail> => {
+  const response = await axios.get<ApiSuccess<AccountDetail>>(
+    `/api/v1/admin/accounts/${userId}`,
+  );
+  return response.data.data;
+};
+
+/** Both writes take a reason, and the server requires it. An operator who can
+ *  silently change what somebody pays for is a worse position than this
+ *  product was in before the console existed. */
+export const setAccountPlanApi = async (
+  userId: string,
+  planId: string,
+  reason: string,
+): Promise<AccountAction> => {
+  const response = await axios.post<ApiSuccess<{ action: AccountAction }>>(
+    `/api/v1/admin/accounts/${userId}/plan`,
+    { planId, reason },
+  );
+  return response.data.data.action;
+};
+
+export const setAccountOverrideApi = async (input: {
+  userId: string;
+  override: Record<string, number | boolean> | null;
+  expiresInDays?: number;
+  reason: string;
+}): Promise<AccountAction> => {
+  const response = await axios.post<ApiSuccess<{ action: AccountAction }>>(
+    `/api/v1/admin/accounts/${input.userId}/override`,
+    {
+      override: input.override,
+      expiresInDays: input.expiresInDays,
+      reason: input.reason,
+    },
+  );
+  return response.data.data.action;
+};
+
+/** Is this machine full? The question the container cap makes an operator ask
+ *  most often, and which no screen could answer until now. */
+export const getMachineStatusApi = async (): Promise<MachineStatus> => {
+  const response = await axios.get<ApiSuccess<MachineStatus>>(
+    "/api/v1/admin/machine",
   );
   return response.data.data;
 };

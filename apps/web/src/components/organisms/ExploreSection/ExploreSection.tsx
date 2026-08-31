@@ -6,6 +6,7 @@ import {
   forkProjectApi,
   listPublicProjectsApi,
 } from "../../../apis/projects.ts";
+import { ReportProject } from "../../molecules/ReportProject/ReportProject.tsx";
 
 /** Projects other people have published, and a way to take a copy.
  *
@@ -130,6 +131,14 @@ export const ExploreSection = () => {
                 >
                   Fork
                 </Button>
+                {/* Last, small, and quiet. Reporting is the rare action on this
+                    card and should not compete with the two that are not. */}
+                <div style={{ marginLeft: "auto" }}>
+                  <ReportProject
+                    projectId={project.id}
+                    projectName={project.name}
+                  />
+                </div>
               </div>
             </div>
           ))}

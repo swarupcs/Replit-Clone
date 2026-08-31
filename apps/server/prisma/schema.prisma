@@ -7,6 +7,57 @@ datasource db {
   provider = "postgresql"
 }
 
+/// A tier as offered: what it is called, what it costs, and the numbers it
+/// buys.
+///
+/// In the database rather than in code so that an operator can change a limit
+/// without a deploy, and seeded by the migration that creates it so that a
+/// fresh deployment has a `free` plan before its first signup. The seeded
+/// numbers are exactly the `env` defaults that used to be the only limits
+/// there were, which is what makes introducing this a behavioural no-op.
+///
+/// Only limits that are about an ACCOUNT are here. The machine's own limits --
+/// MAX_CONCURRENT_CONTAINERS, CONTAINER_MEMORY_MB, DEPLOY_MEMORY_MB -- stay in
+/// `env`, because a plan may promise more of what this platform allocates and
+/// never more than the host has. See plan.md section 6, decision 15.
+model Plan {
+  /// A stable string, not a uuid: it is written in config, in a Stripe price's
+  /// metadata, and in this file's own seed. A generated key would make those
+  /// three disagree the first time anybody restored a database.
+  id String @id
+
+  label String
+
+  /// Minor units. A price is not a float, and this one is never arithmetic
+  /// anyway -- the charge is Stripe's to compute; this is what the screen says.
+  priceCents Int    @default(0)
+  currency   String @default("usd")
+
+  /// Display order, and the only thing that makes "upgrade" a meaningful word.
+  rank Int @default(0)
+
+  maxProjects          Int
+  userDiskQuotaMb      Int
+  projectDiskQuotaMb   Int
+  aiRequestsPerHour    Int
+  maxContainersPerUser Int
+
+  managedDatabases Boolean @default(false)
+  customDomains    Boolean @default(false)
+  scheduledJobs    Boolean @default(false)
+
+  /// Withdrawn from the catalogue without being deleted. Accounts already on
+  /// it keep every number: a plan that stops being sold is not a plan that
+  /// stops being honoured, and deleting the row would silently move those
+  /// accounts to the free tier -- which is the same class of mistake as
+  /// deleting a customer's data when they stop paying.
+  archivedAt DateTime?
+
+  users User[]
+
+  @@map("plans")
+}
+
 model User {
   id    String @id @default(uuid())
   email String @unique
@@ -27,13 +78,172 @@ model User {
 
   createdAt DateTime @default(now())
 
+  /// What this account is entitled to. Defaults to the free plan, which the
+  /// migration seeds, so every account that existed before plans did lands on
+  /// limits identical to the ones it already had.
+  ///
+  /// Restrict, not Cascade or SetNull: deleting a plan out from under the
+  /// accounts on it is the one operation this table must refuse. Archive it.
+  planId String @default("free")
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  /// Limits set for this one account, overriding the plan's. A partial of the
+  /// same shape, validated on read.
+  ///
+  /// Json rather than a nullable column per limit, which would duplicate every
+  /// column of `plans` onto `users` and have to be added twice forever. The
+  /// cost is that it is unvalidated at rest, so it is parsed through a schema
+  /// on the way out and a row that fails falls back to the PLAN -- never to
+  /// something more generous. Garbage must not be a way to buy a bigger quota.
+  ///
+  /// This column is not a nicety. Comping a customer, extending a trial and
+  /// grandfathering an early account are the same operation, and without it
+  /// each one ends in somebody inventing a plan row for one person.
+  entitlementOverride Json?
+
+  /// Why, in an operator's words. An override with no account of itself is the
+  /// half of the record that makes the other half unfalsifiable -- the same
+  /// argument the moderation trail makes about a reinstatement.
+  overrideReason String?
+
+  /// When the override lapses, or null for one that does not. A trial that has
+  /// to be remembered to be ended is a trial that never ends.
+  overrideUntil DateTime?
+
+  /// Set when this account was told it was nearly out of room, and cleared
+  /// when it no longer is. One bit, because it is what makes the warning a
+  /// notification about a CHANGE rather than a recurring reminder.
+  ///
+  /// Here rather than derived from the notifications table, which is pruned:
+  /// deriving it would have the pruner decide to warn somebody again.
+  quotaWarnedAt DateTime?
+
   projects      Project[]
   refreshTokens RefreshToken[]
   collaborations ProjectCollaborator[]
+  reportsFiled   ProjectReport[]
   tokens        UserToken[]
   githubConnection GithubConnection?
+  notifications Notification[]
+  apiKeys       ApiKey[]
+  accountActions AccountAction[] @relation("AccountActionSubject")
 
+  /// "Which accounts are on this plan" is the operator's question, and the one
+  /// a pricing change has to answer before it is made.
+  @@index([planId])
   @@map("users")
+}
+
+/// A long-lived credential for something that is not a person.
+///
+/// `UserToken` is single-use, arrives by email and lives an hour; this is the
+/// opposite object on every axis, which is why it is not that table with a
+/// third purpose. It is presented on every request, for months, from a CI
+/// runner -- so the design questions are entirely different ones: what it may
+/// do, how it is revoked, and whether anybody can tell it was used.
+///
+/// The secret is shown once, at creation, and stored only as a hash. There is
+/// no route that returns it again, because there is nothing to return.
+model ApiKey {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// What its owner called it. The only way to know which runner to go and
+  /// change after revoking one.
+  label String
+
+  /// The public half, stored in the clear and shown in the list: it is in the
+  /// presented secret and is what the lookup keys on, so a key can be
+  /// identified without the database holding anything that would let it be
+  /// used. Unique because it is the lookup.
+  prefix String @unique
+
+  /// SHA-256 of the whole presented string. See `UserToken.tokenHash` for the
+  /// same reasoning: a leaked database must not hand over live credentials.
+  tokenHash String @unique
+
+  /// What this key may do, from a small closed set. Stored as a list rather
+  /// than as booleans so that adding a scope does not migrate every row.
+  scopes String[]
+
+  /// When it was last accepted. Written at most once a minute rather than on
+  /// every request -- the question it answers is "is anything still using
+  /// this", and that question does not need second-level resolution or a
+  /// database write per call.
+  lastUsedAt DateTime?
+
+  /// Optional. A key that expires is one nobody has to remember to remove.
+  expiresAt DateTime?
+
+  /// Revocation is a timestamp, not a delete: "this key was revoked on
+  /// Tuesday" is the answer somebody needs after an incident, and a deleted
+  /// row answers nothing.
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// The listing is one account's keys, newest first.
+  @@index([userId, createdAt])
+  @@map("api_keys")
+}
+
+/// What an operator did to an ACCOUNT, as opposed to a project.
+///
+/// A second audit table rather than a third kind of `ModerationAction`, and
+/// the reason is that table's own invariant: every row in it names a project,
+/// and `projectName` is copied into it precisely so the record still reads
+/// after the project is gone. An action against an account has no project, so
+/// fitting one in would mean making that column nullable -- loosening a
+/// constraint that is doing real work, to hold an event that is not the same
+/// conversation. §2.17 put the appeal in the moderation table because "taken
+/// down, appealed, reinstated" only reads in order; "moved to Pro" is not part
+/// of that sequence and would appear in the project's trail as noise.
+///
+/// Same discipline otherwise: the actor is stored rather than joined, the
+/// subject's address is copied so the record survives the account, and a
+/// reason is required by the API for every action here -- an operator who can
+/// silently change what somebody pays for is a worse position than this
+/// product was in before the console existed.
+model AccountAction {
+  id String @id @default(uuid())
+
+  /// SetNull, like the moderation trail and for the same reason: a record that
+  /// vanishes with its subject can be erased by deleting the subject.
+  subjectUserId String?
+  subject       User?   @relation("AccountActionSubject", fields: [subjectUserId], references: [id], onDelete: SetNull)
+  /// Copied at the time, so the trail still says whose account it was.
+  subjectEmail  String
+
+  action AccountActionType
+
+  /// The operator's address, from `ADMIN_EMAILS`. Stored rather than joined:
+  /// that list is config, and somebody removed from it still did what they did.
+  actor String
+
+  /// Required by the API, unlike a moderation decision's.
+  reason String
+
+  /// What changed, in words, for a person reading the trail later: "free to
+  /// pro", "maxProjects 20 to 50". Not a diff to replay -- a sentence to read.
+  detail String?
+
+  createdAt DateTime @default(now())
+
+  /// One account's history, and the console's recent feed.
+  @@index([subjectUserId, createdAt])
+  @@index([createdAt])
+  @@map("account_actions")
+}
+
+enum AccountActionType {
+  /// An operator moved this account to a different plan.
+  PLAN_CHANGED
+  /// An operator set limits for this account by hand, over its plan's.
+  OVERRIDE_SET
+  /// ...and took them away again, leaving the plan's.
+  OVERRIDE_CLEARED
 }
 
 /// One-time tokens for flows that arrive by email.
@@ -126,6 +336,159 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+/// Somebody telling the operator that a public project should not be public.
+///
+/// Only public projects can be reported, because a private one is visible to
+/// nobody but its owner and the people they invited -- there is no audience to
+/// protect and nothing a stranger could have seen to object to.
+model ProjectReport {
+  id String @id @default(uuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Who reported it. SetNull rather than Cascade: a report outlives the
+  /// account that filed it, because deleting your account must not quietly
+  /// withdraw a complaint somebody has yet to act on. The report stays, and
+  /// stops naming anybody.
+  reporterId String?
+  reporter   User?   @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+
+  reason  ProjectReportReason
+  /// What the reporter wrote, if anything. Capped by the request schema rather
+  /// than by the column, so the limit can be explained in the error.
+  details String?
+
+  status     ProjectReportStatus @default(OPEN)
+  /// When an operator last acted on it, and which one.
+  reviewedAt    DateTime?
+  reviewedBy    String?
+
+  createdAt DateTime @default(now())
+
+  /// One open report per person per project. Without it, a single account can
+  /// file the same complaint a thousand times and bury every other report in
+  /// the queue -- the review queue is the scarce resource here, not the
+  /// database.
+  @@unique([projectId, reporterId])
+  @@index([status, createdAt])
+  @@map("project_reports")
+}
+
+enum ProjectReportReason {
+  /// Credentials, keys, or personal data the owner probably did not mean to
+  /// publish. First because it is the one where speed matters and where the
+  /// owner is usually grateful rather than aggrieved.
+  SECRETS
+  ABUSE
+  MALWARE
+  INFRINGEMENT
+  OTHER
+}
+
+enum ProjectReportStatus {
+  OPEN
+  /// Looked at, nothing wrong. Kept rather than deleted so that a project
+  /// reported and cleared ten times reads differently from one never reported.
+  DISMISSED
+  /// Acted on: the project was made private.
+  ACTIONED
+}
+
+/// A command this project runs on a schedule, without anybody being here.
+///
+/// The unit of always-on compute that is NOT a server. A deployment answers
+/// requests and is therefore always running; a scheduled job runs for a minute
+/// and stops, which is the cheap half of "always on" and the half most people
+/// actually want — a nightly backup, an hourly fetch, a weekly digest.
+///
+/// The schedule is a five-field cron expression **in UTC**, parsed by
+/// `lib/cron.ts` rather than by a library, and `nextRunAt` is the answer to it.
+/// Storing the answer rather than re-deriving it every sweep is what lets the
+/// sweeper be one indexed query instead of a scan that parses every row.
+model ScheduledJob {
+  id String @id @default(uuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// What the owner calls it. Shown in the list and in the run history.
+  name String
+
+  /// Five cron fields, UTC. See `lib/cron.ts` for the dialect.
+  schedule String
+
+  /// Run through `/bin/sh -lc` inside the project's own container.
+  ///
+  /// A shell, deliberately: the sandbox is the security boundary here, not the
+  /// argv array. Whoever writes this already has a terminal in the same
+  /// container, so refusing them a pipe would buy nothing and cost every job
+  /// that is honestly `npm run x | tee log`.
+  command String
+
+  /// A disabled job keeps its history and its schedule and stops firing.
+  /// Deleting is the other thing, and it is not the same thing.
+  enabled Boolean @default(true)
+
+  /// When it next fires. Null when disabled, and null when the expression
+  /// parses but matches no reachable instant — `0 0 30 2 *` is valid cron and
+  /// will never happen.
+  nextRunAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  runs ScheduledRun[]
+
+  /// The sweeper's whole query: enabled jobs that are due.
+  @@index([enabled, nextRunAt])
+  @@index([projectId])
+  @@map("scheduled_jobs")
+}
+
+/// One execution of a scheduled job, kept so that "it did not run" and "it ran
+/// and failed" are different answers.
+///
+/// A row is written when the run *starts*, not when it finishes, because the
+/// interesting failure is the one that never finished — a run stuck in RUNNING
+/// is visible, where a run recorded only on completion would be indistinguishable
+/// from a run that never happened.
+model ScheduledRun {
+  id String @id @default(uuid())
+
+  jobId String
+  job   ScheduledJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  status   ScheduledRunStatus @default(RUNNING)
+  exitCode Int?
+
+  /// The tail of stdout and stderr, truncated. The tail rather than the head
+  /// because the useful line in a failed job is almost always the last one.
+  output String?
+
+  @@index([jobId, startedAt])
+  @@map("scheduled_runs")
+}
+
+enum ScheduledRunStatus {
+  RUNNING
+  SUCCEEDED
+  /// Exited non-zero.
+  FAILED
+  /// The previous run of the same job had not finished. Recorded rather than
+  /// silently passed over, so an overlapping schedule looks like the
+  /// misconfiguration it is instead of like a job that stopped firing.
+  SKIPPED
+  /// Gave up waiting. The command may still be running inside the container —
+  /// this abandons the exec, it does not kill it.
+  TIMED_OUT
+  /// Could not start at all: no container, no Docker, project has no tree.
+  ERRORED
+}
+
 model Project {
   id       String @id @default(uuid())
   name     String
@@ -134,6 +497,23 @@ model Project {
 
   ownerId String
   owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  /// When a moderator took this project down, or null.
+  ///
+  /// Distinct from `visibility` on purpose, and the distinction is the whole
+  /// point. Visibility is the OWNER's switch -- `setProjectVisibility` calls it
+  /// "a decision about who may read the source" -- so a takedown expressed as
+  /// `visibility: PRIVATE` is a decision the person it was applied to can
+  /// reverse in one request, which is what used to happen.
+  ///
+  /// Set, it does three things nothing else was doing: the owner cannot
+  /// publish again, the deployment is not served, and the embed is not
+  /// resolved. The last two are WHERE clauses rather than cleanup steps,
+  /// because a guarantee that depends on a teardown having succeeded is not a
+  /// guarantee.
+  takenDownAt DateTime?
+
+  moderationActions ModerationAction[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -147,6 +527,16 @@ model Project {
   /// own `npm run dev` is not in a fixed registry of templates, so it is read
   /// from its package.json at import and can be corrected afterwards.
   startCommand String?
+
+  /// What the test panel runs, when the template's default is not right.
+  ///
+  /// Null means "use the template's", exactly like `startCommand`, and for the
+  /// same reason: an imported repository's own test script is not in a fixed
+  /// registry. A template with no default and a project with no override means
+  /// this project has no test command, which the panel says rather than
+  /// guessing -- running `npm test` in a Go project is a worse answer than
+  /// asking.
+  testCommand String?
 
   /// Environment variables injected into this project's container, as a JSON
   /// object of string values. Stored per project rather than in a file so they
@@ -182,10 +572,12 @@ model Project {
   forks        Project[] @relation("ProjectForks")
 
   collaborators ProjectCollaborator[]
+  reports       ProjectReport[]
   deployment    Deployment?
   databaseConnection ProjectDatabaseConnection?
   managedDatabase    ManagedDatabase?
   embed              Embed?
+  scheduledJobs      ScheduledJob[]
 
   @@index([ownerId])
   /// The gallery reads this, and only this.
@@ -283,10 +675,89 @@ model Deployment {
   /// anything is published to it.
   deployedAt DateTime?
 
+  /// A hostname the owner claims to control, pointed here with a CNAME.
+  ///
+  /// Unique across every deployment, because it is an address and two sites
+  /// cannot answer at one. Unlike `subdomain` this is user-supplied, which is
+  /// the whole reason for the three columns below it: the server has no reason
+  /// to believe a claim about a name it did not generate.
+  customDomain String? @unique
+
+  /// The value the owner must publish in a TXT record to prove the claim.
+  /// Generated when the domain is claimed and regenerated on every re-claim,
+  /// so a token seen once cannot be replayed against a later claim.
+  domainToken String?
+
+  /// When the TXT record was last SEEN. Null means unverified, and an
+  /// unverified domain is never served -- a claim is not an address.
+  domainVerifiedAt DateTime?
+
+  /// When the record was last LOOKED FOR, whatever the answer. Distinct from
+  /// the line above because that is exactly the difference between "we have
+  /// never checked" and "we checked and it was gone", and a re-check that
+  /// cannot tell those apart cannot safely act on either.
+  domainCheckedAt DateTime?
+
+  /// Which release is being served, or null for a deployment published before
+  /// releases existed (its files are still in the legacy site directory).
+  ///
+  /// A pointer rather than a copy, and that is what makes a rollback a
+  /// database write instead of a file operation: every build keeps its own
+  /// directory, and going back to one is changing which directory this names.
+  /// Nothing is rebuilt, nothing is copied, and the previous build is exactly
+  /// the bytes that were serving before -- not a fresh build of a source tree
+  /// that has moved on since.
+  liveReleaseId String?
+
+  releases DeploymentRelease[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("deployments")
+}
+
+/// One published build, kept so it can be gone back to.
+///
+/// `Deployment` is the current state of a project's site and is mutated in
+/// place; this is the history it used to throw away. Before it, a publish
+/// overwrote its own predecessor and "put back the one that worked" had
+/// nothing to put back.
+///
+/// Static releases own a directory of files. A SERVICE release does not: what
+/// it published is a running container built from a source tree that has since
+/// moved on, so its row is a record and not something to roll back to. Saying
+/// that plainly is better than a rollback that silently rebuilds something
+/// else.
+model DeploymentRelease {
+  id String @id @default(uuid())
+
+  deploymentId String
+  deployment   Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  /// Copied from the deployment at publish time. A release has to keep naming
+  /// its own directory even if the deployment is later removed and the row is
+  /// read while its files are being cleaned up.
+  subdomain String
+
+  kind DeploymentKind
+
+  /// What produced it, recorded rather than looked up: rolling back to a build
+  /// means rolling back to what that build actually ran, and a template whose
+  /// defaults changed since must not rewrite history.
+  buildCommand String
+  outputDir    String
+
+  sizeBytes Int @default(0)
+
+  /// Tail of that build's output, bounded before it is written.
+  log String @default("")
+
+  createdAt DateTime @default(now())
+
+  /// Newest first, per deployment, is the whole read pattern.
+  @@index([deploymentId, createdAt])
+  @@map("deployment_releases")
 }
 
 enum DeploymentStatus {
@@ -401,4 +872,146 @@ model Embed {
   updatedAt DateTime @updatedAt
 
   @@map("embeds")
+}
+
+/// Something the platform needs to tell one person about.
+///
+/// A stored record FIRST, and mail only if mail happens to be configured. The
+/// obvious implementation -- call the mailer where the event happens -- is
+/// wrong here specifically: `lib/mailer.ts` falls back to a logging mailer
+/// that reports an ERROR per message in production, so an install without
+/// SMTP would turn every failing job into error spam and still leave its
+/// users knowing nothing. The row is the feature. The email is a transport
+/// that may not exist.
+///
+/// These are for USERS. Moderators are identified by `ADMIN_EMAILS` rather
+/// than by a role column (§2.11 chose that deliberately), so a moderator need
+/// not have a row in `users` at all and there is nothing here to hang their
+/// notifications on. The review queue notifies by mail instead.
+model Notification {
+  id String @id @default(uuid())
+
+  /// Cascade, unlike `ProjectReport.reporterId`: a report outlives its author
+  /// because somebody else still has to act on it, and news addressed to a
+  /// deleted account is addressed to nobody.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  kind NotificationKind
+
+  /// Written when the notification is created, not rendered on read. What a
+  /// message said must not change because the thing it described changed
+  /// afterwards -- "Nightly backup started failing" is a statement about a
+  /// moment, and a job later renamed or deleted does not make it untrue.
+  title String
+  body  String
+
+  /// Where to go about it: a path in the web app, already including any query
+  /// the destination needs. Null when there is nowhere useful to point.
+  link String?
+
+  readAt DateTime?
+
+  /// When this also went out as mail, or null -- which covers three different
+  /// cases deliberately left indistinguishable here: no mailer configured, an
+  /// unverified address, or a send that failed. All three mean the same thing
+  /// to the reader, and the log has the detail.
+  emailedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// The unread badge and the list are the same query with and without a
+  /// filter, newest first.
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+enum NotificationKind {
+  /// A job that was working has started failing. Sent on the TRANSITION, never
+  /// on the state: thirty consecutive failures are one piece of news, and a
+  /// message every night is how a feature meant to end silence earns itself a
+  /// filter rule and re-creates it.
+  JOB_FAILING
+
+  /// ...and the recovery, which is news for the same reason.
+  JOB_RECOVERED
+
+  /// A moderator made this project private. The one action in the system taken
+  /// against a user rather than for them, which is exactly why it must not be
+  /// something they discover by finding their own project missing.
+  PROJECT_UNPUBLISHED
+
+  /// ...and the answer to an appeal, which is the same argument: the person a
+  /// decision was made against is the person who has to hear it reversed.
+  PROJECT_REINSTATED
+
+  /// This account has crossed into the last fifth of one of its quotas. On the
+  /// crossing, once. Being over it is a state and says nothing further, and
+  /// dropping back under it is silent -- nobody was harmed by a wall they did
+  /// not hit, and somebody who has just deleted a project knows they did.
+  QUOTA_WARNING
+
+  /// An operator changed this account's plan or its limits. The same argument
+  /// the takedown notification makes: a decision taken about somebody, by
+  /// somebody else, is one they have to hear about from us rather than
+  /// discover from a refusal.
+  PLAN_CHANGED
+}
+
+/// Everything that has happened to one project's moderation state, in order.
+///
+/// The queue records the report and its status. It did not record who acted,
+/// when, or why — and unpublishing somebody's project is the one power in this
+/// system exercised AGAINST a user rather than for them. A moderator could not
+/// demonstrate they were fair and could not be shown to have been unfair.
+///
+/// The owner's appeal is in the same table as the operator's decisions, rather
+/// than in one of its own. It is the same story and it only makes sense read
+/// in order: taken down, appealed, reinstated. Two tables would be two halves
+/// of one conversation.
+model ModerationAction {
+  id String @id @default(uuid())
+
+  /// SetNull, not Cascade — for the reason `ProjectReport.reporterId` gives
+  /// about its author. An audit trail that vanishes with its subject can be
+  /// erased by deleting the subject, which is exactly the move it exists to
+  /// make visible. `projectName` is copied for the same reason.
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectName String
+
+  /// Which report occasioned this, when one did. A reinstatement follows an
+  /// appeal rather than a report, and an appeal follows neither.
+  reportId String?
+
+  action ModerationActionType
+
+  /// The email of whoever did it: an operator from `ADMIN_EMAILS` for a
+  /// decision, the owner for an appeal. Stored rather than joined, because the
+  /// record has to survive the account and because `ADMIN_EMAILS` is config —
+  /// an operator removed from that list still did what they did.
+  actor String
+
+  /// Why. Optional for a decision and required by the API for a reinstatement,
+  /// because "we put it back" without a reason is the half of the record that
+  /// makes the other half unfalsifiable.
+  reason String?
+
+  createdAt DateTime @default(now())
+
+  /// The trail for one project, oldest first, is the whole read pattern.
+  @@index([projectId, createdAt])
+  @@map("moderation_actions")
+}
+
+enum ModerationActionType {
+  /// A moderator made the project private and took it down.
+  ACTIONED
+  /// A moderator looked and found nothing wrong.
+  DISMISSED
+  /// The owner asked for the takedown to be looked at again.
+  APPEALED
+  /// A moderator lifted a takedown. Restores the owner's CONTROL, not the
+  /// project's visibility: what to do next is theirs to decide again.
+  REINSTATED
 }

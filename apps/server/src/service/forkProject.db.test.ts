@@ -25,6 +25,8 @@ describe.skipIf(!TEST_DATABASE_URL)("forking a public project", () => {
 
   let ownerId: string;
   let strangerId: string;
+  /** `setCollaborator` invites by address, not by id. */
+  let strangerEmail: string;
   let sourceId: string;
 
   /** Everything this test created, removed however it ends. */
@@ -41,8 +43,9 @@ describe.skipIf(!TEST_DATABASE_URL)("forking a public project", () => {
     const owner = await prisma.user.create({
       data: { email: scope.email("owner"), passwordHash: "x" },
     });
+    strangerEmail = scope.email("stranger");
     const stranger = await prisma.user.create({
-      data: { email: scope.email("stranger"), passwordHash: "x" },
+      data: { email: strangerEmail, passwordHash: "x" },
     });
     ownerId = owner.id;
     strangerId = stranger.id;
@@ -96,6 +99,52 @@ describe.skipIf(!TEST_DATABASE_URL)("forking a public project", () => {
     madeProjects.push(fork.id);
     return fork;
   }
+
+  describe("duplicating, which is the other way a copy is made", () => {
+    /** Duplicating keeps the variables and forking does not, on the grounds
+     *  that a duplicate is your own copy of your own project. But duplicating
+     *  is open to a VIEWER, and reading `/env` is not — it needs editor
+     *  access, because "read-only access to a project is not access to its
+     *  credentials". A viewer who could duplicate with the variables attached
+     *  would be reading, through a project they now own, exactly what that
+     *  endpoint refuses them. */
+    it("does not hand a viewer the variables it refuses to show them", async () => {
+      await accessService.setCollaborator(sourceId, ownerId, strangerEmail, "VIEWER");
+
+      const copy = await projectService.duplicateProjectService(
+        sourceId,
+        strangerId,
+      );
+      madeProjects.push(copy.id);
+
+      expect(copy.envVars).toEqual({});
+      expect(JSON.stringify(copy.envVars)).not.toContain("hunter2");
+    });
+
+    it("still carries them for an editor, who can already read them", async () => {
+      // The convenience the rule is meant to preserve: a copy that cannot run
+      // is not much of a copy, for somebody entitled to the credentials.
+      await accessService.setCollaborator(sourceId, ownerId, strangerEmail, "EDITOR");
+
+      const copy = await projectService.duplicateProjectService(
+        sourceId,
+        strangerId,
+      );
+      madeProjects.push(copy.id);
+
+      expect(copy.envVars).toEqual({ STRIPE_KEY: "sk_live_hunter2" });
+    });
+
+    it("carries them for the owner", async () => {
+      const copy = await projectService.duplicateProjectService(
+        sourceId,
+        ownerId,
+      );
+      madeProjects.push(copy.id);
+
+      expect(copy.envVars).toEqual({ STRIPE_KEY: "sk_live_hunter2" });
+    });
+  });
 
   it("refuses a stranger while the project is private", async () => {
     // Reported as missing rather than forbidden, so the endpoint cannot be

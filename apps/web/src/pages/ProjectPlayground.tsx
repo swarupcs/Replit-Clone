@@ -15,6 +15,8 @@ import {
   VscDatabase,
   VscSymbolClass,
   VscCloudUpload,
+  VscWatch,
+  VscBeaker,
   VscSettingsGear,
   VscSparkle,
   VscRepoForked,
@@ -55,6 +57,8 @@ import { SearchPanel } from "../components/organisms/SearchPanel/SearchPanel.tsx
 import { SourceControlPanel } from "../components/organisms/SourceControlPanel/SourceControlPanel.tsx";
 import { PackagesPanel } from "../components/organisms/PackagesPanel/PackagesPanel.tsx";
 import { DeployPanel } from "../components/organisms/DeployPanel/DeployPanel.tsx";
+import { JobsPanel } from "../components/organisms/JobsPanel/JobsPanel.tsx";
+import { TestsPanel } from "../components/organisms/TestsPanel/TestsPanel.tsx";
 import { AiPanel } from "../components/organisms/AiPanel/AiPanel.tsx";
 import { getAiStatusApi } from "../apis/ai.ts";
 import { forkProjectApi } from "../apis/projects.ts";
@@ -156,6 +160,8 @@ export const ProjectPlayground = () => {
     | "git"
     | "packages"
     | "deploy"
+    | "jobs"
+    | "tests"
     | "database"
     | "outline"
     | "ai"
@@ -915,6 +921,26 @@ export const ProjectPlayground = () => {
                     <VscCloudUpload size={16} />
                   </button>
                 </Tooltip>
+                <Tooltip title="Scheduled jobs" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "jobs"}
+                    aria-label="Scheduled jobs"
+                    onClick={() => setSidebarView("jobs")}
+                  >
+                    <VscWatch size={16} />
+                  </button>
+                </Tooltip>
+                <Tooltip title="Tests" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "tests"}
+                    aria-label="Tests"
+                    onClick={() => setSidebarView("tests")}
+                  >
+                    <VscBeaker size={16} />
+                  </button>
+                </Tooltip>
                 <Tooltip title="Outline" placement="right">
                   <button
                     className="rc-icon-button"
@@ -1012,6 +1038,34 @@ export const ProjectPlayground = () => {
                     <ErrorBoundary label="Deploy">
                       <DeployPanel
                         projectId={projectIdFromUrl}
+                        isOwner={accessLevel === "owner"}
+                      />
+                    </ErrorBoundary>
+                  </div>
+                )}
+
+                {/* Mounted only while showing, like the deploy pane: opening
+                    it re-reads the jobs and their last runs, which is the
+                    whole reason somebody opens it. */}
+                {sidebarView === "jobs" && projectIdFromUrl && (
+                  <div style={{ height: "100%", overflow: "auto" }}>
+                    <ErrorBoundary label="Scheduled jobs">
+                      <JobsPanel
+                        projectId={projectIdFromUrl}
+                        isOwner={accessLevel === "owner"}
+                      />
+                    </ErrorBoundary>
+                  </div>
+                )}
+
+                {sidebarView === "tests" && projectIdFromUrl && (
+                  <div style={{ height: "100%", overflow: "auto" }}>
+                    <ErrorBoundary label="Tests">
+                      <TestsPanel
+                        projectId={projectIdFromUrl}
+                        // Running executes code in the container, which is the
+                        // grant `Run` needs rather than one reading implies.
+                        canRun={accessLevel === "owner" || accessLevel === "editor"}
                         isOwner={accessLevel === "owner"}
                       />
                     </ErrorBoundary>

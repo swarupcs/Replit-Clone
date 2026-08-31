@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { envVarsSchema, parseEnvVars, toDockerEnv } from "./projectEnvService.js";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  envVarsEncryptedAtRest,
+  envVarsSchema,
+  parseEnvVars,
+  toDockerEnv,
+} from "./projectEnvService.js";
+import { seal } from "../lib/secretBox.js";
+import { env } from "../config/env.js";
 
 const accepts = (vars: unknown) => envVarsSchema.safeParse(vars).success;
 
@@ -84,5 +91,100 @@ describe("toDockerEnv", () => {
 
   it("renders an empty value", () => {
     expect(toDockerEnv({ EMPTY: "" })).toEqual(["EMPTY="]);
+  });
+});
+
+/** Reading a column that holds ciphertext, plain text, or both.
+ *
+ *  Both, necessarily: this column was plain text until it was not, and a
+ *  server that could not read what it wrote last week would lose every
+ *  variable on the machine at the moment it was upgraded.
+ *
+ *  The schema is parsed once at import, so a test wanting a particular key
+ *  writes it onto the parsed object and puts it back afterwards.
+ */
+describe("reading stored values", () => {
+  const original = env.SECRET_ENCRYPTION_KEY;
+  const KEY = Buffer.alloc(32, 5).toString("base64");
+
+  afterEach(() => {
+    env.SECRET_ENCRYPTION_KEY = original;
+  });
+
+  it("opens a sealed value", () => {
+    env.SECRET_ENCRYPTION_KEY = KEY;
+
+    expect(parseEnvVars({ STRIPE_KEY: seal("sk_live_hunter2") })).toEqual({
+      STRIPE_KEY: "sk_live_hunter2",
+    });
+  });
+
+  it("passes through a row written before this was encrypted", () => {
+    // The upgrade path. Without it, turning encryption on empties every
+    // project's environment on the next read.
+    env.SECRET_ENCRYPTION_KEY = KEY;
+
+    expect(parseEnvVars({ API_URL: "https://example.com" })).toEqual({
+      API_URL: "https://example.com",
+    });
+  });
+
+  it("reads a row that is half sealed and half not", () => {
+    // Exactly what a backfill interrupted part-way leaves behind.
+    env.SECRET_ENCRYPTION_KEY = KEY;
+
+    expect(
+      parseEnvVars({ OLD: "plain", NEW: seal("sealed") }),
+    ).toEqual({ OLD: "plain", NEW: "sealed" });
+  });
+
+  it("drops a value it cannot open rather than returning the ciphertext", () => {
+    // The failure that matters. A wrong key must not silently become "the
+    // secret is this base64 blob" -- the container would start with a
+    // credential that is not a credential, and nothing would say why.
+    env.SECRET_ENCRYPTION_KEY = KEY;
+    const sealed = seal("sk_live_hunter2");
+    env.SECRET_ENCRYPTION_KEY = Buffer.alloc(32, 6).toString("base64");
+
+    const read = parseEnvVars({ STRIPE_KEY: sealed, API_URL: "https://x" });
+
+    expect(read["STRIPE_KEY"]).toBeUndefined();
+    expect(JSON.stringify(read)).not.toContain(sealed);
+    // One unreadable variable costs one variable. A project with nine good
+    // ones should still start with nine.
+    expect(read).toEqual({ API_URL: "https://x" });
+  });
+
+  it("still drops the entries a hand-edited row could introduce", () => {
+    env.SECRET_ENCRYPTION_KEY = KEY;
+
+    expect(
+      parseEnvVars({ GOOD: seal("1"), "BAD NAME": seal("2"), ALSO_BAD: 3 }),
+    ).toEqual({ GOOD: "1" });
+  });
+});
+
+describe("envVarsEncryptedAtRest", () => {
+  const original = env.SECRET_ENCRYPTION_KEY;
+
+  afterEach(() => {
+    env.SECRET_ENCRYPTION_KEY = original;
+  });
+
+  it("is false with no key, so the panel can say so", () => {
+    // A server that stores these in the clear and looks identical to one that
+    // does not is a panel that lies on one of the two.
+    delete env.SECRET_ENCRYPTION_KEY;
+    expect(envVarsEncryptedAtRest()).toBe(false);
+  });
+
+  it("is false for a key that is the wrong length", () => {
+    env.SECRET_ENCRYPTION_KEY = Buffer.alloc(16, 1).toString("base64");
+    expect(envVarsEncryptedAtRest()).toBe(false);
+  });
+
+  it("is true for a usable key", () => {
+    env.SECRET_ENCRYPTION_KEY = Buffer.alloc(32, 5).toString("base64");
+    expect(envVarsEncryptedAtRest()).toBe(true);
   });
 });

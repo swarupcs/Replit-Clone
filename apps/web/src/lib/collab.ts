@@ -2,6 +2,11 @@ import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import { MonacoBinding } from "y-monaco";
 import { discardWrite } from "./pendingWrites.ts";
+import {
+  applyCursorStyles,
+  safeColor,
+  type CursorStyle,
+} from "./remoteCursors.ts";
 import type { editor } from "monaco-editor";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
@@ -64,9 +69,37 @@ export interface Peer {
   files: string[];
 }
 
+/** Where somebody's editor is scrolled to, in line numbers.
+ *
+ *  Published per document, because a person in two files is scrolled to two
+ *  different places and only the one in the file being followed matters. */
+export interface Viewport {
+  top: number;
+  bottom: number;
+}
+
+interface Present {
+  clientId: number;
+  name: string;
+  color: string;
+  viewport?: Viewport;
+}
+
+/** A viewport as it arrives from another client — which is to say, unvalidated.
+ *  Anything that is not a pair of finite line numbers is not a viewport. */
+function readViewport(value: unknown): Viewport | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+
+  const { top, bottom } = value as { top?: unknown; bottom?: unknown };
+  if (typeof top !== "number" || typeof bottom !== "number") return undefined;
+  if (!Number.isFinite(top) || !Number.isFinite(bottom)) return undefined;
+
+  return { top, bottom };
+}
+
 /** Reads one document's awareness, skipping our own entry. */
-function othersIn(live: LiveDoc): { name: string; color: string }[] {
-  const found: { name: string; color: string }[] = [];
+function othersIn(live: LiveDoc): Present[] {
+  const found: Present[] = [];
 
   for (const [clientId, state] of live.awareness.getStates()) {
     if (clientId === live.awareness.clientID) continue;
@@ -75,8 +108,16 @@ function othersIn(live: LiveDoc): { name: string; color: string }[] {
     if (typeof user?.name !== "string") continue;
 
     found.push({
+      clientId,
       name: user.name,
-      color: typeof user.color === "string" ? user.color : colorFor(user.name),
+      // Not `typeof === "string"`: this colour is interpolated into a
+      // stylesheet by `remoteCursors`, and a string is not the same thing as a
+      // colour. A peer whose colour does not parse gets the one derived from
+      // their name, which is what they would have had anyway.
+      color: safeColor(user.color, colorFor(user.name)),
+      viewport: readViewport(
+        (state as { viewport?: unknown }).viewport,
+      ),
     });
   }
 
@@ -131,7 +172,70 @@ export function subscribeCollab(listener: Listener): () => void {
 }
 
 function notify(): void {
+  // Other people's carets are drawn by CSS whose rules name their client ids,
+  // so the stylesheet has to be rebuilt whenever the set of people changes.
+  // Hung off `notify` rather than off the awareness handler because a document
+  // being torn down removes cursors too, and that path does not go through
+  // awareness at all.
+  applyCursorStyles(cursorStyles());
+
   for (const listener of listeners) listener();
+}
+
+/** Everyone visible right now, as the stylesheet needs them.
+ *
+ *  Not folded by name the way `peers` folds: the same person in two files is
+ *  two client ids and each one decorates its own document, so both need a
+ *  rule even though they share a name and a colour. */
+function cursorStyles(): CursorStyle[] {
+  const found: CursorStyle[] = [];
+
+  for (const live of docs.values()) {
+    for (const person of othersIn(live)) {
+      found.push({
+        clientId: person.clientId,
+        name: person.name,
+        color: person.color,
+      });
+    }
+  }
+
+  return found;
+}
+
+/** Where a named collaborator is scrolled to in one file.
+ *
+ *  Per file rather than per person: `peers` folds somebody in two documents
+ *  into one entry, and a single scroll position for two files is meaningless.
+ */
+export function viewportIn(relPath: string, name: string): Viewport | undefined {
+  const live = docs.get(relPath);
+  if (!live) return undefined;
+
+  return othersIn(live).find((person) => person.name === name)?.viewport;
+}
+
+/** Last viewport put on the wire, per file.
+ *
+ *  Scrolling fires continuously and awareness broadcasts on every local
+ *  change, so publishing unconditionally would put a packet on the socket for
+ *  every frame of a flick-scroll. Only a change in the visible LINES is worth
+ *  telling anyone about — pixel-level movement within a line is not something
+ *  a follower could act on. */
+const publishedViewports = new Map<string, Viewport>();
+
+/** Publishes this editor's visible range for anyone following. */
+export function publishViewport(relPath: string, viewport: Viewport): void {
+  const live = docs.get(relPath);
+  if (!live) return;
+
+  const last = publishedViewports.get(relPath);
+  if (last && last.top === viewport.top && last.bottom === viewport.bottom) {
+    return;
+  }
+
+  publishedViewports.set(relPath, viewport);
+  live.awareness.setLocalStateField("viewport", viewport);
 }
 
 /** Wires the socket's collaboration events into the local documents.
@@ -340,6 +444,10 @@ function destroy(relPath: string, live: LiveDoc): void {
   live.awareness.destroy();
   live.doc.destroy();
   docs.delete(relPath);
+  // Otherwise reopening the file starts with a "last published" that no longer
+  // matches an awareness state anybody holds, and the first scroll back to
+  // where you were would be suppressed as a no-op.
+  publishedViewports.delete(relPath);
   notify();
 }
 

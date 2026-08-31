@@ -8,6 +8,10 @@ import authRouter from "./auth.js";
 import projectRouter from "./projects.js";
 import githubRouter from "./github.js";
 import embedRouter from "./embeds.js";
+import adminRouter from "./admin.js";
+import notificationRouter from "./notifications.js";
+import accountRouter from "./account.js";
+import pubRouter from "./pub.js";
 
 const router = express.Router();
 
@@ -25,6 +29,21 @@ router.get("/ai/status", requireAuth, asyncHandler(aiStatusController));
 router.use("/auth", authRouter);
 router.use("/projects", projectRouter);
 router.use("/github", githubRouter);
+// Scoped entirely by the auth context -- there is no id in any path here,
+// which is the only kind of scoping nobody can forget to apply.
+router.use("/notifications", requireAuth, notificationRouter);
+// The same, and for the same reason.
+router.use("/account", requireAuth, accountRouter);
+// Behind requireAuth here, and behind requireAdmin inside. Both: the inner
+// guard reads the auth context, so a router that mounted it alone would fail
+// as an Unauthorized rather than as the wiring mistake it is.
+router.use("/admin", requireAuth, adminRouter);
+// Deliberately NOT behind requireAuth: this is the API-key surface, and a key
+// is not a session. It authenticates itself, and the set of things it can
+// reach is the set of routes written in that file -- see routes/v1/pub.ts for
+// why that is the enforcement rather than a convenience.
+router.use("/pub", pubRouter);
+
 // Deliberately NOT behind requireAuth: an embed is read by people who have
 // no account here and never will. See routes/v1/embeds.ts.
 router.use("/embeds", embedRouter);

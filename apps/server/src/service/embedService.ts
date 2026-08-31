@@ -238,8 +238,13 @@ async function resolveToken(rawToken: string): Promise<{
     throw new NotFoundError("That embed is not available");
   }
 
-  const row = await prisma.embed.findUnique({
-    where: { token: rawToken },
+  // An embed is a capability token and is deliberately independent of
+  // `visibility` -- an owner may embed a private project, and that is the
+  // feature. A moderator's takedown is not visibility: it is the statement
+  // that this must stop being served to strangers, and an embed is exactly the
+  // anonymous surface it has to reach.
+  const row = await prisma.embed.findFirst({
+    where: { token: rawToken, project: { takenDownAt: null } },
     include: { project: { select: { id: true, name: true, template: true } } },
   });
 

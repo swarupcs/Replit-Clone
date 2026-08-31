@@ -160,8 +160,11 @@ export async function previewShareLinkController(
 
   const project =
     typeof token === "string" && token.length > 0
-      ? await prisma.project.findUnique({
-          where: { shareToken: token },
+      ? await prisma.project.findFirst({
+          // Same clause as `redeemShareToken`. A preview that still named a
+          // taken-down project would make this the one endpoint that confirms
+          // moderation acted, to anybody holding the link.
+          where: { shareToken: token, takenDownAt: null },
           select: { name: true, template: true },
         })
       : null;

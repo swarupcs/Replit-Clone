@@ -37,6 +37,13 @@ const { prismaMock } = vi.hoisted(() => ({
 }));
 vi.mock("../lib/prisma.js", () => ({ prisma: prismaMock }));
 
+/** Provisioning now asks whether the owner's plan includes managed databases.
+ *  That question has its own tests; here it is answered yes, so these keep
+ *  testing what they were written to test. */
+vi.mock("./entitlementService.js", () => ({
+  assertFeature: vi.fn(() => Promise.resolve()),
+}));
+
 vi.mock("../lib/secretBox.js", () => ({
   seal: (value: string) => `v1.${Buffer.from(value).toString("base64url")}`,
   open: (value: string) => {

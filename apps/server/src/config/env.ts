@@ -148,6 +148,20 @@ const envSchema = z.object({
    *  cannot be unbounded. */
   DEPLOY_BUILD_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(10),
 
+  /** Who may read the report queue and act on it.
+   *
+   *  A comma-separated allowlist of email addresses rather than a column on
+   *  `User`, because this app is deployed as one operator running their own
+   *  instance and a role column would need a way to make the first admin --
+   *  which is its own bootstrapping problem, solved by an env var anyway.
+   *
+   *  Empty by default, and an empty allowlist means **nobody**, not everybody.
+   *  A deployment that has not thought about moderation gets a queue no one
+   *  can open, which is inert; the other way round it would hand the queue to
+   *  every account that signed up.
+   */
+  ADMIN_EMAILS: z.string().default(""),
+
   WEB_ORIGIN: z.string().url().default("http://localhost:5273"),
 
   /** This server's own public origin. Needed because an OAuth redirect_uri has

@@ -7,6 +7,16 @@ const aiService = vi.hoisted(() => ({
 }));
 
 vi.mock("../service/aiService.js", () => aiService);
+
+/** The handler resolves the asking account's hourly allowance before spending
+ *  against it. Mocked rather than left to reach the database, which in this
+ *  file is not configured — the real one would fail open to the free plan
+ *  after a two-second timeout, and every assertion here would be racing it. */
+vi.mock("../service/entitlementService.js", () => ({
+  resolveEntitlements: vi.fn(() =>
+    Promise.resolve({ aiRequestsPerHour: 60, planLabel: "Free" }),
+  ),
+}));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   extendLogContext: vi.fn(),
@@ -239,7 +249,10 @@ describe("installAiHandler", () => {
     harness.fire("aiAsk", QUESTION);
     await settle();
 
-    expect(aiService.assertWithinAiBudget).toHaveBeenCalledWith(USER);
+    // The allowance passed with it is the ASKING account's plan, for the same
+    // reason the identity is: a viewer asking questions in somebody else's
+    // project spends their own hour, not the owner's.
+    expect(aiService.assertWithinAiBudget).toHaveBeenCalledWith(USER, 60);
   });
 
   /** The panel is hidden when unconfigured, so this is the belt to that

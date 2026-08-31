@@ -30,6 +30,11 @@ export interface LogContext {
   requestId: string;
   userId?: string;
   projectId?: string;
+  /** Which API key made the request, when one did. After an incident the
+   *  question is which credential did it, and an account id cannot answer
+   *  that — an account may hold ten keys and revoking all of them is not the
+   *  same thing as revoking the one that leaked. */
+  apiKeyId?: string;
 }
 
 const storage = new AsyncLocalStorage<LogContext>();

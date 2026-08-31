@@ -49,6 +49,19 @@ export interface TemplateDefinition {
    *  every template has one of them so a new one cannot quietly ship
    *  unpublishable. */
   serviceDeploy?: ServiceDeploy;
+  /** What the test panel runs by default, inside the project's container.
+   *
+   *  Optional, and absent is a real answer rather than a gap: `static-html`
+   *  has nothing to test, and a template that guessed would run a command that
+   *  fails for a reason the person reading the output cannot act on. A project
+   *  may override it with `Project.testCommand`.
+   *
+   *  These are the commands the starter files actually support. A JS template
+   *  ships no test runner, so `npm test` here would fail on a fresh project --
+   *  which is the honest outcome and says what to do next ("no test script"),
+   *  where inventing `vitest run` would fail with a command-not-found nobody
+   *  asked for. */
+  testCommand?: string;
 }
 
 export interface ServiceDeploy {
@@ -82,6 +95,7 @@ export const TEMPLATE_FILES_ROOT = path.resolve(here, "../../templates");
 export const TEMPLATES: Record<string, TemplateDefinition> = {
   "react-vite": {
     id: "react-vite",
+    testCommand: "npm test",
     label: "React (Vite)",
     image: "sandbox-node:latest",
     devPort: 5173,
@@ -94,6 +108,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
   },
   "react-vite-ts": {
     id: "react-vite-ts",
+    testCommand: "npm test",
     label: "React (Vite) + TypeScript",
     image: "sandbox-node:latest",
     devPort: 5173,
@@ -105,6 +120,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
   },
   "node-express": {
     id: "node-express",
+    testCommand: "npm test",
     label: "Node (Express)",
     image: "sandbox-node:latest",
     devPort: 3000,
@@ -122,6 +138,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
   },
   "node-express-postgres": {
     id: "node-express-postgres",
+    testCommand: "npm test",
     label: "Node (Express + Postgres)",
     image: "sandbox-node:latest",
     devPort: 3000,
@@ -149,6 +166,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
   },
   "node-express-ts": {
     id: "node-express-ts",
+    testCommand: "npm test",
     label: "Node (Express) + TypeScript",
     image: "sandbox-node:latest",
     devPort: 3000,
@@ -179,6 +197,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
   },
   "nextjs": {
     id: "nextjs",
+    testCommand: "npm test",
     label: "Next.js",
     image: "sandbox-node:latest",
     devPort: 3000,
@@ -192,6 +211,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
   },
   "nextjs-ts": {
     id: "nextjs-ts",
+    testCommand: "npm test",
     label: "Next.js + TypeScript",
     image: "sandbox-node:latest",
     devPort: 3000,
@@ -205,6 +225,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
   },
   "vue-vite": {
     id: "vue-vite",
+    testCommand: "npm test",
     label: "Vue (Vite)",
     image: "sandbox-node:latest",
     devPort: 5173,
@@ -216,6 +237,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
   },
   "svelte-vite": {
     id: "svelte-vite",
+    testCommand: "npm test",
     label: "Svelte (Vite)",
     image: "sandbox-node:latest",
     devPort: 5173,
@@ -227,6 +249,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
   },
   "python-flask": {
     id: "python-flask",
+    testCommand: "pytest",
     label: "Python (Flask)",
     image: "sandbox-python:latest",
     devPort: 5000,
@@ -249,6 +272,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
   },
   "python-fastapi": {
     id: "python-fastapi",
+    testCommand: "pytest",
     label: "Python (FastAPI)",
     image: "sandbox-python:latest",
     devPort: 8000,
@@ -269,6 +293,7 @@ export const TEMPLATES: Record<string, TemplateDefinition> = {
   },
   "go-http": {
     id: "go-http",
+    testCommand: "go test ./...",
     label: "Go (net/http)",
     image: "sandbox-go:latest",
     devPort: 8080,

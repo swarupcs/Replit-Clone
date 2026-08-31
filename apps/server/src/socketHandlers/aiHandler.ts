@@ -1,4 +1,5 @@
 import type { AiAskPayload } from "@replit-clone/shared";
+import { resolveEntitlements } from "../service/entitlementService.js";
 import {
   assertWithinAiBudget,
   isAiConfigured,
@@ -61,7 +62,10 @@ export function installAiHandler(socket: EditorSocket): void {
       inFlight = controller;
 
       try {
-        assertWithinAiBudget(userId);
+        // How many questions an hour is a plan's number, not the
+        // deployment's. Resolved here because this path is already async.
+        const { aiRequestsPerHour } = await resolveEntitlements(userId);
+        assertWithinAiBudget(userId, aiRequestsPerHour);
         increment("ai_requests");
 
         const stopReason = await streamAssistantReply({

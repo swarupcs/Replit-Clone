@@ -36,6 +36,7 @@ import {
 } from "../../../store/gitGutterStore.ts";
 import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
 import { useLanguageServer } from "../../../hooks/useLanguageServer.ts";
+import { useViewportSync } from "../../../hooks/useViewportSync.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
 import {
@@ -344,6 +345,19 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     // `mounted` for the same reason as the attach effect above: on the first
     // file, Monaco has not produced an editor yet and this would bind nothing.
   }, [activeTab?.relPath, editorSocket, canEdit, user?.email, user?.id, mountTick]);
+
+  /** Follow mode's second half: their scroll position, not just their file.
+   *
+   *  Primary pane only, and only while this pane can edit — which is the same
+   *  condition the document itself is retained under, because a viewport
+   *  belongs to a live document and there is none without it.
+   */
+  useViewportSync({
+    editor: pane === "primary" ? editorRef.current : null,
+    relPath: activeTab?.relPath,
+    enabled: pane === "primary" && canEdit && Boolean(editorSocket),
+    mountTick,
+  });
 
   /** Document symbols, for the breadcrumbs and the outline.
    *

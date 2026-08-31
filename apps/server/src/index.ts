@@ -62,6 +62,9 @@ import {
 } from "./containers/containerManager.js";
 import { ensureEgressGateway } from "./containers/egressGateway.js";
 import { restoreServices } from "./service/deployService.js";
+import { recheckDomains } from "./service/customDomainService.js";
+import { backfillSealedEnvVars } from "./service/projectEnvService.js";
+import { runDueJobs } from "./service/scheduleService.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
 import { SandboxNetworkMismatch } from "./containers/sandboxNetwork.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
@@ -314,6 +317,63 @@ function startTokenPrune(): void {
   setInterval(sweep, 60 * 60 * 1000).unref();
 }
 
+/** Re-checks the DNS record behind every verified custom domain.
+ *
+ *  A verification that happened once and is believed forever means somebody
+ *  who sold their domain keeps an address they no longer control, and the
+ *  buyer's visitors land on the seller's code. `recheckDomains` only looks at
+ *  rows whose last check has aged out, so this interval is how *often it can*
+ *  notice rather than how often it queries anything.
+ *
+ *  Hourly against a daily staleness window, for the same reason the token
+ *  prune is: it keeps the first sweep after a restart soon.
+ */
+function startDomainRecheck(): void {
+  const sweep = (): void => {
+    void recheckDomains()
+      .then(({ checked, cleared }) => {
+        if (checked > 0) logger.info("custom domains re-checked", { checked, cleared });
+      })
+      .catch((error: unknown) => {
+        logger.error("could not re-check custom domains", error);
+      });
+  };
+
+  sweep();
+  setInterval(sweep, 60 * 60 * 1000).unref();
+}
+
+/** Starts the scheduled jobs that have come due.
+ *
+ *  Every minute, because cron's resolution is a minute and a sweeper that runs
+ *  less often than the smallest unit it schedules is a scheduler that is
+ *  quietly wrong — a job set for 03:00 firing at 03:04 is not what was asked
+ *  for, and nothing in the interface would say so.
+ *
+ *  The sweep itself is one indexed query on `(enabled, nextRunAt)` and returns
+ *  nothing almost every time it runs. That is the point of storing the next
+ *  firing rather than deriving it: a minute's tick costs a query, not a parse
+ *  of every expression on the machine.
+ *
+ *  NOT `unref`'d, unlike the hourly sweeps. A process whose only remaining
+ *  work is a scheduled job should stay alive to do it; the hourly ones are
+ *  housekeeping that can wait for the next boot.
+ */
+function startJobSweeper(): void {
+  const sweep = (): void => {
+    void runDueJobs()
+      .then(({ started }) => {
+        if (started > 0) logger.info("scheduled jobs started", { started });
+      })
+      .catch((error: unknown) => {
+        logger.error("could not sweep scheduled jobs", error);
+      });
+  };
+
+  sweep();
+  setInterval(sweep, 60 * 1000);
+}
+
 /** How long a Docker call at boot may take before we give up on it.
  *
  *  The daemon can accept a connection and then never answer -- it is
@@ -414,7 +474,18 @@ async function start(): Promise<void> {
   });
   startIdleReaper();
   startTokenPrune();
+  startDomainRecheck();
+  startJobSweeper();
   startAccessWatch();
+
+  // Once, at boot, rather than on a timer: it is a migration, not a sweep. A
+  // SQL migration could not do it -- the key lives in the environment, which
+  // is the property that makes a leaked dump worthless -- and it cannot be
+  // lazy-on-read either, because reads do not write and a project nobody
+  // opens would keep its secrets in the clear indefinitely.
+  void backfillSealedEnvVars().catch((error: unknown) => {
+    logger.error("could not seal environment variables", error);
+  });
 
   // A `tsx watch` restart can race the previous process releasing the port on
   // Windows, which otherwise kills the dev server outright.

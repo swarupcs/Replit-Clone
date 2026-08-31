@@ -2,11 +2,18 @@ import type { Request, Response } from "express";
 import { getAuthContext } from "../middlewares/requireAuth.js";
 import { assertProjectAccess } from "../service/projectAccessService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
+import { z } from "zod";
 import {
   deploymentState,
   publish,
   unpublish,
 } from "../service/deployService.js";
+import {
+  claimDomain,
+  releaseDomain,
+  verifyDomain,
+} from "../service/customDomainService.js";
+import { listReleases, rollbackTo } from "../service/releaseService.js";
 
 /** Who may do what with a deployment.
  *
@@ -53,6 +60,42 @@ export async function deployController(
   });
 }
 
+/** A project's published builds, newest first.
+ *
+ *  A viewer's, like reading the deployment itself: this is the history of a
+ *  thing that is public by construction.
+ */
+export async function listReleasesController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  res.json({
+    success: true,
+    message: "Releases",
+    data: { releases: await listReleases(projectId) },
+  });
+}
+
+/** Serving an earlier build again.
+ *
+ *  The owner's, exactly like publishing: this changes what strangers get at a
+ *  public address, and it is the same decision made in the other direction.
+ */
+export async function rollbackController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "owner");
+  const releaseId = z.string().uuid().parse(req.params["releaseId"]);
+
+  res.json({
+    success: true,
+    message: "Rolled back",
+    data: { releases: await rollbackTo(projectId, releaseId) },
+  });
+}
+
 export async function undeployController(
   req: Request,
   res: Response,
@@ -63,6 +106,65 @@ export async function undeployController(
   res.json({
     success: true,
     message: "Taken offline",
+    data: await deploymentState(projectId),
+  });
+}
+
+/* ---- custom domains ---- */
+
+/** The owner's alone, like publishing and for the same reason.
+ *
+ *  Pointing a name at a deployment is a decision about an address the whole
+ *  internet reaches, and an editor having write access to a file is not the
+ *  same decision. Verification is owner-only too even though it only reads
+ *  DNS: it is the step that makes the address live.
+ */
+const domainSchema = z.object({
+  // Length and shape are settled in `normalizeDomain`, which produces errors
+  // that say what to do next. This bound only keeps an unreasonable body out
+  // of the parser.
+  domain: z.string().min(1).max(300),
+});
+
+export async function claimDomainController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "owner");
+  const { domain } = domainSchema.parse(req.body);
+
+  res.json({
+    success: true,
+    message:
+      "Domain claimed. Add the TXT record shown, then verify — DNS usually " +
+      "propagates within a few minutes.",
+    data: await claimDomain({ projectId, domain }),
+  });
+}
+
+export async function verifyDomainController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "owner");
+
+  res.json({
+    success: true,
+    message: "Domain verified. It is serving now.",
+    data: await verifyDomain(projectId),
+  });
+}
+
+export async function releaseDomainController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "owner");
+  await releaseDomain(projectId);
+
+  res.json({
+    success: true,
+    message: "Domain removed",
     data: await deploymentState(projectId),
   });
 }

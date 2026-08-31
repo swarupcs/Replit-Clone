@@ -154,6 +154,35 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
     expect(await service.listAccessibleProjects(strangerId)).toHaveLength(0);
   });
 
+  /** The list used to return whole `Project` rows, which is the hazard the
+   *  comment on `listPublicProjects` names twenty lines below it. A viewer got
+   *  `shareToken` -- a bearer credential that redeems at the link's role, so a
+   *  read-only collaborator could hand out access the owner never offered --
+   *  and the names of every environment variable, which 2.14 settled is not
+   *  something read-only access carries. */
+  it("does not hand a viewer the share token or the env var names", async () => {
+    await service.rotateShareToken(projectId, ownerId, service.ProjectRole.VIEWER);
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { envVars: { STRIPE_SECRET_KEY: "sealed" } },
+    });
+    await service.setCollaborator(
+      projectId,
+      ownerId,
+      await emailOf(mateId),
+      service.ProjectRole.VIEWER,
+    );
+
+    const [listed] = await service.listAccessibleProjects(mateId);
+
+    expect(listed).toBeDefined();
+    expect(listed).not.toHaveProperty("shareToken");
+    expect(listed).not.toHaveProperty("envVars");
+    // Still everything the dashboard actually renders.
+    expect(listed).toMatchObject({ id: projectId, visibility: "PRIVATE" });
+    expect(listed?.takenDownAt).toBeNull();
+  });
+
   it("revokes access when a collaborator is removed", async () => {
     await service.setCollaborator(
       projectId,
@@ -370,8 +399,16 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
         service.ProjectVisibility.PUBLIC,
       );
 
-      const listed = await service.listPublicProjects();
+      // Restricted to this suite's own rows. `listPublicProjects` is global,
+      // as a gallery has to be, so serialising the whole list here would make
+      // the assertion depend on what every other suite happens to have
+      // published at that moment.
+      const listed = (await service.listPublicProjects()).filter(
+        (row) => row.id === projectId,
+      );
       const serialised = JSON.stringify(listed);
+
+      expect(listed).toHaveLength(1);
 
       expect(serialised).not.toContain("hunter2");
       expect(serialised).not.toContain("s3cret-token");

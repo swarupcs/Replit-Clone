@@ -1,7 +1,7 @@
 import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { BadRequestError, UnauthorizedError } from "../utils/errors.js";
-import type { PublicUser } from "./authService.js";
+import { toPublicUser, type PublicUser } from "./authService.js";
 
 /** GitHub sign-in.
  *
@@ -108,7 +108,7 @@ export async function signInWithGithub(code: string): Promise<PublicUser> {
 
   const existing = await prisma.user.findUnique({ where: { githubId } });
   if (existing) {
-    return { id: existing.id, email: existing.email };
+    return toPublicUser(existing);
   }
 
   const email = await resolveEmail(profile, token);
@@ -129,7 +129,7 @@ export async function signInWithGithub(code: string): Promise<PublicUser> {
     update: { githubId, avatarUrl: profile.avatar_url },
   });
 
-  return { id: user.id, email: user.email };
+  return toPublicUser(user);
 }
 
 /** Picks the address to link this account by.

@@ -46,7 +46,53 @@ export type CounterName =
   | "embeds_created"
   | "embeds_revoked"
   | "embed_views"
-  | "embed_path_rejected";
+  | "embed_path_rejected"
+  // Moderation. `project_reported` climbing while `report_actioned` and
+  // `report_dismissed` stay flat is the signal that matters most here: it says
+  // the queue is filling and nobody is reading it, which is the failure mode a
+  // report mechanism with no reviewer actually has.
+  | "project_reported"
+  | "report_actioned"
+  | "report_dismissed"
+  // Custom domains. `domain_unverified` climbing is the interesting one: it
+  // counts names that were verified and are not any more, which is either
+  // somebody's DNS breaking or a domain changing hands.
+  | "domain_verified"
+  | "domain_unverified"
+  // Scheduled jobs. `jobs_skipped` is the one that says a schedule is wrong
+  // rather than a command: it counts firings that found the previous run still
+  // going, which is a job asked to run more often than it takes to run.
+  | "jobs_created"
+  | "jobs_started"
+  | "jobs_succeeded"
+  | "jobs_failed"
+  | "jobs_skipped"
+  // Notifications. `notifications_created` against `notifications_mailed` is
+  // the honest measure of how much of this actually reaches anybody: the gap
+  // between them is people who have to open the app to find out, which is the
+  // condition the feature was built to end.
+  | "notifications_created"
+  | "notifications_mailed"
+  // Moderation, after the fact. `moderation_appealed` climbing while
+  // `moderation_reinstated` stays flat is the number that says appeals are
+  // being filed and not read -- the same shape as a report queue nobody
+  // reviews, one step further along.
+  | "moderation_appealed"
+  | "moderation_reinstated"
+  // The operator's authority over ACCOUNTS, which is newer and larger than the
+  // one over projects. Counted for the same reason it is logged: a power that
+  // acts on a person should be visible in aggregate, not only per incident.
+  | "account_plan_changed"
+  | "account_override_changed"
+  // Test runs. `test_runs_errored` is the one that is never about the user's
+  // code: it counts runs that never reached a container.
+  | "test_runs_started"
+  | "test_runs_passed"
+  | "test_runs_failed"
+  | "test_runs_errored"
+  // A rollback is a publish that undoes one. Climbing against
+  // `deploys_succeeded` says builds are going out that should not have.
+  | "deploys_rolled_back";
 
 const counters = new Map<CounterName, number>();
 

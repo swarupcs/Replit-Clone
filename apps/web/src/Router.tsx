@@ -20,6 +20,15 @@ const ProjectPlayground = lazy(() =>
   })),
 );
 
+/** Lazy because almost nobody is an operator. The queue is one page of table
+ *  and two buttons, but it is a page every other visitor would download to
+ *  never open. */
+const ReportQueue = lazy(() =>
+  import("./pages/ReportQueue.tsx").then((module) => ({
+    default: module.ReportQueue,
+  })),
+);
+
 /** Lazy for the same reason, and for one more: an embed is loaded by readers
  *  who did not ask for it, often several to a page. Nothing about the editor's
  *  own routes should be on their critical path, and nothing about theirs should
@@ -84,6 +93,22 @@ export const Router = () => {
             <ProtectedRoute>
               <Suspense fallback={<RouteFallback />}>
                 <ProjectPlayground />
+              </Suspense>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Behind auth but not behind an admin check on the client. The
+            server checks the allowlist on every request, so a stranger who
+            types this path gets a page saying it could not load the queue --
+            and hiding the ROUTE would be a check that looks like security
+            while enforcing nothing. */}
+        <Route
+          path="/admin/reports"
+          element={
+            <ProtectedRoute>
+              <Suspense fallback={<RouteFallback />}>
+                <ReportQueue />
               </Suspense>
             </ProtectedRoute>
           }

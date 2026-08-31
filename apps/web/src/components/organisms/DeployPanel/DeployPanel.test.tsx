@@ -39,6 +39,7 @@ const LIVE: Deployment = {
   log: "vite v6.1.0 building for production...",
   error: null,
   deployedAt: new Date().toISOString(),
+  customDomain: null,
 };
 
 const DEPLOYABLE: DeploymentState = {
