@@ -79,6 +79,11 @@ export type CounterName =
   // reviews, one step further along.
   | "moderation_appealed"
   | "moderation_reinstated"
+  // The operator's authority over ACCOUNTS, which is newer and larger than the
+  // one over projects. Counted for the same reason it is logged: a power that
+  // acts on a person should be visible in aggregate, not only per incident.
+  | "account_plan_changed"
+  | "account_override_changed"
   // Test runs. `test_runs_errored` is the one that is never about the user's
   // code: it counts runs that never reached a container.
   | "test_runs_started"

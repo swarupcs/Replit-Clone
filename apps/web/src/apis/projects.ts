@@ -1,9 +1,13 @@
 import type {
+  AccountAction,
+  AccountDetail,
+  AccountRow,
   AccountSummary,
   ApiKeyScope,
   ApiKeySummary,
   ApiSuccess,
   CreatedApiKey,
+  MachineStatus,
   ModerationAction,
   ProjectVisibility,
   PublicProject,
@@ -854,4 +858,66 @@ export const createApiKeyApi = async (input: {
 
 export const revokeApiKeyApi = async (keyId: string): Promise<void> => {
   await axios.delete(`/api/v1/account/keys/${keyId}`);
+};
+
+/** The operator's account lookup. Part of an address, which is what somebody
+ *  writing in gives you. */
+export const searchAccountsApi = async (
+  query: string,
+): Promise<AccountRow[]> => {
+  const response = await axios.get<ApiSuccess<AccountRow[]>>(
+    "/api/v1/admin/accounts",
+    { params: { q: query } },
+  );
+  return response.data.data;
+};
+
+export const getAdminAccountApi = async (
+  userId: string,
+): Promise<AccountDetail> => {
+  const response = await axios.get<ApiSuccess<AccountDetail>>(
+    `/api/v1/admin/accounts/${userId}`,
+  );
+  return response.data.data;
+};
+
+/** Both writes take a reason, and the server requires it. An operator who can
+ *  silently change what somebody pays for is a worse position than this
+ *  product was in before the console existed. */
+export const setAccountPlanApi = async (
+  userId: string,
+  planId: string,
+  reason: string,
+): Promise<AccountAction> => {
+  const response = await axios.post<ApiSuccess<{ action: AccountAction }>>(
+    `/api/v1/admin/accounts/${userId}/plan`,
+    { planId, reason },
+  );
+  return response.data.data.action;
+};
+
+export const setAccountOverrideApi = async (input: {
+  userId: string;
+  override: Record<string, number | boolean> | null;
+  expiresInDays?: number;
+  reason: string;
+}): Promise<AccountAction> => {
+  const response = await axios.post<ApiSuccess<{ action: AccountAction }>>(
+    `/api/v1/admin/accounts/${input.userId}/override`,
+    {
+      override: input.override,
+      expiresInDays: input.expiresInDays,
+      reason: input.reason,
+    },
+  );
+  return response.data.data.action;
+};
+
+/** Is this machine full? The question the container cap makes an operator ask
+ *  most often, and which no screen could answer until now. */
+export const getMachineStatusApi = async (): Promise<MachineStatus> => {
+  const response = await axios.get<ApiSuccess<MachineStatus>>(
+    "/api/v1/admin/machine",
+  );
+  return response.data.data;
 };

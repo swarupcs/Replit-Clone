@@ -33,7 +33,12 @@ export type NotificationKind =
    *  same rule as everything above it. Falling back under the line is silent:
    *  nobody was harmed by a limit they never reached, and somebody who has
    *  just deleted a project does not need to be told it worked. */
-  | "QUOTA_WARNING";
+  | "QUOTA_WARNING"
+  /** An operator changed this account's plan or its limits. The same argument
+   *  the takedown notification makes: a decision taken about somebody, by
+   *  somebody else, is one they should hear from us rather than discover from
+   *  a refusal — or from a number on a screen that changed overnight. */
+  | "PLAN_CHANGED";
 
 export interface Notification {
   id: string;

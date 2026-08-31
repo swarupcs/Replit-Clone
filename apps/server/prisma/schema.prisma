@@ -126,6 +126,7 @@ model User {
   githubConnection GithubConnection?
   notifications Notification[]
   apiKeys       ApiKey[]
+  accountActions AccountAction[] @relation("AccountActionSubject")
 
   /// "Which accounts are on this plan" is the operator's question, and the one
   /// a pricing change has to answer before it is made.
@@ -186,6 +187,63 @@ model ApiKey {
   /// The listing is one account's keys, newest first.
   @@index([userId, createdAt])
   @@map("api_keys")
+}
+
+/// What an operator did to an ACCOUNT, as opposed to a project.
+///
+/// A second audit table rather than a third kind of `ModerationAction`, and
+/// the reason is that table's own invariant: every row in it names a project,
+/// and `projectName` is copied into it precisely so the record still reads
+/// after the project is gone. An action against an account has no project, so
+/// fitting one in would mean making that column nullable -- loosening a
+/// constraint that is doing real work, to hold an event that is not the same
+/// conversation. §2.17 put the appeal in the moderation table because "taken
+/// down, appealed, reinstated" only reads in order; "moved to Pro" is not part
+/// of that sequence and would appear in the project's trail as noise.
+///
+/// Same discipline otherwise: the actor is stored rather than joined, the
+/// subject's address is copied so the record survives the account, and a
+/// reason is required by the API for every action here -- an operator who can
+/// silently change what somebody pays for is a worse position than this
+/// product was in before the console existed.
+model AccountAction {
+  id String @id @default(uuid())
+
+  /// SetNull, like the moderation trail and for the same reason: a record that
+  /// vanishes with its subject can be erased by deleting the subject.
+  subjectUserId String?
+  subject       User?   @relation("AccountActionSubject", fields: [subjectUserId], references: [id], onDelete: SetNull)
+  /// Copied at the time, so the trail still says whose account it was.
+  subjectEmail  String
+
+  action AccountActionType
+
+  /// The operator's address, from `ADMIN_EMAILS`. Stored rather than joined:
+  /// that list is config, and somebody removed from it still did what they did.
+  actor String
+
+  /// Required by the API, unlike a moderation decision's.
+  reason String
+
+  /// What changed, in words, for a person reading the trail later: "free to
+  /// pro", "maxProjects 20 to 50". Not a diff to replay -- a sentence to read.
+  detail String?
+
+  createdAt DateTime @default(now())
+
+  /// One account's history, and the console's recent feed.
+  @@index([subjectUserId, createdAt])
+  @@index([createdAt])
+  @@map("account_actions")
+}
+
+enum AccountActionType {
+  /// An operator moved this account to a different plan.
+  PLAN_CHANGED
+  /// An operator set limits for this account by hand, over its plan's.
+  OVERRIDE_SET
+  /// ...and took them away again, leaving the plan's.
+  OVERRIDE_CLEARED
 }
 
 /// One-time tokens for flows that arrive by email.
@@ -892,6 +950,12 @@ enum NotificationKind {
   /// dropping back under it is silent -- nobody was harmed by a wall they did
   /// not hit, and somebody who has just deleted a project knows they did.
   QUOTA_WARNING
+
+  /// An operator changed this account's plan or its limits. The same argument
+  /// the takedown notification makes: a decision taken about somebody, by
+  /// somebody else, is one they have to hear about from us rather than
+  /// discover from a refusal.
+  PLAN_CHANGED
 }
 
 /// Everything that has happened to one project's moderation state, in order.

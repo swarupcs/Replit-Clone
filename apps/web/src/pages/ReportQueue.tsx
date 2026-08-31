@@ -5,6 +5,8 @@ import { Button, Empty, Segmented, Typography, message } from "antd";
 import type { ProjectReport, ReportStatus } from "@replit-clone/shared";
 import { listReportsApi, reviewReportApi } from "../apis/projects.ts";
 import { ModerationActivity } from "../components/organisms/ModerationActivity/ModerationActivity.tsx";
+import { AccountAdmin } from "../components/organisms/AccountAdmin/AccountAdmin.tsx";
+import { MachinePanel } from "../components/organisms/AccountAdmin/MachinePanel.tsx";
 
 /** The operator's queue.
  *
@@ -36,7 +38,9 @@ const REASON_LABELS: Record<ProjectReport["reason"], string> = {
 type Filter = ReportStatus | "ALL";
 
 export const ReportQueue = () => {
-  const [tab, setTab] = useState<"reports" | "activity">("reports");
+  const [tab, setTab] = useState<
+    "reports" | "activity" | "accounts" | "machine"
+  >("reports");
   const [filter, setFilter] = useState<Filter>("OPEN");
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
@@ -88,18 +92,24 @@ export const ReportQueue = () => {
         </Typography.Text>
       </div>
 
-      <Segmented<"reports" | "activity">
+      <Segmented<"reports" | "activity" | "accounts" | "machine">
         value={tab}
         onChange={setTab}
         style={{ marginBottom: 16, marginRight: 12 }}
         options={[
           { label: "Reports", value: "reports" },
           { label: "Activity", value: "activity" },
+          { label: "Accounts", value: "accounts" },
+          { label: "Machine", value: "machine" },
         ]}
       />
 
       {tab === "activity" ? (
         <ModerationActivity />
+      ) : tab === "accounts" ? (
+        <AccountAdmin />
+      ) : tab === "machine" ? (
+        <MachinePanel />
       ) : (
         <>
       <Segmented<Filter>

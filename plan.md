@@ -44,9 +44,9 @@ re-run that day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1568 passing**, 280 skipped (115 files) — no database on this machine |
-| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds three migrations — see §5 |
-| `pnpm --filter web test` | **1012 passing** (78 files) |
+| `pnpm --filter server test` | **1588 passing**, 280 skipped (116 files) — no database on this machine |
+| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds four migrations — see §5 |
+| `pnpm --filter web test` | **1030 passing** (80 files) |
 | `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
 
@@ -1205,6 +1205,68 @@ the run exits 0, so it is noise rather than a failure — recorded here so the
 next person to see it does not go looking for it in §8's work. **Not
 investigated.**
 
+### 2.25 Since (2026-08-31, night, last) — §8.7
+
+The operator's console: find an account, read it, change what it is allowed —
+and, separately, find out whether the machine is full.
+
+**This is the first authority in the product that acts on a person rather than
+on a project**, and §6 decision 11 says plainly that the moderation power is
+small *because* nothing reviews it and must not grow until something does. So
+the review shipped in the same commit as the power, not after it:
+
+- **The change and its record commit together.** `account_actions` is written
+  on the same transaction client as the update, so the log cannot be missing
+  the entry for the thing it exists to describe — and the gap would appear
+  exactly when the write failed, which is when somebody most wants to know.
+  Mutation-tested: moving the insert outside the transaction fails 3 tests.
+- **The reason is required**, by the schema, by the service, and by the button
+  being dead until something is typed. An operator who can silently change what
+  somebody pays for is a worse position than this product was in before the
+  console existed.
+- **The account holder is told**, with a new `PLAN_CHANGED` notification
+  carrying what changed and the reason verbatim. Same argument the takedown
+  notification makes: a decision taken about somebody, by somebody else, is one
+  they hear from us rather than discover from a refusal — or from a number that
+  changed overnight.
+
+**A second audit table, not a third kind of moderation action.** Every row in
+`moderation_actions` names a project, and `projectName` is copied into it so
+the record still reads after the project is deleted. An action against an
+account has no project, so fitting one in meant making that column nullable:
+loosening a constraint that is doing real work, to hold an event that is not
+part of the same conversation. §2.17 put the appeal in that table because
+"taken down, appealed, reinstated" only reads in order; "moved to Pro" is not
+in that sequence and would appear in a project's trail as noise. Same
+discipline in the new table, plus one difference: `reason` is `NOT NULL` here,
+where a moderation decision's is optional.
+
+**Suspension was considered and refused** — recorded rather than left as an
+absence somebody fills in later. Locking a person out of their own work is a
+far larger power than making one project private, and decision 11's argument is
+that the authority stays the smallest one that resolves a complaint. Now §6
+decision 18.
+
+**And the machine, which closes §3.2's `/metrics` item.** `GET /admin/machine`
+and a panel: containers running against the cap, uptime and resident memory,
+every counter this codebase has been carefully incrementing all along, and one
+number that is not a gauge but a defect report — scheduled runs sitting in
+`RUNNING`. That count should return to zero, and §3.1 records why it may not.
+The panel says so in words, because the wedge is otherwise completely silent:
+the job reports `SKIPPED` from then on and §6 decision 14 correctly keeps quiet
+about it.
+
+Two smaller things worth naming because each had a plausible wrong answer:
+an **archived plan can be moved away from and not onto** — the archive is what
+stops a withdrawn tier reaching somebody new, and an operator doing it by hand
+is exactly the case it exists to stop — and an **override is validated by the
+same schema that reads it back**, so one that could not be parsed can never be
+stored. The alternative fails silently at resolution time, with the operator
+believing it applied.
+
+1588 server tests and 1030 web tests pass. **This migration has not been
+applied either** — see §5.
+
 ---
 
 ## 3. Open
@@ -1480,7 +1542,10 @@ once, found three more times.
       half that makes it actionable — "you are out of space" is not a thing
       anybody can act on, and "this project is 4 GB of the 5 you have" is.
 
-- [ ] **The operator can see the report queue and nothing about the machine.**
+- [x] **The operator can see the report queue and nothing about the machine.**
+      Shipped 2026-08-31 — see §2.25, alongside §8.7, because an operator
+      looking up an account and an operator asking whether the machine is full
+      are the same person at the same screen.
       `/metrics` is the one endpoint in the product with no client, and unlike
       the appeal that is a defensible choice — a scrape target is not a screen.
       But it means the counters this codebase has been carefully incrementing
@@ -1754,7 +1819,7 @@ the data.
 `pnpm -r typecheck` clean 3/3, `pnpm -r lint` clean 3/3, 1536 server tests and
 1003 web tests passing — all run, not quoted.
 
-**None of the three migrations has been applied to any database.** Docker was not running
+**None of the four migrations has been applied to any database.** Docker was not running
 on this machine, so the DB-gated suites skipped, `plans` has never existed
 outside the `.sql` file, the seeded `free` row has never been read by anything,
 and neither has `users.quotaWarnedAt` or the new `QUOTA_WARNING` enum value.
@@ -1767,7 +1832,7 @@ insufficient for a claim about a schema: §2.14's eleven DB-gated tests had also
 never been run, and every one of them failed the first time they were.
 
 So the honest statement is: **the code is verified and the schema is not.**
-That covers §2.23 and §2.24 as well — and §2.24 is the one where it matters
+That covers §2.23, §2.24 and §2.25 as well — and §2.24 is the one where it matters
 most, because `api_keys` carries a unique index on a hash and a `TEXT[]`
 column, and a unique index is exactly the kind of claim §1 already says a mock
 cannot be trusted about.
@@ -2008,6 +2073,19 @@ it; nothing else here is a standing decision.
     *Changes it:* a use somebody actually has. Widening the surface means
     writing a route into `pub.ts` deliberately, which is the point.
 
+18. **An operator may change what an account is allowed, and may not stop it
+    being used.** §8.7 grew the moderation authority for the first time — from
+    projects to people — and stopped deliberately short of suspension. Locking
+    somebody out of their own work is a far larger power than making one
+    project private, it has no route back that the subject can take, and
+    decision 11's argument is that this authority stays the smallest one that
+    resolves a complaint. A complaint is about a project. If an account has to
+    be stopped, that is a decision for whoever owns the deployment, taken
+    deliberately, with database access — not a button that exists because it
+    seemed to belong next to the others. *Changes it:* abuse that a per-project
+    takedown demonstrably cannot reach, which would also be the evidence for
+    what the power should look like. Nothing yet has needed it.
+
 ---
 
 ## 7. How to keep this file true
@@ -2177,10 +2255,11 @@ reach has to be **designed and separate**, not the signed-in one behind a
 different credential. That turned out to be the whole security content of the
 item, and it is §6 decision 17.
 
-### 8.7 An operator console
+### 8.7 An operator console — **shipped 2026-08-31, see §2.25**
 
 Overlaps §3.2's `/metrics` item and extends it: find an account, read its plan
-and usage, comp or suspend it.
+and usage, comp it. **Not suspend it** — that half of this line was refused
+when it came to be written, and the refusal is §6 decision 18.
 
 **This grows operator authority, and §6 decision 11 says that must not happen
 until something reviews it.** So the audit trail is not a follow-up commit: any
@@ -2189,6 +2268,13 @@ survives the deletion of its subject, and is already readable from a screen —
 in the same transaction as the change, from the first commit. An operator who
 can silently change what a customer paid for is a worse position than this
 product is in today.
+
+*What shipped differed in one place*: the trail is its own table rather than
+the moderation log. Every row of that log names a project and copies the name
+so the record survives the deletion; an account action has none, and fitting
+one in would have meant making that column nullable to hold an event that is
+not part of the same conversation. §2.25 has the argument. The rule this
+section stated — audit in the same transaction, from the first commit — held.
 
 ### 8.8 Compute is the real cost and nothing meters it
 
@@ -2221,9 +2307,14 @@ the machine — and what a lapsed plan is allowed to do to work somebody has
 already done. Those two questions are §6 decisions 15 and 16, and everything
 after this point in §8 leans on them.
 
-**8.6 is now done too** (§2.24), which leaves §8 with nothing unblocked in it.
-8.4 needs a Stripe account and its keys, which are the operator's to create;
-8.7 is small but grows operator authority and should land with its audit trail
-in the same commit; 8.5 is the large one and needs a pricing decision first.
-Until a Stripe account exists the honest state of this deployment is a free
-tier with plans it can describe and cannot sell.
+**8.6 and 8.7 are done too** (§2.24, §2.25). Five of §8's seven items shipped
+the day the section was written, which says less about the pace than about the
+observation in §8.0: almost all of this was already built, and what was missing
+was the layer that lets it differ per customer and be seen.
+
+**What is left is exactly the two items that need somebody other than a
+programmer.** 8.4 needs a Stripe account and its keys, which are the operator's
+to create. 8.5 needs a pricing decision — per seat or per usage — before any of
+its code means anything. Until then the honest state of this deployment is a
+free tier with plans it can describe, comp, meter and warn about, and cannot
+sell.

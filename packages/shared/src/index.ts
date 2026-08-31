@@ -15,3 +15,4 @@ export * from "./moderation.js";
 export * from "./tests.js";
 export * from "./billing.js";
 export * from "./apiKeys.js";
+export * from "./admin.js";
