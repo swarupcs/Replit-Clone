@@ -17,6 +17,7 @@ import {
   type ScheduledRun as ApiRun,
 } from "@replit-clone/shared";
 import { notify } from "./notificationService.js";
+import { assertFeature } from "./entitlementService.js";
 
 /** Cron jobs for a project: the cheap half of always-on compute.
  *
@@ -205,6 +206,8 @@ export async function createJob(
   input: JobInput,
   now = new Date(),
 ): Promise<ApiJob> {
+  await assertFeature(projectId, "scheduledJobs");
+
   const name = cleanName(input.name);
   const command = cleanCommand(input.command);
   const enabled = input.enabled ?? true;

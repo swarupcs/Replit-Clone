@@ -13,3 +13,4 @@ export * from "./schedules.js";
 export * from "./notifications.js";
 export * from "./moderation.js";
 export * from "./tests.js";
+export * from "./billing.js";

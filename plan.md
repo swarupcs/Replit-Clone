@@ -44,9 +44,9 @@ re-run that day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1772 passing**, 20 skipped (110 files) |
-| the same, with `TEST_DATABASE_URL` set | **run 2026-08-31 evening, four times — green** |
-| `pnpm --filter web test` | **994 passing** (76 files) |
+| `pnpm --filter server test` | **1536 passing**, 280 skipped (112 files) — no database on this machine |
+| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds a migration — see §5 |
+| `pnpm --filter web test` | **1003 passing** (77 files) |
 | `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
 
@@ -98,7 +98,9 @@ regressions:
   since well before it was first seen. **Not investigated**, and recorded here
   rather than left to be rediscovered.
 
-**§8 is new and is counted separately**, because it is not the same kind of
+**§8's first two items shipped the same night it was written** — see §2.22,
+and §5 for the one claim in them that is not verified. The rest of §8 is
+counted separately, because it is not the same kind of
 line as the rest of this file: it is the product around the platform rather
 than another thing wrong with the platform. Its first item ships in §2.22.
 
@@ -1032,6 +1034,69 @@ Rows 1–13, all `done`:
 
 ---
 
+### 2.22 Since (2026-08-31, night) — §8.1 and §8.2
+
+The first two items of the new §8, which are one change: limits that differ
+per account, and a screen that says what yours are.
+
+- **Every account limit now comes from a plan row.** `Plan` is a catalogue
+  table — projects, user disk, per-project disk, assistant requests an hour,
+  containers at once, and three feature flags — with `users.planId` defaulting
+  to a `free` row the migration seeds. `entitlementService.resolveEntitlements`
+  resolves it, caches it for 30 s the way `userQuotaService` already cached
+  usage, and **fails open to the free plan** rather than to no limit at all: a
+  slow lookup must not refuse somebody's save, and an unreachable database must
+  not be a way to buy an unbounded quota.
+
+  Wired at every per-account site: `getUserUsage` and both quota assertions,
+  the per-project disk ceiling (`diskUsageService` no longer holds a module
+  constant), the per-user container cap, and the assistant's hourly budget. The
+  machine's own limits — `MAX_CONCURRENT_CONTAINERS`, `CONTAINER_MEMORY_MB`,
+  `DEPLOY_MEMORY_MB` — were deliberately left alone, which is now §6 decision
+  15.
+
+- **A per-account override, in one `Json` column, parsed rather than trusted.**
+  Comping a customer, extending a trial and grandfathering an early account are
+  the same operation, and without this each one ends in somebody inventing a
+  plan row for one person. It is `.strict()` and bounded, and a row that fails
+  to parse falls back to **the plan** — never to something larger. `maxProject`
+  for `maxProjects` should not silently apply the plan's number while an
+  operator believes they changed it, and garbage in a column should not be a
+  quota. `overrideUntil` makes a trial end without anybody remembering to end it.
+
+- **The three feature flags are checked where the thing is created and nowhere
+  else.** `provision`, `claimDomain` and `createJob`; not `start`, not
+  `runDueJobs`. A plan that lapses does not delete the jobs somebody already
+  has or stop them running — an account that drops a tier is blocked at the
+  boundary, not seized. The other version of that check is the one that
+  destroys work at the moment somebody stops paying, and it is one line away.
+
+- **`GET /account`, and the dialog behind the dashboard's "Plan" button.**
+  Usage, limits, the plan, the catalogue, and the per-project breakdown, in one
+  response because the three are only meaningful together. This closes the
+  §3.2 item: the quota had been enforced since the first release and shown by
+  nothing, so the only way to learn where you stood was to be refused — by a
+  message that named a limit without saying how close you had been to it or
+  which project was eating it.
+
+  The screen says plainly that no plan can be changed from it, because nothing
+  on this deployment takes payment and a button that appeared to would be lying
+  about what happens next.
+
+**Introducing all of this changed no behaviour, and that was the point.** The
+seeded `free` plan holds exactly the `env` defaults it replaced, so the claim
+"the limits arrive by a different route and hold the same values" is one the
+existing suite checks by passing unchanged. 1536 server tests and 1003 web
+tests pass; five suites needed a new mock, and every one of them needed it
+because a module they replace wholesale gained an export — none because an
+assertion about behaviour stopped holding.
+
+**Not verified: the migration has not been run.** Docker was down on this
+machine, so the DB-gated suites were skipped and `plans` has never existed in a
+real database. See §5.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -1290,7 +1355,9 @@ feature in the sense of a feature nobody built. Each is a capability the server
 already has and nobody can reach — the shape §2.21 just finished paying for
 once, found three more times.
 
-- [ ] **Quotas are enforced and never shown.** `getUserUsage` computes a
+- [x] **Quotas are enforced and never shown.** Shipped 2026-08-31 — see
+      §2.22, together with §8.1, because a usage screen with no plan behind it
+      would have had to invent one. `getUserUsage` computes a
       person's project count and disk against their limits;
       `assertCanCreateProject` and `assertUserDiskQuota` refuse on it;
       `diskUsageService` tracks the same per project. There is no endpoint and
@@ -1572,6 +1639,24 @@ orphan directories** in the other direction. Still deliberately left alone:
 deleting rows and recreating trees are judgment calls belonging to whoever owns
 the data.
 
+### §8.1 and §8.2, and the one thing not checked
+
+`pnpm -r typecheck` clean 3/3, `pnpm -r lint` clean 3/3, 1536 server tests and
+1003 web tests passing — all run, not quoted.
+
+**The migration has not been applied to any database.** Docker was not running
+on this machine, so the DB-gated suites skipped, `plans` has never existed
+outside the `.sql` file, and the seeded `free` row has never been read by
+anything. The unit tests cover the resolution logic thoroughly against a mocked
+client, and that is exactly the kind of evidence §1 already records as
+insufficient for a claim about a schema: §2.14's eleven DB-gated tests had also
+never been run, and every one of them failed the first time they were.
+
+So the honest statement is: **the code is verified and the schema is not.**
+The first thing to do with a database in front of you is `prisma migrate
+deploy` followed by the DB-gated suites, before anything else in §8 is built on
+top of it.
+
 ### The 2026-08-31 sweep
 
 Everything in §3.1 and §3.2 dated that night came from reading the tree rather
@@ -1770,6 +1855,27 @@ it; nothing else here is a standing decision.
     watched — `SKIPPED`, `ERRORED` — neither start a failure nor end one.
     *Changes it:* a class of event where every occurrence is independently
     actionable. Job runs are not one.
+
+15. **A plan may promise more of what this platform allocates, and never
+    more than the host has.** The per-account limits — projects, disk,
+    assistant requests, containers at once, and the feature flags — moved to a
+    `Plan` row. `MAX_CONCURRENT_CONTAINERS`, `CONTAINER_MEMORY_MB` and
+    `DEPLOY_MEMORY_MB` did not, and must not: a tier claiming more memory per
+    container than the machine has is a promise kept by an OOM kill in
+    somebody's terminal rather than by an honest refusal, and the person it
+    fails is the one who paid for it. Sell capability and capacity, not
+    hardware. *Changes it:* per-plan container sizing, which is a scheduling
+    problem — deciding which host a project runs on — and not a column.
+
+16. **What a plan buys is checked where the thing is CREATED, and nowhere
+    else.** `provision`, `claimDomain` and `createJob` ask; `start`,
+    `runDueJobs` and every read path do not. An account that drops a tier is
+    blocked at the boundary — no new databases, domains or jobs — and keeps
+    everything it already has, running. The other version is one `WHERE`
+    clause away and deletes a customer's work at the moment they stop paying,
+    which is both the obvious implementation and the one that would end the
+    product. *Changes it:* nothing short of a legal obligation to stop
+    serving something, which is what moderation is for and has its own path.
 
 ---
 

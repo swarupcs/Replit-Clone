@@ -1,8 +1,12 @@
-import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/errors.js";
 import { increment } from "../lib/metrics.js";
 import { usedBytes } from "./diskUsageService.js";
+import {
+  forgetEntitlements,
+  ownerOf,
+  resolveEntitlements,
+} from "./entitlementService.js";
 
 /** Per-user limits.
  *
@@ -27,6 +31,11 @@ export interface UserUsage {
   diskLimitBytes: number;
 }
 
+/** A limit stated in MB, in the bytes everything here actually compares. */
+function toBytes(megabytes: number): number {
+  return megabytes * 1024 * 1024;
+}
+
 /** What this user is currently costing. Owned projects only: a project shared
  *  with someone counts against whoever owns it, not everyone who can see it. */
 export async function getUserUsage(userId: string): Promise<UserUsage> {
@@ -40,11 +49,16 @@ export async function getUserUsage(userId: string): Promise<UserUsage> {
     diskBytes += await usedBytes(project.id);
   }
 
+  // The limits are this account's, not the deployment's. Before plans existed
+  // they were the same two constants for everybody; `env` is now the free
+  // plan's defaults and the fallback when the plan cannot be read at all.
+  const entitlements = await resolveEntitlements(userId);
+
   return {
     projects: projects.length,
-    projectLimit: env.MAX_PROJECTS_PER_USER,
+    projectLimit: entitlements.maxProjects,
     diskBytes,
-    diskLimitBytes: env.USER_DISK_QUOTA_MB * 1024 * 1024,
+    diskLimitBytes: toBytes(entitlements.userDiskQuotaMb),
   };
 }
 
@@ -68,9 +82,6 @@ const LOOKUP_TIMEOUT_MS = 2000;
 
 const usageCache = new Map<string, { usage: UserUsage; measuredAt: number }>();
 
-/** A project's owner never changes, so this is worth remembering outright. */
-const ownerCache = new Map<string, string>();
-
 function withTimeout<T>(work: Promise<T>): Promise<T | undefined> {
   return Promise.race([
     work,
@@ -80,23 +91,6 @@ function withTimeout<T>(work: Promise<T>): Promise<T | undefined> {
       }, LOOKUP_TIMEOUT_MS).unref(),
     ),
   ]).catch(() => undefined);
-}
-
-async function ownerOf(projectId: string): Promise<string | undefined> {
-  const known = ownerCache.get(projectId);
-  if (known) return known;
-
-  const project = await withTimeout(
-    prisma.project.findUnique({
-      where: { id: projectId },
-      select: { ownerId: true },
-    }),
-  );
-
-  if (!project) return undefined;
-
-  ownerCache.set(projectId, project.ownerId);
-  return project.ownerId;
 }
 
 async function cachedUsage(userId: string): Promise<UserUsage | undefined> {
@@ -141,7 +135,8 @@ export async function assertUserDiskQuota(
   if (projected > usage.diskLimitBytes) {
     increment("quota_rejections");
     throw new QuotaError(
-      `These projects are using all ${String(env.USER_DISK_QUOTA_MB)} MB of ` +
+      `These projects are using all ` +
+        `${String(Math.round(usage.diskLimitBytes / 1024 / 1024))} MB of ` +
         `available space. Delete or download something first.`,
       "USER_DISK_LIMIT",
     );
@@ -154,14 +149,15 @@ export async function assertUserDiskQuota(
 
 /** Drops what is remembered about a user and a project, e.g. on deletion. */
 export function forgetUserQuota(projectId: string, userId?: string): void {
-  ownerCache.delete(projectId);
   if (userId) usageCache.delete(userId);
+  // The owner and the plan are remembered next door now. A caller that has
+  // just deleted a project should not have to know that.
+  forgetEntitlements(userId, projectId);
 }
 
 /** Only for tests, which need a clean slate between cases. */
 export function resetUserQuotaCaches(): void {
   usageCache.clear();
-  ownerCache.clear();
 }
 
 /** Throws unless this user may create another project. */
@@ -180,7 +176,8 @@ export async function assertCanCreateProject(userId: string): Promise<void> {
   if (usage.diskBytes >= usage.diskLimitBytes) {
     increment("quota_rejections");
     throw new QuotaError(
-      `Your projects are using all ${String(env.USER_DISK_QUOTA_MB)} MB of ` +
+      `Your projects are using all ` +
+        `${String(Math.round(usage.diskLimitBytes / 1024 / 1024))} MB of ` +
         `available space. Delete or download something first.`,
       "USER_DISK_LIMIT",
     );

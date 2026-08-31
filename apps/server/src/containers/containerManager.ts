@@ -939,7 +939,15 @@ async function assertUserContainerBudget(projectId: string): Promise<void> {
     return projectId !== undefined && ownedIds.has(projectId);
   });
 
-  if (theirs.length >= env.MAX_CONTAINERS_PER_USER) {
+  // The owner's plan decides how many they may run at once. The MACHINE's cap
+  // is checked separately and no plan can raise it — this one is about how the
+  // machine's capacity is shared, not how much of it there is.
+  const { resolveEntitlements } = await import(
+    "../service/entitlementService.js"
+  );
+  const { maxContainersPerUser } = await resolveEntitlements(project.ownerId);
+
+  if (theirs.length >= maxContainersPerUser) {
     increment("containers_capacity_rejected");
     throw new AppError(
       429,

@@ -38,6 +38,28 @@ const api = vi.hoisted(() => ({
   // replaced wholesale, so a missing export is a crash rather than a 403.
   listProjectModerationApi: vi.fn().mockResolvedValue([]),
   appealTakedownApi: vi.fn(),
+  // And the plan dialog reads this one, for the same reason.
+  getAccountApi: vi.fn().mockResolvedValue({
+    email: "someone@example.com",
+    entitlements: {
+      planId: "free",
+      planLabel: "Free",
+      maxProjects: 20,
+      userDiskQuotaMb: 2048,
+      projectDiskQuotaMb: 512,
+      aiRequestsPerHour: 60,
+      maxContainersPerUser: 2,
+      managedDatabases: true,
+      customDomains: true,
+      scheduledJobs: true,
+      overridden: false,
+      overrideUntil: null,
+    },
+    projects: 0,
+    diskBytes: 0,
+    breakdown: [],
+    plans: [],
+  }),
 }));
 vi.mock("../apis/projects.ts", () => api);
 

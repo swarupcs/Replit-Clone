@@ -1,0 +1,107 @@
+/** What an account is allowed to do, and where the numbers come from.
+ *
+ *  Every limit in this product used to be a constant in `env`, which is the
+ *  right shape for a deployment and the wrong one for a product: a SaaS
+ *  product is precisely one where these numbers differ per customer. So they
+ *  moved to a `Plan` row, and `env` became the free plan's defaults rather
+ *  than the whole story.
+ *
+ *  Only the limits that are *about an account* live here. `MAX_CONCURRENT_-
+ *  CONTAINERS`, `CONTAINER_MEMORY_MB` and `DEPLOY_MEMORY_MB` deliberately do
+ *  not: those are about the machine, and a plan that promises more memory per
+ *  container than the host has is a promise kept by an OOM kill in somebody's
+ *  terminal rather than by an honest refusal. See plan.md §6 decision 15.
+ */
+
+/** Stable plan identifiers. Strings rather than an enum because they are also
+ *  the primary key of the catalogue table, and adding a tier should be a row
+ *  rather than a migration of every account that references one. */
+export type PlanId = string;
+
+/** The free plan's id, which is also the fallback when anything at all goes
+ *  wrong resolving an account's entitlements. It is a constant because two
+ *  places have to agree on it and neither may be the other's source. */
+export const FREE_PLAN_ID = "free";
+
+/** The limits themselves, separated from the plan they came from so that an
+ *  override can be expressed as a partial of exactly this shape. */
+export interface EntitlementLimits {
+  /** How many projects this account may own. */
+  maxProjects: number;
+  /** Total disk across all of them. */
+  userDiskQuotaMb: number;
+  /** Ceiling on any single one. */
+  projectDiskQuotaMb: number;
+  /** Assistant requests per hour. */
+  aiRequestsPerHour: number;
+  /** How many of this account's projects may be running at once. Bounded in
+   *  turn by the machine's own cap, which no plan can raise. */
+  maxContainersPerUser: number;
+
+  /** Features, as opposed to amounts. Each is already a working capability
+   *  behind a deployment-wide flag; a plan decides who gets it. */
+  managedDatabases: boolean;
+  customDomains: boolean;
+  scheduledJobs: boolean;
+}
+
+/** A tier as offered, which is the limits plus what it is called and costs. */
+export interface Plan extends EntitlementLimits {
+  id: PlanId;
+  label: string;
+  /** Minor units — cents — because a price is not a float. Zero is free. */
+  priceCents: number;
+  currency: string;
+  /** Display order, and the only thing that makes "upgrade" meaningful. */
+  rank: number;
+}
+
+/** What an account actually gets: its plan's limits with any override applied,
+ *  plus enough about where each came from to render it honestly.
+ *
+ *  `planId` is the plan of record even when every number has been overridden —
+ *  an account comped up to Pro limits is still on the plan it pays for, and
+ *  conflating the two is how a billing system starts lying about revenue. */
+export interface Entitlements extends EntitlementLimits {
+  planId: PlanId;
+  planLabel: string;
+  /** True when an operator has adjusted at least one number by hand. Shown to
+   *  the account holder, because a limit they cannot find on any pricing page
+   *  should say why it is different rather than look like a bug. */
+  overridden: boolean;
+  /** When the override lapses, if it does. A trial that must be remembered to
+   *  be ended is a trial that never ends. */
+  overrideUntil: string | null;
+}
+
+/** One project's share of the account's disk. The half that makes a quota
+ *  actionable: "you are out of space" is not something anybody can act on, and
+ *  "this project is 4 GB of the 5 you have" is. */
+export interface ProjectUsage {
+  projectId: string;
+  name: string;
+  diskBytes: number;
+}
+
+/** Everything the account screen needs, in one response.
+ *
+ *  One endpoint rather than three, because the three are only meaningful
+ *  together: a number, its limit, and what is responsible for it. */
+export interface AccountSummary {
+  email: string;
+  entitlements: Entitlements;
+  /** Projects owned. Shared projects count against whoever owns them. */
+  projects: number;
+  diskBytes: number;
+  /** Owned projects, largest first. */
+  breakdown: ProjectUsage[];
+  /** The catalogue, so the screen can say what else exists without a second
+   *  request. Archived plans are omitted; an account *on* an archived plan
+   *  still reads its own limits from `entitlements`. */
+  plans: Plan[];
+}
+
+/** The fraction of a quota at which somebody should be told, before the wall
+ *  rather than at it. Crossing it is a change of state and notifies once —
+ *  being over it is a state and says nothing further (§6 decision 14). */
+export const QUOTA_WARN_FRACTION = 0.8;

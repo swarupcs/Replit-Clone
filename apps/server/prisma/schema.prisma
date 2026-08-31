@@ -7,6 +7,57 @@ datasource db {
   provider = "postgresql"
 }
 
+/// A tier as offered: what it is called, what it costs, and the numbers it
+/// buys.
+///
+/// In the database rather than in code so that an operator can change a limit
+/// without a deploy, and seeded by the migration that creates it so that a
+/// fresh deployment has a `free` plan before its first signup. The seeded
+/// numbers are exactly the `env` defaults that used to be the only limits
+/// there were, which is what makes introducing this a behavioural no-op.
+///
+/// Only limits that are about an ACCOUNT are here. The machine's own limits --
+/// MAX_CONCURRENT_CONTAINERS, CONTAINER_MEMORY_MB, DEPLOY_MEMORY_MB -- stay in
+/// `env`, because a plan may promise more of what this platform allocates and
+/// never more than the host has. See plan.md section 6, decision 15.
+model Plan {
+  /// A stable string, not a uuid: it is written in config, in a Stripe price's
+  /// metadata, and in this file's own seed. A generated key would make those
+  /// three disagree the first time anybody restored a database.
+  id String @id
+
+  label String
+
+  /// Minor units. A price is not a float, and this one is never arithmetic
+  /// anyway -- the charge is Stripe's to compute; this is what the screen says.
+  priceCents Int    @default(0)
+  currency   String @default("usd")
+
+  /// Display order, and the only thing that makes "upgrade" a meaningful word.
+  rank Int @default(0)
+
+  maxProjects          Int
+  userDiskQuotaMb      Int
+  projectDiskQuotaMb   Int
+  aiRequestsPerHour    Int
+  maxContainersPerUser Int
+
+  managedDatabases Boolean @default(false)
+  customDomains    Boolean @default(false)
+  scheduledJobs    Boolean @default(false)
+
+  /// Withdrawn from the catalogue without being deleted. Accounts already on
+  /// it keep every number: a plan that stops being sold is not a plan that
+  /// stops being honoured, and deleting the row would silently move those
+  /// accounts to the free tier -- which is the same class of mistake as
+  /// deleting a customer's data when they stop paying.
+  archivedAt DateTime?
+
+  users User[]
+
+  @@map("plans")
+}
+
 model User {
   id    String @id @default(uuid())
   email String @unique
@@ -27,6 +78,38 @@ model User {
 
   createdAt DateTime @default(now())
 
+  /// What this account is entitled to. Defaults to the free plan, which the
+  /// migration seeds, so every account that existed before plans did lands on
+  /// limits identical to the ones it already had.
+  ///
+  /// Restrict, not Cascade or SetNull: deleting a plan out from under the
+  /// accounts on it is the one operation this table must refuse. Archive it.
+  planId String @default("free")
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  /// Limits set for this one account, overriding the plan's. A partial of the
+  /// same shape, validated on read.
+  ///
+  /// Json rather than a nullable column per limit, which would duplicate every
+  /// column of `plans` onto `users` and have to be added twice forever. The
+  /// cost is that it is unvalidated at rest, so it is parsed through a schema
+  /// on the way out and a row that fails falls back to the PLAN -- never to
+  /// something more generous. Garbage must not be a way to buy a bigger quota.
+  ///
+  /// This column is not a nicety. Comping a customer, extending a trial and
+  /// grandfathering an early account are the same operation, and without it
+  /// each one ends in somebody inventing a plan row for one person.
+  entitlementOverride Json?
+
+  /// Why, in an operator's words. An override with no account of itself is the
+  /// half of the record that makes the other half unfalsifiable -- the same
+  /// argument the moderation trail makes about a reinstatement.
+  overrideReason String?
+
+  /// When the override lapses, or null for one that does not. A trial that has
+  /// to be remembered to be ended is a trial that never ends.
+  overrideUntil DateTime?
+
   projects      Project[]
   refreshTokens RefreshToken[]
   collaborations ProjectCollaborator[]
@@ -35,6 +118,9 @@ model User {
   githubConnection GithubConnection?
   notifications Notification[]
 
+  /// "Which accounts are on this plan" is the operator's question, and the one
+  /// a pricing change has to answer before it is made.
+  @@index([planId])
   @@map("users")
 }
 

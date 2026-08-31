@@ -44,6 +44,7 @@ import {
 } from "../apis/projects.ts";
 import { TemplatePicker } from "../components/molecules/TemplatePicker/TemplatePicker.tsx";
 import { NotificationBell } from "../components/molecules/NotificationBell/NotificationBell.tsx";
+import { AccountDialog } from "../components/organisms/AccountDialog/AccountDialog.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
 import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx";
 import { ModerationDialog } from "../components/organisms/ModerationDialog/ModerationDialog.tsx";
@@ -256,6 +257,7 @@ export const Dashboard = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, logout } = useAuth();
+  const [accountOpen, setAccountOpen] = useState(false);
   const [messageApi, contextHolder] = message.useMessage();
 
   const [isCreating, setIsCreating] = useState(false);
@@ -383,6 +385,10 @@ export const Dashboard = () => {
               Reports
             </Button>
           )}
+          {/* The quota was enforced from the first release and shown from
+              none of them: the only way to learn where you stood was to be
+              refused. */}
+          <Button onClick={() => setAccountOpen(true)}>Plan</Button>
           <NotificationBell />
           <Button
             icon={<VscGithub />}
@@ -393,6 +399,11 @@ export const Dashboard = () => {
           <Button onClick={() => void logout()}>Sign out</Button>
         </div>
       </header>
+
+      <AccountDialog
+        open={accountOpen}
+        onClose={() => setAccountOpen(false)}
+      />
 
       <main className="rc-page">
         <div

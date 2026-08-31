@@ -1,4 +1,5 @@
 import type {
+  AccountSummary,
   ApiSuccess,
   ModerationAction,
   ProjectVisibility,
@@ -810,4 +811,17 @@ export const reinstateProjectApi = async (
     { reason },
   );
   return response.data.data.action;
+};
+
+/** What this account is using, what it is allowed, and which project is
+ *  responsible for most of it.
+ *
+ *  One request rather than three: the number, its limit and the breakdown are
+ *  only meaningful together, and fetching them separately is how a screen
+ *  comes to show a usage figure against last minute's limit. */
+export const getAccountApi = async (): Promise<AccountSummary> => {
+  const response = await axios.get<ApiSuccess<AccountSummary>>(
+    "/api/v1/account",
+  );
+  return response.data.data;
 };

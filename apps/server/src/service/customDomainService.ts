@@ -12,6 +12,7 @@ import { logger } from "../lib/logger.js";
 import { increment } from "../lib/metrics.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.js";
+import { assertFeature } from "./entitlementService.js";
 
 /** A hostname the owner controls, pointed at a deployment.
  *
@@ -188,6 +189,8 @@ export async function claimDomain(input: {
   const projectId = assertValidProjectId(input.projectId);
   const domain = normalizeDomain(input.domain);
   assertClaimable(domain);
+
+  await assertFeature(projectId, "customDomains");
 
   const deployment = await prisma.deployment.findUnique({
     where: { projectId },
