@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
@@ -257,7 +257,13 @@ export const Dashboard = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, logout } = useAuth();
-  const [accountOpen, setAccountOpen] = useState(false);
+  // The quota warning links here. A notification that pointed at the dashboard
+  // and left the reader to find the button would be telling them where to look
+  // rather than showing them.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [accountOpen, setAccountOpen] = useState(
+    () => searchParams.get("view") === "account",
+  );
   const [messageApi, contextHolder] = message.useMessage();
 
   const [isCreating, setIsCreating] = useState(false);
@@ -402,7 +408,14 @@ export const Dashboard = () => {
 
       <AccountDialog
         open={accountOpen}
-        onClose={() => setAccountOpen(false)}
+        onClose={() => {
+          setAccountOpen(false);
+          // Otherwise the query outlives the dialog and reopens it on reload.
+          if (searchParams.has("view")) {
+            searchParams.delete("view");
+            setSearchParams(searchParams, { replace: true });
+          }
+        }}
       />
 
       <main className="rc-page">

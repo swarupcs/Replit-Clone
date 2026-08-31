@@ -1,4 +1,7 @@
+import { QUOTA_WARN_FRACTION } from "@replit-clone/shared";
 import { prisma } from "../lib/prisma.js";
+import { logger } from "../lib/logger.js";
+import { notify } from "./notificationService.js";
 import { AppError } from "../utils/errors.js";
 import { increment } from "../lib/metrics.js";
 import { usedBytes } from "./diskUsageService.js";
@@ -54,12 +57,102 @@ export async function getUserUsage(userId: string): Promise<UserUsage> {
   // plan's defaults and the fallback when the plan cannot be read at all.
   const entitlements = await resolveEntitlements(userId);
 
-  return {
+  const usage: UserUsage = {
     projects: projects.length,
     projectLimit: entitlements.maxProjects,
     diskBytes,
     diskLimitBytes: toBytes(entitlements.userDiskQuotaMb),
   };
+
+  // Deliberately not awaited. This is the only place a fresh measurement
+  // exists, which makes it the right place to notice a crossing — and a save
+  // must not wait on an announcement about it. `reviewQuotaWarning` throws at
+  // nobody.
+  void reviewQuotaWarning(userId, usage);
+
+  return usage;
+}
+
+/** Whether an account is inside the last fifth of either quota.
+ *
+ *  Either, not both: they are two different rooms to run out of, and being
+ *  nearly out of one is the whole news. */
+export function isNearQuota(usage: UserUsage): boolean {
+  const disk =
+    usage.diskLimitBytes > 0 && usage.diskBytes / usage.diskLimitBytes >= QUOTA_WARN_FRACTION;
+  const projects =
+    usage.projectLimit > 0 && usage.projects / usage.projectLimit >= QUOTA_WARN_FRACTION;
+
+  return disk || projects;
+}
+
+/** Tells somebody they are nearly out of room, once, on the way in.
+ *
+ *  §6 decision 14 governs this and it is the whole design: the news is the
+ *  CROSSING, not the state. An account that sits at 90% for a month is one
+ *  message, because a message a week about a number that has not changed is
+ *  how a warning people needed becomes a filter rule.
+ *
+ *  Dropping back under the line is silent, which is where this differs from a
+ *  job recovering. A job that starts working again reverses a failure somebody
+ *  was told about and may have been acting on; nobody was ever harmed by a
+ *  wall they did not hit, and somebody who has just deleted a project to make
+ *  room does not need to be told it worked. The bit is cleared, and that is
+ *  all — so the next crossing speaks again.
+ *
+ *  One bit for both quotas rather than one each. The state being announced is
+ *  "this account is running out of room", the message links to the screen that
+ *  shows both meters, and a second mail the same week adding "also, projects"
+ *  is exactly the thing decision 14 exists to prevent.
+ */
+export async function reviewQuotaWarning(
+  userId: string,
+  usage: UserUsage,
+): Promise<void> {
+  try {
+    const near = isNearQuota(usage);
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { quotaWarnedAt: true },
+    });
+    if (!user) return;
+
+    const warned = user.quotaWarnedAt !== null;
+    if (near === warned) return;
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { quotaWarnedAt: near ? new Date() : null },
+    });
+
+    if (!near) return;
+
+    const percent = Math.min(
+      99,
+      Math.round(
+        Math.max(
+          usage.diskLimitBytes > 0 ? usage.diskBytes / usage.diskLimitBytes : 0,
+          usage.projectLimit > 0 ? usage.projects / usage.projectLimit : 0,
+        ) * 100,
+      ),
+    );
+
+    await notify({
+      userId,
+      kind: "QUOTA_WARNING",
+      title: "You are nearly out of room",
+      body:
+        `This account is using about ${String(percent)}% of what its plan ` +
+        `allows. Nothing has been refused yet — this is so that the first ` +
+        `you hear of it is not a save that fails. You will not be told again ` +
+        `unless it clears and happens again.`,
+      link: "/?view=account",
+    });
+  } catch (error) {
+    // A warning that could not be sent must not become a write that failed.
+    logger.error("could not review a quota warning", error, { userId });
+  }
 }
 
 /** How long a user's measured usage is trusted before it is worked out again.

@@ -110,6 +110,14 @@ model User {
   /// to be remembered to be ended is a trial that never ends.
   overrideUntil DateTime?
 
+  /// Set when this account was told it was nearly out of room, and cleared
+  /// when it no longer is. One bit, because it is what makes the warning a
+  /// notification about a CHANGE rather than a recurring reminder.
+  ///
+  /// Here rather than derived from the notifications table, which is pruned:
+  /// deriving it would have the pruner decide to warn somebody again.
+  quotaWarnedAt DateTime?
+
   projects      Project[]
   refreshTokens RefreshToken[]
   collaborations ProjectCollaborator[]
@@ -822,6 +830,12 @@ enum NotificationKind {
   /// ...and the answer to an appeal, which is the same argument: the person a
   /// decision was made against is the person who has to hear it reversed.
   PROJECT_REINSTATED
+
+  /// This account has crossed into the last fifth of one of its quotas. On the
+  /// crossing, once. Being over it is a state and says nothing further, and
+  /// dropping back under it is silent -- nobody was harmed by a wall they did
+  /// not hit, and somebody who has just deleted a project knows they did.
+  QUOTA_WARNING
 }
 
 /// Everything that has happened to one project's moderation state, in order.

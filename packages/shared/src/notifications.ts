@@ -27,7 +27,13 @@ export type NotificationKind =
   /** A moderator made this project private. */
   | "PROJECT_UNPUBLISHED"
   /** ...and lifted it again, which the same person has to hear. */
-  | "PROJECT_REINSTATED";
+  | "PROJECT_REINSTATED"
+  /** This account has crossed into the last fifth of one of its quotas. Sent
+   *  on the CROSSING, once, and not again until it is no longer true — the
+   *  same rule as everything above it. Falling back under the line is silent:
+   *  nobody was harmed by a limit they never reached, and somebody who has
+   *  just deleted a project does not need to be told it worked. */
+  | "QUOTA_WARNING";
 
 export interface Notification {
   id: string;

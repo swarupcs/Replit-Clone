@@ -44,8 +44,8 @@ re-run that day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1536 passing**, 280 skipped (112 files) — no database on this machine |
-| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds a migration — see §5 |
+| `pnpm --filter server test` | **1547 passing**, 280 skipped (113 files) — no database on this machine |
+| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds two migrations — see §5 |
 | `pnpm --filter web test` | **1003 passing** (77 files) |
 | `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
@@ -1095,6 +1095,51 @@ assertion about behaviour stopped holding.
 machine, so the DB-gated suites were skipped and `plans` has never existed in a
 real database. See §5.
 
+### 2.23 Since (2026-08-31, night, later) — §8.3
+
+The third item, and the last of the trio that was meant to land together: a
+warning before the wall rather than at it.
+
+- **`QUOTA_WARNING`, sent on the crossing and not on the state.** An account
+  that reaches the last fifth of either quota is told once. One bit on `users`
+  — `quotaWarnedAt` — is what makes it a notification about a change: set on
+  the way in, cleared on the way back under, and nothing said in between. An
+  account that sits at 90% for a month is one message, because a message a week
+  about a number that has not moved is how a warning people needed teaches them
+  to filter it (§6 decision 14).
+
+- **Dropping back under the line is silent**, which is where this departs from
+  a job recovering — and the departure is the argued part. A job that starts
+  working again reverses a failure somebody was told about and may have been
+  acting on. Nobody was ever harmed by a wall they did not hit, and somebody
+  who has just deleted a project to make room does not need to be told that it
+  worked. The bit is cleared and that is all, so the next crossing speaks.
+
+- **One bit for both quotas, not one each.** Disk and project count are two
+  different rooms to run out of, but the state being announced is "this account
+  is running out of room": the message links to the screen that shows both
+  meters, and a second mail the same week adding "also, projects" is precisely
+  what decision 14 exists to stop. The alternative is recorded here rather than
+  left implied, because it is the reading somebody will arrive at later.
+
+- **Reviewed where a fresh measurement already exists** — inside
+  `getUserUsage`, which is the one place that walks the trees — and not
+  awaited. A save must not wait on an announcement about it, and nothing in
+  `reviewQuotaWarning` throws at its caller.
+
+- The notification links to `/?view=account`, and the dashboard now opens the
+  plan dialog on that query. A message that pointed at the dashboard and left
+  the reader to find the button would be telling somebody where to look rather
+  than showing them.
+
+**Mutation-tested, both guards.** Removing the transition check (`near ===
+warned`) so that every measurement announces itself: 2 tests failed. Removing
+the silence on recovery so that clearing the bit also sends a message: 2 tests
+failed. Neither guard is decoration.
+
+1547 server tests and 1003 web tests pass. **The migration for this has not
+been applied either** — same reason, same caveat, see §5.
+
 ---
 
 ## 3. Open
@@ -1644,15 +1689,20 @@ the data.
 `pnpm -r typecheck` clean 3/3, `pnpm -r lint` clean 3/3, 1536 server tests and
 1003 web tests passing — all run, not quoted.
 
-**The migration has not been applied to any database.** Docker was not running
+**Neither migration has been applied to any database.** Docker was not running
 on this machine, so the DB-gated suites skipped, `plans` has never existed
-outside the `.sql` file, and the seeded `free` row has never been read by
-anything. The unit tests cover the resolution logic thoroughly against a mocked
+outside the `.sql` file, the seeded `free` row has never been read by anything,
+and neither has `users.quotaWarnedAt` or the new `QUOTA_WARNING` enum value.
+That last one is worth naming on its own: `ALTER TYPE ... ADD VALUE` is the one
+statement here with a version-dependent rule about running inside a
+transaction, and the precedent it follows (`20260830233000`) was applied
+against a real server while this has not been. The unit tests cover the resolution logic thoroughly against a mocked
 client, and that is exactly the kind of evidence §1 already records as
 insufficient for a claim about a schema: §2.14's eleven DB-gated tests had also
 never been run, and every one of them failed the first time they were.
 
 So the honest statement is: **the code is verified and the schema is not.**
+That covers §2.23 as well.
 The first thing to do with a database in front of you is `prisma migrate
 deploy` followed by the DB-gated suites, before anything else in §8 is built on
 top of it.
@@ -1978,12 +2028,14 @@ actionable — "you are out of space" is not something anybody can act on, and
 You cannot sell a plan without a screen that says what the current one gives
 you, and the screen is worth building even if nothing is ever sold.
 
-### 8.3 Warning before the wall
+### 8.3 Warning before the wall — **shipped 2026-08-31, see §2.23**
 
 Small, and governed by §6 decision 14. Crossing 80% of disk or project count
 is a **change of state** and notifies once; being over it is a state and says
-nothing further. The existing notification system takes this with a new kind
-and no new mechanism.
+nothing further. The existing notification system took this with a new kind and
+no new mechanism, as expected — the only thing it needed that was not already
+there is one bit on `users` to remember which side of the line the account was
+on last time.
 
 ### 8.4 Billing — Stripe Checkout and the Customer Portal
 
@@ -2075,3 +2127,15 @@ referral or affiliate mechanics.
 8.1 → 8.2 → 8.3 → 8.6 → 8.4 → 8.7 → 8.5. The first three are one week of
 work, land as one coherent change, and leave the product sellable-shaped
 without a payment processor in it.
+
+**The first three are done** (§2.22, §2.23), and the estimate above was the
+wrong shape rather than the wrong size: almost none of the work was the plan
+table or the screen. It was deciding what a limit is *about* — the account or
+the machine — and what a lapsed plan is allowed to do to work somebody has
+already done. Those two questions are §6 decisions 15 and 16, and everything
+after this point in §8 leans on them.
+
+Next is **8.6**, API keys, which is unblocked and needs nothing from anybody.
+8.4 needs a Stripe account and its keys, which are the operator's to create;
+until those exist the honest state of this deployment is a free tier with
+plans it can describe and cannot sell.
