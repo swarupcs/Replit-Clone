@@ -114,6 +114,13 @@ architectural route). §8.4 and §8.5 are blocked too, on a Stripe account and o
 a pricing decision respectively, and are listed there rather than duplicated
 here.
 
+**§9 was written on 2026-09-01 and takes four of the five apart** — not by
+finding new work, but by asking of each blocked row which half needs a person
+and which half is only code nobody wrote. A recoverable delete, a compute
+meter, a hostname endpoint for a TLS terminator, and billing state without a
+processor are all buildable today. Read it before believing the five below are
+each one thing.
+
 Seven items came off in three commits (§2.26–§2.28), which is what a sweep's
 findings look like once they are worked through rather than what they looked
 like when they arrived. **Nothing unblocked left is the state this file has
@@ -1764,7 +1771,10 @@ once, found three more times.
 
 Each is named with what blocks it, so none reads as ready to start.
 
-- [ ] **Certificates for custom domains.** What is left of the row that used
+- [ ] **Certificates for custom domains.** **Split by §9.2** — the code half
+      is one endpoint telling a TLS terminator which hostnames are real, and
+      what is left here is whether this deployment terminates TLS and where
+      that key lives. What is left of the row that used
       to say "custom domains", once the code half shipped on 2026-08-30
       (§2.12). A verified domain is served over plain HTTP today. Over HTTPS
       each one needs a certificate for its own name — not the wildcard that
@@ -1778,7 +1788,9 @@ Each is named with what blocks it, so none reads as ready to start.
       Resuming a running process is a mechanism nothing here resembles, and it
       needs a decision about how much disk a suspended project may hold. The
       last thing CodeSandbox does that this does not.
-- [ ] **Autoscale.** What is left of the row that used to say "autoscale and
+- [ ] **Autoscale.** Still blocked, and §9.5 says why it gets closer without
+      being worked on: §9.3's compute meter is the input its cost model is
+      missing. What is left of the row that used to say "autoscale and
       scheduled jobs", once the scheduling half shipped on 2026-08-30 (§2.13).
       Still a different product with a different cost model: always-on compute
       exists in its smallest useful form, and deciding how many copies of it to
@@ -1791,7 +1803,11 @@ Each is named with what blocks it, so none reads as ready to start.
       A puts the multiplayer layer, the assistant, the run control and the
       preview behind a rewrite. Revisit the route, not the row.
 
-- [ ] **Backup and restore.** Added 2026-08-31 after a sweep found no story
+- [ ] **Backup and restore.** **Split by §9.1**, which takes the recoverable
+      delete and deliberately leaves this row open: a trash answers "I meant
+      the other project" and a backup answers "the host died", and only the
+      second needs a destination. Do not read §9.1 as closing this.
+      Added 2026-08-31 after a sweep found no story
       for either. Everything a user has lives in exactly one place: the working
       tree on the host's disk, the rows in one Postgres, the published releases
       in a sibling directory. `deleteProjectService` is thorough and
@@ -1968,6 +1984,12 @@ much as the same work done once, properly.
 Everything still in §3.3 is blocked on a decision or on infrastructure and
 should not be started until that decision is made. Everything in §3.1 and
 §3.2 is not.
+
+**That sentence was true and incomplete, which §9 now says.** Three of §3.3's
+rows and one of §8's are two things bundled together, exactly as the custom
+domain row (§2.12) and the scheduled jobs row (§2.13) were. §9 splits them and
+gives the four halves an order; what is left after that is blocked on a
+person and not on a programmer.
 
 This section used to close by claiming **there is nothing left on this page to
 simply start**. That claim has now been wrong five times, which is enough to
@@ -2403,7 +2425,12 @@ on last time.
 ### 8.4 Billing — Stripe Checkout and the Customer Portal
 
 **Blocked on a Stripe account and its keys, which are the operator's to
-create.** The code is small; the decisions are not, and three of them have a
+create** — **and §9.4 splits it**: subscription state, the webhook and its
+dedupe, and what a lapsed plan may do are all buildable and testable with no
+account in existence. Only the two calls that create a Checkout and a Portal
+session need the keys, and they sit behind a flag.
+
+The original argument, unchanged: The code is small; the decisions are not, and three of them have a
 plausible wrong answer that is also the easier one to write.
 
 - **No card data ever touches this server.** Checkout and the Portal are
@@ -2482,6 +2509,10 @@ section stated — audit in the same transaction, from the first commit — held
 
 ### 8.8 Compute is the real cost and nothing meters it
 
+Recorded rather than decided — and §9.3 says the decision cannot be made yet
+for a reason worth stating: there is no number. The meter is unblocked, it is
+the evidence this question needs, and it should exist before the answer does.
+
 Recorded rather than decided. What is limited is disk and project count; what
 is expensive is container-hours, and the idle reaper is the only thing standing
 between a free tier and an unbounded bill. Before any price is set, settle
@@ -2516,9 +2547,227 @@ the day the section was written, which says less about the pace than about the
 observation in §8.0: almost all of this was already built, and what was missing
 was the layer that lets it differ per customer and be seen.
 
+**§9 amends what follows.** 8.4 is half buildable (§9.4) and 8.8 needs a meter
+before it needs an answer (§9.3). The paragraph below is still right about
+8.5, and about what makes this product sellable.
+
 **What is left is exactly the two items that need somebody other than a
 programmer.** 8.4 needs a Stripe account and its keys, which are the operator's
 to create. 8.5 needs a pricing decision — per seat or per usage — before any of
 its code means anything. Until then the honest state of this deployment is a
 free tier with plans it can describe, comp, meter and warn about, and cannot
 sell.
+
+---
+
+## 9. What is left, and what is actually blocked
+
+Written 2026-09-01, after §3.1 and §3.2 emptied for the first time with
+nothing unblocked behind them. Seven items remain across §3.3 and §8, and every
+one of them is marked blocked.
+
+**This document has been wrong about that five times** (§4 says so, and keeps
+count). Twice the blocker did not exist. Once it existed and was an unmade
+decision, which is the cheapest kind there is. Twice a row was two things
+bundled together and came apart the moment anybody split it — §2.12 shipped
+custom domains that way, and §2.13 shipped scheduled jobs out of the row that
+also held autoscaling. So the useful question is not "what is unblocked" but:
+
+> **For each remaining item, what part of it needs somebody with a credit card,
+> a DNS zone or a pricing opinion — and what part is just code that nobody has
+> written because the row had one word on it?**
+
+Asked that way, four of the seven come apart. The other three do not, and
+saying which is which is most of the value of this section.
+
+### 9.0 The split, item by item
+
+| Row | The half that needs a person | The half that is only code |
+|---|---|---|
+| Backup and restore (§3.3) | where backups **go** — object storage, a second disk, or a written acceptance of loss | a delete that can be undone, which is the failure mode that actually happens |
+| Certificates (§3.3) | who terminates TLS, and where the account key lives | telling that terminator **which hostnames are real**, which is one endpoint |
+| Compute metering (§8.8) | whether this product sells capability or sells minutes | the meter, which is the evidence the decision needs and does not have |
+| Billing (§8.4) | a Stripe account and its keys | subscription state, webhook ingestion, and what a lapsed plan may do |
+| Autoscale (§3.3) | a cost model | — |
+| Process snapshots (§3.3) | a disk budget, and a mechanism nothing here resembles | — |
+| Teams (§8.5) | per seat or per usage | — (see 9.6) |
+
+Debugging is not in the table: §6 decision 1 defers it deliberately, and §3.3
+already says the answer is to revisit the *route*, not the row.
+
+### 9.1 A delete that can be undone — **unblocked**
+
+The backup row's real content, separated from its destination.
+
+`deleteProjectService` removes the container, the managed database **and its
+volume**, the checkpoints, the cache volume, the deployment and its published
+files, the row, and then `fs.rm(projectDir, { recursive: true, force: true })`.
+It is thorough, correct, and irreversible, and the only thing in front of it is
+a confirmation dialog.
+
+**The distinction that unblocks this row: losing a disk and losing a click are
+different problems, and only one of them needs a destination.** A backup answers
+"the host died". A trash answers "I meant the other project", which is the one
+that actually happens, needs nothing off this machine, and is the half a user
+can act on. Shipping it does not make the backup row less true; it makes the
+irreversible path recoverable while the destination is still an open question.
+
+The design, with the parts that have a plausible wrong answer named:
+
+- **Deleted is a state, not an absence.** `deletedAt` on `Project`, and every
+  query that lists or resolves a project filters on it — §6 decision 13, which
+  §2.20 already paid to learn: the guarantee lives in the query, never in the
+  cleanup. There are more of those call sites than the takedown had.
+- **What is released immediately and what is held.** A deleted project's
+  container stops, its site is unpublished, its jobs stop firing, its share
+  token stops redeeming — everything that costs money or serves the public goes
+  at once. What is *held* is the working tree and the row. Holding the
+  container to make restore instant would be paying for storage nobody asked
+  for, and serving a deleted project's site for a week is indefensible.
+- **A grace period, then the real delete.** Seven days, swept by the same
+  timer machinery the token prune and the domain recheck already use. The
+  existing `deleteProjectService` becomes the sweeper's body rather than the
+  button's, which means the destructive path keeps exactly one implementation.
+- **It stops counting against quota immediately.** A trash that holds somebody
+  at their project limit for a week is a trash they will empty in the first
+  minute, which is the same as not having one.
+- **The name is freed and the id is not.** A restored project keeps its id, so
+  every URL that ever pointed at it still does.
+
+### 9.2 Telling a TLS terminator which hostnames are real — **mostly unblocked**
+
+`resolveCustomDomain(hostname)` already exists and already answers the only
+question a certificate needs answered: *is this a name this platform is willing
+to serve?* It is verified by a TXT record (§2.12) and it is a row in a table.
+
+**The decision that unblocks the row is refusing to write an ACME client.** An
+account key, a challenge responder, a renewal timer and a certificate store are
+four things to get right, all of them solved, and the solution is a reverse
+proxy this deployment is going to run anyway. Caddy's on-demand TLS asks an
+HTTP endpoint before issuing for a hostname it has never seen; that endpoint is
+`resolveCustomDomain` with a status code in front of it. Roughly thirty lines,
+and the blocked half stops being "build ACME" and becomes "the operator writes
+six lines of Caddyfile".
+
+Three things this endpoint has to get right, because it is the only guard
+between a public listener and unbounded certificate issuance:
+
+- **Unauthenticated, and it must be.** The proxy asks before any session
+  exists. So it answers with a status code and nothing else — no body, no
+  reason, no distinction between "unknown" and "unverified" — because it is a
+  hostname oracle otherwise.
+- **Verified only.** An unverified claim is not an address (§2.12), and issuing
+  a certificate for one would let anybody claim a name and get a certificate
+  attempt for it.
+- **Rate limited on the same reasoning as everything else that costs.** Every
+  yes is an ACME order somewhere, and a certificate authority's rate limits are
+  the kind you discover by being locked out for a week.
+
+What stays blocked: whether this deployment terminates TLS at all, and where
+that key lives. That is genuinely the operator's, and it is now a config file
+rather than a project.
+
+### 9.3 A meter for compute — **unblocked, and it is the evidence 8.8 needs**
+
+§8.8 records the question and does not answer it: does this product sell
+capability, or sell minutes? It also says the code is shaped for the first.
+
+**It cannot be answered without a number, and there is no number.** Disk and
+project count are metered; container-hours, which is the actual cost, are not
+measured anywhere. So the unblocked half is the meter, and the decision waits
+for it — which is the right order, because a pricing decision made without
+usage data is a guess that becomes a table nobody can change later.
+
+One design decision carries this, and it is a direct lesson from §2.26:
+
+> **Sample, do not open a session.** A `startedAt`/`endedAt` row is the obvious
+> shape and it is the restart wedge again — a row with an open end, a process
+> that stops existing, and a number that is wrong forever afterwards. Instead a
+> sweep on the interval this codebase already runs adds elapsed seconds per
+> running container to a per-user, per-day total. A restart loses at most one
+> tick, nothing is ever left open, and the failure mode is a slight undercount
+> rather than a project that appears to have run for three weeks.
+
+Recorded, not billed. Nothing refuses anything on this number until §8.8 is
+answered, and the account screen can show it because "you used 4 hours of
+compute this month" is true and useful before it is ever a price.
+
+### 9.4 Billing state, with the processor behind a flag — **half unblocked**
+
+Same split §2.12 used for custom domains: everything except the part that needs
+a credential somebody else owns.
+
+What can be built and tested now, with no Stripe account in existence:
+
+- **`Subscription` state on the account**, and the state machine that maps it
+  to a `planId` — which is the only thing the rest of the codebase reads,
+  because §2.22 already made every limit an entitlement lookup. Billing writes
+  one column, exactly as §8.0 predicted.
+- **The webhook endpoint, and its dedupe table.** Events are recorded by
+  Stripe's event id with a unique index, so an at-least-once redelivery is
+  dropped by the database rather than by hoping. This is testable against
+  recorded payloads and needs no key: the signature check is one function with
+  the secret injected.
+- **The grace period and the downgrade**, which is the part §8.4 says has a
+  plausible wrong answer that is also easier to write. An account that stops
+  paying is **blocked at the boundary** — no new projects, no growth past the
+  free quota — and keeps everything it has, working and exportable. §6 decision
+  16 already settled the shape of this for plan features; this is the same rule
+  reaching subscriptions, and it should be the same code.
+
+What stays blocked: creating a Checkout session and a Portal session, which are
+two calls to a live API behind a feature flag that is off. **The webhook is the
+only writer of subscription state** either way (§8.4), so nothing that grants a
+plan depends on the flagged half.
+
+### 9.5 What stays blocked, and why it is not stubbornness
+
+- **Autoscale.** Deciding how many copies of an always-on process to buy in
+  response to load is a cost model. 9.3's meter is the input it is missing, so
+  this row gets closer by somebody else's work rather than by its own.
+- **Process snapshots.** Suspending and resuming a running process is a
+  mechanism nothing in this codebase resembles, and it needs a disk budget per
+  suspended project. Both halves are real. Nothing to split.
+- **Where backups go.** 9.1 takes the recoverable-delete half and deliberately
+  leaves this: object storage off this VM, a second disk, or a written
+  acceptance that this platform loses data when its host does. **9.1 must not
+  be allowed to read as closing this row**, and §3.3 keeps it open.
+- **Debugging.** §6 decision 1. Revisit the route, not the row.
+
+### 9.6 Teams, and why it stays whole
+
+§8.5 is blocked on per-seat versus per-usage, and unlike the four above, the
+split does not help: the *pricing* is the blocked half, but the *code* half is
+"every `ownerId === userId` comparison in the codebase becomes a membership
+question". That is not a row somebody starts on a Tuesday to unblock something
+else, and starting it half-blocked produces an ownership model built around a
+pricing decision nobody has made.
+
+The honest note is that §2.22 made this cheaper than it was: entitlements are
+resolved per account through one function, so an org's plan would be one more
+branch in `resolveEntitlements` rather than a second billing system. The
+ownership rewrite is still the cost.
+
+### Order
+
+**9.1 → 9.3 → 9.2 → 9.4.**
+
+9.1 first because it is the only one with a user on the other end of it who is
+currently one dialog away from losing their work, and because it is the largest
+of the four — the filter has to reach every query that resolves a project, and
+§2.20 is the record of how many surfaces that means.
+
+9.3 second because it is small, it has no dependencies, and every day it does
+not exist is a day of data the §8.8 decision will not have.
+
+9.2 third: thirty lines, and it converts a blocked row into a documented config
+file rather than closing it.
+
+9.4 last of the four because it is the biggest and the least useful until
+somebody has an account — but it is genuinely buildable, and building it is
+what makes "we got the keys" a one-day change instead of a two-week one.
+
+**None of this makes the product sellable.** That still needs the Stripe
+account (§8.4) and a pricing decision (§8.8, §8.5). What it does is make the
+list honest: after these four, everything left on this page is waiting on a
+person rather than on a programmer, and for the first time that will be true.
