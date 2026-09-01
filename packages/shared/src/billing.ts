@@ -99,6 +99,15 @@ export interface AccountSummary {
    *  request. Archived plans are omitted; an account *on* an archived plan
    *  still reads its own limits from `entitlements`. */
   plans: Plan[];
+  /** Container-seconds this calendar month, across every project this account
+   *  owns — sandboxes and published services both.
+   *
+   *  Shown and not charged for. plan.md §8.8 asks whether this product sells
+   *  capability or sells minutes and says the code is shaped for the first;
+   *  that question cannot be answered without a number, so the number exists
+   *  first and the decision waits for it. Until then this is a fact somebody
+   *  may find interesting, and nothing refuses anything on it. */
+  computeSecondsThisMonth: number;
 }
 
 /** The fraction of a quota at which somebody should be told, before the wall

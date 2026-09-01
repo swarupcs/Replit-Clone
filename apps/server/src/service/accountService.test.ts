@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const prismaMock = vi.hoisted(() => ({
   user: { findUnique: vi.fn() },
   project: { findMany: vi.fn() },
+  // The summary now carries the month's container-seconds. Mocked at the
+  // client rather than the service, so the test still proves the summary asks
+  // for it -- mocking `computeSecondsSince` away would leave the field
+  // untested in the one place it is assembled.
+  computeUsage: { findMany: vi.fn(() => Promise.resolve([{ seconds: 90 }])) },
 }));
 
 const usedBytes = vi.hoisted(() => vi.fn());
@@ -107,5 +112,25 @@ describe("the account summary", () => {
     await expect(getAccountSummary(USER)).rejects.toMatchObject({
       statusCode: 404,
     });
+  });
+});
+
+/** Compute is what this platform actually spends, and until §9.3 nothing
+ *  counted it. The summary carries it because the account screen is where a
+ *  person can see it — and it is a fact there, not a limit: nothing in this
+ *  codebase refuses anything on this number. */
+describe("compute on the summary", () => {
+  it("reports the month's container-seconds", async () => {
+    const summary = await getAccountSummary(USER);
+
+    expect(summary.computeSecondsThisMonth).toBe(90);
+  });
+
+  it("asks only for this account's days", async () => {
+    await getAccountSummary(USER);
+
+    expect(prismaMock.computeUsage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ userId: USER }) }),
+    );
   });
 });

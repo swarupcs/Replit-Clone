@@ -256,6 +256,30 @@ async function runningCount(): Promise<number> {
   return containers.length;
 }
 
+/** Which projects have a container up right now, one entry per container.
+ *
+ *  One entry per CONTAINER and not per project, deliberately: a project with a
+ *  managed database is running two, and two is what it costs the host — which
+ *  is the same reason `runningCount` above counts both prefixes against the
+ *  cap. The compute meter reads this and would otherwise undercount by half
+ *  for exactly the projects that cost the most.
+ */
+export async function runningProjectContainers(): Promise<string[]> {
+  const containers = await docker
+    .listContainers({ filters: { name: [CONTAINER_PREFIX, DB_CONTAINER_PREFIX] } })
+    .catch(() => []);
+
+  const ids: string[] = [];
+  for (const info of containers) {
+    // `projectIdFromNames` already knows both prefixes and is anchored --
+    // an unanchored parse is the defect the reaper was fixed for.
+    const projectId = projectIdFromNames(info.Names);
+    if (projectId) ids.push(projectId);
+  }
+
+  return ids;
+}
+
 /** In-flight `ensureContainer` calls, so concurrent callers share one attempt.
  *
  *  Opening a project fires this from the editor socket, from each terminal and

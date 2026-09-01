@@ -38,6 +38,9 @@ function summary(over: Partial<AccountSummary> = {}): AccountSummary {
       { projectId: "p2", name: "Small One", diskBytes: 20 * MB },
     ],
     plans: [],
+    // Three and a bit hours, so the reading below is not a round number that
+    // a broken formatter could produce by accident.
+    computeSecondsThisMonth: 11_400,
     ...over,
   };
 }
@@ -176,5 +179,43 @@ describe("the catalogue", () => {
     expect(await screen.findByText("Current")).toBeTruthy();
     expect(screen.getByText(/12\.00 USD/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /upgrade/i })).toBeNull();
+  });
+});
+
+/** Compute is what this platform actually spends, and until now nothing
+ *  counted it. plan.md 8.8 asks whether this product sells capability or sells
+ *  minutes; the number exists so that question has data behind it, and it is
+ *  shown without being charged for while the answer is open. */
+describe("compute", () => {
+  it("reads it in hours, and says it is not a bill", async () => {
+    show();
+
+    expect(await screen.findByText(/3.2 hours/)).toBeTruthy();
+    expect(screen.getByText(/not charged for/i)).toBeTruthy();
+  });
+
+  it("says minutes when it is minutes", async () => {
+    // The first month of a free tier is all minutes, and "0.1 hours" is a
+    // number nobody pictures.
+    getAccount.mockResolvedValue(summary({ computeSecondsThisMonth: 300 }));
+    show();
+
+    expect(await screen.findByText(/5 minutes/)).toBeTruthy();
+  });
+
+  it("says none rather than zero", async () => {
+    getAccount.mockResolvedValue(summary({ computeSecondsThisMonth: 0 }));
+    show();
+
+    expect(await screen.findByText(/none yet/i)).toBeTruthy();
+  });
+
+  /** A bar needs a limit and there is no limit on this. Rendering one would
+   *  answer the pricing question by accident. */
+  it("is not shown as a quota bar", async () => {
+    show();
+
+    await screen.findByText(/3.2 hours/);
+    expect(screen.queryByLabelText(/compute/i)).toBeNull();
   });
 });

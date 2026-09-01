@@ -71,6 +71,10 @@ export type CounterName =
   // deploy is normal; climbing while nobody is deploying is a server dying
   // repeatedly, which no other counter here would say.
   | "jobs_abandoned"
+  // Container-seconds recorded by the meter. The only counter here that is
+  // about MONEY rather than about behaviour, and the one plan.md 8.8 says has
+  // to exist before a price can be argued for.
+  | "compute_seconds"
   // Notifications. `notifications_created` against `notifications_mailed` is
   // the honest measure of how much of this actually reaches anybody: the gap
   // between them is people who have to open the app to find out, which is the

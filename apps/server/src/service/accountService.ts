@@ -1,5 +1,6 @@
 import type { AccountSummary, ProjectUsage } from "@replit-clone/shared";
 import { prisma } from "../lib/prisma.js";
+import { computeSecondsSince, startOfMonth } from "./computeMeterService.js";
 import { NotFoundError } from "../utils/errors.js";
 import { usedBytes } from "./diskUsageService.js";
 import { listPlans, resolveEntitlements } from "./entitlementService.js";
@@ -70,5 +71,10 @@ export async function getAccountSummary(
     diskBytes,
     breakdown: measured.slice(0, BREAKDOWN_LIMIT),
     plans,
+    // Every project this account has ever run this month, not only the ones
+    // it still owns: a project deleted on the 20th spent real container-hours
+    // before it went, and a meter that forgot them would read lowest for the
+    // accounts that churned most.
+    computeSecondsThisMonth: await computeSecondsSince(userId, startOfMonth()),
   };
 }

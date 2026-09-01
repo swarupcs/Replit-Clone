@@ -44,9 +44,9 @@ re-run that day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1656 passing**, 280 skipped (122 files) — no database on this machine |
-| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds six migrations — see §5 |
-| `pnpm --filter web test` | **1051 passing** (82 files) |
+| `pnpm --filter server test` | **1671 passing**, 280 skipped (123 files) — no database on this machine |
+| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds seven migrations — see §5 |
+| `pnpm --filter web test` | **1055 passing** (82 files) |
 | `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
 
@@ -104,13 +104,13 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 113 items. Open: 8 — three of them unblocked.**
+**Done: 114 items. Open: 7 — two of them unblocked.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
-that), **no unblocked work in §3.2**, **three halves §9 split out and gave an
-order** (a compute meter, a hostname endpoint for a TLS terminator, and billing
-state without a processor), and **five blocked** (§3.3 — a certificate, an autoscaler's
+that), **no unblocked work in §3.2**, **two halves §9 split out and gave an
+order** (a hostname endpoint for a TLS terminator, and billing state without a
+processor), and **five blocked** (§3.3 — a certificate, an autoscaler's
 cost model, a disk budget for snapshots, a backup destination, and an
 architectural route). §8.4 and §8.5 are blocked too, on a Stripe account and on
 a pricing decision respectively, and are listed there rather than duplicated
@@ -1508,6 +1508,56 @@ the other project".
 applied either** — see §5. It is the first of these to add an index rather than
 a column alone.
 
+### 2.30 Since (2026-09-02) — §9.3, a meter for compute
+
+The second of §9's four halves, and the one whose whole justification is that
+a decision cannot be made without it. §8.8 asks whether this product sells
+capability or sells minutes, says the code is shaped for the first, and leaves
+it open. **It could not have been closed either way, because there was no
+number**: disk and project count are limited and measured, container-hours are
+the actual cost, and nothing counted them anywhere.
+
+**Sample, do not open a session.** The obvious shape is a row per container
+with `startedAt` and `endedAt`, and it is §2.26's restart wedge wearing a
+different hat — an open end, a process that stops existing, and a total that is
+wrong forever afterwards. Instead a sweep adds the elapsed seconds to a
+per-account, per-day row. A restart loses at most one tick, nothing is ever
+left open, and the failure mode is a slight undercount, which is the right
+direction for a number that might one day be a bill.
+
+Three decisions inside that, each mutation-tested or with an obvious wrong
+version:
+
+- **Elapsed, not the interval, and capped at two ticks.** A sweep that fires
+  late has still been a late sweep. But a laptop that slept for six hours, a
+  paused debugger or a busy host all produce one enormous delta, and the
+  container may well have been running — this process was not watching. A
+  meter that guesses upward is the one nobody can defend. Removing the cap
+  fails a test by name.
+- **`increment`, not `set`.** The wrong one makes a day's total equal its last
+  minute, and it is a one-word difference that no screen would contradict.
+- **The first tick after boot records nothing.** It has nothing to measure
+  from, and counting it as a full interval would make the meter read highest
+  for the least stable host.
+
+**What counts is a container, not a project**, because a project with a managed
+database runs two and two is what it costs — the same reason the concurrency
+cap already counts both prefixes. And **a published service counts**: it is
+always-on by definition, so a meter that watched only sandboxes would be
+quietest about exactly the case §8.8 is asking about.
+
+**Recorded, never enforced.** Nothing in this codebase refuses anything on this
+number, and the account screen deliberately shows it as a line rather than as a
+`Meter`: a progress bar needs a limit, and rendering one would answer the
+pricing question by accident. It reads "3.2 hours · not charged for", in
+minutes below the hour, because the first month of a free tier is all minutes
+and "0.1 hours" is a number nobody pictures.
+
+1671 server tests and 1055 web tests pass. **This migration has not been
+applied either** — see §5 — and it is the first of the seven to create a table
+with a unique index the code depends on: the sweep's upsert targets
+`(userId, day)` every minute.
+
 ---
 
 ## 3. Open
@@ -2098,7 +2148,7 @@ the data.
 `pnpm -r typecheck` clean 3/3, `pnpm -r lint` clean 3/3, 1536 server tests and
 1003 web tests passing — all run, not quoted.
 
-**None of the six migrations has been applied to any database.** Docker was not running
+**None of the seven migrations has been applied to any database.** Docker was not running
 on this machine, so the DB-gated suites skipped, `plans` has never existed
 outside the `.sql` file, the seeded `free` row has never been read by anything,
 and neither has `users.quotaWarnedAt` or the new `QUOTA_WARNING` enum value.
@@ -2575,9 +2625,11 @@ section stated — audit in the same transaction, from the first commit — held
 
 ### 8.8 Compute is the real cost and nothing meters it
 
-Recorded rather than decided — and §9.3 says the decision cannot be made yet
-for a reason worth stating: there is no number. The meter is unblocked, it is
-the evidence this question needs, and it should exist before the answer does.
+Recorded rather than decided — and the reason it could not be decided was that
+there was no number. **There is one now** (§2.30, shipped 2026-09-02):
+container-seconds per account per day, sandboxes and published services both,
+recorded and not enforced. This question is no longer blocked on engineering.
+It is blocked on somebody letting the meter run long enough to argue from.
 
 Recorded rather than decided. What is limited is disk and project count; what
 is expensive is container-hours, and the idle reaper is the only thing standing
@@ -2733,7 +2785,7 @@ What stays blocked: whether this deployment terminates TLS at all, and where
 that key lives. That is genuinely the operator's, and it is now a config file
 rather than a project.
 
-### 9.3 A meter for compute — **unblocked, and it is the evidence 8.8 needs**
+### 9.3 A meter for compute — **shipped 2026-09-02, see §2.30**
 
 §8.8 records the question and does not answer it: does this product sell
 capability, or sell minutes? It also says the code is shaped for the first.
@@ -2819,8 +2871,8 @@ ownership rewrite is still the cost.
 **9.1 → 9.3 → 9.2 → 9.4.**
 
 - [x] **9.1 A delete that can be undone.** Shipped 2026-09-01 — see §2.29.
-- [ ] **9.3 A meter for compute.** Next.
-- [ ] **9.2 A hostname endpoint for a TLS terminator.**
+- [x] **9.3 A meter for compute.** Shipped 2026-09-02 — see §2.30.
+- [ ] **9.2 A hostname endpoint for a TLS terminator.** Next.
 - [ ] **9.4 Billing state, with the processor behind a flag.**
 
 Listed as rows and not only as prose because §1 counts checkboxes, and a

@@ -118,15 +118,16 @@ model User {
   /// deriving it would have the pruner decide to warn somebody again.
   quotaWarnedAt DateTime?
 
-  projects      Project[]
-  refreshTokens RefreshToken[]
-  collaborations ProjectCollaborator[]
-  reportsFiled   ProjectReport[]
-  tokens        UserToken[]
+  projects         Project[]
+  refreshTokens    RefreshToken[]
+  collaborations   ProjectCollaborator[]
+  reportsFiled     ProjectReport[]
+  tokens           UserToken[]
   githubConnection GithubConnection?
-  notifications Notification[]
-  apiKeys       ApiKey[]
-  accountActions AccountAction[] @relation("AccountActionSubject")
+  notifications    Notification[]
+  apiKeys          ApiKey[]
+  accountActions   AccountAction[]       @relation("AccountActionSubject")
+  computeUsage     ComputeUsage[]
 
   /// "Which accounts are on this plan" is the operator's question, and the one
   /// a pricing change has to answer before it is made.
@@ -361,8 +362,8 @@ model ProjectReport {
 
   status     ProjectReportStatus @default(OPEN)
   /// When an operator last acted on it, and which one.
-  reviewedAt    DateTime?
-  reviewedBy    String?
+  reviewedAt DateTime?
+  reviewedBy String?
 
   createdAt DateTime @default(now())
 
@@ -492,6 +493,39 @@ enum ScheduledRunStatus {
   ABANDONED
 }
 
+/// Container-seconds, per account, per day.
+///
+/// What is limited in this product is disk and project count; what is
+/// EXPENSIVE is container-hours, and nothing measured them. plan.md section
+/// 8.8 asks whether this sells capability or sells minutes and cannot be
+/// answered without a number, so this is the number.
+///
+/// Sampled, not sessioned. A startedAt/endedAt row is the obvious shape and it
+/// is the restart wedge again (section 2.26): a row with an open end, a
+/// process that stops existing, and a total that is wrong forever afterwards.
+/// A sweep adds elapsed seconds to a day, so a restart loses at most one tick
+/// and nothing is ever left open.
+///
+/// Recorded, never enforced. Nothing refuses anything on this.
+model ComputeUsage {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Midnight UTC of the day being counted. UTC and not the viewer's zone,
+  /// because two servers disagreeing about when a day starts is a rounding
+  /// error that compounds.
+  day DateTime @db.Date
+
+  /// Container-seconds. A project with a database runs two containers and
+  /// counts twice, which is what it actually costs the host.
+  seconds Int @default(0)
+
+  @@unique([userId, day])
+  @@index([day])
+  @@map("compute_usage")
+}
+
 model Project {
   id       String @id @default(uuid())
   name     String
@@ -533,8 +567,8 @@ model Project {
 
   moderationActions ModerationAction[]
 
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
   /// Last time a socket or terminal attached; drives the idle container reaper.
   lastActiveAt DateTime?
 
@@ -564,11 +598,11 @@ model Project {
   /// Secret in the share link, when one has been created. Null means the
   /// project is not shared by link at all; revoking clears it, which
   /// invalidates every link already handed out.
-  shareToken String? @unique
+  shareToken String?     @unique
   /// What a link holder may do. EDITOR links are still named grants: redeeming
   /// adds the signed-in user as a collaborator the owner can see and demote,
   /// so a link never becomes an anonymous write credential.
-  shareRole ProjectRole @default(VIEWER)
+  shareRole  ProjectRole @default(VIEWER)
 
   /// Whether anybody signed in may read this project and take a copy.
   ///
@@ -589,9 +623,9 @@ model Project {
   forkedFrom   Project?  @relation("ProjectForks", fields: [forkedFromId], references: [id], onDelete: SetNull)
   forks        Project[] @relation("ProjectForks")
 
-  collaborators ProjectCollaborator[]
-  reports       ProjectReport[]
-  deployment    Deployment?
+  collaborators      ProjectCollaborator[]
+  reports            ProjectReport[]
+  deployment         Deployment?
   databaseConnection ProjectDatabaseConnection?
   managedDatabase    ManagedDatabase?
   embed              Embed?

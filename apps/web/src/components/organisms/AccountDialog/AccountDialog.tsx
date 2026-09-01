@@ -98,6 +98,18 @@ function PlanCard({ plan, current }: { plan: Plan; current: boolean }) {
   );
 }
 
+/** Container-hours, read by a person.
+ *
+ *  Minutes below an hour, because "0.1 hours" is a number nobody pictures and
+ *  the first month of a free tier is all minutes. */
+function hours(seconds: number): string {
+  if (seconds < 60) return "none yet";
+  if (seconds < 3600) return `${String(Math.round(seconds / 60))} minutes`;
+
+  const value = seconds / 3600;
+  return `${value < 10 ? value.toFixed(1) : String(Math.round(value))} hours`;
+}
+
 export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
   const [tab, setTab] = useState<"usage" | "keys" | "trash">("usage");
 
@@ -192,6 +204,27 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
             limit={data.entitlements.userDiskQuotaMb * 1024 * 1024}
             render={mb}
           />
+
+          {/* Not a Meter, on purpose: a bar needs a limit, and there is no
+              limit on this. Compute is the thing this platform actually
+              spends and nothing has ever counted it, so the number exists to
+              be looked at while the question of whether it is ever priced
+              stays open. A progress bar would answer that question by
+              accident. */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "baseline",
+              fontSize: 13,
+              margin: "4px 0 16px",
+            }}
+          >
+            <span>Compute this month</span>
+            <span style={{ color: "var(--rc-text-subtle)" }}>
+              {hours(data.computeSecondsThisMonth)} · not charged for
+            </span>
+          </div>
 
           <Typography.Title level={5}>Where the space is going</Typography.Title>
           {data.breakdown.length === 0 ? (

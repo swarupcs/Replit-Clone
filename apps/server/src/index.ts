@@ -66,6 +66,7 @@ import { recheckDomains } from "./service/customDomainService.js";
 import { backfillSealedEnvVars } from "./service/projectEnvService.js";
 import { reconcileJobRuns, runDueJobs } from "./service/scheduleService.js";
 import { purgeExpiredTrash } from "./service/projectService.js";
+import { startComputeMeter } from "./service/computeMeterService.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
 import { SandboxNetworkMismatch } from "./containers/sandboxNetwork.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
@@ -509,6 +510,10 @@ async function start(): Promise<void> {
     await stopManagedDatabase(projectId).catch(() => undefined);
   });
   startIdleReaper();
+  // Alongside the reaper and not inside it: the reaper decides how long an
+  // abandoned container keeps costing, and a meter that shared its try/catch
+  // would take the more important of the two down with it.
+  startComputeMeter();
   startTokenPrune();
   startTrashSweep();
   startDomainRecheck();
