@@ -516,6 +516,21 @@ model Project {
   /// guarantee.
   takenDownAt DateTime?
 
+  /// When the owner deleted this project -- and the delete has not happened
+  /// yet.
+  ///
+  /// The whole of the trash. `deleteProjectService` removes the container, the
+  /// managed database AND its volume, the checkpoints, the cache volume, the
+  /// published files and the working tree, and the only thing in front of it
+  /// was a confirmation dialog. Now that body is a sweeper's, seven days
+  /// later, and the button writes this column.
+  ///
+  /// Enforced in `getProjectAccess`, which every route and socket handler
+  /// reaches through, plus the handful of surfaces that resolve a project
+  /// WITHOUT a session -- the site, the embed, the share link, the job sweep.
+  /// WHERE clauses rather than cleanup, for the reason the line above gives.
+  deletedAt DateTime?
+
   moderationActions ModerationAction[]
 
   createdAt DateTime  @default(now())
@@ -586,6 +601,9 @@ model Project {
   /// The gallery reads this, and only this.
   @@index([visibility])
   @@index([forkedFromId])
+  /// Only the trash. Every other query asks for `deletedAt IS NULL`, which is
+  /// almost every row; the index that helps is over the few that are not.
+  @@index([deletedAt])
   @@map("projects")
 }
 

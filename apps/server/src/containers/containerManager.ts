@@ -776,6 +776,10 @@ export async function reconcileOnBoot(): Promise<{
   directoriesFound: number;
 }> {
   const { prisma } = await import("../lib/prisma.js");
+  // Every row, trash included, and deliberately: a trashed project still has
+  // its working tree, and leaving it out here would report that tree as an
+  // orphan directory -- which is the one thing this function is careful never
+  // to say wrongly.
   const projects = await prisma.project.findMany({ select: { id: true } });
   const known = new Set(projects.map((project) => project.id));
 
@@ -921,7 +925,10 @@ async function assertUserContainerBudget(projectId: string): Promise<void> {
   if (!project) return;
 
   const owned = await prisma.project.findMany({
-    where: { ownerId: project.ownerId },
+    // A trashed project's container was stopped when it was trashed, so this
+    // is belt and braces -- but the cap is about what a person is running now,
+    // and a project they have deleted is not that.
+    where: { ownerId: project.ownerId, deletedAt: null },
     select: { id: true },
   });
   const ownedIds = new Set(owned.map((entry) => entry.id));

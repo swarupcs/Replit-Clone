@@ -94,8 +94,45 @@ export const listProjectsApi = async (): Promise<Project[]> => {
   return all;
 };
 
+/** Delete, which puts the project in the trash rather than removing it.
+ *
+ *  Same route and same verb as before. The recoverable path REPLACES the
+ *  irreversible one instead of sitting beside it, because an option nobody
+ *  picks protects nobody.
+ */
 export const deleteProjectApi = async (projectId: string): Promise<void> => {
   await axios.delete(`/api/v1/projects/${projectId}`);
+};
+
+export interface TrashedProject {
+  id: string;
+  name: string;
+  template: string;
+  deletedAt: string;
+}
+
+export const listTrashApi = async (): Promise<{
+  trashDays: number;
+  projects: TrashedProject[];
+}> => {
+  const response = await axios.get<
+    ApiSuccess<{ trashDays: number; projects: TrashedProject[] }>
+  >("/api/v1/projects/trash");
+  return response.data.data;
+};
+
+export const restoreProjectApi = async (projectId: string): Promise<Project> => {
+  const response = await axios.post<ApiSuccess<Project>>(
+    `/api/v1/projects/${projectId}/restore`,
+  );
+  return response.data.data;
+};
+
+/** The delete that is still a delete. Only reachable for something already in
+ *  the trash, which is what keeps the irreversible path from being one button
+ *  again. */
+export const purgeProjectApi = async (projectId: string): Promise<void> => {
+  await axios.delete(`/api/v1/projects/${projectId}/purge`);
 };
 
 export const getProjectTree = async ({

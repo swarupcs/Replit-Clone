@@ -40,7 +40,10 @@ export async function getAccountSummary(
   // whoever owns it, not against everybody who can see it — the same rule the
   // quota itself applies.
   const projects = await prisma.project.findMany({
-    where: { ownerId: userId },
+    // Trashed projects are excluded here for the same reason the quota
+    // excludes them: this screen exists to explain the number the quota
+    // enforces, and a breakdown that does not add up to it is worse than none.
+    where: { ownerId: userId, deletedAt: null },
     select: { id: true, name: true },
   });
 

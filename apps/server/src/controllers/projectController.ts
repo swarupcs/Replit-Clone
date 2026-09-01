@@ -3,7 +3,11 @@ import { z } from "zod";
 import archiver from "archiver";
 import {
   createProjectService,
-  deleteProjectService,
+  trashProjectService,
+  restoreProjectService,
+  purgeProjectService,
+  listTrashedProjects,
+  TRASH_DAYS,
   duplicateProjectService,
   forkProjectService,
   EXCLUDED_GLOBS,
@@ -117,11 +121,74 @@ export async function getProjectPorts(
   });
 }
 
+/** Delete, which now means "put in the trash".
+ *
+ *  Same verb, same route, same button: the recoverable path replaces the
+ *  irreversible one rather than sitting beside it, because an option nobody
+ *  picks protects nobody. The real delete is `purgeProjectController` below,
+ *  reachable only from the trash.
+ */
 export async function deleteProjectController(
   req: Request<{ projectId: string }>,
   res: Response,
 ): Promise<void> {
-  await deleteProjectService(
+  await trashProjectService(
+    assertValidProjectId(req.params.projectId),
+    getAuthContext(req).userId,
+  );
+
+  res.json({
+    success: true,
+    message: `Moved to the trash. It will be deleted in ${String(TRASH_DAYS)} days.`,
+    data: { trashDays: TRASH_DAYS },
+  });
+}
+
+export async function listTrashController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projects = await listTrashedProjects(getAuthContext(req).userId);
+
+  res.json({
+    success: true,
+    message: "Trash",
+    data: {
+      trashDays: TRASH_DAYS,
+      projects: projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        template: project.template,
+        // Never null for a row this query returned, and narrowed here rather
+        // than asserted so the response type says what the screen can rely on.
+        deletedAt: (project.deletedAt ?? new Date()).toISOString(),
+      })),
+    },
+  });
+}
+
+export async function restoreProjectController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const project = await restoreProjectService(
+    assertValidProjectId(req.params.projectId),
+    getAuthContext(req).userId,
+  );
+
+  res.json({ success: true, message: "Project restored", data: project });
+}
+
+/** Emptying the trash, for an owner who does not want to wait a week.
+ *
+ *  Only reachable for a project already in the trash, which is what keeps the
+ *  irreversible path from being one button again.
+ */
+export async function purgeProjectController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  await purgeProjectService(
     assertValidProjectId(req.params.projectId),
     getAuthContext(req).userId,
   );

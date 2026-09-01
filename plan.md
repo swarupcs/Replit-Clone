@@ -44,9 +44,9 @@ re-run that day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1628 passing**, 280 skipped (120 files) — no database on this machine |
-| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds five migrations — see §5 |
-| `pnpm --filter web test` | **1042 passing** (81 files) |
+| `pnpm --filter server test` | **1656 passing**, 280 skipped (122 files) — no database on this machine |
+| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds six migrations — see §5 |
+| `pnpm --filter web test` | **1051 passing** (82 files) |
 | `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
 
@@ -104,11 +104,13 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 112 items. Open: 5 — none of them unblocked.**
+**Done: 113 items. Open: 8 — three of them unblocked.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
-that), **no unblocked work** (§3.2 is empty too), and **five blocked** (§3.3 — a certificate, an autoscaler's
+that), **no unblocked work in §3.2**, **three halves §9 split out and gave an
+order** (a compute meter, a hostname endpoint for a TLS terminator, and billing
+state without a processor), and **five blocked** (§3.3 — a certificate, an autoscaler's
 cost model, a disk budget for snapshots, a backup destination, and an
 architectural route). §8.4 and §8.5 are blocked too, on a Stripe account and on
 a pricing decision respectively, and are listed there rather than duplicated
@@ -1442,6 +1444,70 @@ that asks for it by shape.
 
 1628 server tests and 1042 web tests pass.
 
+### 2.29 Since (2026-09-01) — §9.1, a delete that can be undone
+
+The first of the four halves §9 split out, and the one with a user on the
+other end of it who was one dialog away from losing their work.
+
+**What replaced what.** `DELETE /:projectId` is the same route, the same verb
+and the same button, and it no longer deletes anything. A recoverable path
+that sits *beside* the irreversible one protects nobody — the person about to
+make the mistake is the person who will not go looking for the safer option —
+so it had to take its place. The old body is now `purgeProject`, reached only
+from the trash: by the sweeper after seven days, or by an owner who does not
+want to wait.
+
+**The split is the design, and it is wrong in two directions.** A trashed
+project stops its container, stops its database, unpublishes its site, revokes
+its embed and clears its share token — immediately. Anything that goes on
+serving the public or costing money for a week is indefensible. What is *held*
+is the working tree, the row, and the managed database's **volume**, because
+the volume is the user's data and a trash that gives back an empty project is
+not a trash. Both halves are mutation-tested: destroying the volume on the way
+in fails two tests, and leaving the share token alive fails one.
+
+**One line covers the authenticated product.** `getProjectAccess` is what every
+route and every socket handler reaches a project through, so `if
+(project.deletedAt) return null` closes the editor, the terminal, the deploy
+panel, the jobs and the rest at once — as a 404, which is also the honest
+answer. Restoring is the single operation that must see past it, so it reads
+the row itself and says so rather than adding a flag to the function ninety
+callers trust.
+
+**And the surfaces that never see a session were enumerated rather than
+recalled**, because §2.20 is the record of what happens otherwise: the gallery,
+the dashboard list, the site, the embed, the share-link redeem and preview, and
+the job sweep. WHERE clauses, not cleanup — §6 decision 13 for the fifth time.
+The share token is *both* cleared and filtered, which §2.20 settled is not
+belt-and-braces but the rule.
+
+**Two quota decisions, each with a plausible wrong answer.** A trashed project
+stops counting immediately — a trash that holds somebody at their project limit
+for a week is one they empty in the first minute, which is the same as not
+having one. And because it stops counting, **restore has to ask for room**:
+`assertCanCreateProject` runs first, so an account that filled up in the
+meantime is told which limit it hit instead of being restored into a state
+where nothing can be created.
+
+**The one test that mattered was the one I had not written.** Removing the
+`getProjectAccess` guard — the single most load-bearing line in the change —
+left all 1650 tests passing. That is the §3.1 lesson arriving on schedule: the
+suite was green about a feature whose central guard did nothing.
+`trashGuards.test.ts` exists because of it, and the mutant now fails two.
+
+**Deliberately not done:** restoring does not republish the site, re-issue the
+embed or bring the share link back. Those were public surfaces the owner gave
+up when they deleted the project, and handing them back unasked would be this
+platform deciding who may read something on somebody's behalf.
+
+**This does not close §3.3's backup row and must not be read as doing so.** A
+backup answers "the host died" and needs a destination; this answers "I meant
+the other project".
+
+1656 server tests and 1051 web tests pass. **This migration has not been
+applied either** — see §5. It is the first of these to add an index rather than
+a column alone.
+
 ---
 
 ## 3. Open
@@ -2032,7 +2098,7 @@ the data.
 `pnpm -r typecheck` clean 3/3, `pnpm -r lint` clean 3/3, 1536 server tests and
 1003 web tests passing — all run, not quoted.
 
-**None of the five migrations has been applied to any database.** Docker was not running
+**None of the six migrations has been applied to any database.** Docker was not running
 on this machine, so the DB-gated suites skipped, `plans` has never existed
 outside the `.sql` file, the seeded `free` row has never been read by anything,
 and neither has `users.quotaWarnedAt` or the new `QUOTA_WARNING` enum value.
@@ -2595,7 +2661,7 @@ saying which is which is most of the value of this section.
 Debugging is not in the table: §6 decision 1 defers it deliberately, and §3.3
 already says the answer is to revisit the *route*, not the row.
 
-### 9.1 A delete that can be undone — **unblocked**
+### 9.1 A delete that can be undone — **shipped 2026-09-01, see §2.29**
 
 The backup row's real content, separated from its destination.
 
@@ -2751,6 +2817,15 @@ ownership rewrite is still the cost.
 ### Order
 
 **9.1 → 9.3 → 9.2 → 9.4.**
+
+- [x] **9.1 A delete that can be undone.** Shipped 2026-09-01 — see §2.29.
+- [ ] **9.3 A meter for compute.** Next.
+- [ ] **9.2 A hostname endpoint for a TLS terminator.**
+- [ ] **9.4 Billing state, with the processor behind a flag.**
+
+Listed as rows and not only as prose because §1 counts checkboxes, and a
+section whose items were paragraphs would have made that figure mean two
+different things — which is the drift §7 was extended to stop.
 
 9.1 first because it is the only one with a user on the other end of it who is
 currently one dialog away from losing their work, and because it is the largest

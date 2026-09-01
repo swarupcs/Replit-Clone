@@ -8,6 +8,7 @@ import {
 } from "@replit-clone/shared";
 import { getAccountApi } from "../../../apis/projects.ts";
 import { ApiKeys } from "./ApiKeys.tsx";
+import { TrashPanel } from "../TrashPanel/TrashPanel.tsx";
 
 /** What this account is using, and what it is allowed.
  *
@@ -98,7 +99,7 @@ function PlanCard({ plan, current }: { plan: Plan; current: boolean }) {
 }
 
 export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
-  const [tab, setTab] = useState<"usage" | "keys">("usage");
+  const [tab, setTab] = useState<"usage" | "keys" | "trash">("usage");
 
   const { data, isLoading, error } = useQuery<AccountSummary>({
     queryKey: ["account"],
@@ -121,14 +122,21 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
         options={[
           { label: "Usage", value: "usage" },
           { label: "API keys", value: "keys" },
+          // Here rather than on the dashboard: the trash is about the account
+          // -- what it is holding and what that costs -- and putting deleted
+          // projects back among the live ones is how somebody opens the wrong
+          // thing.
+          { label: "Trash", value: "trash" },
         ]}
         value={tab}
-        onChange={(value) => setTab(value as "usage" | "keys")}
+        onChange={(value) => setTab(value as "usage" | "keys" | "trash")}
         style={{ marginBottom: 16 }}
       />
 
       {tab === "keys" ? (
         <ApiKeys />
+      ) : tab === "trash" ? (
+        <TrashPanel />
       ) : error ? (
         <Empty description="Could not load this account's usage." />
       ) : isLoading || !data ? (

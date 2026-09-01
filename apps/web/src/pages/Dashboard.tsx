@@ -305,7 +305,14 @@ export const Dashboard = () => {
 
   const deleteMutation = useMutation({
     mutationFn: deleteProjectApi,
-    onSuccess: refreshProjects,
+    onSuccess: async () => {
+      await refreshProjects();
+      // The trash gained a row, and the account's usage lost one -- neither
+      // screen would refetch on its own.
+      await queryClient.invalidateQueries({ queryKey: ["trash"] });
+      await queryClient.invalidateQueries({ queryKey: ["account"] });
+      void messageApi.success("Moved to the trash. You have a week to undo it.");
+    },
     onError: () => {
       // Silence here used to mean a card that simply stayed put.
       void messageApi.error("Could not delete the project.");
@@ -802,8 +809,12 @@ export const Dashboard = () => {
         destroyOnHidden
       >
         <span style={{ color: "var(--rc-text-muted)" }}>
-          <b>{deleting?.name}</b> and its files are removed from disk
-          permanently. Download it first if you want to keep a copy.
+          {/* This used to promise permanent removal, and it was true. Saying
+              it now would be wrong in the direction that matters: somebody who
+              believes their work is gone does not go looking for it. */}
+          <b>{deleting?.name}</b> stops running and goes offline now. It is
+          kept for a week in the trash, under Plan and usage, where you can put
+          it back or delete it for good.
         </span>
       </Modal>
 

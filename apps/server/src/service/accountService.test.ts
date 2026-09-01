@@ -86,7 +86,10 @@ describe("the account summary", () => {
     await getAccountSummary(USER);
 
     expect(prismaMock.project.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { ownerId: USER } }),
+      // ...and not the ones in the trash, which stop counting the moment
+      // they are trashed. This screen explains the number the quota enforces,
+      // and a breakdown that does not add up to it is worse than none.
+      expect.objectContaining({ where: { ownerId: USER, deletedAt: null } }),
     );
   });
 

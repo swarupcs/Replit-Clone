@@ -65,6 +65,7 @@ import { reconcileDeployments, restoreServices } from "./service/deployService.j
 import { recheckDomains } from "./service/customDomainService.js";
 import { backfillSealedEnvVars } from "./service/projectEnvService.js";
 import { reconcileJobRuns, runDueJobs } from "./service/scheduleService.js";
+import { purgeExpiredTrash } from "./service/projectService.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
 import { SandboxNetworkMismatch } from "./containers/sandboxNetwork.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
@@ -328,6 +329,27 @@ function startTokenPrune(): void {
  *  Hourly against a daily staleness window, for the same reason the token
  *  prune is: it keeps the first sweep after a restart soon.
  */
+/** Deletes for real what has been in the trash longer than the grace period.
+ *
+ *  Hourly, on the same machinery as the token prune above it, and it runs once
+ *  at boot: a server that was down for a fortnight owes a purge, and waiting an
+ *  hour to start would keep every one of those trees on disk for no reason.
+ *
+ *  Failures are logged and never propagate. A tree that will not delete must
+ *  not stop the sweep -- one stuck project holding every other account's disk
+ *  is a far worse outcome than one project that needs looking at by hand.
+ */
+function startTrashSweep(): void {
+  const sweep = (): void => {
+    void purgeExpiredTrash().catch((error: unknown) => {
+      logger.error("could not purge trashed projects", error);
+    });
+  };
+
+  sweep();
+  setInterval(sweep, 60 * 60 * 1000).unref();
+}
+
 function startDomainRecheck(): void {
   const sweep = (): void => {
     void recheckDomains()
@@ -488,6 +510,7 @@ async function start(): Promise<void> {
   });
   startIdleReaper();
   startTokenPrune();
+  startTrashSweep();
   startDomainRecheck();
   startJobSweeper();
   startAccessWatch();
