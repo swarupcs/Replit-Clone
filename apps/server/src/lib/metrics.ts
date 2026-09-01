@@ -75,6 +75,11 @@ export type CounterName =
   // about MONEY rather than about behaviour, and the one plan.md 8.8 says has
   // to exist before a price can be argued for.
   | "compute_seconds"
+  // The TLS authorize endpoint. `tls_authorize_refused` climbing is the shape
+  // of somebody pointing hostnames at this deployment that it never agreed to
+  // serve -- which is what a certificate authority's rate limit is spent on.
+  | "tls_authorize_allowed"
+  | "tls_authorize_refused"
   // Notifications. `notifications_created` against `notifications_mailed` is
   // the honest measure of how much of this actually reaches anybody: the gap
   // between them is people who have to open the app to find out, which is the

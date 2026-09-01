@@ -44,7 +44,7 @@ re-run that day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1671 passing**, 280 skipped (123 files) — no database on this machine |
+| `pnpm --filter server test` | **1676 passing**, 280 skipped (124 files) — no database on this machine |
 | the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds seven migrations — see §5 |
 | `pnpm --filter web test` | **1055 passing** (82 files) |
 | `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
@@ -104,13 +104,12 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 114 items. Open: 7 — two of them unblocked.**
+**Done: 115 items. Open: 6 — one of them unblocked.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
-that), **no unblocked work in §3.2**, **two halves §9 split out and gave an
-order** (a hostname endpoint for a TLS terminator, and billing state without a
-processor), and **five blocked** (§3.3 — a certificate, an autoscaler's
+that), **no unblocked work in §3.2**, **one half §9 split out and has not
+built yet** (billing state without a processor), and **five blocked** (§3.3 — a certificate, an autoscaler's
 cost model, a disk budget for snapshots, a backup destination, and an
 architectural route). §8.4 and §8.5 are blocked too, on a Stripe account and on
 a pricing decision respectively, and are listed there rather than duplicated
@@ -1558,6 +1557,55 @@ applied either** — see §5 — and it is the first of the seven to create a ta
 with a unique index the code depends on: the sweep's upsert targets
 `(userId, day)` every minute.
 
+### 2.31 Since (2026-09-02) — §9.2, the certificate row, mostly
+
+Third of §9's four halves, and the one where the useful work was **deciding not
+to build something**.
+
+§3.3 carried "certificates for custom domains" as blocked infrastructure and
+described what it would take: ACME, an account key, a challenge the deploy
+listener can answer, and renewal. All four are real, all four are solved
+problems, and the thing that solves them is a reverse proxy this deployment is
+going to run anyway. Caddy asks an HTTP endpoint before issuing for a hostname
+it has not seen — `on_demand_tls { ask … }` — and that question is one this
+codebase could already answer, because `resolveCustomDomain` exists and a
+domain reaches it only after its owner published a TXT record that was checked
+(§2.12).
+
+So the code half is a status code in front of a function that was already
+written, and the blocked half stops being "build an ACME client" and becomes
+"the operator writes six lines of Caddyfile", which is in the file.
+
+**It is the only guard between a public listener and unbounded certificate
+issuance**, so what it refuses matters more than what it allows:
+
+- **Unauthenticated, and it has to be** — the proxy asks before any session
+  exists. Which makes it a hostname oracle unless it says nothing, so it
+  answers with a status code and an empty body. One 404 covers "never heard of
+  it", "claimed but never verified" and "verified and then the record went
+  away" alike, because telling them apart tells an anonymous caller which
+  domains somebody has claimed here.
+- **Rate limited**, because every yes is an ACME order somewhere and a
+  certificate authority's limits are the kind you discover by being locked out
+  for a week.
+- **A `domain` that is not a string is refused without a query.**
+  `?domain=a&domain=b` arrives as an array, which is the shape that becomes a
+  type error at the database rather than a 404.
+
+**And it found a real gap on the way in.** `resolveCustomDomain` filtered on
+the verification and on the deployment, but not on the takedown or the trash —
+which was never a hole in what gets *served*, because `resolveSite` filters
+those itself, and became one the moment a caller asked "is this name worth a
+certificate". A taken-down project's domain would have had one issued for it.
+Fixed in the WHERE clause where §6 decision 13 says the guarantee belongs:
+belt and braces on the serving path, load-bearing on this one.
+
+What stays in §3.3: whether this deployment terminates TLS at all, and where
+that key lives. Genuinely the operator's, and now a config file rather than a
+project.
+
+1676 server tests and 1055 web tests pass.
+
 ---
 
 ## 3. Open
@@ -1887,10 +1935,10 @@ once, found three more times.
 
 Each is named with what blocks it, so none reads as ready to start.
 
-- [ ] **Certificates for custom domains.** **Split by §9.2** — the code half
-      is one endpoint telling a TLS terminator which hostnames are real, and
-      what is left here is whether this deployment terminates TLS and where
-      that key lives. What is left of the row that used
+- [ ] **Certificates for custom domains.** **Split by §9.2, and the code half
+      shipped 2026-09-02 (§2.31).** What is left here is whether this
+      deployment terminates TLS at all and where that key lives — a Caddyfile
+      and a decision, not a project. What is left of the row that used
       to say "custom domains", once the code half shipped on 2026-08-30
       (§2.12). A verified domain is served over plain HTTP today. Over HTTPS
       each one needs a certificate for its own name — not the wildcard that
@@ -2752,7 +2800,7 @@ The design, with the parts that have a plausible wrong answer named:
 - **The name is freed and the id is not.** A restored project keeps its id, so
   every URL that ever pointed at it still does.
 
-### 9.2 Telling a TLS terminator which hostnames are real — **mostly unblocked**
+### 9.2 Telling a TLS terminator which hostnames are real — **shipped 2026-09-02, see §2.31**
 
 `resolveCustomDomain(hostname)` already exists and already answers the only
 question a certificate needs answered: *is this a name this platform is willing
@@ -2872,8 +2920,8 @@ ownership rewrite is still the cost.
 
 - [x] **9.1 A delete that can be undone.** Shipped 2026-09-01 — see §2.29.
 - [x] **9.3 A meter for compute.** Shipped 2026-09-02 — see §2.30.
-- [ ] **9.2 A hostname endpoint for a TLS terminator.** Next.
-- [ ] **9.4 Billing state, with the processor behind a flag.**
+- [x] **9.2 A hostname endpoint for a TLS terminator.** Shipped 2026-09-02 — see §2.31.
+- [ ] **9.4 Billing state, with the processor behind a flag.** Next, and the last of the four.
 
 Listed as rows and not only as prose because §1 counts checkboxes, and a
 section whose items were paragraphs would have made that figure mean two
