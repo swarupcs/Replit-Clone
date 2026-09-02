@@ -55,6 +55,8 @@ model Plan {
 
   users User[]
 
+  subscriptions Subscription[]
+
   @@map("plans")
 }
 
@@ -128,6 +130,7 @@ model User {
   apiKeys          ApiKey[]
   accountActions   AccountAction[]       @relation("AccountActionSubject")
   computeUsage     ComputeUsage[]
+  subscription     Subscription?
 
   /// "Which accounts are on this plan" is the operator's question, and the one
   /// a pricing change has to answer before it is made.
@@ -507,6 +510,85 @@ enum ScheduledRunStatus {
 /// and nothing is ever left open.
 ///
 /// Recorded, never enforced. Nothing refuses anything on this.
+/// What a subscription is doing right now, as the processor last described it.
+///
+/// One row per account, and the ONLY writer is the webhook. The post-checkout
+/// redirect is a browser event -- it can be dropped, replayed, or hit by
+/// somebody who never paid -- so it is not evidence of anything. This is
+/// section 6 decision 13 in another costume: the guarantee lives where it
+/// cannot be skipped.
+///
+/// The subscription does not decide what an account may do. It decides
+/// `User.planId`, and everything else in this codebase already reads
+/// entitlements from that -- which is section 8.0's whole point, that billing
+/// writes one column.
+model Subscription {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  status SubscriptionStatus
+
+  /// The plan this subscription is FOR, which is not always the plan the
+  /// account is on: a past-due subscription past its grace is for `pro` and
+  /// the account is on `free`. Keeping both is what makes recovery a status
+  /// change rather than a guess about what somebody used to pay for.
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  /// The processor's own ids. Nullable because a comped or manually created
+  /// subscription has none, and because this deployment can hold subscription
+  /// state before it has ever been given a key.
+  customerId     String? @unique
+  subscriptionId String? @unique
+
+  /// When the paid period ends. What a cancellation counts down to: cancelling
+  /// does not take away what has been paid for.
+  currentPeriodEnd DateTime?
+
+  /// When a failing payment stops being tolerated. Set when the status first
+  /// becomes PAST_DUE and cleared when it recovers -- a state that outlives
+  /// its cause is the defect section 2.26 is about.
+  graceUntil DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("subscriptions")
+}
+
+/// A processor event that has already been applied.
+///
+/// Webhooks are at-least-once. A redelivery must not be applied twice, and
+/// "we have probably not seen this one" is not a guarantee -- so the event id
+/// carries a unique index and the second delivery loses to the database rather
+/// than to a race.
+model BillingEvent {
+  /// The processor's event id, verbatim. The primary key on purpose: there is
+  /// no second identity for this row, and a generated one would let two copies
+  /// of the same event exist.
+  id String @id
+
+  type       String
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+  @@map("billing_events")
+}
+
+enum SubscriptionStatus {
+  /// Paid and current.
+  ACTIVE
+  /// Free period before the first charge. Entitled, exactly like ACTIVE.
+  TRIALING
+  /// A payment failed. Still entitled until `graceUntil` -- a card that
+  /// expired on a Friday must not take somebody's work away on the Saturday.
+  PAST_DUE
+  /// Ended, by the customer or by the processor giving up. Not entitled.
+  CANCELED
+}
+
 model ComputeUsage {
   id     String @id @default(uuid())
   userId String
@@ -1011,6 +1093,12 @@ enum NotificationKind {
   /// somebody else, is one they have to hear about from us rather than
   /// discover from a refusal.
   PLAN_CHANGED
+
+  /// A payment failed, or the subscription ended. Sent on the two moments a
+  /// person can act on and never in between -- a renewal that works is not
+  /// news. Neither message says anything has been taken away, because nothing
+  /// is: a lapsed account is blocked at the boundary, not emptied.
+  BILLING_PROBLEM
 }
 
 /// Everything that has happened to one project's moderation state, in order.

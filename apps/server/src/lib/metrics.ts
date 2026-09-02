@@ -80,6 +80,14 @@ export type CounterName =
   // serve -- which is what a certificate authority's rate limit is spent on.
   | "tls_authorize_allowed"
   | "tls_authorize_refused"
+  // Billing. `billing_event_duplicate` is not an error and is worth watching:
+  // it is at-least-once delivery working as documented, and a zero there for
+  // a busy deployment means the dedupe is not being exercised rather than that
+  // nothing is being redelivered.
+  | "billing_subscription_updated"
+  | "billing_grace_expired"
+  | "billing_event_duplicate"
+  | "billing_webhook_rejected"
   // Notifications. `notifications_created` against `notifications_mailed` is
   // the honest measure of how much of this actually reaches anybody: the gap
   // between them is people who have to open the app to find out, which is the

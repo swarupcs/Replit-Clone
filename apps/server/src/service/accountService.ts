@@ -1,6 +1,7 @@
 import type { AccountSummary, ProjectUsage } from "@replit-clone/shared";
 import { prisma } from "../lib/prisma.js";
 import { computeSecondsSince, startOfMonth } from "./computeMeterService.js";
+import { getSubscriptionState } from "./billingService.js";
 import { NotFoundError } from "../utils/errors.js";
 import { usedBytes } from "./diskUsageService.js";
 import { listPlans, resolveEntitlements } from "./entitlementService.js";
@@ -76,5 +77,9 @@ export async function getAccountSummary(
     // before it went, and a meter that forgot them would read lowest for the
     // accounts that churned most.
     computeSecondsThisMonth: await computeSecondsSince(userId, startOfMonth()),
+    // Null on every account of a deployment with no processor configured,
+    // which is why the screen reads it as "the free plan" rather than as
+    // something being wrong.
+    subscription: await getSubscriptionState(userId),
   };
 }

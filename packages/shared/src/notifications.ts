@@ -38,7 +38,13 @@ export type NotificationKind =
    *  the takedown notification makes: a decision taken about somebody, by
    *  somebody else, is one they should hear from us rather than discover from
    *  a refusal — or from a number on a screen that changed overnight. */
-  | "PLAN_CHANGED";
+  | "PLAN_CHANGED"
+  /** A payment failed, or the subscription ended. Two moments, both of them
+   *  actionable, and nothing in between: a renewal that works is not news, and
+   *  a message every day of a grace period is how a channel somebody needs
+   *  becomes one they filter. What each of these says is what changes and by
+   *  when — never that anything has been taken away, because nothing is. */
+  | "BILLING_PROBLEM";
 
 export interface Notification {
   id: string;

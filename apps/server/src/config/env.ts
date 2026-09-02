@@ -184,6 +184,13 @@ const envSchema = z.object({
   /** The AI assistant. No key means the feature is simply off, exactly like
    *  GitHub sign-in above: the panel is not offered rather than being offered
    *  and then failing. */
+  /** Billing. One secret and not two, because this deployment can hold
+   *  subscription state without being able to sell anything: the webhook is
+   *  the only writer of that state (plan.md 8.4), so its signing secret is
+   *  what decides whether billing is real here. Creating a Checkout session
+   *  needs a different key and is deliberately not built -- see 9.4. */
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+
   ANTHROPIC_API_KEY: z.string().optional(),
   AI_MODEL: z.string().default("claude-sonnet-5"),
   AI_MAX_TOKENS: z.coerce.number().int().positive().default(4096),

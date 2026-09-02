@@ -67,6 +67,7 @@ import { backfillSealedEnvVars } from "./service/projectEnvService.js";
 import { reconcileJobRuns, runDueJobs } from "./service/scheduleService.js";
 import { purgeExpiredTrash } from "./service/projectService.js";
 import { startComputeMeter } from "./service/computeMeterService.js";
+import { expireGracePeriods } from "./service/billingService.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
 import { SandboxNetworkMismatch } from "./containers/sandboxNetwork.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
@@ -351,6 +352,25 @@ function startTrashSweep(): void {
   setInterval(sweep, 60 * 60 * 1000).unref();
 }
 
+/** Drops accounts whose payment grace has run out to the free plan.
+ *
+ *  Necessary because nothing else would: the processor sends an event when a
+ *  payment fails and another when it finally gives up, and between them is a
+ *  week in which no event arrives at all. A deployment relying on webhooks
+ *  alone would leave a lapsed account on its paid plan for as long as the
+ *  processor kept retrying the card.
+ */
+function startGraceSweep(): void {
+  const sweep = (): void => {
+    void expireGracePeriods().catch((error: unknown) => {
+      logger.error("could not expire grace periods", error);
+    });
+  };
+
+  sweep();
+  setInterval(sweep, 60 * 60 * 1000).unref();
+}
+
 function startDomainRecheck(): void {
   const sweep = (): void => {
     void recheckDomains()
@@ -516,6 +536,7 @@ async function start(): Promise<void> {
   startComputeMeter();
   startTokenPrune();
   startTrashSweep();
+  startGraceSweep();
   startDomainRecheck();
   startJobSweeper();
   startAccessWatch();
