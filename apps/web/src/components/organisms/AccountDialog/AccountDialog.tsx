@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Empty, Modal, Progress, Segmented, Tag, Typography } from "antd";
+import { Alert, Empty, Modal, Progress, Segmented, Tag, Typography } from "antd";
 import {
   QUOTA_WARN_FRACTION,
   type AccountSummary,
   type Plan,
+  type SubscriptionState,
 } from "@replit-clone/shared";
 import { getAccountApi } from "../../../apis/projects.ts";
 import { ApiKeys } from "./ApiKeys.tsx";
@@ -70,6 +71,77 @@ function Meter({
         aria-label={label}
       />
     </div>
+  );
+}
+
+function date(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleDateString() : "";
+}
+
+/** What the subscription is doing, said once and only when it is news.
+ *
+ *  Nothing at all for an account with no subscription, which is every account
+ *  on a deployment with no processor — and for a renewal that simply worked,
+ *  which is §6 decision 14 on a screen rather than in a notification.
+ *
+ *  The two states that get a banner are the two a person can act on, and the
+ *  wording of both is load-bearing. A failed payment has to say that nothing
+ *  has happened yet and by when it will; an ended subscription has to say
+ *  that nothing was taken away, because the thing people reasonably fear at
+ *  that moment is that their work is gone.
+ */
+function SubscriptionNotice({ subscription }: { subscription: SubscriptionState }) {
+  if (subscription.status === "PAST_DUE" && subscription.entitled) {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="A payment did not go through"
+        description={
+          <>
+            Nothing has changed yet — your projects keep running and this
+            account stays on {subscription.planLabel} until{" "}
+            {date(subscription.graceUntil)}. After that it moves to the free
+            plan: nothing is deleted, but it stops being able to grow.
+          </>
+        }
+      />
+    );
+  }
+
+  if (!subscription.entitled) {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message={`Your ${subscription.planLabel} subscription has ended`}
+        description={
+          <>
+            Everything you have is still here, still running and still
+            exportable. What changed is the limits on making more.
+          </>
+        }
+      />
+    );
+  }
+
+  // Paid and current: a line, not a banner. A renewal that works is not news.
+  return (
+    <Typography.Paragraph
+      style={{ color: "var(--rc-text-subtle)", fontSize: 12.5, marginBottom: 16 }}
+    >
+      {subscription.status === "TRIALING" ? "Trial of " : ""}
+      {subscription.planLabel}
+      {subscription.currentPeriodEnd
+        ? `${subscription.status === "TRIALING" ? ", ends " : ", renews "}${date(
+            subscription.currentPeriodEnd,
+          )}`
+        : ""}
+      . Billing is handled by the payment processor; this screen only reports
+      what it last said.
+    </Typography.Paragraph>
   );
 }
 
@@ -192,6 +264,10 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
             )}
           </div>
 
+          {data.subscription && (
+            <SubscriptionNotice subscription={data.subscription} />
+          )}
+
           <Meter
             label="Projects"
             used={data.projects}
@@ -277,9 +353,10 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
                   marginTop: 10,
                 }}
               >
-                There is no way to change plan from here yet. Nothing on this
-                deployment takes payment, so a button that appeared to would be
-                lying about what happens next.
+                There is no way to change plan from here yet. This deployment
+                can read what a payment processor tells it, but it cannot start
+                a checkout — so a button that appeared to would be lying about
+                what happens next.
               </Typography.Paragraph>
             </>
           )}

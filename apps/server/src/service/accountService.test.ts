@@ -8,6 +8,10 @@ const prismaMock = vi.hoisted(() => ({
   // for it -- mocking `computeSecondsSince` away would leave the field
   // untested in the one place it is assembled.
   computeUsage: { findMany: vi.fn(() => Promise.resolve([{ seconds: 90 }])) },
+  // Null is the normal case: every account on a deployment with no payment
+  // processor has never had a subscription, and the summary has to be
+  // readable for those accounts rather than only for paying ones.
+  subscription: { findUnique: vi.fn(() => Promise.resolve(null)) },
 }));
 
 const usedBytes = vi.hoisted(() => vi.fn());
@@ -132,5 +136,35 @@ describe("compute on the summary", () => {
     expect(prismaMock.computeUsage.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ userId: USER }) }),
     );
+  });
+});
+
+/** The account screen is the only place a person can see what their
+ *  subscription is doing, and §9.4's whole point is that nothing else on this
+ *  deployment can tell them: there is no checkout, no portal, and no email
+ *  from a processor that has not been configured. */
+describe("the subscription on the summary", () => {
+  it("is null for an account that has never had one", async () => {
+    const summary = await getAccountSummary(USER);
+
+    expect(summary.subscription).toBeNull();
+  });
+
+  it("carries what the processor last said, and whether it still counts", async () => {
+    prismaMock.subscription.findUnique.mockResolvedValue({
+      status: "PAST_DUE",
+      planId: "pro",
+      graceUntil: new Date(Date.now() + 86_400_000),
+      currentPeriodEnd: null,
+      plan: { label: "Pro" },
+    } as never);
+
+    const summary = await getAccountSummary(USER);
+
+    expect(summary.subscription?.status).toBe("PAST_DUE");
+    expect(summary.subscription?.planLabel).toBe("Pro");
+    // Inside the grace, so still entitled -- a card that expired on a Friday
+    // must not take somebody's work away on the Saturday.
+    expect(summary.subscription?.entitled).toBe(true);
   });
 });

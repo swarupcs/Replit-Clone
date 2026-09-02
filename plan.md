@@ -104,14 +104,18 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 115 items. Open: 6 — one of them unblocked.**
+**Done: 116 items. Open: 5 — none of them unblocked.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
-that), **no unblocked work in §3.2**, **one half §9 split out and has not
-built yet** (billing state without a processor), and **five blocked** (§3.3 — a certificate, an autoscaler's
-cost model, a disk budget for snapshots, a backup destination, and an
-architectural route). §8.4 and §8.5 are blocked too, on a Stripe account and on
+that), **no unblocked work in §3.2**, **nothing left of the four halves §9
+split out**, and **five blocked** (§3.3 — a certificate's private key, an
+autoscaler's cost model, a disk budget for snapshots, a backup destination, and
+an architectural route).
+
+That every open row is now blocked is a claim §9 has already been wrong about
+five times, and the top of §3.1 applies to it word for word: an empty unblocked
+list means nobody has looked lately, never that there is nothing to do. §8.4 and §8.5 are blocked too, on a Stripe account and on
 a pricing decision respectively, and are listed there rather than duplicated
 here.
 
@@ -1608,6 +1612,85 @@ project.
 
 ---
 
+### 2.32 Since (2026-09-02) — §9.4, billing state with no processor attached
+
+Last of §9's four, and the one where the split was cleanest: everything that
+decides what an account is allowed, built and tested with no Stripe account in
+existence, because the interesting part was never the API call.
+
+**The webhook is the only writer of subscription state.** The post-checkout
+redirect is a browser event — droppable, replayable, and reachable by somebody
+who never paid — so granting a plan on redirect is what most tutorials show and
+it is wrong. §6 decision 13 in another costume: the guarantee lives where it
+cannot be skipped. Which makes `POST /api/v1/billing/webhook` the entire trust
+boundary around money, and its content is what it refuses:
+
+- **The signature is written out rather than taken from the SDK**, forty lines
+  of HMAC over `${timestamp}.${rawBody}`. Not to avoid a dependency — because a
+  function taking a payload, a header and a secret is testable *exactly*, with
+  no key, no network and no account. 15 tests, including a v0 signature, a
+  replay, a clock ten minutes ahead, and six malformed headers that would
+  otherwise be 500s: `timingSafeEqual` throws on a length mismatch rather than
+  returning false, so the lengths are compared first.
+- **`express.raw`, mounted before the JSON parser.** The signature covers the
+  bytes that were sent, and `JSON.parse` then `JSON.stringify` produces a
+  different string that fails every real delivery while passing any test that
+  builds its own body. So there is a test that signs a body with spaces after
+  its colons and asserts the round-trip is not the same string.
+- **One answer for every refusal.** An endpoint that says which half of the
+  check failed is an oracle for guessing the other half, so a wrong secret and
+  a replayed timestamp return the identical body — asserted by comparing the
+  two responses to each other rather than to a literal.
+- **No secret means no acceptance**, 503 rather than treating an unset secret
+  as one that everything matches. `/billing/status` says so plainly, and says
+  `checkoutConfigured: false` because nothing here can create a Checkout
+  session and a button that appeared to would be lying about what happens next.
+
+**The state machine writes one column.** `User.planId`, which §2.22 already
+made every limit resolve from — a subscription that decided entitlements
+directly would be a second answer to a question that has one. Both writes in
+one transaction, because an account whose subscription says ACTIVE while its
+`planId` says free is a customer paying for nothing.
+
+**And a downgrade never deletes and never seizes.** §8.4 flagged this as the
+row with a plausible wrong answer that is also easier to write. An account that
+stops paying is blocked at the boundary and keeps everything it has, running
+and exportable. The grace period is seven days and is **not restarted on
+redelivery** — a webhook that arrives twice, or a second failed attempt on the
+same card, must not buy another week. A `graceUntil` that is null on a
+`PAST_DUE` row reads as *already expired*, not as forever, because the other
+reading makes a missing date an unlimited free plan. Both of those lines were
+reverted and re-run: the first fails two tests, the second fails one.
+
+**The sweep exists because nothing else would.** Stripe sends an event when a
+payment fails and another when it finally gives up, and between them is a week
+in which no event arrives at all — so a deployment relying on webhooks alone
+leaves a lapsed account on its paid plan for as long as the processor keeps
+retrying. Hourly, one account at a time, skipping accounts already on free
+(§6 decision 14: on the change, never on the state).
+
+**On the screen**, `AccountDialog` gains a notice that says nothing for an
+account with no subscription — which is every account on a deployment with no
+processor — and nothing for a renewal that simply worked. Two states get a
+banner, and the wording of both is load-bearing: a failed payment has to say
+that nothing has happened yet and by when it will; an ended subscription has to
+say that nothing was taken away, because that is what a person actually fears
+at that moment.
+
+What stays blocked, and is now genuinely all that is: creating a Checkout
+session and a Portal session, two calls to a live API behind a flag that is
+off. Nothing that grants a plan depends on them.
+
+**Not verified against a database.** The `Subscription` and `BillingEvent`
+tables are in a migration that has never been applied — Docker is not running
+on this machine — which puts the unique index that the dedupe leans on in
+exactly the class §1 says a mock cannot be trusted about. The dedupe is tested
+against a mock that rejects; that it is the *constraint* rejecting is not.
+
+1728 server tests and 1060 web tests pass.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -2588,11 +2671,13 @@ on last time.
 
 ### 8.4 Billing — Stripe Checkout and the Customer Portal
 
-**Blocked on a Stripe account and its keys, which are the operator's to
-create** — **and §9.4 splits it**: subscription state, the webhook and its
-dedupe, and what a lapsed plan may do are all buildable and testable with no
-account in existence. Only the two calls that create a Checkout and a Portal
-session need the keys, and they sit behind a flag.
+**Split by §9.4, and the buildable half is built** (2026-09-02 — see §2.32):
+subscription state, the webhook and its dedupe, the signature check, the grace
+period and the downgrade all shipped, tested, with no Stripe account in
+existence. **What is left of this row is the two calls that create a Checkout
+and a Portal session**, which need keys that are the operator's to create.
+Nothing that grants a plan depends on them — the webhook is the only writer
+either way — so this row no longer blocks anything but the button.
 
 The original argument, unchanged: The code is small; the decisions are not, and three of them have a
 plausible wrong answer that is also the easier one to write.
@@ -2921,7 +3006,7 @@ ownership rewrite is still the cost.
 - [x] **9.1 A delete that can be undone.** Shipped 2026-09-01 — see §2.29.
 - [x] **9.3 A meter for compute.** Shipped 2026-09-02 — see §2.30.
 - [x] **9.2 A hostname endpoint for a TLS terminator.** Shipped 2026-09-02 — see §2.31.
-- [ ] **9.4 Billing state, with the processor behind a flag.** Next, and the last of the four.
+- [x] **9.4 Billing state, with the processor behind a flag.** Shipped 2026-09-02 — see §2.32.
 
 Listed as rows and not only as prose because §1 counts checkboxes, and a
 section whose items were paragraphs would have made that figure mean two

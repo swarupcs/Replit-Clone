@@ -38,6 +38,9 @@ function summary(over: Partial<AccountSummary> = {}): AccountSummary {
       { projectId: "p2", name: "Small One", diskBytes: 20 * MB },
     ],
     plans: [],
+    // Null is the normal case, and the one every account on a deployment with
+    // no payment processor is in.
+    subscription: null,
     // Three and a bit hours, so the reading below is not a round number that
     // a broken formatter could produce by accident.
     computeSecondsThisMonth: 11_400,
@@ -217,5 +220,85 @@ describe("compute", () => {
 
     await screen.findByText(/3.2 hours/);
     expect(screen.queryByLabelText(/compute/i)).toBeNull();
+  });
+});
+
+describe("the subscription", () => {
+  const DAY = 86_400_000;
+
+  function subscribed(over: Partial<NonNullable<AccountSummary["subscription"]>> = {}) {
+    return summary({
+      subscription: {
+        status: "ACTIVE",
+        planId: "pro",
+        planLabel: "Pro",
+        currentPeriodEnd: new Date(Date.now() + 20 * DAY).toISOString(),
+        graceUntil: null,
+        entitled: true,
+        ...over,
+      },
+    });
+  }
+
+  /** Every account on a deployment with no payment processor. A screen that
+   *  said something about billing here would be inventing a relationship. */
+  it("says nothing at all when there is not one", async () => {
+    show();
+
+    await screen.findByText(/someone@example.com/);
+    expect(screen.queryByText(/subscription/i)).toBeNull();
+  });
+
+  /** A renewal that works is not news -- decision 14 on a screen. */
+  it("is a quiet line when it is simply paid up", async () => {
+    getAccount.mockResolvedValue(subscribed());
+    show();
+
+    await screen.findByText(/renews/i);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  /** The two things somebody can act on: nothing has happened yet, and when
+   *  it will. */
+  it("warns about a failed payment, with the date attached", async () => {
+    const graceUntil = new Date(Date.now() + 3 * DAY);
+    getAccount.mockResolvedValue(
+      subscribed({ status: "PAST_DUE", graceUntil: graceUntil.toISOString() }),
+    );
+    show();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/did not go through/i);
+    // The date is the actionable half. Without it the banner is only anxiety.
+    expect(alert.textContent).toContain(graceUntil.toLocaleDateString());
+    expect(alert.textContent).toMatch(/nothing is deleted/i);
+  });
+
+  /** The message that would be easiest to get wrong and would cost the most.
+   *  What a person fears at this moment is that their work is gone. */
+  it("says plainly that an ended subscription took nothing away", async () => {
+    getAccount.mockResolvedValue(
+      subscribed({ status: "CANCELED", entitled: false, currentPeriodEnd: null }),
+    );
+    show();
+
+    expect(await screen.findByText(/still here/i)).toBeTruthy();
+    expect(screen.getByText(/still running/i)).toBeTruthy();
+  });
+
+  /** Past due AND past the grace is the same situation as cancelled, and must
+   *  not show the "nothing has changed yet" banner -- by then it has. */
+  it("does not promise a grace that has already run out", async () => {
+    getAccount.mockResolvedValue(
+      subscribed({
+        status: "PAST_DUE",
+        entitled: false,
+        graceUntil: new Date(Date.now() - DAY).toISOString(),
+      }),
+    );
+    show();
+
+    expect(await screen.findByText(/still here/i)).toBeTruthy();
+    expect(screen.queryByText(/nothing has changed yet/i)).toBeNull();
   });
 });

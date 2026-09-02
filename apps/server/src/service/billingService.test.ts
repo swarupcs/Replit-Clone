@@ -44,7 +44,11 @@ vi.mock("../lib/prisma.js", () => {
   };
 });
 
-const notify = vi.hoisted(() => vi.fn(() => Promise.resolve("n1")));
+const notify = vi.hoisted(() =>
+  vi.fn((_message: { kind: string; title: string; body: string; link: string }) =>
+    Promise.resolve("n1"),
+  ),
+);
 vi.mock("./notificationService.js", () => ({ notify, notifyAdmins: vi.fn() }));
 
 const forgetEntitlements = vi.hoisted(() => vi.fn());
@@ -210,7 +214,8 @@ describe("what the account holder is told", () => {
   it("hears about a failed payment, with the date attached", async () => {
     await applySubscription({ userId: USER, planId: "pro", status: "PAST_DUE" }, NOW);
 
-    const message = notify.mock.calls[0]?.[0] as { kind: string; body: string };
+    const message = notify.mock.calls[0]?.[0];
+    if (!message) throw new Error("nothing was announced");
     expect(message.kind).toBe("BILLING_PROBLEM");
     // The two things somebody can act on: nothing has happened yet, and when
     // it will.
@@ -230,7 +235,8 @@ describe("what the account holder is told", () => {
   it("is told plainly that nothing has been taken away", async () => {
     await applySubscription({ userId: USER, planId: "pro", status: "CANCELED" }, NOW);
 
-    const message = notify.mock.calls[0]?.[0] as { body: string };
+    const message = notify.mock.calls[0]?.[0];
+    if (!message) throw new Error("nothing was announced");
     expect(message.body).toMatch(/still here/i);
     expect(message.body).toMatch(/still running/i);
   });
