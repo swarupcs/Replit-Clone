@@ -359,6 +359,13 @@ export async function resolveCustomDomain(
       customDomain: hostname,
       domainVerifiedAt: { not: null },
       deployedAt: { not: null },
+      // Added with the TLS authorize endpoint, which asks this function
+      // whether a hostname is worth a certificate. `resolveSite` filtered the
+      // takedown and the trash itself, so this was never a hole in what gets
+      // SERVED -- but a name whose project is gone is not a name to make a
+      // certificate authority issue for, and now there is a caller that would
+      // have. Belt and braces on the serving path, load-bearing on this one.
+      project: { takenDownAt: null, deletedAt: null },
     },
     select: { subdomain: true },
   });

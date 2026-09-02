@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Empty, Modal, Progress, Segmented, Tag, Typography } from "antd";
+import { Alert, Empty, Modal, Progress, Segmented, Tag, Typography } from "antd";
 import {
   QUOTA_WARN_FRACTION,
   type AccountSummary,
   type Plan,
+  type SubscriptionState,
 } from "@replit-clone/shared";
 import { getAccountApi } from "../../../apis/projects.ts";
 import { ApiKeys } from "./ApiKeys.tsx";
+import { TrashPanel } from "../TrashPanel/TrashPanel.tsx";
 
 /** What this account is using, and what it is allowed.
  *
@@ -72,6 +74,77 @@ function Meter({
   );
 }
 
+function date(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleDateString() : "";
+}
+
+/** What the subscription is doing, said once and only when it is news.
+ *
+ *  Nothing at all for an account with no subscription, which is every account
+ *  on a deployment with no processor — and for a renewal that simply worked,
+ *  which is §6 decision 14 on a screen rather than in a notification.
+ *
+ *  The two states that get a banner are the two a person can act on, and the
+ *  wording of both is load-bearing. A failed payment has to say that nothing
+ *  has happened yet and by when it will; an ended subscription has to say
+ *  that nothing was taken away, because the thing people reasonably fear at
+ *  that moment is that their work is gone.
+ */
+function SubscriptionNotice({ subscription }: { subscription: SubscriptionState }) {
+  if (subscription.status === "PAST_DUE" && subscription.entitled) {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="A payment did not go through"
+        description={
+          <>
+            Nothing has changed yet — your projects keep running and this
+            account stays on {subscription.planLabel} until{" "}
+            {date(subscription.graceUntil)}. After that it moves to the free
+            plan: nothing is deleted, but it stops being able to grow.
+          </>
+        }
+      />
+    );
+  }
+
+  if (!subscription.entitled) {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message={`Your ${subscription.planLabel} subscription has ended`}
+        description={
+          <>
+            Everything you have is still here, still running and still
+            exportable. What changed is the limits on making more.
+          </>
+        }
+      />
+    );
+  }
+
+  // Paid and current: a line, not a banner. A renewal that works is not news.
+  return (
+    <Typography.Paragraph
+      style={{ color: "var(--rc-text-subtle)", fontSize: 12.5, marginBottom: 16 }}
+    >
+      {subscription.status === "TRIALING" ? "Trial of " : ""}
+      {subscription.planLabel}
+      {subscription.currentPeriodEnd
+        ? `${subscription.status === "TRIALING" ? ", ends " : ", renews "}${date(
+            subscription.currentPeriodEnd,
+          )}`
+        : ""}
+      . Billing is handled by the payment processor; this screen only reports
+      what it last said.
+    </Typography.Paragraph>
+  );
+}
+
 function PlanCard({ plan, current }: { plan: Plan; current: boolean }) {
   return (
     <li className="rc-card" style={{ padding: 12 }}>
@@ -97,8 +170,20 @@ function PlanCard({ plan, current }: { plan: Plan; current: boolean }) {
   );
 }
 
+/** Container-hours, read by a person.
+ *
+ *  Minutes below an hour, because "0.1 hours" is a number nobody pictures and
+ *  the first month of a free tier is all minutes. */
+function hours(seconds: number): string {
+  if (seconds < 60) return "none yet";
+  if (seconds < 3600) return `${String(Math.round(seconds / 60))} minutes`;
+
+  const value = seconds / 3600;
+  return `${value < 10 ? value.toFixed(1) : String(Math.round(value))} hours`;
+}
+
 export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
-  const [tab, setTab] = useState<"usage" | "keys">("usage");
+  const [tab, setTab] = useState<"usage" | "keys" | "trash">("usage");
 
   const { data, isLoading, error } = useQuery<AccountSummary>({
     queryKey: ["account"],
@@ -121,14 +206,21 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
         options={[
           { label: "Usage", value: "usage" },
           { label: "API keys", value: "keys" },
+          // Here rather than on the dashboard: the trash is about the account
+          // -- what it is holding and what that costs -- and putting deleted
+          // projects back among the live ones is how somebody opens the wrong
+          // thing.
+          { label: "Trash", value: "trash" },
         ]}
         value={tab}
-        onChange={(value) => setTab(value as "usage" | "keys")}
+        onChange={(value) => setTab(value as "usage" | "keys" | "trash")}
         style={{ marginBottom: 16 }}
       />
 
       {tab === "keys" ? (
         <ApiKeys />
+      ) : tab === "trash" ? (
+        <TrashPanel />
       ) : error ? (
         <Empty description="Could not load this account's usage." />
       ) : isLoading || !data ? (
@@ -172,6 +264,10 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
             )}
           </div>
 
+          {data.subscription && (
+            <SubscriptionNotice subscription={data.subscription} />
+          )}
+
           <Meter
             label="Projects"
             used={data.projects}
@@ -184,6 +280,27 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
             limit={data.entitlements.userDiskQuotaMb * 1024 * 1024}
             render={mb}
           />
+
+          {/* Not a Meter, on purpose: a bar needs a limit, and there is no
+              limit on this. Compute is the thing this platform actually
+              spends and nothing has ever counted it, so the number exists to
+              be looked at while the question of whether it is ever priced
+              stays open. A progress bar would answer that question by
+              accident. */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "baseline",
+              fontSize: 13,
+              margin: "4px 0 16px",
+            }}
+          >
+            <span>Compute this month</span>
+            <span style={{ color: "var(--rc-text-subtle)" }}>
+              {hours(data.computeSecondsThisMonth)} · not charged for
+            </span>
+          </div>
 
           <Typography.Title level={5}>Where the space is going</Typography.Title>
           {data.breakdown.length === 0 ? (
@@ -236,9 +353,10 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
                   marginTop: 10,
                 }}
               >
-                There is no way to change plan from here yet. Nothing on this
-                deployment takes payment, so a button that appeared to would be
-                lying about what happens next.
+                There is no way to change plan from here yet. This deployment
+                can read what a payment processor tells it, but it cannot start
+                a checkout — so a button that appeared to would be lying about
+                what happens next.
               </Typography.Paragraph>
             </>
           )}

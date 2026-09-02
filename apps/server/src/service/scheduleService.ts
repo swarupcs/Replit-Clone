@@ -653,7 +653,7 @@ export async function runDueJobs(now = new Date()): Promise<{
     where: {
       enabled: true,
       nextRunAt: { not: null, lte: now },
-      project: { takenDownAt: null },
+      project: { takenDownAt: null, deletedAt: null },
     },
     orderBy: { nextRunAt: "asc" },
     take: SWEEP_BATCH,

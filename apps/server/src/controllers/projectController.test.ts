@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const projectService = vi.hoisted(() => ({
   createProjectService: vi.fn(),
-  deleteProjectService: vi.fn(),
+  trashProjectService: vi.fn(),
+  restoreProjectService: vi.fn(),
+  purgeProjectService: vi.fn(),
+  listTrashedProjects: vi.fn(),
+  TRASH_DAYS: 7,
   duplicateProjectService: vi.fn(),
   renameProjectService: vi.fn(),
   assertProjectAccess: vi.fn(),
@@ -35,6 +39,9 @@ import {
   createProjectController,
   deleteProjectController,
   duplicateProjectController,
+  listTrashController,
+  purgeProjectController,
+  restoreProjectController,
   getProjectEnvController,
   getProjectPorts,
   getProjectTree,
@@ -57,6 +64,17 @@ const app = apiApp([
   { method: "put", path: "/projects/:projectId/env", handler: setProjectEnvController },
   { method: "patch", path: "/projects/:projectId", handler: renameProjectController },
   { method: "delete", path: "/projects/:projectId", handler: deleteProjectController },
+  { method: "get", path: "/projects/trash", handler: listTrashController },
+  {
+    method: "post",
+    path: "/projects/:projectId/restore",
+    handler: restoreProjectController,
+  },
+  {
+    method: "delete",
+    path: "/projects/:projectId/purge",
+    handler: purgeProjectController,
+  },
   {
     method: "post",
     path: "/projects/:projectId/duplicate",
@@ -366,19 +384,44 @@ describe("duplicateProjectController", () => {
   });
 });
 
+/** DELETE no longer deletes. The same verb, route and button now put the
+ *  project in the trash, because a recoverable path that sits BESIDE the
+ *  irreversible one protects nobody -- it has to replace it. */
 describe("deleteProjectController", () => {
-  it("deletes on behalf of the caller", async () => {
-    projectService.deleteProjectService.mockResolvedValue(undefined);
+  it("puts the project in the trash on behalf of the caller", async () => {
+    projectService.trashProjectService.mockResolvedValue(undefined);
 
     const response = await request(app)
       .delete(`/projects/${TEST_PROJECT}`)
       .set("Authorization", bearer());
 
     expect(response.status).toBe(200);
-    expect(projectService.deleteProjectService).toHaveBeenCalledWith(
+    expect(projectService.trashProjectService).toHaveBeenCalledWith(
       TEST_PROJECT,
       TEST_USER.sub,
     );
+  });
+
+  it("says how long there is to change your mind", async () => {
+    // A trash nobody knows about is a delete with extra steps.
+    projectService.trashProjectService.mockResolvedValue(undefined);
+
+    const response = await request(app)
+      .delete(`/projects/${TEST_PROJECT}`)
+      .set("Authorization", bearer());
+
+    expect(response.body.message).toMatch(/7 days/);
+    expect(response.body.data).toEqual({ trashDays: 7 });
+  });
+
+  it("does not reach the destructive path at all", async () => {
+    projectService.trashProjectService.mockResolvedValue(undefined);
+
+    await request(app)
+      .delete(`/projects/${TEST_PROJECT}`)
+      .set("Authorization", bearer());
+
+    expect(projectService.purgeProjectService).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid project id without calling the service", async () => {
@@ -387,6 +430,62 @@ describe("deleteProjectController", () => {
       .set("Authorization", bearer());
 
     expect(response.status).toBe(400);
-    expect(projectService.deleteProjectService).not.toHaveBeenCalled();
+    expect(projectService.trashProjectService).not.toHaveBeenCalled();
+  });
+});
+
+describe("the trash", () => {
+  it("lists what is in it, with when it goes", async () => {
+    projectService.listTrashedProjects.mockResolvedValue([
+      {
+        id: TEST_PROJECT,
+        name: "demo",
+        template: "react-vite",
+        deletedAt: new Date("2026-09-01T10:00:00.000Z"),
+      },
+    ]);
+
+    const response = await request(app)
+      .get("/projects/trash")
+      .set("Authorization", bearer());
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.trashDays).toBe(7);
+    expect(response.body.data.projects[0]).toEqual({
+      id: TEST_PROJECT,
+      name: "demo",
+      template: "react-vite",
+      deletedAt: "2026-09-01T10:00:00.000Z",
+    });
+  });
+
+  it("restores on behalf of the caller", async () => {
+    projectService.restoreProjectService.mockResolvedValue({ id: TEST_PROJECT });
+
+    const response = await request(app)
+      .post(`/projects/${TEST_PROJECT}/restore`)
+      .set("Authorization", bearer());
+
+    expect(response.status).toBe(200);
+    expect(projectService.restoreProjectService).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      TEST_USER.sub,
+    );
+  });
+
+  /** The irreversible path still exists, and it is now behind a project that
+   *  is already in the trash -- which is the whole of what makes it safe. */
+  it("purges only through its own route", async () => {
+    projectService.purgeProjectService.mockResolvedValue(undefined);
+
+    const response = await request(app)
+      .delete(`/projects/${TEST_PROJECT}/purge`)
+      .set("Authorization", bearer());
+
+    expect(response.status).toBe(200);
+    expect(projectService.purgeProjectService).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      TEST_USER.sub,
+    );
   });
 });

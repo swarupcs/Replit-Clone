@@ -164,7 +164,7 @@ export async function previewShareLinkController(
           // Same clause as `redeemShareToken`. A preview that still named a
           // taken-down project would make this the one endpoint that confirms
           // moderation acted, to anybody holding the link.
-          where: { shareToken: token, takenDownAt: null },
+          where: { shareToken: token, takenDownAt: null, deletedAt: null },
           select: { name: true, template: true },
         })
       : null;

@@ -44,9 +44,9 @@ re-run that day, and why that matters more than usual:
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1628 passing**, 280 skipped (120 files) — no database on this machine |
-| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds five migrations — see §5 |
-| `pnpm --filter web test` | **1042 passing** (81 files) |
+| `pnpm --filter server test` | **1676 passing**, 280 skipped (124 files) — no database on this machine |
+| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds seven migrations — see §5 |
+| `pnpm --filter web test` | **1055 passing** (82 files) |
 | `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
 
@@ -104,15 +104,27 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 112 items. Open: 5 — none of them unblocked.**
+**Done: 116 items. Open: 5 — none of them unblocked.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
-that), **no unblocked work** (§3.2 is empty too), and **five blocked** (§3.3 — a certificate, an autoscaler's
-cost model, a disk budget for snapshots, a backup destination, and an
-architectural route). §8.4 and §8.5 are blocked too, on a Stripe account and on
+that), **no unblocked work in §3.2**, **nothing left of the four halves §9
+split out**, and **five blocked** (§3.3 — a certificate's private key, an
+autoscaler's cost model, a disk budget for snapshots, a backup destination, and
+an architectural route).
+
+That every open row is now blocked is a claim §9 has already been wrong about
+five times, and the top of §3.1 applies to it word for word: an empty unblocked
+list means nobody has looked lately, never that there is nothing to do. §8.4 and §8.5 are blocked too, on a Stripe account and on
 a pricing decision respectively, and are listed there rather than duplicated
 here.
+
+**§9 was written on 2026-09-01 and takes four of the five apart** — not by
+finding new work, but by asking of each blocked row which half needs a person
+and which half is only code nobody wrote. A recoverable delete, a compute
+meter, a hostname endpoint for a TLS terminator, and billing state without a
+processor are all buildable today. Read it before believing the five below are
+each one thing.
 
 Seven items came off in three commits (§2.26–§2.28), which is what a sweep's
 findings look like once they are worked through rather than what they looked
@@ -1435,6 +1447,248 @@ that asks for it by shape.
 
 1628 server tests and 1042 web tests pass.
 
+### 2.29 Since (2026-09-01) — §9.1, a delete that can be undone
+
+The first of the four halves §9 split out, and the one with a user on the
+other end of it who was one dialog away from losing their work.
+
+**What replaced what.** `DELETE /:projectId` is the same route, the same verb
+and the same button, and it no longer deletes anything. A recoverable path
+that sits *beside* the irreversible one protects nobody — the person about to
+make the mistake is the person who will not go looking for the safer option —
+so it had to take its place. The old body is now `purgeProject`, reached only
+from the trash: by the sweeper after seven days, or by an owner who does not
+want to wait.
+
+**The split is the design, and it is wrong in two directions.** A trashed
+project stops its container, stops its database, unpublishes its site, revokes
+its embed and clears its share token — immediately. Anything that goes on
+serving the public or costing money for a week is indefensible. What is *held*
+is the working tree, the row, and the managed database's **volume**, because
+the volume is the user's data and a trash that gives back an empty project is
+not a trash. Both halves are mutation-tested: destroying the volume on the way
+in fails two tests, and leaving the share token alive fails one.
+
+**One line covers the authenticated product.** `getProjectAccess` is what every
+route and every socket handler reaches a project through, so `if
+(project.deletedAt) return null` closes the editor, the terminal, the deploy
+panel, the jobs and the rest at once — as a 404, which is also the honest
+answer. Restoring is the single operation that must see past it, so it reads
+the row itself and says so rather than adding a flag to the function ninety
+callers trust.
+
+**And the surfaces that never see a session were enumerated rather than
+recalled**, because §2.20 is the record of what happens otherwise: the gallery,
+the dashboard list, the site, the embed, the share-link redeem and preview, and
+the job sweep. WHERE clauses, not cleanup — §6 decision 13 for the fifth time.
+The share token is *both* cleared and filtered, which §2.20 settled is not
+belt-and-braces but the rule.
+
+**Two quota decisions, each with a plausible wrong answer.** A trashed project
+stops counting immediately — a trash that holds somebody at their project limit
+for a week is one they empty in the first minute, which is the same as not
+having one. And because it stops counting, **restore has to ask for room**:
+`assertCanCreateProject` runs first, so an account that filled up in the
+meantime is told which limit it hit instead of being restored into a state
+where nothing can be created.
+
+**The one test that mattered was the one I had not written.** Removing the
+`getProjectAccess` guard — the single most load-bearing line in the change —
+left all 1650 tests passing. That is the §3.1 lesson arriving on schedule: the
+suite was green about a feature whose central guard did nothing.
+`trashGuards.test.ts` exists because of it, and the mutant now fails two.
+
+**Deliberately not done:** restoring does not republish the site, re-issue the
+embed or bring the share link back. Those were public surfaces the owner gave
+up when they deleted the project, and handing them back unasked would be this
+platform deciding who may read something on somebody's behalf.
+
+**This does not close §3.3's backup row and must not be read as doing so.** A
+backup answers "the host died" and needs a destination; this answers "I meant
+the other project".
+
+1656 server tests and 1051 web tests pass. **This migration has not been
+applied either** — see §5. It is the first of these to add an index rather than
+a column alone.
+
+### 2.30 Since (2026-09-02) — §9.3, a meter for compute
+
+The second of §9's four halves, and the one whose whole justification is that
+a decision cannot be made without it. §8.8 asks whether this product sells
+capability or sells minutes, says the code is shaped for the first, and leaves
+it open. **It could not have been closed either way, because there was no
+number**: disk and project count are limited and measured, container-hours are
+the actual cost, and nothing counted them anywhere.
+
+**Sample, do not open a session.** The obvious shape is a row per container
+with `startedAt` and `endedAt`, and it is §2.26's restart wedge wearing a
+different hat — an open end, a process that stops existing, and a total that is
+wrong forever afterwards. Instead a sweep adds the elapsed seconds to a
+per-account, per-day row. A restart loses at most one tick, nothing is ever
+left open, and the failure mode is a slight undercount, which is the right
+direction for a number that might one day be a bill.
+
+Three decisions inside that, each mutation-tested or with an obvious wrong
+version:
+
+- **Elapsed, not the interval, and capped at two ticks.** A sweep that fires
+  late has still been a late sweep. But a laptop that slept for six hours, a
+  paused debugger or a busy host all produce one enormous delta, and the
+  container may well have been running — this process was not watching. A
+  meter that guesses upward is the one nobody can defend. Removing the cap
+  fails a test by name.
+- **`increment`, not `set`.** The wrong one makes a day's total equal its last
+  minute, and it is a one-word difference that no screen would contradict.
+- **The first tick after boot records nothing.** It has nothing to measure
+  from, and counting it as a full interval would make the meter read highest
+  for the least stable host.
+
+**What counts is a container, not a project**, because a project with a managed
+database runs two and two is what it costs — the same reason the concurrency
+cap already counts both prefixes. And **a published service counts**: it is
+always-on by definition, so a meter that watched only sandboxes would be
+quietest about exactly the case §8.8 is asking about.
+
+**Recorded, never enforced.** Nothing in this codebase refuses anything on this
+number, and the account screen deliberately shows it as a line rather than as a
+`Meter`: a progress bar needs a limit, and rendering one would answer the
+pricing question by accident. It reads "3.2 hours · not charged for", in
+minutes below the hour, because the first month of a free tier is all minutes
+and "0.1 hours" is a number nobody pictures.
+
+1671 server tests and 1055 web tests pass. **This migration has not been
+applied either** — see §5 — and it is the first of the seven to create a table
+with a unique index the code depends on: the sweep's upsert targets
+`(userId, day)` every minute.
+
+### 2.31 Since (2026-09-02) — §9.2, the certificate row, mostly
+
+Third of §9's four halves, and the one where the useful work was **deciding not
+to build something**.
+
+§3.3 carried "certificates for custom domains" as blocked infrastructure and
+described what it would take: ACME, an account key, a challenge the deploy
+listener can answer, and renewal. All four are real, all four are solved
+problems, and the thing that solves them is a reverse proxy this deployment is
+going to run anyway. Caddy asks an HTTP endpoint before issuing for a hostname
+it has not seen — `on_demand_tls { ask … }` — and that question is one this
+codebase could already answer, because `resolveCustomDomain` exists and a
+domain reaches it only after its owner published a TXT record that was checked
+(§2.12).
+
+So the code half is a status code in front of a function that was already
+written, and the blocked half stops being "build an ACME client" and becomes
+"the operator writes six lines of Caddyfile", which is in the file.
+
+**It is the only guard between a public listener and unbounded certificate
+issuance**, so what it refuses matters more than what it allows:
+
+- **Unauthenticated, and it has to be** — the proxy asks before any session
+  exists. Which makes it a hostname oracle unless it says nothing, so it
+  answers with a status code and an empty body. One 404 covers "never heard of
+  it", "claimed but never verified" and "verified and then the record went
+  away" alike, because telling them apart tells an anonymous caller which
+  domains somebody has claimed here.
+- **Rate limited**, because every yes is an ACME order somewhere and a
+  certificate authority's limits are the kind you discover by being locked out
+  for a week.
+- **A `domain` that is not a string is refused without a query.**
+  `?domain=a&domain=b` arrives as an array, which is the shape that becomes a
+  type error at the database rather than a 404.
+
+**And it found a real gap on the way in.** `resolveCustomDomain` filtered on
+the verification and on the deployment, but not on the takedown or the trash —
+which was never a hole in what gets *served*, because `resolveSite` filters
+those itself, and became one the moment a caller asked "is this name worth a
+certificate". A taken-down project's domain would have had one issued for it.
+Fixed in the WHERE clause where §6 decision 13 says the guarantee belongs:
+belt and braces on the serving path, load-bearing on this one.
+
+What stays in §3.3: whether this deployment terminates TLS at all, and where
+that key lives. Genuinely the operator's, and now a config file rather than a
+project.
+
+1676 server tests and 1055 web tests pass.
+
+---
+
+### 2.32 Since (2026-09-02) — §9.4, billing state with no processor attached
+
+Last of §9's four, and the one where the split was cleanest: everything that
+decides what an account is allowed, built and tested with no Stripe account in
+existence, because the interesting part was never the API call.
+
+**The webhook is the only writer of subscription state.** The post-checkout
+redirect is a browser event — droppable, replayable, and reachable by somebody
+who never paid — so granting a plan on redirect is what most tutorials show and
+it is wrong. §6 decision 13 in another costume: the guarantee lives where it
+cannot be skipped. Which makes `POST /api/v1/billing/webhook` the entire trust
+boundary around money, and its content is what it refuses:
+
+- **The signature is written out rather than taken from the SDK**, forty lines
+  of HMAC over `${timestamp}.${rawBody}`. Not to avoid a dependency — because a
+  function taking a payload, a header and a secret is testable *exactly*, with
+  no key, no network and no account. 15 tests, including a v0 signature, a
+  replay, a clock ten minutes ahead, and six malformed headers that would
+  otherwise be 500s: `timingSafeEqual` throws on a length mismatch rather than
+  returning false, so the lengths are compared first.
+- **`express.raw`, mounted before the JSON parser.** The signature covers the
+  bytes that were sent, and `JSON.parse` then `JSON.stringify` produces a
+  different string that fails every real delivery while passing any test that
+  builds its own body. So there is a test that signs a body with spaces after
+  its colons and asserts the round-trip is not the same string.
+- **One answer for every refusal.** An endpoint that says which half of the
+  check failed is an oracle for guessing the other half, so a wrong secret and
+  a replayed timestamp return the identical body — asserted by comparing the
+  two responses to each other rather than to a literal.
+- **No secret means no acceptance**, 503 rather than treating an unset secret
+  as one that everything matches. `/billing/status` says so plainly, and says
+  `checkoutConfigured: false` because nothing here can create a Checkout
+  session and a button that appeared to would be lying about what happens next.
+
+**The state machine writes one column.** `User.planId`, which §2.22 already
+made every limit resolve from — a subscription that decided entitlements
+directly would be a second answer to a question that has one. Both writes in
+one transaction, because an account whose subscription says ACTIVE while its
+`planId` says free is a customer paying for nothing.
+
+**And a downgrade never deletes and never seizes.** §8.4 flagged this as the
+row with a plausible wrong answer that is also easier to write. An account that
+stops paying is blocked at the boundary and keeps everything it has, running
+and exportable. The grace period is seven days and is **not restarted on
+redelivery** — a webhook that arrives twice, or a second failed attempt on the
+same card, must not buy another week. A `graceUntil` that is null on a
+`PAST_DUE` row reads as *already expired*, not as forever, because the other
+reading makes a missing date an unlimited free plan. Both of those lines were
+reverted and re-run: the first fails two tests, the second fails one.
+
+**The sweep exists because nothing else would.** Stripe sends an event when a
+payment fails and another when it finally gives up, and between them is a week
+in which no event arrives at all — so a deployment relying on webhooks alone
+leaves a lapsed account on its paid plan for as long as the processor keeps
+retrying. Hourly, one account at a time, skipping accounts already on free
+(§6 decision 14: on the change, never on the state).
+
+**On the screen**, `AccountDialog` gains a notice that says nothing for an
+account with no subscription — which is every account on a deployment with no
+processor — and nothing for a renewal that simply worked. Two states get a
+banner, and the wording of both is load-bearing: a failed payment has to say
+that nothing has happened yet and by when it will; an ended subscription has to
+say that nothing was taken away, because that is what a person actually fears
+at that moment.
+
+What stays blocked, and is now genuinely all that is: creating a Checkout
+session and a Portal session, two calls to a live API behind a flag that is
+off. Nothing that grants a plan depends on them.
+
+**Not verified against a database.** The `Subscription` and `BillingEvent`
+tables are in a migration that has never been applied — Docker is not running
+on this machine — which puts the unique index that the dedupe leans on in
+exactly the class §1 says a mock cannot be trusted about. The dedupe is tested
+against a mock that rejects; that it is the *constraint* rejecting is not.
+
+1728 server tests and 1060 web tests pass.
+
 ---
 
 ## 3. Open
@@ -1764,7 +2018,10 @@ once, found three more times.
 
 Each is named with what blocks it, so none reads as ready to start.
 
-- [ ] **Certificates for custom domains.** What is left of the row that used
+- [ ] **Certificates for custom domains.** **Split by §9.2, and the code half
+      shipped 2026-09-02 (§2.31).** What is left here is whether this
+      deployment terminates TLS at all and where that key lives — a Caddyfile
+      and a decision, not a project. What is left of the row that used
       to say "custom domains", once the code half shipped on 2026-08-30
       (§2.12). A verified domain is served over plain HTTP today. Over HTTPS
       each one needs a certificate for its own name — not the wildcard that
@@ -1778,7 +2035,9 @@ Each is named with what blocks it, so none reads as ready to start.
       Resuming a running process is a mechanism nothing here resembles, and it
       needs a decision about how much disk a suspended project may hold. The
       last thing CodeSandbox does that this does not.
-- [ ] **Autoscale.** What is left of the row that used to say "autoscale and
+- [ ] **Autoscale.** Still blocked, and §9.5 says why it gets closer without
+      being worked on: §9.3's compute meter is the input its cost model is
+      missing. What is left of the row that used to say "autoscale and
       scheduled jobs", once the scheduling half shipped on 2026-08-30 (§2.13).
       Still a different product with a different cost model: always-on compute
       exists in its smallest useful form, and deciding how many copies of it to
@@ -1791,7 +2050,11 @@ Each is named with what blocks it, so none reads as ready to start.
       A puts the multiplayer layer, the assistant, the run control and the
       preview behind a rewrite. Revisit the route, not the row.
 
-- [ ] **Backup and restore.** Added 2026-08-31 after a sweep found no story
+- [ ] **Backup and restore.** **Split by §9.1**, which takes the recoverable
+      delete and deliberately leaves this row open: a trash answers "I meant
+      the other project" and a backup answers "the host died", and only the
+      second needs a destination. Do not read §9.1 as closing this.
+      Added 2026-08-31 after a sweep found no story
       for either. Everything a user has lives in exactly one place: the working
       tree on the host's disk, the rows in one Postgres, the published releases
       in a sibling directory. `deleteProjectService` is thorough and
@@ -1969,6 +2232,12 @@ Everything still in §3.3 is blocked on a decision or on infrastructure and
 should not be started until that decision is made. Everything in §3.1 and
 §3.2 is not.
 
+**That sentence was true and incomplete, which §9 now says.** Three of §3.3's
+rows and one of §8's are two things bundled together, exactly as the custom
+domain row (§2.12) and the scheduled jobs row (§2.13) were. §9 splits them and
+gives the four halves an order; what is left after that is blocked on a
+person and not on a programmer.
+
 This section used to close by claiming **there is nothing left on this page to
 simply start**. That claim has now been wrong five times, which is enough to
 stop making it. Twice the blocker turned out not to exist. Once it existed and
@@ -2010,7 +2279,7 @@ the data.
 `pnpm -r typecheck` clean 3/3, `pnpm -r lint` clean 3/3, 1536 server tests and
 1003 web tests passing — all run, not quoted.
 
-**None of the five migrations has been applied to any database.** Docker was not running
+**None of the seven migrations has been applied to any database.** Docker was not running
 on this machine, so the DB-gated suites skipped, `plans` has never existed
 outside the `.sql` file, the seeded `free` row has never been read by anything,
 and neither has `users.quotaWarnedAt` or the new `QUOTA_WARNING` enum value.
@@ -2402,8 +2671,15 @@ on last time.
 
 ### 8.4 Billing — Stripe Checkout and the Customer Portal
 
-**Blocked on a Stripe account and its keys, which are the operator's to
-create.** The code is small; the decisions are not, and three of them have a
+**Split by §9.4, and the buildable half is built** (2026-09-02 — see §2.32):
+subscription state, the webhook and its dedupe, the signature check, the grace
+period and the downgrade all shipped, tested, with no Stripe account in
+existence. **What is left of this row is the two calls that create a Checkout
+and a Portal session**, which need keys that are the operator's to create.
+Nothing that grants a plan depends on them — the webhook is the only writer
+either way — so this row no longer blocks anything but the button.
+
+The original argument, unchanged: The code is small; the decisions are not, and three of them have a
 plausible wrong answer that is also the easier one to write.
 
 - **No card data ever touches this server.** Checkout and the Portal are
@@ -2482,6 +2758,12 @@ section stated — audit in the same transaction, from the first commit — held
 
 ### 8.8 Compute is the real cost and nothing meters it
 
+Recorded rather than decided — and the reason it could not be decided was that
+there was no number. **There is one now** (§2.30, shipped 2026-09-02):
+container-seconds per account per day, sandboxes and published services both,
+recorded and not enforced. This question is no longer blocked on engineering.
+It is blocked on somebody letting the meter run long enough to argue from.
+
 Recorded rather than decided. What is limited is disk and project count; what
 is expensive is container-hours, and the idle reaper is the only thing standing
 between a free tier and an unbounded bill. Before any price is set, settle
@@ -2516,9 +2798,236 @@ the day the section was written, which says less about the pace than about the
 observation in §8.0: almost all of this was already built, and what was missing
 was the layer that lets it differ per customer and be seen.
 
+**§9 amends what follows.** 8.4 is half buildable (§9.4) and 8.8 needs a meter
+before it needs an answer (§9.3). The paragraph below is still right about
+8.5, and about what makes this product sellable.
+
 **What is left is exactly the two items that need somebody other than a
 programmer.** 8.4 needs a Stripe account and its keys, which are the operator's
 to create. 8.5 needs a pricing decision — per seat or per usage — before any of
 its code means anything. Until then the honest state of this deployment is a
 free tier with plans it can describe, comp, meter and warn about, and cannot
 sell.
+
+---
+
+## 9. What is left, and what is actually blocked
+
+Written 2026-09-01, after §3.1 and §3.2 emptied for the first time with
+nothing unblocked behind them. Seven items remain across §3.3 and §8, and every
+one of them is marked blocked.
+
+**This document has been wrong about that five times** (§4 says so, and keeps
+count). Twice the blocker did not exist. Once it existed and was an unmade
+decision, which is the cheapest kind there is. Twice a row was two things
+bundled together and came apart the moment anybody split it — §2.12 shipped
+custom domains that way, and §2.13 shipped scheduled jobs out of the row that
+also held autoscaling. So the useful question is not "what is unblocked" but:
+
+> **For each remaining item, what part of it needs somebody with a credit card,
+> a DNS zone or a pricing opinion — and what part is just code that nobody has
+> written because the row had one word on it?**
+
+Asked that way, four of the seven come apart. The other three do not, and
+saying which is which is most of the value of this section.
+
+### 9.0 The split, item by item
+
+| Row | The half that needs a person | The half that is only code |
+|---|---|---|
+| Backup and restore (§3.3) | where backups **go** — object storage, a second disk, or a written acceptance of loss | a delete that can be undone, which is the failure mode that actually happens |
+| Certificates (§3.3) | who terminates TLS, and where the account key lives | telling that terminator **which hostnames are real**, which is one endpoint |
+| Compute metering (§8.8) | whether this product sells capability or sells minutes | the meter, which is the evidence the decision needs and does not have |
+| Billing (§8.4) | a Stripe account and its keys | subscription state, webhook ingestion, and what a lapsed plan may do |
+| Autoscale (§3.3) | a cost model | — |
+| Process snapshots (§3.3) | a disk budget, and a mechanism nothing here resembles | — |
+| Teams (§8.5) | per seat or per usage | — (see 9.6) |
+
+Debugging is not in the table: §6 decision 1 defers it deliberately, and §3.3
+already says the answer is to revisit the *route*, not the row.
+
+### 9.1 A delete that can be undone — **shipped 2026-09-01, see §2.29**
+
+The backup row's real content, separated from its destination.
+
+`deleteProjectService` removes the container, the managed database **and its
+volume**, the checkpoints, the cache volume, the deployment and its published
+files, the row, and then `fs.rm(projectDir, { recursive: true, force: true })`.
+It is thorough, correct, and irreversible, and the only thing in front of it is
+a confirmation dialog.
+
+**The distinction that unblocks this row: losing a disk and losing a click are
+different problems, and only one of them needs a destination.** A backup answers
+"the host died". A trash answers "I meant the other project", which is the one
+that actually happens, needs nothing off this machine, and is the half a user
+can act on. Shipping it does not make the backup row less true; it makes the
+irreversible path recoverable while the destination is still an open question.
+
+The design, with the parts that have a plausible wrong answer named:
+
+- **Deleted is a state, not an absence.** `deletedAt` on `Project`, and every
+  query that lists or resolves a project filters on it — §6 decision 13, which
+  §2.20 already paid to learn: the guarantee lives in the query, never in the
+  cleanup. There are more of those call sites than the takedown had.
+- **What is released immediately and what is held.** A deleted project's
+  container stops, its site is unpublished, its jobs stop firing, its share
+  token stops redeeming — everything that costs money or serves the public goes
+  at once. What is *held* is the working tree and the row. Holding the
+  container to make restore instant would be paying for storage nobody asked
+  for, and serving a deleted project's site for a week is indefensible.
+- **A grace period, then the real delete.** Seven days, swept by the same
+  timer machinery the token prune and the domain recheck already use. The
+  existing `deleteProjectService` becomes the sweeper's body rather than the
+  button's, which means the destructive path keeps exactly one implementation.
+- **It stops counting against quota immediately.** A trash that holds somebody
+  at their project limit for a week is a trash they will empty in the first
+  minute, which is the same as not having one.
+- **The name is freed and the id is not.** A restored project keeps its id, so
+  every URL that ever pointed at it still does.
+
+### 9.2 Telling a TLS terminator which hostnames are real — **shipped 2026-09-02, see §2.31**
+
+`resolveCustomDomain(hostname)` already exists and already answers the only
+question a certificate needs answered: *is this a name this platform is willing
+to serve?* It is verified by a TXT record (§2.12) and it is a row in a table.
+
+**The decision that unblocks the row is refusing to write an ACME client.** An
+account key, a challenge responder, a renewal timer and a certificate store are
+four things to get right, all of them solved, and the solution is a reverse
+proxy this deployment is going to run anyway. Caddy's on-demand TLS asks an
+HTTP endpoint before issuing for a hostname it has never seen; that endpoint is
+`resolveCustomDomain` with a status code in front of it. Roughly thirty lines,
+and the blocked half stops being "build ACME" and becomes "the operator writes
+six lines of Caddyfile".
+
+Three things this endpoint has to get right, because it is the only guard
+between a public listener and unbounded certificate issuance:
+
+- **Unauthenticated, and it must be.** The proxy asks before any session
+  exists. So it answers with a status code and nothing else — no body, no
+  reason, no distinction between "unknown" and "unverified" — because it is a
+  hostname oracle otherwise.
+- **Verified only.** An unverified claim is not an address (§2.12), and issuing
+  a certificate for one would let anybody claim a name and get a certificate
+  attempt for it.
+- **Rate limited on the same reasoning as everything else that costs.** Every
+  yes is an ACME order somewhere, and a certificate authority's rate limits are
+  the kind you discover by being locked out for a week.
+
+What stays blocked: whether this deployment terminates TLS at all, and where
+that key lives. That is genuinely the operator's, and it is now a config file
+rather than a project.
+
+### 9.3 A meter for compute — **shipped 2026-09-02, see §2.30**
+
+§8.8 records the question and does not answer it: does this product sell
+capability, or sell minutes? It also says the code is shaped for the first.
+
+**It cannot be answered without a number, and there is no number.** Disk and
+project count are metered; container-hours, which is the actual cost, are not
+measured anywhere. So the unblocked half is the meter, and the decision waits
+for it — which is the right order, because a pricing decision made without
+usage data is a guess that becomes a table nobody can change later.
+
+One design decision carries this, and it is a direct lesson from §2.26:
+
+> **Sample, do not open a session.** A `startedAt`/`endedAt` row is the obvious
+> shape and it is the restart wedge again — a row with an open end, a process
+> that stops existing, and a number that is wrong forever afterwards. Instead a
+> sweep on the interval this codebase already runs adds elapsed seconds per
+> running container to a per-user, per-day total. A restart loses at most one
+> tick, nothing is ever left open, and the failure mode is a slight undercount
+> rather than a project that appears to have run for three weeks.
+
+Recorded, not billed. Nothing refuses anything on this number until §8.8 is
+answered, and the account screen can show it because "you used 4 hours of
+compute this month" is true and useful before it is ever a price.
+
+### 9.4 Billing state, with the processor behind a flag — **half unblocked**
+
+Same split §2.12 used for custom domains: everything except the part that needs
+a credential somebody else owns.
+
+What can be built and tested now, with no Stripe account in existence:
+
+- **`Subscription` state on the account**, and the state machine that maps it
+  to a `planId` — which is the only thing the rest of the codebase reads,
+  because §2.22 already made every limit an entitlement lookup. Billing writes
+  one column, exactly as §8.0 predicted.
+- **The webhook endpoint, and its dedupe table.** Events are recorded by
+  Stripe's event id with a unique index, so an at-least-once redelivery is
+  dropped by the database rather than by hoping. This is testable against
+  recorded payloads and needs no key: the signature check is one function with
+  the secret injected.
+- **The grace period and the downgrade**, which is the part §8.4 says has a
+  plausible wrong answer that is also easier to write. An account that stops
+  paying is **blocked at the boundary** — no new projects, no growth past the
+  free quota — and keeps everything it has, working and exportable. §6 decision
+  16 already settled the shape of this for plan features; this is the same rule
+  reaching subscriptions, and it should be the same code.
+
+What stays blocked: creating a Checkout session and a Portal session, which are
+two calls to a live API behind a feature flag that is off. **The webhook is the
+only writer of subscription state** either way (§8.4), so nothing that grants a
+plan depends on the flagged half.
+
+### 9.5 What stays blocked, and why it is not stubbornness
+
+- **Autoscale.** Deciding how many copies of an always-on process to buy in
+  response to load is a cost model. 9.3's meter is the input it is missing, so
+  this row gets closer by somebody else's work rather than by its own.
+- **Process snapshots.** Suspending and resuming a running process is a
+  mechanism nothing in this codebase resembles, and it needs a disk budget per
+  suspended project. Both halves are real. Nothing to split.
+- **Where backups go.** 9.1 takes the recoverable-delete half and deliberately
+  leaves this: object storage off this VM, a second disk, or a written
+  acceptance that this platform loses data when its host does. **9.1 must not
+  be allowed to read as closing this row**, and §3.3 keeps it open.
+- **Debugging.** §6 decision 1. Revisit the route, not the row.
+
+### 9.6 Teams, and why it stays whole
+
+§8.5 is blocked on per-seat versus per-usage, and unlike the four above, the
+split does not help: the *pricing* is the blocked half, but the *code* half is
+"every `ownerId === userId` comparison in the codebase becomes a membership
+question". That is not a row somebody starts on a Tuesday to unblock something
+else, and starting it half-blocked produces an ownership model built around a
+pricing decision nobody has made.
+
+The honest note is that §2.22 made this cheaper than it was: entitlements are
+resolved per account through one function, so an org's plan would be one more
+branch in `resolveEntitlements` rather than a second billing system. The
+ownership rewrite is still the cost.
+
+### Order
+
+**9.1 → 9.3 → 9.2 → 9.4.**
+
+- [x] **9.1 A delete that can be undone.** Shipped 2026-09-01 — see §2.29.
+- [x] **9.3 A meter for compute.** Shipped 2026-09-02 — see §2.30.
+- [x] **9.2 A hostname endpoint for a TLS terminator.** Shipped 2026-09-02 — see §2.31.
+- [x] **9.4 Billing state, with the processor behind a flag.** Shipped 2026-09-02 — see §2.32.
+
+Listed as rows and not only as prose because §1 counts checkboxes, and a
+section whose items were paragraphs would have made that figure mean two
+different things — which is the drift §7 was extended to stop.
+
+9.1 first because it is the only one with a user on the other end of it who is
+currently one dialog away from losing their work, and because it is the largest
+of the four — the filter has to reach every query that resolves a project, and
+§2.20 is the record of how many surfaces that means.
+
+9.3 second because it is small, it has no dependencies, and every day it does
+not exist is a day of data the §8.8 decision will not have.
+
+9.2 third: thirty lines, and it converts a blocked row into a documented config
+file rather than closing it.
+
+9.4 last of the four because it is the biggest and the least useful until
+somebody has an account — but it is genuinely buildable, and building it is
+what makes "we got the keys" a one-day change instead of a two-week one.
+
+**None of this makes the product sellable.** That still needs the Stripe
+account (§8.4) and a pricing decision (§8.8, §8.5). What it does is make the
+list honest: after these four, everything left on this page is waiting on a
+person rather than on a programmer, and for the first time that will be true.

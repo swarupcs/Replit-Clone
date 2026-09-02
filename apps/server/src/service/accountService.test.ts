@@ -3,6 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const prismaMock = vi.hoisted(() => ({
   user: { findUnique: vi.fn() },
   project: { findMany: vi.fn() },
+  // The summary now carries the month's container-seconds. Mocked at the
+  // client rather than the service, so the test still proves the summary asks
+  // for it -- mocking `computeSecondsSince` away would leave the field
+  // untested in the one place it is assembled.
+  computeUsage: { findMany: vi.fn(() => Promise.resolve([{ seconds: 90 }])) },
+  // Null is the normal case: every account on a deployment with no payment
+  // processor has never had a subscription, and the summary has to be
+  // readable for those accounts rather than only for paying ones.
+  subscription: { findUnique: vi.fn(() => Promise.resolve(null)) },
 }));
 
 const usedBytes = vi.hoisted(() => vi.fn());
@@ -86,7 +95,10 @@ describe("the account summary", () => {
     await getAccountSummary(USER);
 
     expect(prismaMock.project.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { ownerId: USER } }),
+      // ...and not the ones in the trash, which stop counting the moment
+      // they are trashed. This screen explains the number the quota enforces,
+      // and a breakdown that does not add up to it is worse than none.
+      expect.objectContaining({ where: { ownerId: USER, deletedAt: null } }),
     );
   });
 
@@ -104,5 +116,55 @@ describe("the account summary", () => {
     await expect(getAccountSummary(USER)).rejects.toMatchObject({
       statusCode: 404,
     });
+  });
+});
+
+/** Compute is what this platform actually spends, and until §9.3 nothing
+ *  counted it. The summary carries it because the account screen is where a
+ *  person can see it — and it is a fact there, not a limit: nothing in this
+ *  codebase refuses anything on this number. */
+describe("compute on the summary", () => {
+  it("reports the month's container-seconds", async () => {
+    const summary = await getAccountSummary(USER);
+
+    expect(summary.computeSecondsThisMonth).toBe(90);
+  });
+
+  it("asks only for this account's days", async () => {
+    await getAccountSummary(USER);
+
+    expect(prismaMock.computeUsage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ userId: USER }) }),
+    );
+  });
+});
+
+/** The account screen is the only place a person can see what their
+ *  subscription is doing, and §9.4's whole point is that nothing else on this
+ *  deployment can tell them: there is no checkout, no portal, and no email
+ *  from a processor that has not been configured. */
+describe("the subscription on the summary", () => {
+  it("is null for an account that has never had one", async () => {
+    const summary = await getAccountSummary(USER);
+
+    expect(summary.subscription).toBeNull();
+  });
+
+  it("carries what the processor last said, and whether it still counts", async () => {
+    prismaMock.subscription.findUnique.mockResolvedValue({
+      status: "PAST_DUE",
+      planId: "pro",
+      graceUntil: new Date(Date.now() + 86_400_000),
+      currentPeriodEnd: null,
+      plan: { label: "Pro" },
+    } as never);
+
+    const summary = await getAccountSummary(USER);
+
+    expect(summary.subscription?.status).toBe("PAST_DUE");
+    expect(summary.subscription?.planLabel).toBe("Pro");
+    // Inside the grace, so still entitled -- a card that expired on a Friday
+    // must not take somebody's work away on the Saturday.
+    expect(summary.subscription?.entitled).toBe(true);
   });
 });

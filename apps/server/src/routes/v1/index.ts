@@ -12,6 +12,8 @@ import adminRouter from "./admin.js";
 import notificationRouter from "./notifications.js";
 import accountRouter from "./account.js";
 import pubRouter from "./pub.js";
+import tlsRouter from "./tls.js";
+import billingRouter from "./billing.js";
 
 const router = express.Router();
 
@@ -43,6 +45,16 @@ router.use("/admin", requireAuth, adminRouter);
 // reach is the set of routes written in that file -- see routes/v1/pub.ts for
 // why that is the enforcement rather than a convenience.
 router.use("/pub", pubRouter);
+
+// Deliberately NOT behind requireAuth: a processor has a signature, not a
+// session. The route reads the RAW body for that signature, which is why it
+// brings its own `express.raw` rather than relying on the app's JSON parser.
+router.use("/billing", billingRouter);
+
+// Deliberately NOT behind requireAuth: the TLS terminator asks this before
+// any session exists, which is the whole point of it. It answers with a status
+// code and nothing else -- see routes/v1/tls.ts for why that is not laziness.
+router.use("/tls", tlsRouter);
 
 // Deliberately NOT behind requireAuth: an embed is read by people who have
 // no account here and never will. See routes/v1/embeds.ts.

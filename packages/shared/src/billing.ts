@@ -1,3 +1,4 @@
+import type { SubscriptionState } from "./subscriptions.js";
 /** What an account is allowed to do, and where the numbers come from.
  *
  *  Every limit in this product used to be a constant in `env`, which is the
@@ -99,6 +100,21 @@ export interface AccountSummary {
    *  request. Archived plans are omitted; an account *on* an archived plan
    *  still reads its own limits from `entitlements`. */
   plans: Plan[];
+  /** Container-seconds this calendar month, across every project this account
+   *  owns — sandboxes and published services both.
+   *
+   *  Shown and not charged for. plan.md §8.8 asks whether this product sells
+   *  capability or sells minutes and says the code is shaped for the first;
+   *  that question cannot be answered without a number, so the number exists
+   *  first and the decision waits for it. Until then this is a fact somebody
+   *  may find interesting, and nothing refuses anything on it. */
+  computeSecondsThisMonth: number;
+  /** What this account is paying for, or null for one that never has.
+   *
+   *  Null is the ordinary state of every account on a deployment with no
+   *  processor configured, which is why the screen has to read it as "the free
+   *  plan" rather than as something being wrong. */
+  subscription: SubscriptionState | null;
 }
 
 /** The fraction of a quota at which somebody should be told, before the wall

@@ -1075,7 +1075,7 @@ export async function resolveSite(
     where: {
       subdomain,
       deployedAt: { not: null },
-      project: { takenDownAt: null },
+      project: { takenDownAt: null, deletedAt: null },
     },
   });
   if (!row) return undefined;

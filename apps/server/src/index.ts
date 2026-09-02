@@ -65,6 +65,9 @@ import { reconcileDeployments, restoreServices } from "./service/deployService.j
 import { recheckDomains } from "./service/customDomainService.js";
 import { backfillSealedEnvVars } from "./service/projectEnvService.js";
 import { reconcileJobRuns, runDueJobs } from "./service/scheduleService.js";
+import { purgeExpiredTrash } from "./service/projectService.js";
+import { startComputeMeter } from "./service/computeMeterService.js";
+import { expireGracePeriods } from "./service/billingService.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
 import { SandboxNetworkMismatch } from "./containers/sandboxNetwork.js";
 import { stop as stopManagedDatabase } from "./service/managedDatabaseService.js";
@@ -328,6 +331,46 @@ function startTokenPrune(): void {
  *  Hourly against a daily staleness window, for the same reason the token
  *  prune is: it keeps the first sweep after a restart soon.
  */
+/** Deletes for real what has been in the trash longer than the grace period.
+ *
+ *  Hourly, on the same machinery as the token prune above it, and it runs once
+ *  at boot: a server that was down for a fortnight owes a purge, and waiting an
+ *  hour to start would keep every one of those trees on disk for no reason.
+ *
+ *  Failures are logged and never propagate. A tree that will not delete must
+ *  not stop the sweep -- one stuck project holding every other account's disk
+ *  is a far worse outcome than one project that needs looking at by hand.
+ */
+function startTrashSweep(): void {
+  const sweep = (): void => {
+    void purgeExpiredTrash().catch((error: unknown) => {
+      logger.error("could not purge trashed projects", error);
+    });
+  };
+
+  sweep();
+  setInterval(sweep, 60 * 60 * 1000).unref();
+}
+
+/** Drops accounts whose payment grace has run out to the free plan.
+ *
+ *  Necessary because nothing else would: the processor sends an event when a
+ *  payment fails and another when it finally gives up, and between them is a
+ *  week in which no event arrives at all. A deployment relying on webhooks
+ *  alone would leave a lapsed account on its paid plan for as long as the
+ *  processor kept retrying the card.
+ */
+function startGraceSweep(): void {
+  const sweep = (): void => {
+    void expireGracePeriods().catch((error: unknown) => {
+      logger.error("could not expire grace periods", error);
+    });
+  };
+
+  sweep();
+  setInterval(sweep, 60 * 60 * 1000).unref();
+}
+
 function startDomainRecheck(): void {
   const sweep = (): void => {
     void recheckDomains()
@@ -487,7 +530,13 @@ async function start(): Promise<void> {
     await stopManagedDatabase(projectId).catch(() => undefined);
   });
   startIdleReaper();
+  // Alongside the reaper and not inside it: the reaper decides how long an
+  // abandoned container keeps costing, and a meter that shared its try/catch
+  // would take the more important of the two down with it.
+  startComputeMeter();
   startTokenPrune();
+  startTrashSweep();
+  startGraceSweep();
   startDomainRecheck();
   startJobSweeper();
   startAccessWatch();

@@ -71,6 +71,23 @@ export type CounterName =
   // deploy is normal; climbing while nobody is deploying is a server dying
   // repeatedly, which no other counter here would say.
   | "jobs_abandoned"
+  // Container-seconds recorded by the meter. The only counter here that is
+  // about MONEY rather than about behaviour, and the one plan.md 8.8 says has
+  // to exist before a price can be argued for.
+  | "compute_seconds"
+  // The TLS authorize endpoint. `tls_authorize_refused` climbing is the shape
+  // of somebody pointing hostnames at this deployment that it never agreed to
+  // serve -- which is what a certificate authority's rate limit is spent on.
+  | "tls_authorize_allowed"
+  | "tls_authorize_refused"
+  // Billing. `billing_event_duplicate` is not an error and is worth watching:
+  // it is at-least-once delivery working as documented, and a zero there for
+  // a busy deployment means the dedupe is not being exercised rather than that
+  // nothing is being redelivered.
+  | "billing_subscription_updated"
+  | "billing_grace_expired"
+  | "billing_event_duplicate"
+  | "billing_webhook_rejected"
   // Notifications. `notifications_created` against `notifications_mailed` is
   // the honest measure of how much of this actually reaches anybody: the gap
   // between them is people who have to open the app to find out, which is the

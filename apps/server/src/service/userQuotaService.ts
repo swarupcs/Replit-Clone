@@ -43,7 +43,12 @@ function toBytes(megabytes: number): number {
  *  with someone counts against whoever owns it, not everyone who can see it. */
 export async function getUserUsage(userId: string): Promise<UserUsage> {
   const projects = await prisma.project.findMany({
-    where: { ownerId: userId },
+    // Trashed projects stop counting the moment they are trashed, against
+    // both limits. A trash that holds somebody at their project limit for a
+    // week is a trash they empty in the first minute, which is the same as
+    // not having one -- and the disk is genuinely still in use, which is the
+    // deliberate cost of being able to undo a click.
+    where: { ownerId: userId, deletedAt: null },
     select: { id: true },
   });
 

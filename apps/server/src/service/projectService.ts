@@ -19,6 +19,7 @@ import {
 import {
   destroy as destroyManagedDatabase,
   provision as provisionManagedDatabase,
+  stop as stopManagedDatabase,
 } from "./managedDatabaseService.js";
 import { forgetProject as forgetCheckpoints } from "./checkpointService.js";
 import { forgetRun } from "../containers/runner.js";
@@ -30,7 +31,8 @@ import {
   forgetUserQuota,
 } from "./userQuotaService.js";
 import { unpublish } from "./deployService.js";
-import { ForbiddenError } from "../utils/errors.js";
+import { revokeEmbed } from "./embedService.js";
+import { ForbiddenError, NotFoundError } from "../utils/errors.js";
 import { logger } from "../lib/logger.js";
 
 export function projectDir(projectId: string): string {
@@ -39,7 +41,7 @@ export function projectDir(projectId: string): string {
 
 export async function listProjects(ownerId: string): Promise<Project[]> {
   return prisma.project.findMany({
-    where: { ownerId },
+    where: { ownerId, deletedAt: null },
     orderBy: { createdAt: "desc" },
   });
 }
@@ -103,14 +105,144 @@ export async function createProjectService(
   return project;
 }
 
-export async function deleteProjectService(
+/** How long a trashed project is kept before it is really deleted. */
+export const TRASH_DAYS = 7;
+
+/** The owner deleting a project, which no longer deletes it.
+ *
+ *  Everything that costs money or serves the public stops **now**; the working
+ *  tree and the row are held for `TRASH_DAYS` so a wrong click is recoverable.
+ *  That split is the whole design:
+ *
+ *  - **Stopped, unpublished, unshared, unscheduled** -- a deleted project that
+ *    went on serving its site for a week, or running its nightly job, would be
+ *    indefensible, and one whose container stayed resident would be storage
+ *    nobody asked for.
+ *  - **Held: the tree, the row, the managed database's volume.** Restoring is
+ *    worthless without the data, and the database volume IS data. It is
+ *    stopped, not destroyed -- `destroy` is the purge's job.
+ *  - **Off the quota immediately** (see `getUserUsage`).
+ *
+ *  Not a backup. A backup answers "the host died" and needs a destination;
+ *  this answers "I meant the other project". plan.md section 9.1.
+ */
+export async function trashProjectService(
   projectId: string,
   userId: string,
 ): Promise<void> {
-  // Owner only: a collaborator losing the project for everyone is not a
-  // mistake worth making recoverable, because it is not recoverable.
+  // Owner only, unchanged: a collaborator putting the project in somebody
+  // else's trash is not their decision to make.
   await assertAccess(projectId, userId, "owner");
 
+  await removeContainer(projectId);
+  // Stopped, not destroyed. The volume is the user's data, and the point of a
+  // trash is that the data is still there.
+  await stopManagedDatabase(projectId).catch(() => undefined);
+
+  // Public surfaces, all of them, now. Jobs need nothing here: `runDueJobs`
+  // filters on `deletedAt`, which is decision 13 -- the guarantee is the WHERE
+  // clause and never the cleanup -- and it also means a restored project's
+  // schedules come back intact.
+  await unpublish(projectId).catch((error: unknown) => {
+    logger.error("could not take the deployment offline", error);
+  });
+  await revokeEmbed(projectId).catch(() => undefined);
+
+  await prisma.project.update({
+    where: { id: projectId },
+    data: {
+      deletedAt: new Date(),
+      // A bearer string that was pasted somewhere must stop redeeming. The
+      // redeem query filters on `deletedAt` too, for the reason above; this is
+      // the cleanup half, and 2.20 settled that it is both or neither.
+      shareToken: null,
+    },
+  });
+
+  forgetRun(projectId);
+  forgetDevcontainer(projectId);
+  forgetUsage(projectId);
+  forgetCollab(projectId);
+  forgetUserQuota(projectId, userId);
+}
+
+/** Taking it back out of the trash.
+ *
+ *  The one operation that has to look past `getProjectAccess`, which reports a
+ *  trashed project as missing to the entire rest of the product. So it reads
+ *  the row itself and checks ownership by hand -- narrowly, and said out loud
+ *  rather than by adding a flag to the function every other route trusts.
+ *
+ *  The id survives, so every URL that ever pointed at this project still does.
+ */
+export async function restoreProjectService(
+  projectId: string,
+  userId: string,
+): Promise<Project> {
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+
+  // Not in the trash is not an error worth a different message: to anybody but
+  // the owner, and to the owner of a purged project, this id is simply gone.
+  if (!project?.deletedAt || project.ownerId !== userId) {
+    throw new NotFoundError("Project not found");
+  }
+
+  // Room has to be made first. A restore that walks past the project limit is
+  // the same hole as a trash that does not stop counting, in the other
+  // direction -- and being told why is far better than being restored into an
+  // account that then refuses to create anything.
+  await assertCanCreateProject(userId);
+
+  const restored = await prisma.project.update({
+    where: { id: projectId },
+    data: { deletedAt: null },
+  });
+
+  forgetUserQuota(projectId, userId);
+  // Nothing is restarted, republished or re-shared. The site, the embed and
+  // the share link were public surfaces the owner gave up when they deleted
+  // this, and handing them back automatically would be the platform making a
+  // decision about who may read something on the owner's behalf.
+  return restored;
+}
+
+/** What the trash holds, for the screen that offers to undo. */
+export async function listTrashedProjects(userId: string): Promise<Project[]> {
+  return prisma.project.findMany({
+    where: { ownerId: userId, deletedAt: { not: null } },
+    orderBy: { deletedAt: "desc" },
+  });
+}
+
+/** The real delete, by an owner who does not want to wait.
+ *
+ *  Deliberately ONE implementation of the destructive path, shared with the
+ *  sweeper: two of these drifting apart is how a volume outlives the row that
+ *  pointed at it.
+ */
+export async function purgeProjectService(
+  projectId: string,
+  userId: string,
+): Promise<void> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { ownerId: true, deletedAt: true },
+  });
+
+  // Only from the trash. Purging straight past the grace period would put the
+  // irreversible path back behind a single button, which is what this whole
+  // change exists to remove.
+  if (!project?.deletedAt || project.ownerId !== userId) {
+    throw new NotFoundError("Project not found");
+  }
+
+  await purgeProject(projectId);
+  forgetUserQuota(projectId, userId);
+}
+
+/** Everything `deleteProjectService` used to do, now reached only from the
+ *  trash: by the sweeper after `TRASH_DAYS`, or by an owner emptying it. */
+export async function purgeProject(projectId: string): Promise<void> {
   await removeContainer(projectId);
   // The database container AND its volume. A volume outliving the row that
   // pointed at it is the mistake `deployService.unpublish` learned about
@@ -134,9 +266,39 @@ export async function deleteProjectService(
   forgetDevcontainer(projectId);
   forgetUsage(projectId);
   forgetCollab(projectId);
-  forgetUserQuota(projectId, userId);
   await prisma.project.delete({ where: { id: projectId } });
   await fs.rm(projectDir(projectId), { recursive: true, force: true });
+}
+
+/** Deletes for real everything whose grace period has run out.
+ *
+ *  Errors are per project and never propagate: one tree that will not delete
+ *  must not stop the sweep, or a single stuck project keeps every other
+ *  account's disk occupied indefinitely.
+ */
+export async function purgeExpiredTrash(now = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - TRASH_DAYS * 24 * 60 * 60 * 1000);
+
+  const expired = await prisma.project.findMany({
+    where: { deletedAt: { not: null, lt: cutoff } },
+    select: { id: true, ownerId: true },
+  });
+
+  let purged = 0;
+  for (const project of expired) {
+    try {
+      await purgeProject(project.id);
+      forgetUserQuota(project.id, project.ownerId);
+      purged += 1;
+    } catch (error) {
+      logger.error("could not purge a trashed project", error, {
+        projectId: project.id,
+      });
+    }
+  }
+
+  if (purged > 0) logger.info("purged trashed projects", { purged });
+  return purged;
 }
 
 export async function touchProject(projectId: string): Promise<void> {

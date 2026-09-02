@@ -304,9 +304,11 @@ describe("previewShareLinkController", () => {
     expect(response.body.data).toEqual({ name: "demo", template: "react-vite" });
     // `takenDownAt` is in the WHERE, not applied afterwards. A preview that
     // still named a moderated project would make this the one endpoint that
-    // confirms moderation acted, to anybody holding the link.
+    // confirms moderation acted, to anybody holding the link. `deletedAt` is
+    // there for the same reason: a link pasted somewhere must stop naming a
+    // project its owner has deleted.
     expect(findFirst).toHaveBeenCalledWith({
-      where: { shareToken: SECRET, takenDownAt: null },
+      where: { shareToken: SECRET, takenDownAt: null, deletedAt: null },
       select: { name: true, template: true },
     });
   });

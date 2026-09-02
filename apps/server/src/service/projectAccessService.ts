@@ -83,6 +83,15 @@ export async function getProjectAccess(
 
   if (!project) return null;
 
+  // A project in the trash is gone as far as every caller of this function is
+  // concerned, which is nearly the whole product: routes, socket handlers, the
+  // editor, the terminal, the deploy panel. `assertProjectAccess` turns null
+  // into a 404, which is also the honest answer -- the owner deleted it.
+  //
+  // Restoring deliberately does not come through here. It is the one operation
+  // that has to see past this line, so it looks the row up itself and says so.
+  if (project.deletedAt) return null;
+
   if (project.ownerId === userId) return { project, level: "owner" };
 
   const collaborator = project.collaborators[0];
@@ -154,7 +163,7 @@ export async function listPublicProjects(
   const { cursor, limit } = pageRequest(page);
 
   const rows = await prisma.project.findMany({
-    where: { visibility: ProjectVisibility.PUBLIC },
+    where: { visibility: ProjectVisibility.PUBLIC, deletedAt: null },
     select: {
       id: true,
       name: true,
@@ -244,6 +253,10 @@ export async function listAccessibleProjects(
   const rows = await prisma.project.findMany({
     where: {
       OR: [{ ownerId: userId }, { collaborators: { some: { userId } } }],
+      // The dashboard lists what you can open. The trash is its own screen,
+      // asked for by name, so a deleted project cannot be opened from the
+      // list it no longer appears in.
+      deletedAt: null,
     },
     // This query had no order either, which a cursor cannot be built on: the
     // database was free to answer in a different order each time, and a page
@@ -409,7 +422,7 @@ export async function redeemShareToken(
   // one taken down for MALWARE must stop handing them a container to run it
   // in -- neither of which redeeming was refusing.
   const project = await prisma.project.findFirst({
-    where: { shareToken: token, takenDownAt: null },
+    where: { shareToken: token, takenDownAt: null, deletedAt: null },
   });
 
   // Deliberately the same sentence a revoked link gets. Somebody holding a

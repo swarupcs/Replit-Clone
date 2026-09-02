@@ -1,5 +1,7 @@
 import type { AccountSummary, ProjectUsage } from "@replit-clone/shared";
 import { prisma } from "../lib/prisma.js";
+import { computeSecondsSince, startOfMonth } from "./computeMeterService.js";
+import { getSubscriptionState } from "./billingService.js";
 import { NotFoundError } from "../utils/errors.js";
 import { usedBytes } from "./diskUsageService.js";
 import { listPlans, resolveEntitlements } from "./entitlementService.js";
@@ -40,7 +42,10 @@ export async function getAccountSummary(
   // whoever owns it, not against everybody who can see it — the same rule the
   // quota itself applies.
   const projects = await prisma.project.findMany({
-    where: { ownerId: userId },
+    // Trashed projects are excluded here for the same reason the quota
+    // excludes them: this screen exists to explain the number the quota
+    // enforces, and a breakdown that does not add up to it is worse than none.
+    where: { ownerId: userId, deletedAt: null },
     select: { id: true, name: true },
   });
 
@@ -67,5 +72,14 @@ export async function getAccountSummary(
     diskBytes,
     breakdown: measured.slice(0, BREAKDOWN_LIMIT),
     plans,
+    // Every project this account has ever run this month, not only the ones
+    // it still owns: a project deleted on the 20th spent real container-hours
+    // before it went, and a meter that forgot them would read lowest for the
+    // accounts that churned most.
+    computeSecondsThisMonth: await computeSecondsSince(userId, startOfMonth()),
+    // Null on every account of a deployment with no processor configured,
+    // which is why the screen reads it as "the free plan" rather than as
+    // something being wrong.
+    subscription: await getSubscriptionState(userId),
   };
 }

@@ -65,7 +65,8 @@ describe.skipIf(!enabled)("publishing a project that serves from a process", () 
   let prisma: typeof import("../lib/prisma.js").prisma;
   let deployService: typeof import("./deployService.js");
   let createProjectService: typeof import("./projectService.js").createProjectService;
-  let deleteProjectService: typeof import("./projectService.js").deleteProjectService;
+  // The destructive path is the purge now; delete puts a project in the trash.
+  let purgeProject: typeof import("./projectService.js").purgeProject;
   let server: Server;
   let port: number;
   let userId: string;
@@ -75,7 +76,7 @@ describe.skipIf(!enabled)("publishing a project that serves from a process", () 
 
     ({ prisma } = await import("../lib/prisma.js"));
     deployService = await import("./deployService.js");
-    ({ createProjectService, deleteProjectService } = await import(
+    ({ createProjectService, purgeProject } = await import(
       "./projectService.js"
     ));
 
@@ -129,7 +130,7 @@ describe.skipIf(!enabled)("publishing a project that serves from a process", () 
       // The service rather than a bare row delete: it removes the working
       // tree and the container too. Deleting the row alone leaves an orphan
       // directory per run, which is exactly what the first draft of this did.
-      await deleteProjectService(project.id, userId).catch(() => undefined);
+      await purgeProject(project.id).catch(() => undefined);
     }
   }
 

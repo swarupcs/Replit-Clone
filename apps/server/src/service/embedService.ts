@@ -244,7 +244,7 @@ async function resolveToken(rawToken: string): Promise<{
   // that this must stop being served to strangers, and an embed is exactly the
   // anonymous surface it has to reach.
   const row = await prisma.embed.findFirst({
-    where: { token: rawToken, project: { takenDownAt: null } },
+    where: { token: rawToken, project: { takenDownAt: null, deletedAt: null } },
     include: { project: { select: { id: true, name: true, template: true } } },
   });
 

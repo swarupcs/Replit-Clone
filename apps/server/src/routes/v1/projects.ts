@@ -18,6 +18,9 @@ import {
   duplicateProjectController,
   forkProjectController,
   listPublicProjectsController,
+  listTrashController,
+  restoreProjectController,
+  purgeProjectController,
   setVisibilityController,
   exportProjectController,
   getProjectEnvController,
@@ -158,6 +161,8 @@ router.get("/templates", asyncHandler(listTemplatesController));
 // id -- and readable by anybody signed in, since it lists only what its owners
 // have already published.
 router.get("/public", asyncHandler(listPublicProjectsController));
+// Before every `/:projectId` route, or "trash" is a project id.
+router.get("/trash", asyncHandler(listTrashController));
 router.get("/", asyncHandler(listProjectsController));
 router.post("/", createLimiter, asyncHandler(createProjectController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
@@ -485,6 +490,17 @@ router.delete(
 router.post("/:projectId/share-link", asyncHandler(createShareLinkController));
 router.delete("/:projectId/share-link", asyncHandler(revokeShareLinkController));
 router.put("/:projectId/env", asyncHandler(setProjectEnvController));
+// The trash. `DELETE /:projectId` no longer deletes anything -- it stops
+// everything the project was costing or serving and holds the tree for a week
+// -- so the three routes that finish the job live here.
+//
+// `/trash` is registered ABOVE the `/:projectId` routes it resembles for the
+// ordinary Express reason: a literal segment that comes after a parameter is
+// never reached, and this one would have been read as a project id.
 router.delete("/:projectId", asyncHandler(deleteProjectController));
+router.post("/:projectId/restore", asyncHandler(restoreProjectController));
+// Irreversible, and reachable only for a project already in the trash -- which
+// is what stops this from putting the old one-button delete back.
+router.delete("/:projectId/purge", asyncHandler(purgeProjectController));
 
 export default router;

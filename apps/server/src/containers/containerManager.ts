@@ -256,6 +256,30 @@ async function runningCount(): Promise<number> {
   return containers.length;
 }
 
+/** Which projects have a container up right now, one entry per container.
+ *
+ *  One entry per CONTAINER and not per project, deliberately: a project with a
+ *  managed database is running two, and two is what it costs the host — which
+ *  is the same reason `runningCount` above counts both prefixes against the
+ *  cap. The compute meter reads this and would otherwise undercount by half
+ *  for exactly the projects that cost the most.
+ */
+export async function runningProjectContainers(): Promise<string[]> {
+  const containers = await docker
+    .listContainers({ filters: { name: [CONTAINER_PREFIX, DB_CONTAINER_PREFIX] } })
+    .catch(() => []);
+
+  const ids: string[] = [];
+  for (const info of containers) {
+    // `projectIdFromNames` already knows both prefixes and is anchored --
+    // an unanchored parse is the defect the reaper was fixed for.
+    const projectId = projectIdFromNames(info.Names);
+    if (projectId) ids.push(projectId);
+  }
+
+  return ids;
+}
+
 /** In-flight `ensureContainer` calls, so concurrent callers share one attempt.
  *
  *  Opening a project fires this from the editor socket, from each terminal and
@@ -776,6 +800,10 @@ export async function reconcileOnBoot(): Promise<{
   directoriesFound: number;
 }> {
   const { prisma } = await import("../lib/prisma.js");
+  // Every row, trash included, and deliberately: a trashed project still has
+  // its working tree, and leaving it out here would report that tree as an
+  // orphan directory -- which is the one thing this function is careful never
+  // to say wrongly.
   const projects = await prisma.project.findMany({ select: { id: true } });
   const known = new Set(projects.map((project) => project.id));
 
@@ -921,7 +949,10 @@ async function assertUserContainerBudget(projectId: string): Promise<void> {
   if (!project) return;
 
   const owned = await prisma.project.findMany({
-    where: { ownerId: project.ownerId },
+    // A trashed project's container was stopped when it was trashed, so this
+    // is belt and braces -- but the cap is about what a person is running now,
+    // and a project they have deleted is not that.
+    where: { ownerId: project.ownerId, deletedAt: null },
     select: { id: true },
   });
   const ownedIds = new Set(owned.map((entry) => entry.id));
