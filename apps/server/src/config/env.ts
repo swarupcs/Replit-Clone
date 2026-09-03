@@ -257,6 +257,36 @@ const envSchema = z.object({
 
   PROJECTS_DIR: z.string().default("projects"),
 
+  /** Host directories under which a folder may be opened directly as a
+   *  project, comma separated. Empty -- the default -- turns the feature off.
+   *
+   *  This is the whole security question in one variable, so it is worth being
+   *  plain about what it grants. Opening a folder bind-mounts it into a
+   *  container that runs arbitrary code as a user who can write it, and hands
+   *  its contents to whoever can read the project. Without an allowlist that
+   *  is "any signed-in user may mount any path this process can reach", which
+   *  includes `/`, the deployment's own source, and its `.env`.
+   *
+   *  So the deployment names the roots, exactly as it names devcontainer
+   *  images and egress domains, and a path is accepted only if it resolves --
+   *  through symlinks -- to somewhere beneath one of them. Empty by default
+   *  because a multi-tenant deployment should never turn this on at all: it is
+   *  for the single-seat case, where the operator and the user are the same
+   *  person and the folders in question are already theirs.
+   *
+   *  PROJECTS_ROOT is refused even when it sits inside a named root, because a
+   *  second row pointing at a server-owned tree would give one directory two
+   *  owners with different rules about deleting it. */
+  LOCAL_FOLDER_ROOTS: z
+    .string()
+    .default("")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+
   // Container resource budget, and the defaults differ by environment because
   // the two are not the same problem.
   //
@@ -480,6 +510,17 @@ export const env = parsed.data;
  *  path confinement has a stable anchor to compare against.
  */
 export const PROJECTS_ROOT: string = path.resolve(env.PROJECTS_DIR);
+
+/** The roots beneath which a folder may be opened, absolute.
+ *
+ *  Resolved at startup for the same reason PROJECTS_ROOT is: confinement needs
+ *  an anchor a later `process.chdir` cannot move. Empty means the feature is
+ *  off, which is not the same as "no restriction" and is checked that way --
+ *  see `utils/localRoots.ts`, where an empty list refuses everything.
+ */
+export const LOCAL_FOLDER_ROOTS: string[] = env.LOCAL_FOLDER_ROOTS.map((root) =>
+  path.resolve(root),
+);
 
 export const isProduction = env.NODE_ENV === "production";
 

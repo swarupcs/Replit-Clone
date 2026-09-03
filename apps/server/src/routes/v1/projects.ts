@@ -47,6 +47,11 @@ import {
   mongoCollectionSchemaController,
   mongoQueryController,
 } from "../../controllers/databaseController.js";
+import {
+  browseLocalFoldersController,
+  localFolderSettingsController,
+  openLocalFolderController,
+} from "../../controllers/localFolderController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import {
@@ -165,6 +170,17 @@ router.get("/public", asyncHandler(listPublicProjectsController));
 router.get("/trash", asyncHandler(listTrashController));
 router.get("/", asyncHandler(listProjectsController));
 router.post("/", createLimiter, asyncHandler(createProjectController));
+
+// Opening a folder that is already on the disk. All three are before every
+// `/:projectId` route, or "local" is read as a project id.
+//
+// `createLimiter` on the open, for the same reason `POST /` carries it: it
+// writes a row and its project can immediately start a container. The two reads
+// are cheap and bounded by the allowlist -- browsing is one `readdir` under a
+// directory the deployment named -- so neither gets a budget of its own.
+router.get("/local", asyncHandler(localFolderSettingsController));
+router.get("/local/browse", asyncHandler(browseLocalFoldersController));
+router.post("/local", createLimiter, asyncHandler(openLocalFolderController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
 router.get("/:projectId/ports", asyncHandler(getProjectPorts));
 

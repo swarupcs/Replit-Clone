@@ -9,7 +9,7 @@ import {
   recordWrite,
 } from "../service/diskUsageService.js";
 import { assertUserDiskQuota } from "../service/userQuotaService.js";
-import { claimOneForSandbox } from "../utils/projectPaths.js";
+import { claimOneForProject } from "../utils/projectPaths.js";
 import { assertValidProjectId, resolveInProject } from "../utils/projectPaths.js";
 import { BadRequestError } from "../utils/errors.js";
 import { logger } from "../lib/logger.js";
@@ -91,7 +91,10 @@ export async function uploadFilesController(
     // path under it, so an upload to the project root re-chowned node_modules
     // each time — and swallowing the failure left the new file unwritable by
     // the container with nothing said about it.
-    await claimOneForSandbox(absolute).catch((error: unknown) => {
+    // A no-op for a folder somebody opened: their tree is theirs, the container
+    // already runs as its owner, and chowning a file into it to uid 1001 would
+    // leave a file in their own directory they cannot write.
+    await claimOneForProject(projectId, absolute).catch((error: unknown) => {
       logger.warn("could not hand an uploaded file to the sandbox user", {
         projectId,
         relPath,

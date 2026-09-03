@@ -5,6 +5,7 @@ import { notify } from "./notificationService.js";
 import { AppError } from "../utils/errors.js";
 import { increment } from "../lib/metrics.js";
 import { usedBytes } from "./diskUsageService.js";
+import { isLocalProject } from "../utils/projectPaths.js";
 import {
   forgetEntitlements,
   ownerOf,
@@ -220,6 +221,13 @@ export async function assertUserDiskQuota(
   incomingBytes: number,
   replacingBytes = 0,
 ): Promise<void> {
+  // A write into a folder somebody opened spends their own disk, not this
+  // platform's allowance. `usedBytes` already reports zero for such a project
+  // so the TOTAL is right without this -- but the projection below adds the
+  // incoming bytes, and without the guard a large save into a local folder
+  // could still be refused against a limit it does not consume.
+  if (isLocalProject(projectId)) return;
+
   const ownerId = await ownerOf(projectId);
   if (!ownerId) return;
 

@@ -6,7 +6,12 @@ import {
   assertProjectAccess as assertAccess,
   getProjectAccess,
 } from "./projectAccessService.js";
-import { claimForSandbox, projectRoot } from "../utils/projectPaths.js";
+import {
+  claimForSandbox,
+  forgetLocalRoot,
+  isLocalProject,
+  projectRoot,
+} from "../utils/projectPaths.js";
 import {
   DEFAULT_TEMPLATE_ID,
   getTemplate,
@@ -266,8 +271,27 @@ export async function purgeProject(projectId: string): Promise<void> {
   forgetDevcontainer(projectId);
   forgetUsage(projectId);
   forgetCollab(projectId);
+
+  // Read BEFORE the row goes, because the registry is what the answer comes
+  // from and the row is what would rebuild it.
+  const isLocal = isLocalProject(projectId);
+  const root = projectDir(projectId);
+
   await prisma.project.delete({ where: { id: projectId } });
-  await fs.rm(projectDir(projectId), { recursive: true, force: true });
+  forgetLocalRoot(projectId);
+
+  // The one line in this function that would be a catastrophe on a folder
+  // somebody opened. Everything above removes something this platform created
+  // -- a container, a volume, a published copy -- and is right to. This removes
+  // the working tree, which for a local project is the person's own source
+  // directory, and emptying the trash is not a request to delete their code.
+  //
+  // Closing the project is therefore all a purge does for a local folder: the
+  // row goes, the container goes, the files stay exactly where they were and
+  // the folder can be opened again afterwards.
+  if (!isLocal) {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 }
 
 /** Deletes for real everything whose grace period has run out.

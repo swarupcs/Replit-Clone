@@ -66,6 +66,7 @@ import { recheckDomains } from "./service/customDomainService.js";
 import { backfillSealedEnvVars } from "./service/projectEnvService.js";
 import { reconcileJobRuns, runDueJobs } from "./service/scheduleService.js";
 import { purgeExpiredTrash } from "./service/projectService.js";
+import { loadLocalFolders } from "./service/localFolderService.js";
 import { startComputeMeter } from "./service/computeMeterService.js";
 import { expireGracePeriods } from "./service/billingService.js";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders.js";
@@ -462,6 +463,17 @@ function withTimeout<T>(
 }
 
 async function start(): Promise<void> {
+  // Which projects are folders somebody opened rather than trees this server
+  // made. First, before anything can resolve a path: `projectRoot` answers from
+  // this registry, and a project whose root is not registered yet resolves to a
+  // server-owned directory that does not exist -- so it would read as an EMPTY
+  // project rather than as a broken one, which is the worse of the two failures
+  // and the one nobody would report as a bug.
+  //
+  // A database query and nothing else, so it is ahead of every Docker step
+  // below and cannot be delayed by a daemon that is slow.
+  await loadLocalFolders();
+
   // Docker is deliberately NOT allowed to gate the listener. Signing in,
   // refreshing a session and listing projects need no daemon at all, so a
   // Docker outage should cost the container features and nothing else.
