@@ -1761,11 +1761,22 @@ Server: 1781 passing. Web: 1071 passing. Typecheck and lint clean, 3/3.
 **One thing found and not fixed**, recorded rather than left to be
 rediscovered: nine tests in `useLanguageServer.test.tsx` fail on any checkout
 without `apps/web/.env`, because `socketUrl` calls `new URL(import.meta.env
-.VITE_BACKEND_URL)` and that is `undefined`. CI sets the variable
-(`ci.yml`), so it is green there and red for anybody who has not copied
-`.env.example`. Not this change's doing — verified by stashing it — and not
-a defect in the product, but it is a first-run experience that reads as
-nine broken tests.
+.VITE_BACKEND_URL)` and that is `undefined`. Not this change's doing —
+verified by stashing it.
+
+> **Corrected 2026-09-03, and the correction is the interesting half.** This
+> paragraph originally said "CI sets the variable (`ci.yml`), so it is green
+> there". That is **wrong**, and it was wrong in the direction that hides
+> things: `ci.yml` sets `VITE_BACKEND_URL` in exactly one place, the **e2e**
+> job's "Build the web app" step, and `pnpm -r test` runs under **verify**,
+> which does not set it. So those nine have been failing in CI too — they are
+> half of why `main` has been red since 2026-08-29.
+>
+> The claim was made by grepping `ci.yml` for the variable, finding a hit, and
+> not checking which job it was in. Which is the same mistake this file keeps
+> recording in other people's code: a symbol found is not a symbol in the
+> right scope. Fixed in §2.37 by defaulting it in the test setup, so the suite
+> stops depending on an environment file at all.
 
 ### 2.34 Since (2026-09-03) — §10.3, one account
 
@@ -1913,6 +1924,51 @@ suppresses its own writes for those paths, so removing it would not simplify
 anything — it would stop saving.
 
 Server: 1821 passing. Web: 1074 passing. Typecheck and lint clean, 3/3.
+
+### 2.37 Since (2026-09-03) — the two reasons `main` was red
+
+Not §10 work. Both were found by pushing §10 and reading the CI that came
+back, and both were failing on `main` before this branch existed — since
+2026-08-29, across every run.
+
+- [x] **A page asserted as an array.** `projectAccessService.test.ts` did
+      `expect(await listAccessibleProjects(mate)).toHaveLength(1)` on a
+      function that returns `Page<ListedProject>`. §2.28 gave every list a
+      cursor and updated the call site *twenty lines below* — which
+      destructures `.items` and passes — while missing two above it.
+
+- [x] **An E2E selector for markup deleted a week earlier.** Two flows waited
+      20 s each for `.ant-segmented-item`. The template picker stopped being a
+      `Segmented` in `4b104f7` (2026-08-26); `TemplatePicker.tsx` says so in
+      its own comment. Now keyed on `[data-template-id]`, an attribute the
+      card already carried, rather than on the visible label — the label is
+      what moved last time.
+
+- [x] **Nine tests that needed a file `.gitignore` hides.** `socketUrl` does
+      `new URL(import.meta.env.VITE_BACKEND_URL)`, which throws
+      `Invalid URL: undefined` when it is unset. Defaulted in the vitest setup
+      instead: a unit suite should not need an environment file to run.
+
+**What the three have in common is the finding.** Each was invisible without
+some piece of apparatus — a database, Docker and a browser, an untracked
+`.env` — and each therefore failed only where nobody was looking. Two of them
+are the *same mistake as §2.28's and §2.14's*: a shape changed, most call
+sites were updated, and the ones that were not could not fail on the author's
+machine.
+
+The third is worse, and it is mine. §2.33 asserted "CI sets the variable, so
+it is green there" on the strength of grepping `ci.yml`, finding a hit, and
+not checking **which job** it was in — it is in `e2e`, and the failing suite
+runs under `verify`. A symbol found is not a symbol in scope. §2.33 now
+carries the correction rather than the claim.
+
+Verified against the real thing rather than argued: Postgres installed and
+running locally, migrations applied, and the whole of `pnpm -r test` run the
+way CI runs it — **with no `apps/web/.env` present**, which is the condition
+that had been quietly flattering every previous local run.
+
+Server: 2081 passing (0 failing, 9 skipped). Web: 1074 passing. Typecheck and
+lint clean, 3/3. Both apps build.
 
 ## 3. Open
 
