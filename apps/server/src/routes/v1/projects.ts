@@ -52,6 +52,7 @@ import {
   localFolderSettingsController,
   openLocalFolderController,
 } from "../../controllers/localFolderController.js";
+import { capabilities } from "../../config/deploymentMode.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import {
@@ -165,7 +166,14 @@ router.get("/templates", asyncHandler(listTemplatesController));
 // The gallery. Before "/:projectId/..." routes so "public" is never read as an
 // id -- and readable by anybody signed in, since it lists only what its owners
 // have already published.
-router.get("/public", asyncHandler(listPublicProjectsController));
+//
+// Not mounted in single-user mode: it lists what OTHER people have published,
+// and at n=1 it can only ever contain your own projects, which the dashboard
+// already shows. See config/deploymentMode.ts, where that decision is made
+// once for all of these.
+if (capabilities().gallery) {
+  router.get("/public", asyncHandler(listPublicProjectsController));
+}
 // Before every `/:projectId` route, or "trash" is a project id.
 router.get("/trash", asyncHandler(listTrashController));
 router.get("/", asyncHandler(listProjectsController));
@@ -425,11 +433,16 @@ router.patch(
   publishLimiter,
   asyncHandler(setVisibilityController),
 );
-router.post(
-  "/:projectId/report",
-  reportLimiter,
-  asyncHandler(reportProjectController),
-);
+// Reporting, and the owner's side of it. Not mounted in single-user mode: a
+// report is filed by somebody and reviewed by an operator, and §6 decision 11
+// is that those are different people -- here they would be the same one.
+if (capabilities().moderation) {
+  router.post(
+    "/:projectId/report",
+    reportLimiter,
+    asyncHandler(reportProjectController),
+  );
+}
 
 // Tests. Reading the command is a viewer's, running it needs the same grant
 // `Run` does, and changing it is the owner's -- see the controller.
@@ -458,12 +471,17 @@ router.post("/:projectId/test", testRunLimiter, asyncHandler(runTestsController)
 // The other side of moderation: what was done to this project, and the owner's
 // answer to it. Both are the owner's -- a decision taken against somebody that
 // only the decider can read is not a record, it is a file.
-router.get("/:projectId/moderation", asyncHandler(projectModerationController));
-router.post(
-  "/:projectId/appeal",
-  reportLimiter,
-  asyncHandler(appealController),
-);
+//
+// Gone with the rest of moderation in single-user mode. An appeal is addressed
+// to whoever took the decision, and there is nobody here to address.
+if (capabilities().moderation) {
+  router.get("/:projectId/moderation", asyncHandler(projectModerationController));
+  router.post(
+    "/:projectId/appeal",
+    reportLimiter,
+    asyncHandler(appealController),
+  );
+}
 
 // Export starts no container and is not free either: it walks and zips an
 // entire working tree per request, at viewer level, and a project is allowed
@@ -494,17 +512,24 @@ router.get("/:projectId/files", asyncHandler(downloadFileController));
 // --- Sharing -------------------------------------------------------------
 // `share/preview` and `share/redeem` are not scoped to a project id, because
 // the caller has a token rather than an id — that is the whole point of a link.
-router.get("/share/preview", asyncHandler(previewShareLinkController));
-router.post("/share/redeem", asyncHandler(redeemShareLinkController));
+//
+// None of it is mounted in single-user mode, and this is the clearest case of
+// the lot: redeeming a share link means signing in and being added as a
+// collaborator, and the one account that can sign in already owns the project.
+// The whole block is dead by arithmetic rather than by preference.
+if (capabilities().sharing) {
+  router.get("/share/preview", asyncHandler(previewShareLinkController));
+  router.post("/share/redeem", asyncHandler(redeemShareLinkController));
 
-router.get("/:projectId/sharing", asyncHandler(listSharingController));
-router.put("/:projectId/collaborators", asyncHandler(setCollaboratorController));
-router.delete(
-  "/:projectId/collaborators/:userId",
-  asyncHandler(removeCollaboratorController),
-);
-router.post("/:projectId/share-link", asyncHandler(createShareLinkController));
-router.delete("/:projectId/share-link", asyncHandler(revokeShareLinkController));
+  router.get("/:projectId/sharing", asyncHandler(listSharingController));
+  router.put("/:projectId/collaborators", asyncHandler(setCollaboratorController));
+  router.delete(
+    "/:projectId/collaborators/:userId",
+    asyncHandler(removeCollaboratorController),
+  );
+  router.post("/:projectId/share-link", asyncHandler(createShareLinkController));
+  router.delete("/:projectId/share-link", asyncHandler(revokeShareLinkController));
+}
 router.put("/:projectId/env", asyncHandler(setProjectEnvController));
 // The trash. `DELETE /:projectId` no longer deletes anything -- it stops
 // everything the project was costing or serving and holds the tree for a week

@@ -65,12 +65,21 @@ describe("authProviders", () => {
     const response = await request(app).get("/auth/providers");
 
     expect(response.status).toBe(200);
-    // `singleUser` joined this payload when the endpoint stopped being only
-    // about GitHub: three links on the sign-in form lead to routes that mode
-    // does not mount, and the app needs to be told which.
+    // `singleUser` and `capabilities` joined this payload when the endpoint
+    // stopped being only about GitHub. Between them they say which routes this
+    // deployment actually mounts, and the app reads them so it does not draw a
+    // Sign up link, a Share button or an Explore section whose endpoints are
+    // 404s.
     expect(response.body.data).toEqual({
       github: configured,
       singleUser: false,
+      capabilities: {
+        sharing: true,
+        moderation: true,
+        operatorConsole: true,
+        gallery: true,
+        plans: true,
+      },
     });
   });
 });

@@ -52,6 +52,7 @@ import { ModerationDialog } from "../components/organisms/ModerationDialog/Moder
 import { GithubConnectionCard } from "../components/organisms/GithubConnectionCard/GithubConnectionCard.tsx";
 import { ImportRepoDialog } from "../components/organisms/ImportRepoDialog/ImportRepoDialog.tsx";
 import { OpenFolderDialog } from "../components/organisms/OpenFolderDialog/OpenFolderDialog.tsx";
+import { useDeployment } from "../hooks/useDeployment.ts";
 import { ExploreSection } from "../components/organisms/ExploreSection/ExploreSection.tsx";
 
 /** Relative time for the card footer -- "3 days ago" reads better than a date
@@ -85,6 +86,8 @@ type SortKey = "recent" | "created" | "name";
 function ProjectActions({
   project,
   isOwner,
+  canShare,
+  canModerate,
   onShare,
   onRename,
   onDuplicate,
@@ -93,6 +96,10 @@ function ProjectActions({
 }: {
   project: Project;
   isOwner: boolean;
+  /** Whether this deployment has sharing routes at all. */
+  canShare: boolean;
+  /** The same question for moderation. */
+  canModerate: boolean;
   onShare: () => void;
   onRename: () => void;
   onDuplicate: () => void;
@@ -113,7 +120,12 @@ function ProjectActions({
             // A project shared with you is not yours to rename, share on, or
             // delete -- the menu says so by omission rather than by offering
             // something that will fail.
-            ...(isOwner
+            //
+            // And Share goes entirely when this deployment has no sharing
+            // routes, for exactly the same reason it goes for a non-owner: a
+            // menu entry whose endpoint is a 404 reads as a broken feature
+            // rather than as one this deployment does not have.
+            ...(isOwner && canShare
               ? [
                   {
                     key: "share",
@@ -121,6 +133,10 @@ function ProjectActions({
                     label: "Share",
                     onClick: onShare,
                   },
+                ]
+              : []),
+            ...(isOwner
+              ? [
                   {
                     key: "rename",
                     icon: <EditOutlined />,
@@ -156,7 +172,11 @@ function ProjectActions({
             // Offered whether or not anything was taken down. The trail holds
             // dismissals as well, and "reported and cleared" is a fact about
             // the project its owner is entitled to read.
-            ...(isOwner
+            //
+            // Gone where there is no moderation to read a trail of. Nothing
+            // could ever have been reported: a report needs a reporter and a
+            // separate operator, and there is one account.
+            ...(isOwner && canModerate
               ? [
                   {
                     key: "moderation",
@@ -165,6 +185,10 @@ function ProjectActions({
                     danger: project.takenDownAt !== null,
                     onClick: onModeration,
                   },
+                ]
+              : []),
+            ...(isOwner
+              ? [
                   { type: "divider" as const },
                   {
                     key: "delete",
@@ -289,6 +313,11 @@ export const Dashboard = () => {
   const [githubOpen, setGithubOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
+
+  /** What this deployment has routes for. Sharing and the gallery are not
+   *  mounted in single-user mode, and a control whose endpoint is a 404 reads
+   *  as a broken feature rather than as one this deployment does not have. */
+  const { capabilities } = useDeployment();
   const [sharing, setSharing] = useState<Project | null>(null);
   const [moderating, setModerating] = useState<Project | null>(null);
 
@@ -578,6 +607,8 @@ export const Dashboard = () => {
                 <ProjectActions
                   project={project}
                   isOwner={isOwner}
+                  canShare={capabilities.sharing}
+                  canModerate={capabilities.moderation}
                   onShare={() => setSharing(project)}
                   onRename={() => {
                     setRenaming(project);
@@ -729,8 +760,12 @@ export const Dashboard = () => {
 
         {/* Other people's published work, and a Fork button. Below your own
             projects rather than beside them: this is somewhere to go when you
-            have finished with what you came for. */}
-        <ExploreSection />
+            have finished with what you came for.
+
+            Gone entirely when this deployment has no gallery: at one account
+            it could only ever list your own projects, which is the list
+            directly above it. */}
+        {capabilities.gallery && <ExploreSection />}
       </main>
 
       <GithubConnectionCard

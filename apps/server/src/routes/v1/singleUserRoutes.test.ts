@@ -54,6 +54,8 @@ async function appWith(email: string) {
 }
 
 /** Everything whose existence the mode changes. */
+const PROJECT = "7e1c4b02-9a3d-4f18-8b6e-2d5a7c9e0f31";
+
 const ACCOUNT_ROUTES = [
   { method: "post" as const, path: "/auth/signup" },
   { method: "post" as const, path: "/auth/password-reset" },
@@ -136,5 +138,81 @@ describe("single-user mode", () => {
     // app hides them on this flag, and a link to a 404 is a worse answer than
     // no link.
     expect(response.body.data.singleUser).toBe(true);
+  });
+});
+
+/** §10.5's half: the surface that needs a second person.
+ *
+ *  Mounted through the real project router, so this asserts against the wiring
+ *  rather than against a list of paths somebody kept in step by hand.
+ */
+describe("the surface that needs a second person", () => {
+  /** Everything whose existence single-user mode changes on the project
+   *  router. Each is dead by arithmetic there, not by preference. */
+  const SHARED_ROUTES = [
+    // Redeeming a share link means signing in and becoming a collaborator, and
+    // the one account that can sign in already owns the project.
+    { method: "get" as const, path: "/projects/share/preview" },
+    { method: "post" as const, path: "/projects/share/redeem" },
+    { method: "get" as const, path: `/projects/${PROJECT}/sharing` },
+    { method: "post" as const, path: `/projects/${PROJECT}/share-link` },
+    // A report needs a reporter and a separate operator (§6 decision 11).
+    { method: "post" as const, path: `/projects/${PROJECT}/report` },
+    { method: "get" as const, path: `/projects/${PROJECT}/moderation` },
+    { method: "post" as const, path: `/projects/${PROJECT}/appeal` },
+    // The gallery lists what OTHER people published.
+    { method: "get" as const, path: "/projects/public" },
+  ];
+
+  async function projectsAppWith(email: string) {
+    vi.resetModules();
+    process.env["SINGLE_USER_EMAIL"] = email;
+
+    const router = (await import("./projects.js")).default;
+    const app = express();
+    app.use(express.json());
+    app.use("/projects", router);
+    return app;
+  }
+
+  it("is mounted on an ordinary deployment", async () => {
+    const app = await projectsAppWith("");
+
+    for (const route of SHARED_ROUTES) {
+      const response = await request(app)[route.method](route.path);
+      // 401 from requireAuth is the expected answer here, and it is proof the
+      // route exists -- which is the only thing being asserted.
+      expect(response.status, `${route.method} ${route.path}`).not.toBe(404);
+    }
+  });
+
+  it("is not mounted when there is one account", async () => {
+    const app = await projectsAppWith("me@example.com");
+
+    for (const route of SHARED_ROUTES) {
+      const response = await request(app)[route.method](route.path);
+      expect(response.status, `${route.method} ${route.path}`).toBe(404);
+    }
+  });
+
+  it("leaves everything single-player alone", async () => {
+    const app = await projectsAppWith("me@example.com");
+
+    // The failure this guards against is an exemption written by theme rather
+    // than by reasoning -- sweeping out embeds and exports because they are
+    // near sharing in the file. Each of these has a real user at n=1.
+    const KEPT = [
+      { method: "get" as const, path: "/projects/templates" },
+      { method: "get" as const, path: "/projects/trash" },
+      { method: "get" as const, path: `/projects/${PROJECT}/tree` },
+      { method: "get" as const, path: `/projects/${PROJECT}/export` },
+      { method: "get" as const, path: `/projects/${PROJECT}/embed` },
+      { method: "get" as const, path: "/projects/local" },
+    ];
+
+    for (const route of KEPT) {
+      const response = await request(app)[route.method](route.path);
+      expect(response.status, `${route.method} ${route.path}`).not.toBe(404);
+    }
   });
 });

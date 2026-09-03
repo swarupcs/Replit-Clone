@@ -11,6 +11,7 @@ import {
 import { getAccountApi } from "../../../apis/projects.ts";
 import { ApiKeys } from "./ApiKeys.tsx";
 import { TrashPanel } from "../TrashPanel/TrashPanel.tsx";
+import { useDeployment } from "../../../hooks/useDeployment.ts";
 
 /** What this account is using, and what it is allowed.
  *
@@ -212,6 +213,9 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
     retry: false,
   });
 
+  /** Whether anything here is a choice. See `useDeployment`. */
+  const { capabilities } = useDeployment();
+
   return (
     <Modal
       title="Plan and usage"
@@ -349,7 +353,12 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
             </ol>
           )}
 
-          {data.plans.length > 1 && (
+          {/* A catalogue is a thing you choose from. On a deployment with one
+              account there is nothing to move to and nobody selling it, and
+              the `personal` plan seeded beside `free` would otherwise make
+              this list appear for the first time on exactly the deployment
+              that has least use for it. */}
+          {capabilities.plans && data.plans.length > 1 && (
             <>
               <Typography.Title level={5}>Plans</Typography.Title>
               <ul

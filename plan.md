@@ -104,7 +104,8 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 119 items. Open: 16 — five blocked, eleven from §10.**
+**Done: 120 items. Open: 15 — five blocked, and ten from §10 that are all
+waiting on one decision (§10.1).**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
@@ -1866,6 +1867,53 @@ Server: 1798 passing. Web: 1071 passing. Typecheck and lint clean, 3/3.
 
 Server: 1814 passing. Web: 1071 passing. Typecheck and lint clean, 3/3.
 
+### 2.36 Since (2026-09-03) — §10.5, what has no second person
+
+- [x] **One module, `config/deploymentMode.ts`, and one decision.** §10.5 asked
+      for this as a single row because it is one judgement made a dozen times,
+      and leaving it implicit is how a personal deployment ends up shipping a
+      report queue.
+
+- [x] **Derived from `SINGLE_USER_EMAIL`, not a second flag** — and that is the
+      substantive choice. None of what it turns off is a preference; each is
+      dead by **arithmetic**. A share link is redeemed by signing in and
+      becoming a collaborator, and the one account that can sign in already owns
+      the project. A report needs a reporter and a separate operator, which §6
+      decision 11 requires be different people. The console administers
+      accounts, and there is one. The gallery lists what *other* people
+      published. A flag would imply these could sensibly be switched back on.
+
+- [x] **Not mounted, again.** Sharing, moderation, the appeal, the operator
+      console and the gallery are absent rather than refusing, matching §10.3.
+      The test asserts 404 across all of them, and — the more useful half —
+      asserts that templates, trash, tree, export, embeds and the local-folder
+      routes still answer, because the failure this guards against is an
+      exemption written by *theme* rather than by reasoning.
+
+- [x] **`/auth/providers` carries the capability set**, so the app does not
+      draw a Share button or an Explore section whose endpoint is a 404 —
+      the same argument that removed the signup link in §2.34. The client
+      defaults every capability to **on** while the query is in flight and if it
+      fails: defaulting the other way would blink those controls out of every
+      ordinary deployment on every page load, and hide them permanently
+      wherever the request hiccuped.
+
+**One deviation from §10.5's list, recorded rather than followed silently.**
+That list had **API keys** among the things with no user at n=1, and on
+reflection that is wrong: a personal deployment with a build server is an
+ordinary setup, and §6 decision 17 already makes the key surface default-deny
+and tiny. They stay. **Embeds** stay for the same kind of reason — putting your
+own project in your own blog post is something one person does alone, and the
+audience was never an account here.
+
+**And one thing that looks dead and must not be touched.** Collaborative
+editing has no second participant at n=1, but `collabService` is not switched
+off: the server owns writing a file while its document is live and the editor
+suppresses its own writes for those paths, so removing it would not simplify
+anything — it would stop saving.
+
+Server: 1821 passing. Web: 1074 passing. Typecheck and lint clean, 3/3.
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -3378,8 +3426,8 @@ feature. Route A does not deliver any of them.
       cold start", is multi-tenant economics. One person who wants Python
       intelligence wants it on.
 
-- [ ] **10.5 Say which of the platform has no second person, and let it be
-      turned off.** Recorded as one row because it is one decision taken
+- [x] **10.5 Say which of the platform has no second person, and let it be
+      turned off.** Shipped 2026-09-03 — see §2.36. Recorded as one row because it is one decision taken
       thirteen times, and because leaving it implicit is how a personal
       deployment ends up shipping a report queue.
 
@@ -3496,7 +3544,8 @@ them.
 
 Then, whichever way 10.1 goes:
 
-**10.2 → 10.3 → 10.4 → 10.5.** ~~Open-a-folder first~~ — done 2026-09-03
+~~**10.2 → 10.3 → 10.4 → 10.5.**~~ **All four shipped 2026-09-03** — §2.33
+to §2.36. What is left in this section is 10.1 and the ten rows behind it. ~~Open-a-folder first~~ — done 2026-09-03
 (§2.33), and the reasoning below held: the mount was an afternoon and finding
 every place that assumes this server made the tree was the rest of it. **Next
 is 10.3.** Original note follows.

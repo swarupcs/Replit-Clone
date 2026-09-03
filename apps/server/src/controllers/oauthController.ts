@@ -6,6 +6,7 @@ import {
   isGithubConfigured,
   signInWithGithub,
 } from "../service/oauthService.js";
+import { capabilities } from "../config/deploymentMode.js";
 import { singleUserEnabled } from "../service/singleUserService.js";
 import { issueRefreshToken } from "../service/refreshTokenService.js";
 import {
@@ -51,6 +52,11 @@ export function authProviders(_req: Request, res: Response): Promise<void> {
       // creates accounts, and this deployment has the one it is going to have.
       github: isGithubConfigured() && !singleUserEnabled(),
       singleUser: singleUserEnabled(),
+      // What this deployment has routes for. The app hides a Share button
+      // whose endpoint is a 404 for the same reason it hides a signup link
+      // whose endpoint is a 404 -- and this is the one place both answers
+      // already travel together.
+      capabilities: capabilities(),
     },
   });
 
