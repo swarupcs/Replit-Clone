@@ -82,7 +82,15 @@ test.describe.serial("preview reload on save", () => {
     await expect(page).toHaveURL(/\/$/);
 
     await page.getByRole("button", { name: "New playground" }).first().click();
-    await page.locator(".ant-segmented-item", { hasText: "Static HTML" }).click();
+    // `[data-template-id]`, not `.ant-segmented-item`: the picker stopped
+    // being a Segmented in 4b104f7 (2026-08-26) and became a grid of
+    // `role="radio"` cards. These two specs were never updated, so they have
+    // waited 20s for an element that no longer exists ever since -- which is
+    // why E2E has been red on `main` since that commit.
+    //
+    // Keyed on the template ID rather than on the visible label, because the
+    // label is exactly what moved last time.
+    await page.locator('[data-template-id="static-html"]').click();
     await page.getByRole("button", { name: "Create", exact: true }).click();
 
     await expect(page).toHaveURL(/\/project\/[0-9a-f-]+$/, { timeout: 60_000 });
