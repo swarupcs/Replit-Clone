@@ -104,7 +104,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 118 items. Open: 17 — five blocked, twelve from §10.**
+**Done: 119 items. Open: 16 — five blocked, eleven from §10.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
@@ -1810,6 +1810,62 @@ nine broken tests.
 
 Server: 1798 passing. Web: 1071 passing. Typecheck and lint clean, 3/3.
 
+### 2.35 Since (2026-09-03) — §10.4, limits about a machine nobody shares
+
+- [x] **Zero means unlimited, and a `personal` plan sets every allocation to
+      it.** A sentinel rather than a very large number or a nullable column,
+      because the columns are non-null integers and every consumer compares
+      them arithmetically. The rule also already existed unwritten:
+      `isNearQuota` has always guarded on `limit > 0`, because a meter over a
+      limit of zero means nothing.
+
+      The one thing it costs is that "zero projects allowed" becomes unsayable.
+      Nothing wants to say it — a plan permitting nothing is an account that
+      cannot be used, which is suspension, and §6 decision 18 puts that outside
+      what an operator may do.
+
+- [x] **All five enforcement points learned it**, and each kept its own
+      comparison: a project COUNT is refused at `>=` and a byte total only past
+      `>`. A helper that hid that difference would have made one of the five
+      silently off by one, which is why `isUnlimited` is a predicate and not a
+      comparison.
+
+- [x] **Every case is tested twice.** The dangerous failure here is not
+      "unlimited did not work" — it is an exemption written slightly too wide,
+      quietly removing the limits from every ordinary deployment while no test
+      fails. So each of the five asserts the personal plan is unbounded *and*
+      that the free plan still refuses.
+
+- [x] **`SINGLE_USER_EMAIL` answers a question `NODE_ENV` was standing in
+      for.** The development/deployment split on `CONTAINER_MEMORY_MB` says so
+      itself: a deployment packs other people's projects onto a VM, and a
+      developer running this locally "is the only tenant... nothing is shared,
+      so there is nothing to protect the headroom from". A single-user
+      deployment is the second case wearing the first's clothes, so it now
+      takes the development figures — 2048 MB and 2 CPUs rather than 512 and a
+      half.
+
+- [x] **§6 decision 3 re-read, and half of it overturned.** LSP now defaults
+      ON for a single-tenant deployment. The reason for off-by-default is
+      entirely about a shared machine — the image size is "paid on every cold
+      start by people who never open a `.py` or `.go` file" — and at n=1 there
+      are no such people. The **memory threshold is not relaxed**: that one is
+      about an OOM kill in somebody's own terminal, and it costs them exactly
+      as much when they are the only user.
+
+- [x] **The account screen stopped drawing a full red bar for "no limit".**
+      `limit <= 0` produced a 100%-exception meter, which said the precise
+      opposite of what is true. A bar is a picture of how close you are to a
+      wall; where there is no wall there is no bar.
+
+- [x] **A latent fragility fixed on the way.** `personalPlan` used
+      `.catch()` on a lookup that can throw *synchronously* — a client
+      generated before this plan existed does exactly that — and a synchronous
+      throw happens before there is a promise to attach a handler to. try/catch
+      instead, so "fall back rather than fail" is true rather than intended.
+
+Server: 1814 passing. Web: 1071 passing. Typecheck and lint clean, 3/3.
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -3301,7 +3357,8 @@ feature. Route A does not deliver any of them.
       reasoning applies exactly: a rule enforced by a mode flag sprinkled
       through controllers is a rule that usually holds.
 
-- [ ] **10.4 Limits that mean the machine, not the tenant.**
+- [x] **10.4 Limits that mean the machine, not the tenant.** Shipped
+      2026-09-03 — see §2.35.
       `MAX_PROJECTS_PER_USER` (20), `USER_DISK_QUOTA_MB` (2048),
       `PROJECT_DISK_QUOTA_MB` (512), `MAX_CONTAINERS_PER_USER` (2) and
       `MAX_CONCURRENT_CONTAINERS` (3) are rationing between tenants. At n=1 the

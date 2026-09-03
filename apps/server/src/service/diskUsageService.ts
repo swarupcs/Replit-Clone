@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isUnlimited } from "@replit-clone/shared";
 import { AppError } from "../utils/errors.js";
 import { isLocalProject, projectRoot } from "../utils/projectPaths.js";
 import { increment } from "../lib/metrics.js";
@@ -126,6 +127,9 @@ export async function assertWithinQuota(
   // into someone else's project spends the owner's allowance, which is the
   // rule the user-level quota already followed.
   const { projectDiskQuotaMb } = await resolveProjectEntitlements(projectId);
+
+  // The personal plan sets this to zero, meaning no limit. See UNLIMITED.
+  if (isUnlimited(projectDiskQuotaMb)) return;
 
   if (projected > projectDiskQuotaMb * 1024 * 1024) {
     increment("quota_rejections");

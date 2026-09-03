@@ -9,6 +9,7 @@ import {
   containerUser,
   projectRoot,
 } from "../utils/projectPaths.js";
+import { isUnlimited } from "@replit-clone/shared";
 import { AppError } from "../utils/errors.js";
 import { getTemplate } from "../templates/registry.js";
 import { logger } from "../lib/logger.js";
@@ -972,7 +973,11 @@ async function assertUserContainerBudget(projectId: string): Promise<void> {
   );
   const { maxContainersPerUser } = await resolveEntitlements(project.ownerId);
 
-  if (theirs.length >= maxContainersPerUser) {
+  // Zero means no per-account share, which is the personal plan: there is
+  // nobody to share with. MAX_CONCURRENT_CONTAINERS is checked separately and
+  // still holds, which is the whole distinction -- this limit is about how the
+  // machine's capacity is DIVIDED, and that one is about how much there is.
+  if (!isUnlimited(maxContainersPerUser) && theirs.length >= maxContainersPerUser) {
     increment("containers_capacity_rejected");
     throw new AppError(
       429,

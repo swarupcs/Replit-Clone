@@ -1,4 +1,4 @@
-import { QUOTA_WARN_FRACTION } from "@replit-clone/shared";
+import { isUnlimited, QUOTA_WARN_FRACTION } from "@replit-clone/shared";
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
 import { notify } from "./notificationService.js";
@@ -236,6 +236,12 @@ export async function assertUserDiskQuota(
   // be the reason a save fails.
   if (!usage) return;
 
+  // One of the five places a limit is enforced, and so one of the five that
+  // asks whether it is a limit at all. See UNLIMITED: the personal plan sets
+  // these to zero, because rationing a shared VM between tenants means nothing
+  // when there is one of you and the disk is your own.
+  if (isUnlimited(usage.diskLimitBytes)) return;
+
   const projected = usage.diskBytes - replacingBytes + incomingBytes;
 
   if (projected > usage.diskLimitBytes) {
@@ -270,7 +276,7 @@ export function resetUserQuotaCaches(): void {
 export async function assertCanCreateProject(userId: string): Promise<void> {
   const usage = await getUserUsage(userId);
 
-  if (usage.projects >= usage.projectLimit) {
+  if (!isUnlimited(usage.projectLimit) && usage.projects >= usage.projectLimit) {
     increment("quota_rejections");
     throw new QuotaError(
       `You have reached the limit of ${String(usage.projectLimit)} projects. ` +
@@ -279,7 +285,10 @@ export async function assertCanCreateProject(userId: string): Promise<void> {
     );
   }
 
-  if (usage.diskBytes >= usage.diskLimitBytes) {
+  if (
+    !isUnlimited(usage.diskLimitBytes) &&
+    usage.diskBytes >= usage.diskLimitBytes
+  ) {
     increment("quota_rejections");
     throw new QuotaError(
       `Your projects are using all ` +

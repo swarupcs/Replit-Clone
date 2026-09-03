@@ -26,6 +26,25 @@ if (process.env["NODE_ENV"] !== "test") dotenv.config();
  */
 const inDevelopment = (process.env["NODE_ENV"] ?? "development") === "development";
 
+/** Whether this process has exactly one tenant.
+ *
+ *  Read raw, for the same reason `inDevelopment` is: it decides schema
+ *  DEFAULTS, which have to be fixed before anything is parsed.
+ *
+ *  It exists because the development/deployment split above is not really about
+ *  NODE_ENV -- it is about whether anything is SHARED. The comment on
+ *  `CONTAINER_MEMORY_MB` says so outright: a deployment is packing other
+ *  people's projects onto a VM, and a developer running this locally "is the
+ *  only tenant... nothing is shared, so there is nothing to protect the
+ *  headroom from". A single-user deployment is the second case wearing the
+ *  first's clothes, and giving it 512 MB and half a core is protecting headroom
+ *  from nobody.
+ */
+const soleTenant = (process.env["SINGLE_USER_EMAIL"] ?? "").trim().length > 0;
+
+/** One tenant, whether by NODE_ENV or by configuration. */
+const unshared = inDevelopment || soleTenant;
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
 
@@ -337,7 +356,7 @@ const envSchema = z.object({
     .number()
     .int()
     .positive()
-    .default(inDevelopment ? 2048 : 512),
+    .default(unshared ? 2048 : 512),
 
   /** Whether language servers may be started inside project containers.
    *
@@ -352,7 +371,23 @@ const envSchema = z.object({
   LSP_ENABLED: z
     .string()
     .optional()
-    .transform((value) => value === "true" || value === "1"),
+    // Defaults ON for a single-tenant deployment, and that is §10.4 rereading
+    // §6 decision 3 rather than overturning it. The reason for off-by-default
+    // is written above and is entirely about a shared machine: the image cost
+    // "is paid on every cold start by people who never open a .py or .go
+    // file". On a single-seat deployment there are no such people -- there is
+    // one, and they are the person who would be turning it on.
+    //
+    // The memory threshold below is NOT relaxed. That one is about an OOM kill
+    // in somebody's own terminal, and it costs them exactly as much when they
+    // are the only user.
+    //
+    // Set it explicitly to "false" to override, which is why the raw value is
+    // consulted rather than the transformed one: unset and false have to be
+    // distinguishable for a default to mean anything.
+    .transform((value) =>
+      value === undefined ? soleTenant : value === "true" || value === "1",
+    ),
 
   /** Below this, a language server is refused rather than started.
    *
@@ -369,7 +404,7 @@ const envSchema = z.object({
   CONTAINER_CPUS: z.coerce
     .number()
     .positive()
-    .default(inDevelopment ? 2 : 0.5),
+    .default(unshared ? 2 : 0.5),
   CONTAINER_IDLE_MINUTES: z.coerce.number().int().positive().default(20),
   /** Ceiling on a single project's working tree.
    *

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Empty, Modal, Progress, Segmented, Tag, Typography } from "antd";
 import {
+  isUnlimited,
   QUOTA_WARN_FRACTION,
   type AccountSummary,
   type Plan,
@@ -52,7 +53,12 @@ function Meter({
   limit: number;
   render: (value: number) => string;
 }) {
-  const percent = limit <= 0 ? 100 : Math.min(100, (used / limit) * 100);
+  // Zero means no limit, not a limit of nothing. A bar is a picture of how
+  // close you are to a wall, so where there is no wall there is no bar --
+  // drawing a full red one, which is what `limit <= 0` used to produce, says
+  // the exact opposite of what is true.
+  const unlimited = isUnlimited(limit);
+  const percent = unlimited ? 0 : Math.min(100, (used / limit) * 100);
 
   return (
     <div style={{ marginBottom: 14 }}>
@@ -61,17 +67,28 @@ function Meter({
       >
         <Typography.Text strong>{label}</Typography.Text>
         <Typography.Text style={{ color: "var(--rc-text-subtle)" }}>
-          {render(used)} of {render(limit)}
+          {unlimited ? `${render(used)} used` : `${render(used)} of ${render(limit)}`}
         </Typography.Text>
       </div>
-      <Progress
-        percent={Math.round(percent)}
-        status={tone(used, limit)}
-        showInfo={false}
-        aria-label={label}
-      />
+      {!unlimited && (
+        <Progress
+          percent={Math.round(percent)}
+          status={tone(used, limit)}
+          showInfo={false}
+          aria-label={label}
+        />
+      )}
     </div>
   );
+}
+
+/** One of a plan's allowances, in words.
+ *
+ *  "Unlimited projects" rather than "0 projects", which is what the personal
+ *  plan's rows would otherwise read as -- and which would look like a plan that
+ *  permits nothing rather than one that permits everything. */
+function allowance(limit: number, noun: string): string {
+  return isUnlimited(limit) ? `Unlimited ${noun}` : `${String(limit)} ${noun}`;
 }
 
 function date(iso: string | null): string {
@@ -162,9 +179,10 @@ function PlanCard({ plan, current }: { plan: Plan; current: boolean }) {
       <Typography.Paragraph
         style={{ margin: "6px 0 0", fontSize: 12.5, color: "var(--rc-text-subtle)" }}
       >
-        {plan.maxProjects} projects · {plan.userDiskQuotaMb} MB ·{" "}
-        {plan.aiRequestsPerHour} assistant requests an hour ·{" "}
-        {plan.maxContainersPerUser} running at once
+        {allowance(plan.maxProjects, "projects")} ·{" "}
+        {allowance(plan.userDiskQuotaMb, "MB")} ·{" "}
+        {allowance(plan.aiRequestsPerHour, "assistant requests an hour")} ·{" "}
+        {allowance(plan.maxContainersPerUser, "running at once")}
       </Typography.Paragraph>
     </li>
   );

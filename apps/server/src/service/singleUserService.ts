@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import argon2 from "argon2";
+import { PERSONAL_PLAN_ID } from "@replit-clone/shared";
 import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
@@ -58,6 +59,44 @@ export function assertCanCreateAccount(): void {
   );
 }
 
+/** The plan this account belongs on, if the row exists.
+ *
+ *  §10.4's half of this: every per-account limit rations a shared VM between
+ *  tenants, and there is nobody here to ration against. The `personal` plan
+ *  sets each of them to `UNLIMITED`, and leaves every limit that is about the
+ *  MACHINE — `CONTAINER_MEMORY_MB`, `MAX_CONCURRENT_CONTAINERS`,
+ *  `DEPLOY_MEMORY_MB` — exactly where §6 decision 15 put them.
+ *
+ *  Empty when the row is missing rather than failing: a deployment whose
+ *  migrations have not caught up should get its account, on whatever plan it
+ *  has, rather than no account at all. `resolveEntitlements` already falls back
+ *  to the free plan's numbers for the same reason.
+ */
+async function personalPlan(): Promise<{ planId?: string }> {
+  // try/catch and not `.catch()`: this has to survive the lookup THROWING as
+  // well as rejecting, and a synchronous throw happens before there is a
+  // promise to attach a handler to. That is not hypothetical -- it is what a
+  // client generated before this plan existed does.
+  let plan: { id: string } | null = null;
+  try {
+    plan = await prisma.plan.findUnique({
+      where: { id: PERSONAL_PLAN_ID },
+      select: { id: true },
+    });
+  } catch {
+    plan = null;
+  }
+
+  if (!plan) {
+    logger.warn(
+      "single-user mode: no `personal` plan row, leaving the account's plan alone",
+    );
+    return {};
+  }
+
+  return { planId: PERSONAL_PLAN_ID };
+}
+
 /** A password nobody chose, for a first boot with none configured.
  *
  *  32 bytes of base64url. An account with no password cannot be signed in to,
@@ -103,6 +142,14 @@ export async function ensureSingleUser(): Promise<void> {
 
     if (existing) {
       if (!configured) {
+        // Still worth a write when the plan is wrong -- an account that
+        // predates this mode is on `free`, and its owner would meet a
+        // twenty-project limit on their own machine with no way to see why.
+        const plan = await personalPlan();
+        if (plan.planId && existing.planId !== plan.planId) {
+          await prisma.user.update({ where: { id: existing.id }, data: plan });
+        }
+
         logger.info("single-user mode: account ready", { email });
         return;
       }
@@ -114,6 +161,7 @@ export async function ensureSingleUser(): Promise<void> {
           // In case the account predates this mode and was never confirmed:
           // there is no verification route mounted to confirm it with.
           emailVerifiedAt: existing.emailVerifiedAt ?? new Date(),
+          ...(await personalPlan()),
         },
       });
 
@@ -130,6 +178,7 @@ export async function ensureSingleUser(): Promise<void> {
         email,
         passwordHash: await argon2.hash(password, { type: argon2.argon2id }),
         emailVerifiedAt: new Date(),
+        ...(await personalPlan()),
       },
     });
 

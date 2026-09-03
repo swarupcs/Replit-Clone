@@ -18,6 +18,8 @@ const userFindUnique = vi.hoisted(() => vi.fn());
 const userCreate = vi.hoisted(() => vi.fn());
 const userUpdate = vi.hoisted(() => vi.fn());
 
+const planFindUnique = vi.hoisted(() => vi.fn());
+
 vi.mock("../lib/prisma.js", () => ({
   prisma: {
     user: {
@@ -25,6 +27,7 @@ vi.mock("../lib/prisma.js", () => ({
       create: userCreate,
       update: userUpdate,
     },
+    plan: { findUnique: planFindUnique },
   },
 }));
 
@@ -55,6 +58,7 @@ async function loadWith(
 beforeEach(() => {
   vi.clearAllMocks();
   userFindUnique.mockResolvedValue(null);
+  planFindUnique.mockResolvedValue({ id: "personal" });
   userCreate.mockResolvedValue({ id: "u1", email: EMAIL });
   userUpdate.mockResolvedValue({ id: "u1", email: EMAIL });
 });
@@ -134,6 +138,9 @@ describe("provisioning the account", () => {
       id: "u1",
       email: EMAIL,
       emailVerifiedAt: new Date(),
+      // Already on the right plan, so the only thing that could write here is
+      // the password -- which is exactly what this asserts does not happen.
+      planId: "personal",
     });
 
     const { ensureSingleUser } = await loadWith({ email: EMAIL });
@@ -211,5 +218,75 @@ describe("the creation boundary", () => {
     // first -- and "the email matches, let it through" would be a second way to
     // create the one account, with different rules from the first.
     expect(() => assertCanCreateAccount()).toThrow();
+  });
+});
+
+describe("the plan the account lands on", () => {
+  it("is the personal one, whose allocations are unlimited", async () => {
+    const { ensureSingleUser } = await loadWith({
+      email: EMAIL,
+      password: "hunter22",
+    });
+
+    await ensureSingleUser();
+
+    // §10.4's half. Every per-account limit rations a shared VM between
+    // tenants, and there is nobody here to ration against.
+    expect(userCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ planId: "personal" }),
+    });
+  });
+
+  it("moves an account that predates the mode onto it", async () => {
+    userFindUnique.mockResolvedValue({
+      id: "u1",
+      email: EMAIL,
+      emailVerifiedAt: new Date(),
+      planId: "free",
+    });
+
+    // No password configured, so this is the branch that would otherwise do
+    // nothing at all -- and doing nothing would leave somebody meeting a
+    // twenty-project limit on their own machine with no way to see why.
+    const { ensureSingleUser } = await loadWith({ email: EMAIL });
+
+    await ensureSingleUser();
+
+    expect(userUpdate).toHaveBeenCalledWith({
+      where: { id: "u1" },
+      data: { planId: "personal" },
+    });
+  });
+
+  it("does not rewrite the plan when it is already right", async () => {
+    userFindUnique.mockResolvedValue({
+      id: "u1",
+      email: EMAIL,
+      emailVerifiedAt: new Date(),
+      planId: "personal",
+    });
+
+    const { ensureSingleUser } = await loadWith({ email: EMAIL });
+
+    await ensureSingleUser();
+
+    expect(userUpdate).not.toHaveBeenCalled();
+  });
+
+  it("still provisions the account when the plan row is missing", async () => {
+    planFindUnique.mockResolvedValue(null);
+
+    const { ensureSingleUser } = await loadWith({
+      email: EMAIL,
+      password: "hunter22",
+    });
+
+    await ensureSingleUser();
+
+    // A deployment whose migrations have not caught up should get its account
+    // on whatever plan it has, rather than no account at all. The same
+    // fail-toward-something reasoning `resolveEntitlements` uses.
+    expect(userCreate).toHaveBeenCalled();
+    expect(userCreate.mock.calls[0]?.[0]?.data).not.toHaveProperty("planId");
   });
 });
