@@ -40,6 +40,14 @@ const api = vi.hoisted(() => ({
   // replaced wholesale, so a missing export is a crash rather than a 403.
   listProjectModerationApi: vi.fn().mockResolvedValue([]),
   appealTakedownApi: vi.fn(),
+  // The Open folder dialog reads these, for the same reason -- it is mounted
+  // by the dashboard whether or not it is open. Disabled here, which is the
+  // default configuration and keeps it out of every other test's way.
+  getLocalFolderSettingsApi: vi
+    .fn()
+    .mockResolvedValue({ enabled: false, roots: [] }),
+  browseLocalFoldersApi: vi.fn().mockResolvedValue([]),
+  openLocalFolderApi: vi.fn(),
   // And the plan dialog reads this one, for the same reason.
   getAccountApi: vi.fn().mockResolvedValue({
     email: "someone@example.com",

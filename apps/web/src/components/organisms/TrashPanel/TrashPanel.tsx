@@ -175,8 +175,24 @@ export const TrashPanel = () => {
         destroyOnHidden
       >
         <span style={{ color: "var(--rc-text-muted)" }}>
-          <b>{purging?.name}</b>, its files and its database are removed from
-          disk permanently. This is the one that cannot be undone.
+          {/* Two different sentences, because for a folder somebody opened the
+              first one is simply untrue: the purge deliberately does not touch
+              a tree this server did not create. A dialog that says files are
+              being removed permanently when they are not is the same class of
+              mistake as one that says they are safe when they are not. */}
+          {purging?.localPath ? (
+            <>
+              <b>{purging.name}</b> is closed and its container and database are
+              removed. The folder itself —{" "}
+              <code>{purging.localPath}</code> — is left exactly as it is, and
+              you can open it again afterwards.
+            </>
+          ) : (
+            <>
+              <b>{purging?.name}</b>, its files and its database are removed
+              from disk permanently. This is the one that cannot be undone.
+            </>
+          )}
         </span>
       </Modal>
     </>

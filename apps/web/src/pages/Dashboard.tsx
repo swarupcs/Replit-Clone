@@ -27,6 +27,7 @@ import {
 } from "@ant-design/icons";
 import {
   VscFolder,
+  VscFolderOpened,
   VscGithub,
   VscListFlat,
   VscTerminal,
@@ -50,6 +51,7 @@ import { ShareDialog } from "../components/organisms/ShareDialog/ShareDialog.tsx
 import { ModerationDialog } from "../components/organisms/ModerationDialog/ModerationDialog.tsx";
 import { GithubConnectionCard } from "../components/organisms/GithubConnectionCard/GithubConnectionCard.tsx";
 import { ImportRepoDialog } from "../components/organisms/ImportRepoDialog/ImportRepoDialog.tsx";
+import { OpenFolderDialog } from "../components/organisms/OpenFolderDialog/OpenFolderDialog.tsx";
 import { ExploreSection } from "../components/organisms/ExploreSection/ExploreSection.tsx";
 
 /** Relative time for the card footer -- "3 days ago" reads better than a date
@@ -286,6 +288,7 @@ export const Dashboard = () => {
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [githubOpen, setGithubOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [folderOpen, setFolderOpen] = useState(false);
   const [sharing, setSharing] = useState<Project | null>(null);
   const [moderating, setModerating] = useState<Project | null>(null);
 
@@ -520,6 +523,16 @@ export const Dashboard = () => {
               Import repo
             </Button>
 
+            {/* The third way in, beside the two that CREATE a tree. This one
+                does not: the folder is already there and stays where it is. */}
+            <Button
+              size="large"
+              icon={<VscFolderOpened />}
+              onClick={() => setFolderOpen(true)}
+            >
+              Open folder
+            </Button>
+
             <Button
               type="primary"
               size="large"
@@ -725,6 +738,17 @@ export const Dashboard = () => {
         onClose={() => setGithubOpen(false)}
       />
 
+      <OpenFolderDialog
+        open={folderOpen}
+        onClose={() => setFolderOpen(false)}
+        // Straight into it, for the same reason importing goes straight in:
+        // nobody opens a folder in order to look at a dashboard.
+        onOpened={(project) => {
+          setFolderOpen(false);
+          void navigate(`/project/${project.id}`);
+        }}
+      />
+
       <ImportRepoDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
@@ -815,6 +839,19 @@ export const Dashboard = () => {
           <b>{deleting?.name}</b> stops running and goes offline now. It is
           kept for a week in the trash, under Plan and usage, where you can put
           it back or delete it for good.
+          {/* And for a folder somebody opened, "delete it for good" is not
+              what happens: the tree is theirs, so the purge closes the project
+              and leaves every file where it is. Saying otherwise would be the
+              same mistake as the sentence above, pointing the other way --
+              somebody who believes their folder is about to be deleted does not
+              press the button. */}
+          {deleting?.localPath && (
+            <>
+              {" "}
+              Nothing in <code>{deleting.localPath}</code> is deleted, then or
+              later — this closes the folder, and you can open it again.
+            </>
+          )}
         </span>
       </Modal>
 

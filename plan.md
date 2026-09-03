@@ -104,7 +104,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 116 items. Open: 19 — five blocked, and fourteen added by §10.**
+**Done: 117 items. Open: 18 — five blocked, thirteen from §10.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
@@ -119,7 +119,8 @@ done. It asks a question no previous section asked: not what this platform
 needs before a stranger can pay for it (§8), but what it needs before **one
 person can use it instead of VS Code on their own machine**. Four of its rows
 are unblocked and are about the platform rather than the editor — chiefly that
-there is no way to open a folder that already exists on the disk. The other ten
+there was no way to open a folder that already exists on the disk, **which
+shipped the same day it was written (§2.33)**, leaving three. The other ten
 are parity rows that are all blocked on one architectural decision, and that
 decision is the fifth blocked row above: §6 decision 1 named debugging and
 third-party extensions as the two things that would reopen the Monaco/
@@ -1704,6 +1705,67 @@ against a mock that rejects; that it is the *constraint* rejecting is not.
 
 ---
 
+### 2.33 Since (2026-09-03) — §10.2, a folder that was already there
+
+- [x] **A project's root stopped being a function of its id.**
+      `Project.localPath` holds an absolute path when the tree was already
+      there; `projectRoot` answers from a registry seeded at boot. It stays
+      **synchronous** deliberately — it sits under `resolveInProject`, the
+      confinement check on every read and write, so making it async to ask the
+      database would have put an `await` inside the guard and rewritten all
+      twenty-odd callers for a lookup whose answer never changes. An empty
+      registry behaves exactly as this did before, which is what makes it safe
+      for every project that already exists.
+
+- [x] **`LOCAL_FOLDER_ROOTS`, and an empty list means refuse.** That inverts
+      the convention `EGRESS_ALLOW_DOMAINS` follows, on purpose: what is being
+      allowed here is the host's filesystem, and an operator who has not
+      thought about it has not opted in. Checked against what `realpath`
+      resolves to rather than the name it was reached by — a symlink inside an
+      allowed root is inside it by name and is the whole disk by content — and
+      `PROJECTS_ROOT` is refused even when a named root contains it, because
+      two rows over one directory disagree about who may delete it.
+
+- [x] **The four inversions, which were the actual work.** Each of these is
+      correct *because* the server made the directory, and each fails
+      differently on one it did not:
+      `purgeProject`'s `fs.rm` (deleting somebody's source),
+      `claimForSandbox` (seizing their files for uid 1001),
+      and both disk quotas (an editor refusing to save into its user's own free
+      space). The chown guard went **into** `claimProjectForSandbox` rather
+      than to each call site, for the reason §6 decision 13 gives about queries
+      and cleanups: two callers needed it that day, and the third to be written
+      would not have known to ask.
+
+- [x] **Fork and duplicate needed nothing**, which is worth recording because
+      it was expected to be a fifth case. Both build a row with no `localPath`
+      and copy into it, so taking a copy of an opened folder already produces
+      an ordinary server-owned project — which is the right meaning, not a
+      lucky one.
+
+- [x] **Two dialogs were saying something untrue.** The trash's "its files are
+      removed from disk permanently" and the delete confirmation's "delete it
+      for good" are both wrong for a folder somebody opened, in the same class
+      as the mistake §2.29 fixed pointing the other way. Somebody who believes
+      their folder is about to be deleted does not press the button.
+
+- [x] **A picker rather than a path field.** A field alone means you must
+      already know the path and every typo is a refusal from an allowlist you
+      cannot see. It also says out loud that these are the *server's*
+      directories: on a remote deployment somebody looking for their own
+      laptop's `~/code` would otherwise read an empty list as a bug.
+
+Server: 1781 passing. Web: 1071 passing. Typecheck and lint clean, 3/3.
+
+**One thing found and not fixed**, recorded rather than left to be
+rediscovered: nine tests in `useLanguageServer.test.tsx` fail on any checkout
+without `apps/web/.env`, because `socketUrl` calls `new URL(import.meta.env
+.VITE_BACKEND_URL)` and that is `undefined`. CI sets the variable
+(`ci.yml`), so it is green there and red for anybody who has not copied
+`.env.example`. Not this change's doing — verified by stashing it — and not
+a defect in the product, but it is a first-run experience that reads as
+nine broken tests.
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -3159,8 +3221,12 @@ those four is about the platform underneath.
 These four are what "personal" actually changes, and none of them is a VS Code
 feature. Route A does not deliver any of them.
 
-- [ ] **10.2 Open a folder that is already on the disk.** The largest
-      structural item here. Today a workspace is a `Project` row in Postgres
+- [x] **10.2 Open a folder that is already on the disk.** Shipped 2026-09-03 —
+      see §2.33. The prediction in the paragraph below was
+      right about where the work was: almost none of it was the mount, and
+      almost all of it was the four places that assume this server made the
+      tree.
+      The largest structural item here. Today a workspace is a `Project` row in Postgres
       with a working tree the server created under `PROJECTS_DIR`, reached by
       picking a template (`apps/server/templates`, thirteen of them) or by
       importing a GitHub repo. There is no path from "I have a directory at
@@ -3329,7 +3395,12 @@ them.
 
 Then, whichever way 10.1 goes:
 
-**10.2 → 10.3 → 10.4 → 10.5.** Open-a-folder first because it is the one
+**10.2 → 10.3 → 10.4 → 10.5.** ~~Open-a-folder first~~ — done 2026-09-03
+(§2.33), and the reasoning below held: the mount was an afternoon and finding
+every place that assumes this server made the tree was the rest of it. **Next
+is 10.3.** Original note follows.
+
+Open-a-folder first because it is the one
 without which none of the rest is a personal IDE — you cannot use an editor on
 work you cannot open in it — and because it is the largest, in the way §9.1 was
 largest: the assumption that this server created the tree is spread across
