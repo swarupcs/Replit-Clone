@@ -57,12 +57,22 @@ export const requestEmailVerificationApi = async (): Promise<{
   return response.data.data;
 };
 
-/** Which sign-in providers this server has configured. */
-export const getAuthProvidersApi = async (): Promise<{ github: boolean }> => {
-  const response = await axios.get<{ data: { github: boolean } }>(
-    "/api/v1/auth/providers",
-  );
-  return response.data.data;
+/** What this server's sign-in screen may offer.
+ *
+ *  `singleUser` means the account-creating and account-recovering routes are
+ *  not mounted at all, so the form must not link to them. */
+export const getAuthProvidersApi = async (): Promise<{
+  github: boolean;
+  singleUser: boolean;
+}> => {
+  const response = await axios.get<{
+    data: { github: boolean; singleUser?: boolean };
+  }>("/api/v1/auth/providers");
+
+  const data = response.data.data;
+  // Defaulted rather than required, so a client talking to a server that
+  // predates the mode reads as an ordinary multi-account deployment.
+  return { github: data.github, singleUser: data.singleUser ?? false };
 };
 
 /** A full navigation, not a fetch: the OAuth round trip is the browser

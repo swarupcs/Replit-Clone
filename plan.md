@@ -104,7 +104,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 117 items. Open: 18 — five blocked, thirteen from §10.**
+**Done: 118 items. Open: 17 — five blocked, twelve from §10.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
@@ -1766,6 +1766,50 @@ without `apps/web/.env`, because `socketUrl` calls `new URL(import.meta.env
 a defect in the product, but it is a first-run experience that reads as
 nine broken tests.
 
+### 2.34 Since (2026-09-03) — §10.3, one account
+
+- [x] **`SINGLE_USER_EMAIL`, and the account is provisioned at boot.** Unset —
+      the default — and nothing changes. Set, and this server has exactly one
+      account, created from that address, verified on the way in because there
+      is nothing to verify about a string the operator typed into their own
+      configuration.
+
+- [x] **The routes that create or recover an account are not mounted.** Signup,
+      password reset, email verification and GitHub *sign-in* are absent rather
+      than present-and-refusing, which is §6 decision 17's shape — a rule
+      enforced inside each controller is one the next route somebody adds does
+      not know to ask about. The test asserts **404, not 403**, because that
+      difference *is* the feature.
+
+      Sign-in itself stays, and that is not a compromise: every route in this
+      product authenticates through a session, and a server that issued one to
+      anybody who asked would be an unauthenticated server on whatever network
+      it can be reached from. "Personal" is about who the accounts are for, not
+      about whether the door has a lock.
+
+- [x] **The environment replaces the reset route, which it had to.** Removing
+      "forgot password" removes the way back into a locked account, so boot
+      *rewrites* the password whenever `SINGLE_USER_PASSWORD` is set: the way
+      back in is to edit the environment and restart. That is available to the
+      one person who runs this and needs no mail server, no token table and no
+      inbox — and a personal deployment usually has no outbound mail path, so
+      the reset route was never a way back in there anyway.
+
+- [x] **The creation boundary, at the two places a `User` row is made.**
+      `registerUser` and the GitHub upsert, which is where §6 decision 16 says
+      a limit belongs. Belt to the routing's braces: the handlers are already
+      unreachable, and decision 17's argument is that a structural default-deny
+      should survive somebody putting a route back.
+
+- [x] **The sign-in form stops linking to 404s.** `/auth/providers` grew a
+      `singleUser` flag and lost its `githubStatus` name, since it had stopped
+      being only about GitHub. GitHub reports false in that mode whatever is
+      configured — signing in with it *creates* an account. Connecting GitHub
+      to reach repositories is a different consent on a different router and is
+      untouched, which decision 7 already keeps apart.
+
+Server: 1798 passing. Web: 1071 passing. Typecheck and lint clean, 3/3.
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -3245,7 +3289,7 @@ feature. Route A does not deliver any of them.
       quota (`assertUserDiskQuota`, `diskUsageService`) walks a tree it assumes
       it owns, and checkpoints snapshot into a sibling directory.
 
-- [ ] **10.3 A single-user mode.** Signup, email verification, password reset,
+- [x] **10.3 A single-user mode.** Shipped 2026-09-03 — see §2.34. Signup, email verification, password reset,
       refresh-token rotation with a reuse grace window, share tokens, embed
       tokens, collaborator roles and the whole `assertProjectAccess` ladder are
       correct and load-bearing for a public deployment, and they are ceremony

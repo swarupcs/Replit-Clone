@@ -1,5 +1,6 @@
 import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
+import { assertCanCreateAccount } from "./singleUserService.js";
 import { BadRequestError, UnauthorizedError } from "../utils/errors.js";
 import { toPublicUser, type PublicUser } from "./authService.js";
 
@@ -112,6 +113,13 @@ export async function signInWithGithub(code: string): Promise<PublicUser> {
   }
 
   const email = await resolveEmail(profile, token);
+
+  // The other place a `User` row is made. The route below this is not mounted
+  // in single-user mode, so reaching here means somebody put it back -- which
+  // is exactly the case decision 17 says a structural default-deny should
+  // survive, so it is asked here as well as being unroutable.
+  const linkable = await prisma.user.findUnique({ where: { email } });
+  if (!linkable) assertCanCreateAccount();
 
   // Linked by email when an account already exists, rather than creating a
   // second one: someone who signed up with a password and later uses GitHub

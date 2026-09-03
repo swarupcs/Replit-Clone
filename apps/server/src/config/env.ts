@@ -160,6 +160,37 @@ const envSchema = z.object({
    *  can open, which is inert; the other way round it would hand the queue to
    *  every account that signed up.
    */
+  /** The one account this deployment has, when it is a single-seat one.
+   *
+   *  Unset -- the default -- and everything below is off and nothing changes:
+   *  people sign up, verify an address, reset a password, and sign in with
+   *  GitHub, exactly as before.
+   *
+   *  Set, and this server has exactly one account, provisioned at boot from
+   *  this address. The routes that CREATE or RECOVER an account are then not
+   *  mounted at all: no signup, no password reset, no email verification, no
+   *  GitHub sign-in. Not mounted rather than refusing, because a guard each
+   *  controller has to remember is a guard that usually holds -- the same
+   *  argument decision 17 makes about an API key's router.
+   *
+   *  That removes the way back into a forgotten password, so there is a
+   *  replacement and it is this file: set SINGLE_USER_PASSWORD and restart.
+   *  Boot rewrites the password every time, which makes the environment the
+   *  recovery mechanism rather than an inbox.
+   *
+   *  Sign-in itself stays. Every route in this product authenticates through a
+   *  session, and a server that issued one to anybody who asked would be an
+   *  unauthenticated server on whatever network it is reachable from. */
+  SINGLE_USER_EMAIL: z.string().trim().toLowerCase().default(""),
+
+  /** The password for that account, set at every boot.
+   *
+   *  Optional. Left unset on a first boot one is generated and written to the
+   *  log once -- an account nobody can sign in to is worse than a password in
+   *  a log file on a machine whose owner is the only user. Left unset on a
+   *  later boot the existing password is kept. */
+  SINGLE_USER_PASSWORD: z.string().default(""),
+
   ADMIN_EMAILS: z.string().default(""),
 
   WEB_ORIGIN: z.string().url().default("http://localhost:5273"),

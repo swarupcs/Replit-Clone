@@ -1,5 +1,6 @@
 import argon2 from "argon2";
 import { prisma } from "../lib/prisma.js";
+import { assertCanCreateAccount } from "./singleUserService.js";
 import { isAdminEmail } from "../middlewares/requireAdmin.js";
 import { ConflictError, UnauthorizedError } from "../utils/errors.js";
 import { increment } from "../lib/metrics.js";
@@ -31,6 +32,11 @@ export async function registerUser(
   email: string,
   password: string,
 ): Promise<PublicUser> {
+  // One of the two places a `User` row is made, and so one of the two places
+  // this is asked. See decision 16: a limit is checked where the thing is
+  // CREATED and nowhere else.
+  assertCanCreateAccount();
+
   const normalizedEmail = email.trim().toLowerCase();
 
   const existing = await prisma.user.findUnique({

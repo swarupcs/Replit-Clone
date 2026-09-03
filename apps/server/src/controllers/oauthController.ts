@@ -6,6 +6,7 @@ import {
   isGithubConfigured,
   signInWithGithub,
 } from "../service/oauthService.js";
+import { singleUserEnabled } from "../service/singleUserService.js";
 import { issueRefreshToken } from "../service/refreshTokenService.js";
 import {
   PREVIEW_COOKIE_NAME,
@@ -33,11 +34,24 @@ const stateCookieOptions: CookieOptions = {
   path: "/api/v1/auth",
 };
 
-export function githubStatus(_req: Request, res: Response): Promise<void> {
+/** What this server's sign-in screen may offer.
+ *
+ *  Renamed from `githubStatus` when it stopped being only about GitHub. The
+ *  web app asks it before drawing the form, and in single-user mode there are
+ *  three things on that form -- Sign up, Forgot password, Continue with GitHub
+ *  -- that lead to routes which are not mounted. A link to a 404 is a worse
+ *  answer than no link.
+ */
+export function authProviders(_req: Request, res: Response): Promise<void> {
   res.json({
     success: true,
     message: "Sign-in providers",
-    data: { github: isGithubConfigured() },
+    data: {
+      // Never in single-user mode, whatever is configured: GitHub sign-in
+      // creates accounts, and this deployment has the one it is going to have.
+      github: isGithubConfigured() && !singleUserEnabled(),
+      singleUser: singleUserEnabled(),
+    },
   });
 
   return Promise.resolve();
