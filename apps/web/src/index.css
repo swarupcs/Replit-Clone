@@ -629,6 +629,30 @@ body {
   color: var(--rc-yellow);
 }
 
+/* The published-ports indicator. A button, because clicking it copies — but it
+   has to sit in a row of plain text without announcing itself as one, so the
+   chrome comes off and only the pointer and the hover state say it is live. */
+.rc-statusbar-ports {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--rc-text-subtle);
+  cursor: pointer;
+}
+
+.rc-statusbar-ports:hover {
+  color: var(--rc-text);
+}
+
+.rc-statusbar-ports svg {
+  width: 12px;
+  height: 12px;
+}
+
 /* Preview stage: a checkerboard so a transparent or short page still reads as
  * a rendered surface rather than an empty pane. */
 .rc-preview-stage {
