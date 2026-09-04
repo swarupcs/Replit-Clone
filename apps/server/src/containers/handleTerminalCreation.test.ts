@@ -12,7 +12,6 @@ vi.mock("../templates/registry.js", () => ({
 }));
 
 import { handleTerminalCreation } from "./handleTerminalCreation.js";
-import { terminalPidFile } from "./terminalShell.js";
 
 const TERMINAL_ID = 7;
 
@@ -100,10 +99,42 @@ function fakeContainer() {
 
 const attachInput = () => undefined;
 
-/** The hangup runs as its own exec; this is how the test spots it. */
+/** The shell's exec, whatever order it was created in — the sweep for orphaned
+ *  shells creates one of its own first. */
+function shellCall(docker: ReturnType<typeof fakeContainer>): ExecCall | undefined {
+  return docker.calls.find((call) => call.cmd.includes("/bin/bash"));
+}
+
+/** The pid file this shell was actually given. Read back rather than rebuilt,
+ *  because the nonce in it is not something the test can predict — that is the
+ *  whole point of it. */
+function pidFileOf(docker: ReturnType<typeof fakeContainer>): string {
+  const found = /\/tmp\/rc-term-\d+-[0-9a-f]+\.pid/.exec(
+    shellCall(docker)?.cmd.join(" ") ?? "",
+  );
+  return found?.[0] ?? "no pid file";
+}
+
+/** The hangup runs as its own exec; this is how the test spots it. Matched on
+ *  the exact file, so the sweep — which globs the id and skips this file — is
+ *  never mistaken for it. */
 function hangUps(docker: ReturnType<typeof fakeContainer>): ExecCall[] {
+  const pidFile = pidFileOf(docker);
   return docker.calls.filter((call) =>
-    call.cmd.some((part) => part.includes(terminalPidFile(TERMINAL_ID)) && part.includes("kill")),
+    call.cmd.some(
+      (part) => part.includes(`rm -f ${pidFile}`) && part.includes("kill"),
+    ),
+  );
+}
+
+/** The sweep of shells left behind by earlier connections to this id. */
+function reclaims(docker: ReturnType<typeof fakeContainer>): ExecCall[] {
+  return docker.calls.filter((call) =>
+    call.cmd.some(
+      (part) =>
+        part.includes(`/tmp/rc-term-${String(TERMINAL_ID)}-*.pid`) &&
+        part.includes("kill"),
+    ),
   );
 }
 
@@ -136,7 +167,7 @@ describe("handleTerminalCreation", () => {
 
     start(docker, ws);
 
-    expect(docker.calls[0]?.cmd.join(" ")).toContain(terminalPidFile(TERMINAL_ID));
+    expect(shellCall(docker)?.cmd.join(" ")).toContain(pidFileOf(docker));
   });
 
   /** Closing the stream does NOT end the exec — measured against a real
@@ -201,6 +232,56 @@ describe("handleTerminalCreation", () => {
     expect(hangUps(docker)).toHaveLength(1);
   });
 
+  /** The bug this exists for. A terminal id is reused, and before the sweep a
+   *  reconnect just started a second shell under it: the first one kept
+   *  running, kept whatever it had started running with it, and — since the
+   *  only record of its pid had been overwritten — could no longer be hung up
+   *  by anything. A dev server left that way holds the container's port, and
+   *  `npm start` in the new shell answers EADDRINUSE with nothing visible to
+   *  blame. */
+  it("collects shells left behind by earlier connections to the same terminal", () => {
+    const { ws } = fakeSocket();
+    const docker = fakeContainer();
+
+    start(docker, ws);
+
+    expect(reclaims(docker)).toHaveLength(1);
+  });
+
+  /** The sweep runs while the new shell is still being created, so it must not
+   *  be able to take the new shell with it. Excluding it by exact name is what
+   *  makes the ordering not matter. */
+  it("does not collect the shell it is opening", () => {
+    const { ws } = fakeSocket();
+    const docker = fakeContainer();
+
+    start(docker, ws);
+    docker.create();
+    docker.start();
+
+    const script = reclaims(docker)[0]?.cmd.join(" ") ?? "";
+    expect(script).toContain(`[ "$f" = "${pidFileOf(docker)}" ] && continue`);
+  });
+
+  /** Ports are the reason for the sweep, so it has to happen before the shell
+   *  that will be told to bind them — not after, and not on close. */
+  it("collects them before opening the new shell", () => {
+    const { ws } = fakeSocket();
+    const docker = fakeContainer();
+
+    start(docker, ws);
+
+    const sweep = reclaims(docker)[0];
+    const shell = shellCall(docker);
+    // Asserted, not assumed: `indexOf` on a missing call is -1, which would
+    // pass the ordering check below without a sweep ever having happened.
+    expect(sweep).toBeDefined();
+    expect(shell).toBeDefined();
+    expect(docker.calls.indexOf(sweep!)).toBeLessThan(
+      docker.calls.indexOf(shell!),
+    );
+  });
+
   it("sends nothing to a client that has gone", () => {
     const { ws, raw } = fakeSocket();
     const docker = fakeContainer();
@@ -232,7 +313,7 @@ describe("the run command a shell is told about", () => {
       override,
     );
 
-    return docker.calls[0]?.env
+    return shellCall(docker)?.env
       .find((entry) => entry.startsWith("START_COMMAND="))
       ?.slice("START_COMMAND=".length);
   }
