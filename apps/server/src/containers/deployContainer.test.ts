@@ -151,6 +151,20 @@ describe("the container a published service runs in", () => {
     ).not.toBe("always");
   });
 
+  /** The user's start command runs as pid 1, and pid 1 is held to two duties
+   *  no ordinary process is written for. A Node process there IGNORES SIGTERM
+   *  — the default disposition is only installed for pids other than 1 — so
+   *  `docker stop` waited out its whole timeout and then SIGKILLed, denying
+   *  every published app the chance to finish what it was serving. And nothing
+   *  reaps, so a server that spawns workers spends its PidsLimit on zombies. */
+  it("runs an init as pid 1, so stopping it is graceful and nothing leaks", async () => {
+    stubCreate();
+
+    await startService(SPEC);
+
+    expect(created().HostConfig["Init"]).toBe(true);
+  });
+
   it("holds no capabilities and cannot gain any", async () => {
     stubCreate();
 

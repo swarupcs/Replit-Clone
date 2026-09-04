@@ -68,6 +68,23 @@ export async function removeCacheVolume(projectId: string): Promise<void> {
  */
 const ENV_SIGNATURE_LABEL = "rc.env-signature";
 
+/** Bumped whenever this file changes how a container is BUILT in a way an
+ *  already-running one cannot be given.
+ *
+ *  The signature exists to rebuild a container whose shape no longer matches
+ *  what the code asks for, and it read only the project's inputs — so a change
+ *  here reached a project on its next cold start and not before. A container
+ *  that lives for days would have gone on running the old shape indefinitely,
+ *  which is exactly the class of defect the signature was added to close.
+ *
+ *  The cost of a bump is one rebuild per project, and it is cheap: the package
+ *  cache is a named volume that outlives the container, so the reinstall the
+ *  rebuild would otherwise mean does not happen.
+ *
+ *  2 — `HostConfig.Init`.
+ */
+const CONTAINER_SHAPE = "shape:2";
+
 /** A stable fingerprint of a project's variables.
  *
  *  Sorted, so the same set written in a different order is not mistaken for a
@@ -97,7 +114,7 @@ export function envSignature(
       .map((name) => [name, vars[name] ?? ""]),
   );
 
-  const hash = createHash("sha256").update(stable);
+  const hash = createHash("sha256").update(stable).update(CONTAINER_SHAPE);
 
   if (devcontainer) {
     // `source` and `unsupported` are left out on purpose: they describe how
@@ -509,6 +526,16 @@ async function startContainer(projectId: string): Promise<Container> {
         NanoCpus: Math.round(env.CONTAINER_CPUS * 1e9),
         // Caps a fork bomb.
         PidsLimit: 256,
+        // tini as pid 1, which reaps.
+        //
+        // `sleep infinity` was pid 1, and `sleep` does not reap. Every process
+        // whose parent died before it — a terminal shell hung up while its dev
+        // server was still running, which is the ordinary case — was reparented
+        // to `sleep` and stayed there as a zombie for the life of the
+        // container. Each one holds a pid, and `PidsLimit` above is 256: a
+        // project opened and closed enough times could not start a process at
+        // all, having spent its whole allowance on the dead.
+        Init: true,
         CapDrop: ["ALL"],
         SecurityOpt: ["no-new-privileges"],
         NetworkMode: SANDBOX_NETWORK,
