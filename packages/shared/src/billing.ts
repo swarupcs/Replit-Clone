@@ -24,6 +24,48 @@ export type PlanId = string;
  *  places have to agree on it and neither may be the other's source. */
 export const FREE_PLAN_ID = "free";
 
+/** The plan for a deployment with one person on it.
+ *
+ *  Seeded alongside `free`, and what single-user mode puts its account on.
+ *  Every allocation on it is `UNLIMITED`, for the reason §10.4 gives: the
+ *  per-account numbers ration a shared VM between tenants, and at n=1 there is
+ *  nobody to ration against. A 512 MB project quota on somebody's own machine
+ *  is an editor refusing to save into their own free space.
+ *
+ *  What it does NOT raise is anything about the host — `CONTAINER_MEMORY_MB`,
+ *  `MAX_CONCURRENT_CONTAINERS`, `DEPLOY_MEMORY_MB` — because §6 decision 15 is
+ *  about what a plan may promise, and it may promise more of what this platform
+ *  allocates and never more than the machine has. That argument does not weaken
+ *  at one user; it is the same OOM kill in the same terminal. */
+export const PERSONAL_PLAN_ID = "personal";
+
+/** A limit of zero means there is no limit.
+ *
+ *  Zero rather than a very large number, and rather than `null`: the columns
+ *  are non-null integers and every consumer compares them arithmetically, so a
+ *  sentinel that is already a valid integer keeps the schema, the override
+ *  parser and the API shape exactly as they are. It also reads correctly in the
+ *  place that already had this rule before it was written down —
+ *  `isNearQuota` has always guarded on `limit > 0`, because dividing by a limit
+ *  of zero is how a meter that means nothing gets drawn.
+ *
+ *  The one cost is that "zero projects allowed" is now unsayable. Nothing wants
+ *  to say it: a plan that permits nothing is an account that cannot be used,
+ *  which is suspension, and §6 decision 18 puts that firmly outside what an
+ *  operator may do here. */
+export const UNLIMITED = 0;
+
+/** Whether a limit is one at all.
+ *
+ *  Exported and used at each of the five places that enforce a limit rather
+ *  than folded into one helper that does the comparison too, because those
+ *  five do not compare the same way — a project COUNT reaching its limit is
+ *  refused (`>=`), and a byte total is refused only past it (`>`). A helper
+ *  that hid that difference would make one of the five silently off by one. */
+export function isUnlimited(limit: number): boolean {
+  return limit <= UNLIMITED;
+}
+
 /** The limits themselves, separated from the plan they came from so that an
  *  override can be expressed as a partial of exactly this shape. */
 export interface EntitlementLimits {

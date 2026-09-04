@@ -2,7 +2,11 @@ import fs from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { canSymlink } from "../test/capabilities.js";
 import { env } from "../config/env.js";
-import { projectRoot } from "../utils/projectPaths.js";
+import {
+  projectRoot,
+  registerLocalRoot,
+  resetLocalRoots,
+} from "../utils/projectPaths.js";
 import {
   assertWithinQuota,
   forgetUsage,
@@ -100,5 +104,48 @@ describe("assertWithinQuota", () => {
     await expect(assertWithinQuota(PROJECT, 4096)).rejects.toThrow(
       /QUOTA|limit/i,
     );
+  });
+});
+
+describe("a folder somebody opened", () => {
+  // Registered AFTER `root` was computed above, so the two ids are distinct
+  // and the ordinary cases in this file are unaffected.
+  const LOCAL = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+  afterEach(() => {
+    resetLocalRoots();
+  });
+
+  it("uses no quota, because the disk is not this platform's", async () => {
+    registerLocalRoot(LOCAL, root);
+
+    // `root` genuinely has bytes in it in the cases above; what is asserted is
+    // that they stop being counted, not that the directory is empty.
+    await fs.mkdir(root, { recursive: true });
+    await fs.writeFile(`${root}/big.txt`, "x".repeat(65536));
+
+    expect(await usedBytes(LOCAL)).toBe(0);
+  });
+
+  it("is never refused a write for being over it", async () => {
+    registerLocalRoot(LOCAL, root);
+
+    // A quota is a promise about space this platform allocates. Somebody
+    // saving a file into their own directory is not spending it, and an
+    // editor that refuses is the failure mode this guard exists to prevent.
+    await expect(
+      assertWithinQuota(LOCAL, QUOTA_BYTES * 10),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not change the answer for an ordinary project", async () => {
+    registerLocalRoot(LOCAL, root);
+    await seed({ "a.txt": 4096 });
+
+    // The guard keys on the project, not on the path, so a server-owned
+    // project sharing this test's directory is still measured and still
+    // refused past the limit.
+    expect(await usedBytes(PROJECT)).toBeGreaterThan(0);
+    await expect(assertWithinQuota(PROJECT, QUOTA_BYTES * 10)).rejects.toThrow();
   });
 });

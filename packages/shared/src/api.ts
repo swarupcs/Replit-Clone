@@ -35,10 +35,50 @@ export interface Project {
    *  is where they would look for it. What it stops is spelled out in
    *  `packages/shared/src/moderation.ts`. */
   takenDownAt: string | null;
+  /** Absolute host path when this project is a folder somebody opened rather
+   *  than a tree this server created, and null otherwise.
+   *
+   *  Returned because the difference is visible in what the product will do:
+   *  deleting one closes it and leaves the files, its disk is not counted
+   *  against the account, and the path is the only way to tell two folders with
+   *  the same basename apart. Absent on older responses, hence optional. */
+  localPath?: string | null;
 }
 
 /** POST /api/v1/projects */
 export type CreateProjectResponse = ApiSuccess<Project>;
+
+/** What this deployment will let somebody open from disk.
+ *
+ *  `enabled` is false when LOCAL_FOLDER_ROOTS is unset, which is the default
+ *  and is the state every multi-tenant deployment should stay in. The screen
+ *  asks first so it can say "not configured" rather than offering a picker that
+ *  refuses everything. */
+export interface LocalFolderSettings {
+  enabled: boolean;
+  /** The directories that may be opened from, or below. */
+  roots: string[];
+}
+
+/** One directory offered while choosing a folder. */
+export interface LocalFolderEntry {
+  /** Absolute, and what is sent back to open or to browse deeper. */
+  path: string;
+  /** The last segment, which is what a person reads. */
+  name: string;
+}
+
+/** GET /api/v1/projects/local */
+export type LocalFolderSettingsResponse = ApiSuccess<LocalFolderSettings>;
+
+/** GET /api/v1/projects/local/browse */
+export type LocalFolderBrowseResponse = ApiSuccess<{
+  path: string;
+  entries: LocalFolderEntry[];
+}>;
+
+/** POST /api/v1/projects/local */
+export type OpenLocalFolderResponse = ApiSuccess<Project>;
 
 /** GET /api/v1/projects — one page of them; see `Page`. */
 export type ListProjectsResponse = ApiSuccess<Page<Project>>;

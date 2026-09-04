@@ -9,7 +9,7 @@ const diskUsageService = vi.hoisted(() => ({
   assertWithinQuota: vi.fn(),
   recordWrite: vi.fn(),
 }));
-const claimOneForSandbox = vi.hoisted(() => vi.fn());
+const claimOneForProject = vi.hoisted(() => vi.fn());
 
 vi.mock("../service/projectService.js", () => projectService);
 vi.mock("../service/diskUsageService.js", () => diskUsageService);
@@ -24,7 +24,7 @@ vi.mock("../service/userQuotaService.js", () => ({
 // suite exists to exercise, so it stays real.
 vi.mock("../utils/projectPaths.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../utils/projectPaths.js")>()),
-  claimOneForSandbox,
+  claimOneForProject,
 }));
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -71,7 +71,7 @@ beforeEach(async () => {
   projectService.assertProjectAccess.mockResolvedValue({ id: TEST_PROJECT });
   diskUsageService.assertWithinQuota.mockResolvedValue(undefined);
   // The controller calls `.catch()` on the result, so this has to be a promise.
-  claimOneForSandbox.mockResolvedValue(undefined);
+  claimOneForProject.mockResolvedValue(undefined);
 
   await fs.rm(ROOT, { recursive: true, force: true });
   await fs.mkdir(ROOT, { recursive: true });
@@ -253,12 +253,18 @@ describe("uploadFilesController", () => {
       .set(auth())
       .attach("files", Buffer.from("x"), "a.txt");
 
-    expect(claimOneForSandbox).toHaveBeenCalledWith(path.join(ROOT, "a.txt"));
-    expect(claimOneForSandbox).not.toHaveBeenCalledWith(ROOT);
+    // Through `claimOneForProject`, which is where the "is this a folder
+    // somebody opened" question lives now -- the controller asks once and the
+    // rule lives in one place rather than at each caller.
+    expect(claimOneForProject).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      path.join(ROOT, "a.txt"),
+    );
+    expect(claimOneForProject).not.toHaveBeenCalledWith(TEST_PROJECT, ROOT);
   });
 
   it("still succeeds when the chown fails, since the write did not", async () => {
-    claimOneForSandbox.mockRejectedValue(new Error("EPERM"));
+    claimOneForProject.mockRejectedValue(new Error("EPERM"));
 
     const response = await request(app)
       .post(`/p/${TEST_PROJECT}/files`)

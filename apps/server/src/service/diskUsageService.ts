@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isUnlimited } from "@replit-clone/shared";
 import { AppError } from "../utils/errors.js";
-import { projectRoot } from "../utils/projectPaths.js";
+import { isLocalProject, projectRoot } from "../utils/projectPaths.js";
 import { increment } from "../lib/metrics.js";
 import { resolveProjectEntitlements } from "./entitlementService.js";
 
@@ -78,8 +79,22 @@ async function measure(target: string): Promise<number> {
   return total;
 }
 
-/** Current usage, from cache when it is fresh enough. */
+/** Current usage, from cache when it is fresh enough.
+ *
+ *  Zero for a folder somebody opened, and that is not a shortcut. This number
+ *  exists to ration a shared VM's disk between tenants; a local folder's bytes
+ *  are on a disk this platform neither provided nor can free -- deleting the
+ *  project would leave every one of them exactly where it is. Counting them
+ *  would make an editor refuse to save into its user's own free space, which
+ *  is the failure §10.4 is about, arriving one item early.
+ *
+ *  Zero rather than "skip the check at each call site" so that there is one
+ *  answer in one place: everything downstream compares a number, and the
+ *  honest number for space this platform does not own is none of it.
+ */
 export async function usedBytes(projectId: string): Promise<number> {
+  if (isLocalProject(projectId)) return 0;
+
   const cached = cache.get(projectId);
   if (cached && Date.now() - cached.measuredAt < CACHE_TTL_MS) {
     return cached.bytes;
@@ -100,6 +115,11 @@ export async function assertWithinQuota(
   incomingBytes: number,
   replacingBytes = 0,
 ): Promise<void> {
+  // See `usedBytes`: this quota is about space this platform allocates, and a
+  // folder somebody opened is space it does not. Returning early rather than
+  // relying on a zero total, so the entitlement lookup is skipped too.
+  if (isLocalProject(projectId)) return;
+
   const used = await usedBytes(projectId);
   const projected = used - replacingBytes + incomingBytes;
 
@@ -107,6 +127,9 @@ export async function assertWithinQuota(
   // into someone else's project spends the owner's allowance, which is the
   // rule the user-level quota already followed.
   const { projectDiskQuotaMb } = await resolveProjectEntitlements(projectId);
+
+  // The personal plan sets this to zero, meaning no limit. See UNLIMITED.
+  if (isUnlimited(projectDiskQuotaMb)) return;
 
   if (projected > projectDiskQuotaMb * 1024 * 1024) {
     increment("quota_rejections");

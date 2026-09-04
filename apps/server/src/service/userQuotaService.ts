@@ -1,10 +1,11 @@
-import { QUOTA_WARN_FRACTION } from "@replit-clone/shared";
+import { isUnlimited, QUOTA_WARN_FRACTION } from "@replit-clone/shared";
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
 import { notify } from "./notificationService.js";
 import { AppError } from "../utils/errors.js";
 import { increment } from "../lib/metrics.js";
 import { usedBytes } from "./diskUsageService.js";
+import { isLocalProject } from "../utils/projectPaths.js";
 import {
   forgetEntitlements,
   ownerOf,
@@ -220,6 +221,13 @@ export async function assertUserDiskQuota(
   incomingBytes: number,
   replacingBytes = 0,
 ): Promise<void> {
+  // A write into a folder somebody opened spends their own disk, not this
+  // platform's allowance. `usedBytes` already reports zero for such a project
+  // so the TOTAL is right without this -- but the projection below adds the
+  // incoming bytes, and without the guard a large save into a local folder
+  // could still be refused against a limit it does not consume.
+  if (isLocalProject(projectId)) return;
+
   const ownerId = await ownerOf(projectId);
   if (!ownerId) return;
 
@@ -227,6 +235,12 @@ export async function assertUserDiskQuota(
   // Unreachable or too slow. See LOOKUP_TIMEOUT_MS: a quota check must never
   // be the reason a save fails.
   if (!usage) return;
+
+  // One of the five places a limit is enforced, and so one of the five that
+  // asks whether it is a limit at all. See UNLIMITED: the personal plan sets
+  // these to zero, because rationing a shared VM between tenants means nothing
+  // when there is one of you and the disk is your own.
+  if (isUnlimited(usage.diskLimitBytes)) return;
 
   const projected = usage.diskBytes - replacingBytes + incomingBytes;
 
@@ -262,7 +276,7 @@ export function resetUserQuotaCaches(): void {
 export async function assertCanCreateProject(userId: string): Promise<void> {
   const usage = await getUserUsage(userId);
 
-  if (usage.projects >= usage.projectLimit) {
+  if (!isUnlimited(usage.projectLimit) && usage.projects >= usage.projectLimit) {
     increment("quota_rejections");
     throw new QuotaError(
       `You have reached the limit of ${String(usage.projectLimit)} projects. ` +
@@ -271,7 +285,10 @@ export async function assertCanCreateProject(userId: string): Promise<void> {
     );
   }
 
-  if (usage.diskBytes >= usage.diskLimitBytes) {
+  if (
+    !isUnlimited(usage.diskLimitBytes) &&
+    usage.diskBytes >= usage.diskLimitBytes
+  ) {
     increment("quota_rejections");
     throw new QuotaError(
       `Your projects are using all ` +

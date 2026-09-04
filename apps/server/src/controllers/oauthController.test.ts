@@ -15,14 +15,14 @@ vi.mock("../lib/logger.js", () => ({
   extendLogContext: vi.fn(),
 }));
 
-import { githubCallback, githubStart, githubStatus } from "./oauthController.js";
+import { authProviders, githubCallback, githubStart } from "./oauthController.js";
 import { apiApp, TEST_USER } from "../test/apiHarness.js";
 import { env } from "../config/env.js";
 import { PREVIEW_COOKIE_NAME, REFRESH_COOKIE_NAME } from "../service/tokenService.js";
 
 const app = apiApp(
   [
-    { method: "get", path: "/auth/providers", handler: githubStatus },
+    { method: "get", path: "/auth/providers", handler: authProviders },
     { method: "get", path: "/auth/github", handler: githubStart },
     { method: "get", path: "/auth/github/callback", handler: githubCallback },
   ],
@@ -58,14 +58,29 @@ beforeEach(() => {
   issueRefreshToken.mockResolvedValue({ token: "refresh-token" });
 });
 
-describe("githubStatus", () => {
+describe("authProviders", () => {
   it.each([[true], [false]])("reports github configured = %s", async (configured) => {
     oauthService.isGithubConfigured.mockReturnValue(configured);
 
     const response = await request(app).get("/auth/providers");
 
     expect(response.status).toBe(200);
-    expect(response.body.data).toEqual({ github: configured });
+    // `singleUser` and `capabilities` joined this payload when the endpoint
+    // stopped being only about GitHub. Between them they say which routes this
+    // deployment actually mounts, and the app reads them so it does not draw a
+    // Sign up link, a Share button or an Explore section whose endpoints are
+    // 404s.
+    expect(response.body.data).toEqual({
+      github: configured,
+      singleUser: false,
+      capabilities: {
+        sharing: true,
+        moderation: true,
+        operatorConsole: true,
+        gallery: true,
+        plans: true,
+      },
+    });
   });
 });
 

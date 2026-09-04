@@ -6,6 +6,7 @@ import {
   AI_MAX_MESSAGE_CHARS,
   AI_MAX_PROPOSAL_BYTES,
   AI_MAX_TRANSCRIPT_CHARS,
+  isUnlimited,
   type AiActivity,
   type AiEditorContext,
   type AiMessage,
@@ -98,7 +99,11 @@ export function assertWithinAiBudget(
     return;
   }
 
-  if (existing.count >= limit) {
+  // Zero means no hourly cap. The cap exists because ANTHROPIC_API_KEY bills
+  // one account for everybody's use, so one person must not be able to spend
+  // the whole budget -- and when there is one person, the budget is theirs to
+  // spend. See UNLIMITED.
+  if (!isUnlimited(limit) && existing.count >= limit) {
     const minutes = Math.max(1, Math.ceil((existing.resetAt - now) / 60_000));
     throw new AppError(
       429,

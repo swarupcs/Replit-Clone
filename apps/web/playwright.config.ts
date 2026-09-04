@@ -22,6 +22,22 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: process.env["E2E_BASE_URL"] ?? "http://localhost:15273",
+    // The app's theme choice defaults to "system", which follows
+    // `prefers-color-scheme` -- and headless Chromium reports LIGHT. A fresh
+    // account in CI therefore gets `alucard`, the hand-built light editor
+    // theme, whose background is #ffffff.
+    //
+    // That is the app behaving correctly, and it silently broke the one
+    // assertion in playground-flow that exists because a unit test could not
+    // make it: "the editor is painted in the app's own theme, not Monaco's
+    // default". Monaco's built-in `vs` is white too, so against a light-mode
+    // page that check cannot tell the two apart -- it was written when this
+    // app was dark-only, before the light theme and the "system" default.
+    //
+    // Asking for dark restores what it was written to mean, rather than
+    // weakening it: "system" resolves to dark, `dracula` applies, and a white
+    // editor once again means Monaco fell back.
+    colorScheme: "dark",
     // Real containers take real time to boot.
     actionTimeout: 20_000,
     navigationTimeout: 30_000,

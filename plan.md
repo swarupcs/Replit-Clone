@@ -104,7 +104,8 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 116 items. Open: 5 — none of them unblocked.**
+**Done: 120 items. Open: 15 — five blocked, and ten from §10 that are all
+waiting on one decision (§10.1).**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
@@ -112,6 +113,20 @@ that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, and **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
 an architectural route).
+
+**§10 was written on 2026-09-03 and adds fourteen**, which is why the total
+above moved for the first time in a while by something other than work getting
+done. It asks a question no previous section asked: not what this platform
+needs before a stranger can pay for it (§8), but what it needs before **one
+person can use it instead of VS Code on their own machine**. Four of its rows
+are unblocked and are about the platform rather than the editor — chiefly that
+there was no way to open a folder that already exists on the disk, **which
+shipped the same day it was written (§2.33)**, leaving three. The other ten
+are parity rows that are all blocked on one architectural decision, and that
+decision is the fifth blocked row above: §6 decision 1 named debugging and
+third-party extensions as the two things that would reopen the Monaco/
+openvscode-server route, and a personal VS Code requires both at once. §10 is
+the first thing on this page to supply that trigger rather than wait for one.
 
 That every open row is now blocked is a claim §9 has already been wrong about
 five times, and the top of §3.1 applies to it word for word: an empty unblocked
@@ -1691,6 +1706,270 @@ against a mock that rejects; that it is the *constraint* rejecting is not.
 
 ---
 
+### 2.33 Since (2026-09-03) — §10.2, a folder that was already there
+
+- [x] **A project's root stopped being a function of its id.**
+      `Project.localPath` holds an absolute path when the tree was already
+      there; `projectRoot` answers from a registry seeded at boot. It stays
+      **synchronous** deliberately — it sits under `resolveInProject`, the
+      confinement check on every read and write, so making it async to ask the
+      database would have put an `await` inside the guard and rewritten all
+      twenty-odd callers for a lookup whose answer never changes. An empty
+      registry behaves exactly as this did before, which is what makes it safe
+      for every project that already exists.
+
+- [x] **`LOCAL_FOLDER_ROOTS`, and an empty list means refuse.** That inverts
+      the convention `EGRESS_ALLOW_DOMAINS` follows, on purpose: what is being
+      allowed here is the host's filesystem, and an operator who has not
+      thought about it has not opted in. Checked against what `realpath`
+      resolves to rather than the name it was reached by — a symlink inside an
+      allowed root is inside it by name and is the whole disk by content — and
+      `PROJECTS_ROOT` is refused even when a named root contains it, because
+      two rows over one directory disagree about who may delete it.
+
+- [x] **The four inversions, which were the actual work.** Each of these is
+      correct *because* the server made the directory, and each fails
+      differently on one it did not:
+      `purgeProject`'s `fs.rm` (deleting somebody's source),
+      `claimForSandbox` (seizing their files for uid 1001),
+      and both disk quotas (an editor refusing to save into its user's own free
+      space). The chown guard went **into** `claimProjectForSandbox` rather
+      than to each call site, for the reason §6 decision 13 gives about queries
+      and cleanups: two callers needed it that day, and the third to be written
+      would not have known to ask.
+
+- [x] **Fork and duplicate needed nothing**, which is worth recording because
+      it was expected to be a fifth case. Both build a row with no `localPath`
+      and copy into it, so taking a copy of an opened folder already produces
+      an ordinary server-owned project — which is the right meaning, not a
+      lucky one.
+
+- [x] **Two dialogs were saying something untrue.** The trash's "its files are
+      removed from disk permanently" and the delete confirmation's "delete it
+      for good" are both wrong for a folder somebody opened, in the same class
+      as the mistake §2.29 fixed pointing the other way. Somebody who believes
+      their folder is about to be deleted does not press the button.
+
+- [x] **A picker rather than a path field.** A field alone means you must
+      already know the path and every typo is a refusal from an allowlist you
+      cannot see. It also says out loud that these are the *server's*
+      directories: on a remote deployment somebody looking for their own
+      laptop's `~/code` would otherwise read an empty list as a bug.
+
+Server: 1781 passing. Web: 1071 passing. Typecheck and lint clean, 3/3.
+
+**One thing found and not fixed**, recorded rather than left to be
+rediscovered: nine tests in `useLanguageServer.test.tsx` fail on any checkout
+without `apps/web/.env`, because `socketUrl` calls `new URL(import.meta.env
+.VITE_BACKEND_URL)` and that is `undefined`. Not this change's doing —
+verified by stashing it.
+
+> **Corrected 2026-09-03, and the correction is the interesting half.** This
+> paragraph originally said "CI sets the variable (`ci.yml`), so it is green
+> there". That is **wrong**, and it was wrong in the direction that hides
+> things: `ci.yml` sets `VITE_BACKEND_URL` in exactly one place, the **e2e**
+> job's "Build the web app" step, and `pnpm -r test` runs under **verify**,
+> which does not set it. So those nine have been failing in CI too — they are
+> half of why `main` has been red since 2026-08-29.
+>
+> The claim was made by grepping `ci.yml` for the variable, finding a hit, and
+> not checking which job it was in. Which is the same mistake this file keeps
+> recording in other people's code: a symbol found is not a symbol in the
+> right scope. Fixed in §2.37 by defaulting it in the test setup, so the suite
+> stops depending on an environment file at all.
+
+### 2.34 Since (2026-09-03) — §10.3, one account
+
+- [x] **`SINGLE_USER_EMAIL`, and the account is provisioned at boot.** Unset —
+      the default — and nothing changes. Set, and this server has exactly one
+      account, created from that address, verified on the way in because there
+      is nothing to verify about a string the operator typed into their own
+      configuration.
+
+- [x] **The routes that create or recover an account are not mounted.** Signup,
+      password reset, email verification and GitHub *sign-in* are absent rather
+      than present-and-refusing, which is §6 decision 17's shape — a rule
+      enforced inside each controller is one the next route somebody adds does
+      not know to ask about. The test asserts **404, not 403**, because that
+      difference *is* the feature.
+
+      Sign-in itself stays, and that is not a compromise: every route in this
+      product authenticates through a session, and a server that issued one to
+      anybody who asked would be an unauthenticated server on whatever network
+      it can be reached from. "Personal" is about who the accounts are for, not
+      about whether the door has a lock.
+
+- [x] **The environment replaces the reset route, which it had to.** Removing
+      "forgot password" removes the way back into a locked account, so boot
+      *rewrites* the password whenever `SINGLE_USER_PASSWORD` is set: the way
+      back in is to edit the environment and restart. That is available to the
+      one person who runs this and needs no mail server, no token table and no
+      inbox — and a personal deployment usually has no outbound mail path, so
+      the reset route was never a way back in there anyway.
+
+- [x] **The creation boundary, at the two places a `User` row is made.**
+      `registerUser` and the GitHub upsert, which is where §6 decision 16 says
+      a limit belongs. Belt to the routing's braces: the handlers are already
+      unreachable, and decision 17's argument is that a structural default-deny
+      should survive somebody putting a route back.
+
+- [x] **The sign-in form stops linking to 404s.** `/auth/providers` grew a
+      `singleUser` flag and lost its `githubStatus` name, since it had stopped
+      being only about GitHub. GitHub reports false in that mode whatever is
+      configured — signing in with it *creates* an account. Connecting GitHub
+      to reach repositories is a different consent on a different router and is
+      untouched, which decision 7 already keeps apart.
+
+Server: 1798 passing. Web: 1071 passing. Typecheck and lint clean, 3/3.
+
+### 2.35 Since (2026-09-03) — §10.4, limits about a machine nobody shares
+
+- [x] **Zero means unlimited, and a `personal` plan sets every allocation to
+      it.** A sentinel rather than a very large number or a nullable column,
+      because the columns are non-null integers and every consumer compares
+      them arithmetically. The rule also already existed unwritten:
+      `isNearQuota` has always guarded on `limit > 0`, because a meter over a
+      limit of zero means nothing.
+
+      The one thing it costs is that "zero projects allowed" becomes unsayable.
+      Nothing wants to say it — a plan permitting nothing is an account that
+      cannot be used, which is suspension, and §6 decision 18 puts that outside
+      what an operator may do.
+
+- [x] **All five enforcement points learned it**, and each kept its own
+      comparison: a project COUNT is refused at `>=` and a byte total only past
+      `>`. A helper that hid that difference would have made one of the five
+      silently off by one, which is why `isUnlimited` is a predicate and not a
+      comparison.
+
+- [x] **Every case is tested twice.** The dangerous failure here is not
+      "unlimited did not work" — it is an exemption written slightly too wide,
+      quietly removing the limits from every ordinary deployment while no test
+      fails. So each of the five asserts the personal plan is unbounded *and*
+      that the free plan still refuses.
+
+- [x] **`SINGLE_USER_EMAIL` answers a question `NODE_ENV` was standing in
+      for.** The development/deployment split on `CONTAINER_MEMORY_MB` says so
+      itself: a deployment packs other people's projects onto a VM, and a
+      developer running this locally "is the only tenant... nothing is shared,
+      so there is nothing to protect the headroom from". A single-user
+      deployment is the second case wearing the first's clothes, so it now
+      takes the development figures — 2048 MB and 2 CPUs rather than 512 and a
+      half.
+
+- [x] **§6 decision 3 re-read, and half of it overturned.** LSP now defaults
+      ON for a single-tenant deployment. The reason for off-by-default is
+      entirely about a shared machine — the image size is "paid on every cold
+      start by people who never open a `.py` or `.go` file" — and at n=1 there
+      are no such people. The **memory threshold is not relaxed**: that one is
+      about an OOM kill in somebody's own terminal, and it costs them exactly
+      as much when they are the only user.
+
+- [x] **The account screen stopped drawing a full red bar for "no limit".**
+      `limit <= 0` produced a 100%-exception meter, which said the precise
+      opposite of what is true. A bar is a picture of how close you are to a
+      wall; where there is no wall there is no bar.
+
+- [x] **A latent fragility fixed on the way.** `personalPlan` used
+      `.catch()` on a lookup that can throw *synchronously* — a client
+      generated before this plan existed does exactly that — and a synchronous
+      throw happens before there is a promise to attach a handler to. try/catch
+      instead, so "fall back rather than fail" is true rather than intended.
+
+Server: 1814 passing. Web: 1071 passing. Typecheck and lint clean, 3/3.
+
+### 2.36 Since (2026-09-03) — §10.5, what has no second person
+
+- [x] **One module, `config/deploymentMode.ts`, and one decision.** §10.5 asked
+      for this as a single row because it is one judgement made a dozen times,
+      and leaving it implicit is how a personal deployment ends up shipping a
+      report queue.
+
+- [x] **Derived from `SINGLE_USER_EMAIL`, not a second flag** — and that is the
+      substantive choice. None of what it turns off is a preference; each is
+      dead by **arithmetic**. A share link is redeemed by signing in and
+      becoming a collaborator, and the one account that can sign in already owns
+      the project. A report needs a reporter and a separate operator, which §6
+      decision 11 requires be different people. The console administers
+      accounts, and there is one. The gallery lists what *other* people
+      published. A flag would imply these could sensibly be switched back on.
+
+- [x] **Not mounted, again.** Sharing, moderation, the appeal, the operator
+      console and the gallery are absent rather than refusing, matching §10.3.
+      The test asserts 404 across all of them, and — the more useful half —
+      asserts that templates, trash, tree, export, embeds and the local-folder
+      routes still answer, because the failure this guards against is an
+      exemption written by *theme* rather than by reasoning.
+
+- [x] **`/auth/providers` carries the capability set**, so the app does not
+      draw a Share button or an Explore section whose endpoint is a 404 —
+      the same argument that removed the signup link in §2.34. The client
+      defaults every capability to **on** while the query is in flight and if it
+      fails: defaulting the other way would blink those controls out of every
+      ordinary deployment on every page load, and hide them permanently
+      wherever the request hiccuped.
+
+**One deviation from §10.5's list, recorded rather than followed silently.**
+That list had **API keys** among the things with no user at n=1, and on
+reflection that is wrong: a personal deployment with a build server is an
+ordinary setup, and §6 decision 17 already makes the key surface default-deny
+and tiny. They stay. **Embeds** stay for the same kind of reason — putting your
+own project in your own blog post is something one person does alone, and the
+audience was never an account here.
+
+**And one thing that looks dead and must not be touched.** Collaborative
+editing has no second participant at n=1, but `collabService` is not switched
+off: the server owns writing a file while its document is live and the editor
+suppresses its own writes for those paths, so removing it would not simplify
+anything — it would stop saving.
+
+Server: 1821 passing. Web: 1074 passing. Typecheck and lint clean, 3/3.
+
+### 2.37 Since (2026-09-03) — the two reasons `main` was red
+
+Not §10 work. Both were found by pushing §10 and reading the CI that came
+back, and both were failing on `main` before this branch existed — since
+2026-08-29, across every run.
+
+- [x] **A page asserted as an array.** `projectAccessService.test.ts` did
+      `expect(await listAccessibleProjects(mate)).toHaveLength(1)` on a
+      function that returns `Page<ListedProject>`. §2.28 gave every list a
+      cursor and updated the call site *twenty lines below* — which
+      destructures `.items` and passes — while missing two above it.
+
+- [x] **An E2E selector for markup deleted a week earlier.** Two flows waited
+      20 s each for `.ant-segmented-item`. The template picker stopped being a
+      `Segmented` in `4b104f7` (2026-08-26); `TemplatePicker.tsx` says so in
+      its own comment. Now keyed on `[data-template-id]`, an attribute the
+      card already carried, rather than on the visible label — the label is
+      what moved last time.
+
+- [x] **Nine tests that needed a file `.gitignore` hides.** `socketUrl` does
+      `new URL(import.meta.env.VITE_BACKEND_URL)`, which throws
+      `Invalid URL: undefined` when it is unset. Defaulted in the vitest setup
+      instead: a unit suite should not need an environment file to run.
+
+**What the three have in common is the finding.** Each was invisible without
+some piece of apparatus — a database, Docker and a browser, an untracked
+`.env` — and each therefore failed only where nobody was looking. Two of them
+are the *same mistake as §2.28's and §2.14's*: a shape changed, most call
+sites were updated, and the ones that were not could not fail on the author's
+machine.
+
+The third is worse, and it is mine. §2.33 asserted "CI sets the variable, so
+it is green there" on the strength of grepping `ci.yml`, finding a hit, and
+not checking **which job** it was in — it is in `e2e`, and the failing suite
+runs under `verify`. A symbol found is not a symbol in scope. §2.33 now
+carries the correction rather than the claim.
+
+Verified against the real thing rather than argued: Postgres installed and
+running locally, migrations applied, and the whole of `pnpm -r test` run the
+way CI runs it — **with no `apps/web/.env` present**, which is the condition
+that had been quietly flattering every previous local run.
+
+Server: 2081 passing (0 failing, 9 skipped). Web: 1074 passing. Typecheck and
+lint clean, 3/3. Both apps build.
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -2050,6 +2329,14 @@ Each is named with what blocks it, so none reads as ready to start.
       A puts the multiplayer layer, the assistant, the run control and the
       preview behind a rewrite. Revisit the route, not the row.
 
+      **§10 supplies the trigger.** Written 2026-09-03, it asks what this has
+      to be for one person using it instead of VS Code, and a personal editor
+      requires debugging *and* third-party extensions — both halves of decision
+      1's stated revisit condition, at once. It also recounts Route A's price
+      at n=1 and finds two of the four rewrites have no user. The row stays
+      here and stays blocked; what it is blocked on is now §10.1, which is a
+      decision somebody can take in an afternoon rather than an absence.
+
 - [ ] **Backup and restore.** **Split by §9.1**, which takes the recoverable
       delete and deliberately leaves this row open: a trash answers "I meant
       the other project" and a backup answers "the host died", and only the
@@ -2378,6 +2665,15 @@ it; nothing else here is a standing decision.
    *Changes it:* debugging becoming the reason people choose something else, or
    running the user's own extensions becoming a requirement. Monaco cannot reach
    the second at all.
+
+   **Revisit requested 2026-09-03 — see §10.** Not because anything here was
+   found wrong, but because the trigger this decision names has arrived from a
+   direction it did not anticipate: not one feature becoming decisive, but the
+   product being aimed at a single seat, where debugging and the user's own
+   extensions are both table stakes. §10.0 also re-prices Route A for that
+   target — the multiplayer layer and the assistant, two of the four rewrites
+   this decision weighs, have no user at n=1. The decision stands until §10.1
+   is answered; it is now the only thing ten other rows are waiting on.
 
 2. **A hand-written JSON-RPC client rather than `monaco-languageclient`.** That
    library pins peer versions of Monaco and of the vscode shim, so adopting it
@@ -3031,3 +3327,303 @@ what makes "we got the keys" a one-day change instead of a two-week one.
 account (§8.4) and a pricing decision (§8.8, §8.5). What it does is make the
 list honest: after these four, everything left on this page is waiting on a
 person rather than on a programmer, and for the first time that will be true.
+
+---
+
+## 10. The personal IDE
+
+Written 2026-09-03, and it is not more of §8. §8 asks what has to exist around
+this platform before a stranger can pay for it. This section asks the opposite
+question — **what has to exist before one person can use this instead of VS
+Code on their own machine** — and the two lists disagree about more than they
+agree about, because half of §8 has no user when there is only one of you.
+
+The starting position is much better than it looks from §3. The parity ledger
+(§2.6) is thirteen of thirteen: Monaco with its options exposed, preview tabs
+with MRU `Ctrl+Tab`, breadcrumbs, outline, peek, `Ctrl+T`, zen mode, git gutter
+and tree decorations, hunk staging, merge-conflict resolution, a keybinding
+registry with chords and user overrides, a command palette, quick open,
+project-wide search **and replace**, multiple terminals, a problems panel, two
+hand-checked themes, and language servers for Python and Go. Nothing below is
+about the editor being unfinished. It is about the four or five things VS Code
+does that Monaco structurally cannot, plus the platform assumptions that stop
+making sense at n=1.
+
+### 10.0 The observation that orders everything else
+
+**This is a route decision wearing a feature list.**
+
+§6 decision 1 chose Monaco over openvscode-server, and — unusually for that
+section — it names its own revisit trigger precisely:
+
+> *Changes it:* debugging becoming the reason people choose something else, or
+> running the user's own extensions becoming a requirement. Monaco cannot reach
+> the second at all.
+
+A personal VS Code makes **both** of those requirements at once. So this
+section does not add rows to a Monaco roadmap. It re-opens the route, exactly
+as §3.3's Debugging row already says it should ("Revisit the route, not the
+row"), and it is the first thing on this page that has ever supplied the
+trigger rather than waiting for one.
+
+**And the price of Route A is not what decision 1 priced it at.** That decision
+costed openvscode-server as putting four things behind a rewrite: the
+multiplayer layer, the assistant, the run control and the preview. Recount them
+for one person:
+
+| What Route A would cost | At n=1 |
+|---|---|
+| the multiplayer layer — Yjs docs, `MonacoBinding`, awareness, remote cursors, presence, follow mode | **no user.** There is nobody to follow |
+| the assistant — `AiPanel`, `propose_edit`, the diff-review flow | **not a rewrite.** In VS Code an assistant is an extension, and the good ones already exist |
+| the run control — `RunControl`, `runStore`, the dev-server probe | **real work.** An extension with a webview, and it is not free |
+| the preview — the third origin, the preview token, the iframe | **real work,** and the same shape: port forwarding plus a webview |
+
+Two of the four evaporate and two survive. That is a materially different trade
+from the one decision 1 weighed, and it is a different trade *because the
+product changed*, not because anybody found a new library. **Decision 1 is not
+wrong; it was answered for a multiplayer SaaS, and this section is asking it
+for a single-seat editor.**
+
+So: everything in 10.6–10.14 below is **blocked on 10.1**, and building any of
+it on Monaco first is work Route A would throw away. Everything in 10.2–10.5 is
+**unblocked under either route**, because Route A does not give you any of it —
+openvscode-server ships an editor, not a container platform, and every one of
+those four is about the platform underneath.
+
+---
+
+### 10.1 The route — the one decision this section is blocked on
+
+- [ ] **Settle Monaco versus openvscode-server for the single-seat target.**
+      Not a code change and not a research task: the arguments are all written
+      down already, in §6 decision 1 and in the table above. What is missing is
+      somebody choosing, and the choice is between two honest positions:
+
+      **Route A — openvscode-server.** Debugging, extensions, tasks, snippets,
+      settings files, the diff editor, timeline, multi-root, notebooks and
+      terminal profiles all arrive at once, because they are VS Code and this
+      stops re-implementing it. Costs: rebuild run control and preview as
+      extensions, drop the collaborative layer (or keep this app beside it for
+      the projects that want it), and accept that the editor is no longer a
+      thing this repository controls.
+
+      **Route B — stay on Monaco.** Everything in 10.6–10.14 is built by hand,
+      one at a time, and 10.7 is never reachable at all: **Monaco cannot run VS
+      Code extensions, and no amount of work changes that.** Decision 1 says so
+      in its last sentence.
+
+      Route B is defensible if the multiplayer layer is the point of this
+      product and the personal use is a side effect. Route A is defensible if
+      the personal use is the point. What is not defensible is building
+      10.6–10.14 by hand *while undecided*, which is the failure this row
+      exists to prevent.
+
+---
+
+### Unblocked under either route — the platform, not the editor
+
+These four are what "personal" actually changes, and none of them is a VS Code
+feature. Route A does not deliver any of them.
+
+- [x] **10.2 Open a folder that is already on the disk.** Shipped 2026-09-03 —
+      see §2.33. The prediction in the paragraph below was
+      right about where the work was: almost none of it was the mount, and
+      almost all of it was the four places that assume this server made the
+      tree.
+      The largest structural item here. Today a workspace is a `Project` row in Postgres
+      with a working tree the server created under `PROJECTS_DIR`, reached by
+      picking a template (`apps/server/templates`, thirteen of them) or by
+      importing a GitHub repo. There is no path from "I have a directory at
+      `~/code/thing`" to "it is open in this editor" — every route into the
+      file tree goes through project creation.
+
+      For a personal IDE that is the *only* way in that matters. What it needs:
+      a project whose tree is a bind mount of a path the operator names rather
+      than a directory this server owns, the confinement rules re-derived for a
+      root the server did not create, and a decision about what
+      `deleteProjectService` means for such a project — almost certainly "unlink
+      the row, never touch the tree", which is a different code path and not a
+      flag on the existing one.
+
+      Note what this quietly rules out and check it before starting: the disk
+      quota (`assertUserDiskQuota`, `diskUsageService`) walks a tree it assumes
+      it owns, and checkpoints snapshot into a sibling directory.
+
+- [x] **10.3 A single-user mode.** Shipped 2026-09-03 — see §2.34. Signup, email verification, password reset,
+      refresh-token rotation with a reuse grace window, share tokens, embed
+      tokens, collaborator roles and the whole `assertProjectAccess` ladder are
+      correct and load-bearing for a public deployment, and they are ceremony
+      for one person on a laptop. The ask is not to delete any of it: it is one
+      documented mode in which a single account is provisioned at boot from the
+      environment and the auth surface is not reachable from the network.
+
+      Do it as configuration and not as a second code path — §6 decision 13's
+      reasoning applies exactly: a rule enforced by a mode flag sprinkled
+      through controllers is a rule that usually holds.
+
+- [x] **10.4 Limits that mean the machine, not the tenant.** Shipped
+      2026-09-03 — see §2.35.
+      `MAX_PROJECTS_PER_USER` (20), `USER_DISK_QUOTA_MB` (2048),
+      `PROJECT_DISK_QUOTA_MB` (512), `MAX_CONTAINERS_PER_USER` (2) and
+      `MAX_CONCURRENT_CONTAINERS` (3) are rationing between tenants. At n=1 the
+      only real limit is the host, and a 512 MB disk quota on your own machine
+      is an editor refusing to save into free space.
+
+      §6 decision 15 already draws exactly the line this needs — what the
+      platform *allocates* versus what the host *has* — and §2.22 moved the
+      first group into a `Plan` row. So this is a plan, not a rewrite: a
+      "personal" plan whose allocations are unbounded, with
+      `CONTAINER_MEMORY_MB` and `MAX_CONCURRENT_CONTAINERS` still honest about
+      the machine, per decision 15.
+
+      **§6 decision 3 is in the same bucket and should be re-read here.**
+      Refusing a language server below 1024 MB of container memory, and shipping
+      LSP behind a default-off flag because "the image cost is paid by every
+      cold start", is multi-tenant economics. One person who wants Python
+      intelligence wants it on.
+
+- [x] **10.5 Say which of the platform has no second person, and let it be
+      turned off.** Shipped 2026-09-03 — see §2.36. Recorded as one row because it is one decision taken
+      thirteen times, and because leaving it implicit is how a personal
+      deployment ends up shipping a report queue.
+
+      No user at n=1: presence, follow mode, the collaborative document layer,
+      share links, embeds, the public gallery and Explore, report-and-review and
+      the whole moderation path (§6 decisions 11, 12, 13, 18), the operator
+      console, API keys, teams, plans, entitlements, warning-before-the-wall,
+      and billing. That is most of §8 and a good share of §2.
+
+      Still wanted at n=1, and worth naming so they are not swept up: deploy and
+      custom domains (personal projects still get published), scheduled jobs,
+      notifications, the assistant, the database panel, GitHub, checkpoints,
+      trash.
+
+      **And one row on this page becomes more important rather than less.**
+      §3.3's backup-and-restore is filed as blocked on a deployment decision
+      about where backups go. At n=1 there is no operations team behind it and
+      the host is somebody's laptop, so "this platform loses data when its host
+      does" stops being an acceptable written trade-off. §9.1 shipped the trash;
+      the backup half is still open and it moves up.
+
+---
+
+### Blocked on 10.1 — parity, and free under Route A
+
+Each row says what it costs on Route B, because that is the number the route
+decision needs. Under Route A the cost of every one of them is zero.
+
+- [ ] **10.6 Debugging.** No breakpoints, no stepping, no watch, no call stack,
+      no `launch.json` — `grep` for `launch.json` or `DAP` over `apps/` returns
+      nothing. Route B means a hand-written Debug Adapter Protocol client, a
+      breakpoint gutter and decoration layer, a variables/watch/call-stack UI, a
+      per-language adapter shipped into each sandbox image, and a stdio bridge
+      through `docker exec` — every piece of which §6 decision 2's argument
+      against `monaco-languageclient` applies to twice over. This is the single
+      largest item in this section and the one Route A most obviously wins.
+
+- [ ] **10.7 Extensions.** **Unreachable on Route B.** Not "expensive" —
+      decision 1's closing sentence is that Monaco cannot reach it at all, and
+      §3.3 already lists "the user's own VS Code extensions" as out of scope for
+      that reason. Worth stating as a row anyway, because a personal IDE is
+      largely defined by the six extensions its owner cannot work without, and
+      "we have a file-icon table" is not an answer to that.
+
+- [ ] **10.8 Languages past Python and Go.** `lspPolicy.ts` knows two servers:
+      `pylsp` and `gopls`. TypeScript and JavaScript get Monaco's bundled
+      worker, which is per-model and does not see the project the way `tsserver`
+      does; everything else — Rust, Java, C/C++, C#, Ruby, PHP — gets syntax
+      highlighting and nothing. The sandbox images are the other half of it:
+      `images/` has node, python, go and egress, so a Rust server has no
+      container to run in.
+
+      Route B cost: one policy entry and one image per language, plus whatever
+      each server needs that the gateway does not yet speak (`lspClient.ts` is
+      the seam decision 2 named, and decision 2's revisit trigger — "the
+      language surface growing past diagnostics, completion and hover" — is
+      reached the moment somebody wants rename or code actions).
+
+- [ ] **10.9 Settings, keybindings and snippets that live in files.**
+      `editorSettingsStore` persists sixteen preferences to `localStorage` under
+      `rc-editor-settings`, and `keybindingStore` holds chord overrides the same
+      way. That means: no `settings.json`, no per-workspace settings, nothing
+      diffable, nothing committable, nothing that survives clearing site data,
+      and no way to bring an existing VS Code profile across. Snippets do not
+      exist at all.
+
+      This is the row that most decides whether the thing *feels* like a
+      personal editor, and it is the cheapest of the nine on Route B.
+
+- [ ] **10.10 Tasks.** A project carries exactly one run command (§2.7 row 7,
+      read from `package.json` at import) plus a test command (§2.18). VS Code
+      has `tasks.json`: named tasks, build versus test groups, compound and
+      dependent tasks, and problem matchers that turn compiler output into
+      entries in the problems panel. The problems panel already exists
+      (`problems.ts`, `ProblemsPanel`) and is fed only by the language server,
+      so the matcher half has somewhere to go.
+
+- [ ] **10.11 A real diff editor.** `parseUnifiedDiff` plus `DiffView` renders
+      `git diff` output; `grep` for `createDiffEditor` returns nothing, so
+      Monaco's own side-by-side diff is unused. What is missing is the thing you
+      reach for daily and not the thing you reach for at commit time: compare
+      with saved, compare two arbitrary files, compare against a branch, and
+      **edit inside the diff**.
+
+- [ ] **10.12 Local history, and a timeline.** No timeline view and no per-file
+      history. Checkpoints (§2.x) are the nearest thing and they are the wrong
+      granularity — whole-project, explicit, and on the same disk as the tree
+      they snapshot. VS Code's local history is per file, automatic, and answers
+      "what did this look like an hour ago" for a file that was never committed,
+      which is the question checkpoints do not answer.
+
+- [ ] **10.13 The rest of git.** `gitService.ts` covers status, diff, stage and
+      unstage, hunk staging, commit, log, branches, switch, discard, remotes,
+      fetch, pull, push and conflict resolution — a genuinely complete daily
+      loop. Absent: stash, blame, amend, revert, tags, cherry-pick, rebase
+      (including interactive), a commit graph, and comparing two branches.
+      Stash and blame are the two a personal user notices in the first week.
+
+- [ ] **10.14 The small ones, listed so they are not each rediscovered.**
+      Multi-root workspaces (one project is one root, and there is no
+      `.code-workspace`); markdown preview; notebooks; terminal profiles
+      (`shellArgv` hardcodes `/bin/bash`) and split terminal panes (multiple
+      terminals exist, as tabs only); and editor split views beyond the single
+      Monaco instance.
+
+---
+
+### Order
+
+**10.1 first, and nothing from 10.6–10.14 before it.** That is the whole point
+of the section: nine rows of hand-built parity are the wrong answer if the
+answer is openvscode-server, and there is no way to find out by building one of
+them.
+
+Then, whichever way 10.1 goes:
+
+~~**10.2 → 10.3 → 10.4 → 10.5.**~~ **All four shipped 2026-09-03** — §2.33
+to §2.36. What is left in this section is 10.1 and the ten rows behind it. ~~Open-a-folder first~~ — done 2026-09-03
+(§2.33), and the reasoning below held: the mount was an afternoon and finding
+every place that assumes this server made the tree was the rest of it. **Next
+is 10.3.** Original note follows.
+
+Open-a-folder first because it is the one
+without which none of the rest is a personal IDE — you cannot use an editor on
+work you cannot open in it — and because it is the largest, in the way §9.1 was
+largest: the assumption that this server created the tree is spread across
+quota, checkpoints, delete and confinement, and finding all of it is most of the
+work. Single-user mode second because everything after it is easier to test
+without an auth ladder in front of it. Then the limits, then the switch-off
+list, which is a decision-per-line and reads fastest once the first three have
+made obvious which lines matter.
+
+If 10.1 goes to **Route A**, 10.6–10.14 close as one migration and this section
+becomes short. If it goes to **Route B**, take them 10.9 → 10.13 → 10.11 →
+10.10 → 10.12 → 10.8 → 10.14 → 10.6, and strike 10.7 as unreachable: settings
+files and stash/blame are days, debugging is months, and 10.7 is never.
+
+**A caution in the spirit of §4.** This section was written by reading the
+parity ledger against the code and against §6, which is the method §4 says finds
+roughly twice the work that gets written down. It has not been validated by
+anybody trying to use this as their daily editor for a week, and that week would
+almost certainly reorder these rows — most likely by promoting something in
+10.14 that reads trivial here and is intolerable in practice.

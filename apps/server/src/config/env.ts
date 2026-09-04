@@ -26,6 +26,25 @@ if (process.env["NODE_ENV"] !== "test") dotenv.config();
  */
 const inDevelopment = (process.env["NODE_ENV"] ?? "development") === "development";
 
+/** Whether this process has exactly one tenant.
+ *
+ *  Read raw, for the same reason `inDevelopment` is: it decides schema
+ *  DEFAULTS, which have to be fixed before anything is parsed.
+ *
+ *  It exists because the development/deployment split above is not really about
+ *  NODE_ENV -- it is about whether anything is SHARED. The comment on
+ *  `CONTAINER_MEMORY_MB` says so outright: a deployment is packing other
+ *  people's projects onto a VM, and a developer running this locally "is the
+ *  only tenant... nothing is shared, so there is nothing to protect the
+ *  headroom from". A single-user deployment is the second case wearing the
+ *  first's clothes, and giving it 512 MB and half a core is protecting headroom
+ *  from nobody.
+ */
+const soleTenant = (process.env["SINGLE_USER_EMAIL"] ?? "").trim().length > 0;
+
+/** One tenant, whether by NODE_ENV or by configuration. */
+const unshared = inDevelopment || soleTenant;
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
 
@@ -160,6 +179,37 @@ const envSchema = z.object({
    *  can open, which is inert; the other way round it would hand the queue to
    *  every account that signed up.
    */
+  /** The one account this deployment has, when it is a single-seat one.
+   *
+   *  Unset -- the default -- and everything below is off and nothing changes:
+   *  people sign up, verify an address, reset a password, and sign in with
+   *  GitHub, exactly as before.
+   *
+   *  Set, and this server has exactly one account, provisioned at boot from
+   *  this address. The routes that CREATE or RECOVER an account are then not
+   *  mounted at all: no signup, no password reset, no email verification, no
+   *  GitHub sign-in. Not mounted rather than refusing, because a guard each
+   *  controller has to remember is a guard that usually holds -- the same
+   *  argument decision 17 makes about an API key's router.
+   *
+   *  That removes the way back into a forgotten password, so there is a
+   *  replacement and it is this file: set SINGLE_USER_PASSWORD and restart.
+   *  Boot rewrites the password every time, which makes the environment the
+   *  recovery mechanism rather than an inbox.
+   *
+   *  Sign-in itself stays. Every route in this product authenticates through a
+   *  session, and a server that issued one to anybody who asked would be an
+   *  unauthenticated server on whatever network it is reachable from. */
+  SINGLE_USER_EMAIL: z.string().trim().toLowerCase().default(""),
+
+  /** The password for that account, set at every boot.
+   *
+   *  Optional. Left unset on a first boot one is generated and written to the
+   *  log once -- an account nobody can sign in to is worse than a password in
+   *  a log file on a machine whose owner is the only user. Left unset on a
+   *  later boot the existing password is kept. */
+  SINGLE_USER_PASSWORD: z.string().default(""),
+
   ADMIN_EMAILS: z.string().default(""),
 
   WEB_ORIGIN: z.string().url().default("http://localhost:5273"),
@@ -257,6 +307,36 @@ const envSchema = z.object({
 
   PROJECTS_DIR: z.string().default("projects"),
 
+  /** Host directories under which a folder may be opened directly as a
+   *  project, comma separated. Empty -- the default -- turns the feature off.
+   *
+   *  This is the whole security question in one variable, so it is worth being
+   *  plain about what it grants. Opening a folder bind-mounts it into a
+   *  container that runs arbitrary code as a user who can write it, and hands
+   *  its contents to whoever can read the project. Without an allowlist that
+   *  is "any signed-in user may mount any path this process can reach", which
+   *  includes `/`, the deployment's own source, and its `.env`.
+   *
+   *  So the deployment names the roots, exactly as it names devcontainer
+   *  images and egress domains, and a path is accepted only if it resolves --
+   *  through symlinks -- to somewhere beneath one of them. Empty by default
+   *  because a multi-tenant deployment should never turn this on at all: it is
+   *  for the single-seat case, where the operator and the user are the same
+   *  person and the folders in question are already theirs.
+   *
+   *  PROJECTS_ROOT is refused even when it sits inside a named root, because a
+   *  second row pointing at a server-owned tree would give one directory two
+   *  owners with different rules about deleting it. */
+  LOCAL_FOLDER_ROOTS: z
+    .string()
+    .default("")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+
   // Container resource budget, and the defaults differ by environment because
   // the two are not the same problem.
   //
@@ -276,7 +356,7 @@ const envSchema = z.object({
     .number()
     .int()
     .positive()
-    .default(inDevelopment ? 2048 : 512),
+    .default(unshared ? 2048 : 512),
 
   /** Whether language servers may be started inside project containers.
    *
@@ -291,7 +371,23 @@ const envSchema = z.object({
   LSP_ENABLED: z
     .string()
     .optional()
-    .transform((value) => value === "true" || value === "1"),
+    // Defaults ON for a single-tenant deployment, and that is §10.4 rereading
+    // §6 decision 3 rather than overturning it. The reason for off-by-default
+    // is written above and is entirely about a shared machine: the image cost
+    // "is paid on every cold start by people who never open a .py or .go
+    // file". On a single-seat deployment there are no such people -- there is
+    // one, and they are the person who would be turning it on.
+    //
+    // The memory threshold below is NOT relaxed. That one is about an OOM kill
+    // in somebody's own terminal, and it costs them exactly as much when they
+    // are the only user.
+    //
+    // Set it explicitly to "false" to override, which is why the raw value is
+    // consulted rather than the transformed one: unset and false have to be
+    // distinguishable for a default to mean anything.
+    .transform((value) =>
+      value === undefined ? soleTenant : value === "true" || value === "1",
+    ),
 
   /** Below this, a language server is refused rather than started.
    *
@@ -308,7 +404,7 @@ const envSchema = z.object({
   CONTAINER_CPUS: z.coerce
     .number()
     .positive()
-    .default(inDevelopment ? 2 : 0.5),
+    .default(unshared ? 2 : 0.5),
   CONTAINER_IDLE_MINUTES: z.coerce.number().int().positive().default(20),
   /** Ceiling on a single project's working tree.
    *
@@ -480,6 +576,17 @@ export const env = parsed.data;
  *  path confinement has a stable anchor to compare against.
  */
 export const PROJECTS_ROOT: string = path.resolve(env.PROJECTS_DIR);
+
+/** The roots beneath which a folder may be opened, absolute.
+ *
+ *  Resolved at startup for the same reason PROJECTS_ROOT is: confinement needs
+ *  an anchor a later `process.chdir` cannot move. Empty means the feature is
+ *  off, which is not the same as "no restriction" and is checked that way --
+ *  see `utils/localRoots.ts`, where an empty list refuses everything.
+ */
+export const LOCAL_FOLDER_ROOTS: string[] = env.LOCAL_FOLDER_ROOTS.map((root) =>
+  path.resolve(root),
+);
 
 export const isProduction = env.NODE_ENV === "production";
 

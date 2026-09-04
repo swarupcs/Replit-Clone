@@ -5,11 +5,11 @@ import type { Container, ContainerInfo, ContainerStats as DockerStats } from "do
 import { env, previewTargetMode } from "../config/env.js";
 import {
   assertValidProjectId,
-  claimForSandbox,
+  claimProjectForSandbox,
   containerUser,
   projectRoot,
-  SANDBOX_UID,
 } from "../utils/projectPaths.js";
+import { isUnlimited } from "@replit-clone/shared";
 import { AppError } from "../utils/errors.js";
 import { getTemplate } from "../templates/registry.js";
 import { logger } from "../lib/logger.js";
@@ -369,14 +369,9 @@ async function startContainer(projectId: string): Promise<Container> {
 
   const template = await templateForProject(projectId);
 
-  // Projects scaffolded before ownership was claimed still belong to whoever
-  // the server ran as then. Guarded by a stat so the recursive walk does not
-  // run on every start, and best-effort because a non-root server cannot hand
-  // the tree to another uid — there `containerUser` adapts instead.
-  const root = await fsp.stat(projectRoot(projectId)).catch(() => undefined);
-  if (root && root.uid !== SANDBOX_UID) {
-    await claimForSandbox(projectRoot(projectId)).catch(() => {});
-  }
+  // The stat, the walk and the "not a folder somebody opened" guard all live
+  // in one place now — see `claimProjectForSandbox`.
+  await claimProjectForSandbox(projectId);
 
   // In host-loopback mode the dev port is published on 127.0.0.1 with a random
   // host port, because Docker Desktop gives a Windows/macOS host no route to
@@ -978,7 +973,11 @@ async function assertUserContainerBudget(projectId: string): Promise<void> {
   );
   const { maxContainersPerUser } = await resolveEntitlements(project.ownerId);
 
-  if (theirs.length >= maxContainersPerUser) {
+  // Zero means no per-account share, which is the personal plan: there is
+  // nobody to share with. MAX_CONCURRENT_CONTAINERS is checked separately and
+  // still holds, which is the whole distinction -- this limit is about how the
+  // machine's capacity is DIVIDED, and that one is about how much there is.
+  if (!isUnlimited(maxContainersPerUser) && theirs.length >= maxContainersPerUser) {
     increment("containers_capacity_rejected");
     throw new AppError(
       429,

@@ -1,6 +1,7 @@
 import express from "express";
 import { pingCheck } from "../../controllers/pingController.js";
 import { metricsReport } from "../../controllers/healthController.js";
+import { capabilities } from "../../config/deploymentMode.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { aiStatusController } from "../../controllers/aiController.js";
@@ -39,7 +40,15 @@ router.use("/account", requireAuth, accountRouter);
 // Behind requireAuth here, and behind requireAdmin inside. Both: the inner
 // guard reads the auth context, so a router that mounted it alone would fail
 // as an Unauthorized rather than as the wiring mistake it is.
-router.use("/admin", requireAuth, adminRouter);
+//
+// Not mounted at all in single-user mode. The operator console administers
+// ACCOUNTS and reviews reports filed by one person against another; there is
+// one account here and it is yours, so every screen behind it is a mirror.
+// §6 decision 11 says this authority stays the smallest one that resolves a
+// complaint -- and where no complaint can be made, the smallest is none.
+if (capabilities().operatorConsole) {
+  router.use("/admin", requireAuth, adminRouter);
+}
 // Deliberately NOT behind requireAuth: this is the API-key surface, and a key
 // is not a session. It authenticates itself, and the set of things it can
 // reach is the set of routes written in that file -- see routes/v1/pub.ts for

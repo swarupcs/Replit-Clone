@@ -14,10 +14,11 @@ import {
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import {
+  authProviders,
   githubCallback,
   githubStart,
-  githubStatus,
 } from "../../controllers/oauthController.js";
+import { singleUserEnabled } from "../../service/singleUserService.js";
 
 const router = express.Router();
 
@@ -94,35 +95,64 @@ const refreshLimiter = rateLimit({
   message: RATE_LIMITED,
 });
 
-router.post("/signup", addressLimiter, asyncHandler(signup));
+// Always mounted. Every route in this product authenticates through a session,
+// so these four exist in every mode -- a server that issued a session to
+// anybody who asked would be an unauthenticated server on whatever network it
+// can be reached from, which is not what "personal" means.
 router.post("/login", addressLimiter, loginAccountLimiter, asyncHandler(login));
 router.post("/refresh", refreshLimiter, asyncHandler(refresh));
 router.post("/logout", asyncHandler(logout));
 router.get("/me", requireAuth, asyncHandler(me));
 
-// Reset requests are rate-limited on the same budget as sign-in: the endpoint
-// sends mail on someone else's behalf, which is worth abusing.
-router.post(
-  "/password-reset",
-  addressLimiter,
-  resetAccountLimiter,
-  asyncHandler(requestPasswordReset),
-);
-router.post("/password-reset/confirm", addressLimiter, asyncHandler(resetPassword));
+// What this server offers, which the web app asks before drawing the sign-in
+// form. Always mounted, because its answer is what tells the app which of the
+// routes below exist.
+router.get("/providers", asyncHandler(authProviders));
 
-router.post(
-  "/verify-email/request",
-  requireAuth,
-  addressLimiter,
-  asyncHandler(requestEmailVerification),
-);
-router.post("/verify-email", addressLimiter, asyncHandler(verifyEmail));
+// --- Everything that CREATES or RECOVERS an account ------------------------
+//
+// Not mounted at all in single-user mode, rather than mounted and refusing.
+// The difference is the whole point: a guard inside each controller is a rule
+// the next route somebody adds does not know to ask about, and §6 decision 17
+// prefers a default-deny that is structural over one that is enforced. Here
+// that is literally true -- the handler is not reachable, so it cannot be
+// reached by forgetting something.
+//
+// What replaces the recovery half: SINGLE_USER_PASSWORD and a restart. See
+// `singleUserService`, which rewrites the password at every boot precisely so
+// that the environment is the way back in rather than an inbox.
+if (!singleUserEnabled()) {
+  router.post("/signup", addressLimiter, asyncHandler(signup));
 
-// --- GitHub sign-in ------------------------------------------------------
-// Off unless a client id and secret are configured; `providers` is what the
-// web app asks so it knows whether to offer the button at all.
-router.get("/providers", asyncHandler(githubStatus));
-router.get("/github", addressLimiter, asyncHandler(githubStart));
-router.get("/github/callback", asyncHandler(githubCallback));
+  // Reset requests are rate-limited on the same budget as sign-in: the
+  // endpoint sends mail on someone else's behalf, which is worth abusing.
+  router.post(
+    "/password-reset",
+    addressLimiter,
+    resetAccountLimiter,
+    asyncHandler(requestPasswordReset),
+  );
+  router.post("/password-reset/confirm", addressLimiter, asyncHandler(resetPassword));
+
+  router.post(
+    "/verify-email/request",
+    requireAuth,
+    addressLimiter,
+    asyncHandler(requestEmailVerification),
+  );
+  router.post("/verify-email", addressLimiter, asyncHandler(verifyEmail));
+
+  // --- GitHub sign-in ----------------------------------------------------
+  // Off unless a client id and secret are configured. Off in single-user mode
+  // whatever they are, because signing in with GitHub is a way to CREATE an
+  // account and this deployment has the one it is going to have.
+  //
+  // Connecting GitHub to reach repositories is a different consent on a
+  // different router (`routes/v1/github.ts`) and is unaffected -- decision 7
+  // already keeps those two apart, and importing a repository is exactly the
+  // kind of thing a personal deployment wants.
+  router.get("/github", addressLimiter, asyncHandler(githubStart));
+  router.get("/github/callback", asyncHandler(githubCallback));
+}
 
 export default router;

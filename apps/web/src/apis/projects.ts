@@ -25,6 +25,11 @@ import type {
   GitStatus,
   GitStatusResponse,
   ListTemplatesResponse,
+  LocalFolderBrowseResponse,
+  LocalFolderEntry,
+  LocalFolderSettings,
+  LocalFolderSettingsResponse,
+  OpenLocalFolderResponse,
   TemplateSummary,
   CreateProjectResponse,
   ListProjectsResponse,
@@ -54,6 +59,48 @@ export const createProjectApi = async (
     name,
     template,
   });
+  return response.data.data;
+};
+
+/** What this deployment will let somebody open from disk.
+ *
+ *  Asked before the picker is shown, so a deployment with LOCAL_FOLDER_ROOTS
+ *  unset -- the default, and the right setting for anything multi-tenant --
+ *  says so instead of offering a chooser that refuses every path. */
+export const getLocalFolderSettingsApi =
+  async (): Promise<LocalFolderSettings> => {
+    const response = await axios.get<LocalFolderSettingsResponse>(
+      "/api/v1/projects/local",
+    );
+    return response.data.data;
+  };
+
+/** Subdirectories of an allowed folder.
+ *
+ *  Walking rather than typing, because a path field alone means you have to
+ *  already know what you are looking for and every typo is a refusal. The
+ *  server checks each path against the allowlist regardless, so this is a
+ *  convenience over the same guard rather than a way around it. */
+export const browseLocalFoldersApi = async (
+  path: string,
+): Promise<LocalFolderEntry[]> => {
+  const response = await axios.get<LocalFolderBrowseResponse>(
+    "/api/v1/projects/local/browse",
+    { params: { path } },
+  );
+  return response.data.data.entries;
+};
+
+/** Opens a folder as a project. Nothing is copied and nothing is written into
+ *  it: the directory is mounted, and the files stay where they are. */
+export const openLocalFolderApi = async (
+  path: string,
+  name?: string,
+): Promise<Project> => {
+  const response = await axios.post<OpenLocalFolderResponse>(
+    "/api/v1/projects/local",
+    { path, name },
+  );
   return response.data.data;
 };
 
@@ -109,6 +156,9 @@ export interface TrashedProject {
   name: string;
   template: string;
   deletedAt: string;
+  /** Set when this was a folder somebody opened, which changes what "delete
+   *  for good" means: the project closes and the files stay. */
+  localPath?: string | null;
 }
 
 export const listTrashApi = async (): Promise<{

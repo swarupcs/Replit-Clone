@@ -39,3 +39,29 @@ export interface ApiErrorResponse {
   code: string;
   message: string;
 }
+
+/** What a deployment has routes for.
+ *
+ *  Each of these is false only in single-user mode, and each is dead by
+ *  arithmetic there rather than by preference: a share link is redeemed by a
+ *  second account, a report needs a reporter and a separate operator, the
+ *  console administers accounts, and the gallery lists what other people
+ *  published. See `config/deploymentMode.ts` on the server, where the decision
+ *  is made once.
+ *
+ *  The app reads this to avoid drawing controls whose endpoints are 404s. */
+export interface DeploymentCapabilities {
+  sharing: boolean;
+  moderation: boolean;
+  operatorConsole: boolean;
+  gallery: boolean;
+  plans: boolean;
+}
+
+/** GET /api/v1/auth/providers */
+export interface AuthProviders {
+  github: boolean;
+  /** One account, provisioned from the server's environment. */
+  singleUser: boolean;
+  capabilities: DeploymentCapabilities;
+}

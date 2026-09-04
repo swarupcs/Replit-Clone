@@ -72,9 +72,15 @@ test.describe.serial("playground flow", () => {
 
     // --- Create a static playground.
     await page.getByRole("button", { name: "New playground" }).first().click();
-    await page
-      .locator(".ant-segmented-item", { hasText: "Static HTML" })
-      .click();
+    // `[data-template-id]`, not `.ant-segmented-item`: the picker stopped
+    // being a Segmented in 4b104f7 (2026-08-26) and became a grid of
+    // `role="radio"` cards. These two specs were never updated, so they have
+    // waited 20s for an element that no longer exists ever since -- which is
+    // why E2E has been red on `main` since that commit.
+    //
+    // Keyed on the template ID rather than on the visible label, because the
+    // label is exactly what moved last time.
+    await page.locator('[data-template-id="static-html"]').click();
     await page.getByRole("button", { name: "Create", exact: true }).click();
 
     await expect(page).toHaveURL(/\/project\/[0-9a-f-]+$/, { timeout: 60_000 });
@@ -145,7 +151,13 @@ test.describe.serial("playground flow", () => {
     // --- The dev server. Opening a playground auto-starts it (runSubscribe),
     //  so there is no Run to press — the badge reaching "Running" IS the flow,
     //  container and all.
-    await expect(page.getByText("Running", { exact: true })).toBeVisible({
+    // `.first()`: two things legitimately say "Running" -- the status bar's
+    // badge and the run control's -- so an exact-text locator is a strict-mode
+    // violation rather than a wait. Either one appearing is the fact this
+    // asserts, and the status bar is the one a person looks at.
+    await expect(
+      page.getByText("Running", { exact: true }).first(),
+    ).toBeVisible({
       timeout: 90_000,
     });
 

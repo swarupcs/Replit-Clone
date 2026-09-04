@@ -1,4 +1,10 @@
-import type { AuthResponse, Credentials, PublicUser } from "@replit-clone/shared";
+import type {
+  AuthProviders,
+  AuthResponse,
+  Credentials,
+  DeploymentCapabilities,
+  PublicUser,
+} from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
 export const signupApi = async (body: Credentials): Promise<AuthResponse> => {
@@ -57,12 +63,36 @@ export const requestEmailVerificationApi = async (): Promise<{
   return response.data.data;
 };
 
-/** Which sign-in providers this server has configured. */
-export const getAuthProvidersApi = async (): Promise<{ github: boolean }> => {
-  const response = await axios.get<{ data: { github: boolean } }>(
-    "/api/v1/auth/providers",
-  );
-  return response.data.data;
+/** What this server's sign-in screen may offer.
+ *
+ *  `singleUser` means the account-creating and account-recovering routes are
+ *  not mounted at all, so the form must not link to them. */
+export const getAuthProvidersApi = async (): Promise<AuthProviders> => {
+  const response = await axios.get<{
+    data: {
+      github: boolean;
+      singleUser?: boolean;
+      capabilities?: Partial<DeploymentCapabilities>;
+    };
+  }>("/api/v1/auth/providers");
+
+  const data = response.data.data;
+
+  // Every field is defaulted rather than required, so a client talking to a
+  // server that predates any of this reads as an ordinary multi-account
+  // deployment -- which is what it is. Defaulting the other way would hide
+  // Share and Explore on every existing deployment the moment this shipped.
+  return {
+    github: data.github,
+    singleUser: data.singleUser ?? false,
+    capabilities: {
+      sharing: data.capabilities?.sharing ?? true,
+      moderation: data.capabilities?.moderation ?? true,
+      operatorConsole: data.capabilities?.operatorConsole ?? true,
+      gallery: data.capabilities?.gallery ?? true,
+      plans: data.capabilities?.plans ?? true,
+    },
+  };
 };
 
 /** A full navigation, not a fetch: the OAuth round trip is the browser

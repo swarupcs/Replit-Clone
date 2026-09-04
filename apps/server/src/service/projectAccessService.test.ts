@@ -150,8 +150,15 @@ describe.skipIf(!TEST_DATABASE_URL)("project access", () => {
       service.ProjectRole.VIEWER,
     );
 
-    expect(await service.listAccessibleProjects(mateId)).toHaveLength(1);
-    expect(await service.listAccessibleProjects(strangerId)).toHaveLength(0);
+    // `.items`, because this returns a PAGE. §2.28 gave every list a cursor
+    // and updated the call site twenty lines below this one; these two were
+    // missed, so they have asserted `length` on an object that has none ever
+    // since -- which is a failure only a database makes visible, and this
+    // suite is DB-gated.
+    expect((await service.listAccessibleProjects(mateId)).items).toHaveLength(1);
+    expect(
+      (await service.listAccessibleProjects(strangerId)).items,
+    ).toHaveLength(0);
   });
 
   /** The list used to return whole `Project` rows, which is the hazard the

@@ -647,6 +647,33 @@ model Project {
   /// WHERE clauses rather than cleanup, for the reason the line above gives.
   deletedAt DateTime?
 
+  /// Absolute host path of a folder this server did NOT create, when the
+  /// project is one somebody opened rather than one this platform scaffolded.
+  ///
+  /// Null for every project made from a template or imported from GitHub, and
+  /// those keep the original arrangement exactly: their tree is
+  /// `PROJECTS_ROOT/<id>`, a directory this server owns outright. Set, it means
+  /// the opposite — the tree was already there, it belongs to whoever runs this
+  /// machine, and this platform is a visitor in it.
+  ///
+  /// That distinction is not cosmetic, because four things this codebase does
+  /// to a working tree are only defensible when it owns the tree:
+  /// `purgeProject` removes it recursively, `claimForSandbox` chowns it to the
+  /// sandbox uid, the disk quota rations it, and fork/duplicate copy out of it.
+  /// The first two would be destroying somebody's source directory and the
+  /// third would be an editor refusing to save into their own free space, so
+  /// each asks `isLocalProject` first.
+  ///
+  /// Unique because two rows pointing at one directory is two containers
+  /// writing one tree with no owner, and nothing downstream is built to
+  /// arbitrate that. Opening an already-open folder finds the existing project
+  /// rather than making a second one.
+  ///
+  /// Constrained on the way in by `LOCAL_FOLDER_ROOTS`: the column holds an
+  /// absolute path, so what may be written into it is the whole of the
+  /// security question, and that check lives in `utils/localRoots.ts`.
+  localPath String? @unique
+
   moderationActions ModerationAction[]
 
   createdAt    DateTime  @default(now())

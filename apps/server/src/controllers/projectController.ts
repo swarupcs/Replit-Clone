@@ -162,6 +162,11 @@ export async function listTrashController(
         // Never null for a row this query returned, and narrowed here rather
         // than asserted so the response type says what the screen can rely on.
         deletedAt: (project.deletedAt ?? new Date()).toISOString(),
+        // What "delete for good" will actually do. A purge does not touch a
+        // tree this server did not create, so the confirmation for one of
+        // these has to say something different -- and it cannot say it without
+        // being told which rows they are.
+        localPath: project.localPath,
       })),
     },
   });

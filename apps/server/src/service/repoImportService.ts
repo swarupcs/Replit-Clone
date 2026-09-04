@@ -106,8 +106,13 @@ export function detectStartCommand(
   return `npm install && npm run ${chosen}`;
 }
 
-/** Reads what the clone left behind, for `detectTemplate`. */
-async function inspectClone(dir: string): Promise<{
+/** Reads a directory's top level, for `detectTemplate`.
+ *
+ *  Written for a fresh clone and exported once opening a folder needed the
+ *  same answer about a directory that was already there. The question is
+ *  identical -- "what kind of project is this" -- and the alternative was a
+ *  second detector that would drift from this one. */
+export async function inspectDirectory(dir: string): Promise<{
   files: string[];
   packageJson: Record<string, unknown> | null;
 }> {
@@ -269,7 +274,7 @@ export async function importRepository(
       );
     }
 
-    const { files, packageJson } = await inspectClone(dir);
+    const { files, packageJson } = await inspectDirectory(dir);
     const template = detectTemplate(files, packageJson);
     const startCommand = detectStartCommand(packageJson);
 

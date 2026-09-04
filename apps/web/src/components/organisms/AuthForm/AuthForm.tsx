@@ -70,6 +70,13 @@ export const AuthForm = ({
     retry: false,
   });
 
+  /** One account, provisioned from the server's environment. Three things on
+   *  this form -- Sign up, Forgot password, Continue with GitHub -- lead to
+   *  routes that are not mounted in that mode, and a link to a 404 is a worse
+   *  answer than no link. `providers.github` is already false there, so this
+   *  covers the other two. */
+  const singleUser = providers?.singleUser ?? false;
+
   async function handleFinish(values: Credentials) {
     setError(null);
     setSubmitting(true);
@@ -226,7 +233,12 @@ export const AuthForm = ({
               />
             </Form.Item>
 
-            {showForgotPassword && (
+            {/* Not in single-user mode: the reset routes are not mounted
+                there, so this would be a link to a form that 404s on submit.
+                The way back in is SINGLE_USER_PASSWORD and a restart, which is
+                something only the person running the server can do -- and in
+                that mode they are the person reading this. */}
+            {showForgotPassword && !singleUser && (
               <div style={{ textAlign: "right", marginTop: -16, marginBottom: 16 }}>
                 <Link to="/forgot-password" style={{ fontSize: 13 }}>
                   Forgot your password?
@@ -254,7 +266,17 @@ export const AuthForm = ({
               fontSize: 13,
             }}
           >
-            {footer.prompt} <Link to={footer.to}>{footer.linkText}</Link>
+            {/* Same reason as the reset link above: there is no signup route
+                to send anybody to. Replaced rather than removed, because a
+                sign-in form with nothing under it reads like a page that
+                failed to finish loading. */}
+            {singleUser ? (
+              <>This server is set up for one account.</>
+            ) : (
+              <>
+                {footer.prompt} <Link to={footer.to}>{footer.linkText}</Link>
+              </>
+            )}
           </Typography.Paragraph>
         </div>
       </div>
