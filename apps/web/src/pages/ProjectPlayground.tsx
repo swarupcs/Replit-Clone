@@ -862,11 +862,12 @@ export const ProjectPlayground = () => {
                   and its results, and losing them on every glance at the tree
                   would make it useless. */}
               <div
+                className="rc-activity-bar"
                 style={{
                   display: "flex",
                   flexDirection: "column",
                   gap: 2,
-                  padding: "8px 4px",
+                  padding: "8px 5px",
                   borderRight: "1px solid var(--rc-border)",
                   flex: "none",
                 }}
