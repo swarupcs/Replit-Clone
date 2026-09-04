@@ -19,6 +19,7 @@ import {
   VscDiscard,
   VscRemove,
   VscSourceControl,
+  VscSync,
 } from "react-icons/vsc";
 import type {
   GitBranch,
@@ -43,6 +44,7 @@ import {
   gitHunksApi,
   gitPullApi,
   gitPushApi,
+  gitSyncApi,
   getGithubPullsApi,
   createGithubPullApi,
   getGithubProjectRepoApi,
@@ -312,6 +314,36 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
       void message.error(
         reasonFrom(error, pull ? "Could not pull" : "Could not fetch"),
       );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Fetch, fast-forward and push, in one call.
+   *
+   *  The one control that does not ask which of the three you meant. It is a
+   *  separate call and not these handlers in sequence, because the decisions
+   *  between the legs — is there anything to pull, is there anything to push,
+   *  may this caller push at all — are the server's to make: it is the side
+   *  that knows whether the project is shared and whether a credential exists,
+   *  and a client that guessed would guess differently from the push route.
+   *
+   *  A sync that pulled but could not push is a SUCCESS with a caveat, not a
+   *  failure, so it reports through `warning` rather than `error`. That
+   *  distinction is the whole reason the response says what it did rather than
+   *  only how things ended up.
+   */
+  const syncNow = async (name?: string) => {
+    setBusy(true);
+    try {
+      const result = await gitSyncApi(projectId, name ? { name } : {});
+      setStatus(result.status);
+      if (result.pulled > 0) setCommits(await getGitLogApi(projectId, 20));
+
+      if (result.pushSkipped) void message.warning(result.summary);
+      else void message.success(result.summary);
+    } catch (error) {
+      void message.error(reasonFrom(error, "Could not sync"));
     } finally {
       setBusy(false);
     }
@@ -721,6 +753,20 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
           </span>
         )}
 
+        {canWrite && remotes.length > 0 && !status.unborn && (
+          <Tooltip title="Sync — fetch, fast-forward, then push">
+            <button
+              type="button"
+              className="rc-icon-button"
+              aria-label="Sync with remote"
+              onClick={() => void syncNow()}
+              disabled={busy}
+            >
+              <VscSync size={14} />
+            </button>
+          </Tooltip>
+        )}
+
         {githubRepo && (
           <Tooltip title={`Open ${githubRepo.owner}/${githubRepo.repo} on GitHub`}>
             <a
@@ -739,6 +785,11 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
             trigger={["click"]}
             menu={{
               items: remotes.flatMap((remote) => [
+                {
+                  key: `sync:${remote.name}`,
+                  label: `Sync with ${remote.name}`,
+                  onClick: () => void syncNow(remote.name),
+                },
                 {
                   key: `fetch:${remote.name}`,
                   label: `Fetch from ${remote.name}`,

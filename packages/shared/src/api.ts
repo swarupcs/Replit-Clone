@@ -186,6 +186,47 @@ export type GitRemoteResponse = ApiSuccess<GitRemote[]>;
 /** POST /api/v1/projects/:projectId/git/pull — and /git/fetch. */
 export type GitPullResponse = ApiSuccess<GitStatus>;
 
+/** What one sync did, leg by leg.
+ *
+ *  Reported rather than inferred from the resulting status: "behind 0" after a
+ *  sync is equally true of a pull that fast-forwarded ten commits and of a
+ *  branch that was already current, and a control that cannot tell those apart
+ *  is one people stop trusting. Each leg says whether it MOVED anything, and
+ *  `skipped` says why a leg that could have run did not.
+ */
+export interface GitSyncResult {
+  status: GitStatus;
+  /** The remote and branch the sync actually used, having resolved them. */
+  remote: string;
+  branch: string;
+  /** A fetch always runs; these two ran only when there was something to do. */
+  pulled: number;
+  pushed: number;
+  /** Present when the push leg was deliberately not attempted. `null` when it
+   *  ran, or when there was nothing to push. */
+  pushSkipped: GitPushSkipReason | null;
+  /** One line, already phrased for a person. */
+  summary: string;
+}
+
+/** Why a sync fetched and pulled but did not push.
+ *
+ *  Not errors — a sync that pulled is a sync that did something useful, and
+ *  failing the whole call because the push half was not available would throw
+ *  that away. The panel says which of these happened.
+ */
+export type GitPushSkipReason =
+  /** The project has a collaborator or a live share link, so the credential
+   *  would be readable by someone else. Same rule as /git/push. */
+  | "PROJECT_IS_SHARED"
+  /** No connected GitHub account and no token supplied. */
+  | "NO_CREDENTIAL"
+  /** The remote is not GitHub, so the stored connection cannot pay for it. */
+  | "REMOTE_NOT_GITHUB";
+
+/** POST /api/v1/projects/:projectId/git/sync */
+export type GitSyncResponse = ApiSuccess<GitSyncResult>;
+
 /** GET /api/v1/projects/:projectId/git/diff */
 export type GitDiffResponse = ApiSuccess<{
   path: string;

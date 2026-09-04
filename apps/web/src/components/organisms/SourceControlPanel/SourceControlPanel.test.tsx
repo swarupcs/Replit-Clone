@@ -46,6 +46,7 @@ const api = vi.hoisted(() => ({
   gitFetchApi: vi.fn(),
   gitPullApi: vi.fn(),
   gitPushApi: vi.fn(),
+  gitSyncApi: vi.fn(),
   getGithubPullsApi: vi.fn(),
   createGithubPullApi: vi.fn(),
   getGithubProjectRepoApi: vi.fn(),
@@ -75,6 +76,7 @@ const {
   gitFetchApi,
   gitPullApi,
   gitPushApi,
+  gitSyncApi,
   getGithubPullsApi,
   createGithubPullApi,
   getGithubProjectRepoApi,
@@ -88,11 +90,20 @@ const BRANCHES = [
 /** antd's static `message` renders through its own portal and needs app
  *  context, so what it was ASKED to say is asserted instead of what it drew. */
 const messageError = vi.hoisted(() => vi.fn());
+/** A sync distinguishes success from success-with-a-caveat, so both of these
+ *  have to be observable and not only `error`. */
+const messageSuccess = vi.hoisted(() => vi.fn());
+const messageWarning = vi.hoisted(() => vi.fn());
 vi.mock("antd", async () => {
   const actual = await vi.importActual<typeof import("antd")>("antd");
   return {
     ...actual,
-    message: { ...actual.message, error: messageError },
+    message: {
+      ...actual.message,
+      error: messageError,
+      success: messageSuccess,
+      warning: messageWarning,
+    },
   };
 });
 
@@ -128,6 +139,15 @@ beforeEach(() => {
   gitFetchApi.mockResolvedValue(STATUS);
   gitPullApi.mockResolvedValue(STATUS);
   gitPushApi.mockResolvedValue(STATUS);
+  gitSyncApi.mockResolvedValue({
+    status: STATUS,
+    remote: "origin",
+    branch: "main",
+    pulled: 0,
+    pushed: 0,
+    pushSkipped: null,
+    summary: "Already up to date with origin.",
+  });
   gitBranchApi.mockResolvedValue({
     status: { ...STATUS, branch: "feature" },
     branches: [
@@ -909,5 +929,119 @@ describe("SourceControlPanel upstream state", () => {
 
     fireEvent.click(screen.getByLabelText("Remotes"));
     expect(screen.queryByText(/Open a pull request/)).toBeNull();
+  });
+});
+
+describe("SourceControlPanel sync", () => {
+  const RESULT = {
+    status: { ...STATUS, ahead: 0, behind: 0 },
+    remote: "origin",
+    branch: "main",
+    pulled: 3,
+    pushed: 2,
+    pushSkipped: null,
+    summary: "Synced with origin: pulled 3 commits, pushed 2 commits.",
+  };
+
+  const clickSync = () =>
+    fireEvent.click(screen.getByRole("button", { name: "Sync with remote" }));
+
+  it("syncs without being told which remote or branch", async () => {
+    gitSyncApi.mockResolvedValue(RESULT);
+    await renderPanel();
+
+    clickSync();
+
+    await waitFor(() => {
+      expect(gitSyncApi).toHaveBeenCalledWith(PROJECT, {});
+    });
+  });
+
+  /** The summary is the server's, said verbatim: a client that rephrased it
+   *  would be a second place the same outcome is described. */
+  it("reports what the sync did", async () => {
+    gitSyncApi.mockResolvedValue(RESULT);
+    await renderPanel();
+
+    clickSync();
+
+    await waitFor(() => {
+      expect(messageSuccess).toHaveBeenCalledWith(RESULT.summary);
+    });
+  });
+
+  /** A pull that worked and a push that could not is a success with a caveat,
+   *  and must not be drawn as a failure. */
+  it("warns rather than errors when the push leg was skipped", async () => {
+    gitSyncApi.mockResolvedValue({
+      ...RESULT,
+      pushed: 0,
+      pushSkipped: "PROJECT_IS_SHARED",
+      summary: "Synced with origin: pulled 3 commits. Not pushed: shared.",
+    });
+    await renderPanel();
+
+    clickSync();
+
+    await waitFor(() => {
+      expect(messageWarning).toHaveBeenCalled();
+    });
+    expect(messageError).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the log only when something was pulled", async () => {
+    gitSyncApi.mockResolvedValue({ ...RESULT, pulled: 0, pushed: 0 });
+    await renderPanel();
+    getGitLogApi.mockClear();
+
+    clickSync();
+
+    await waitFor(() => expect(messageSuccess).toHaveBeenCalled());
+    expect(getGitLogApi).not.toHaveBeenCalled();
+  });
+
+  /** git's refusals are the case where the reason IS the useful part, so the
+   *  server's own message is what reaches the screen — not a generic fallback
+   *  and not axios's "Request failed with status code 400". */
+  it("says why a sync failed, in the server's words", async () => {
+    gitSyncApi.mockRejectedValue({
+      response: {
+        data: { message: "Commit or discard your changes before pulling" },
+      },
+    });
+    await renderPanel();
+
+    clickSync();
+
+    await waitFor(() => {
+      expect(messageError).toHaveBeenCalledWith(
+        "Commit or discard your changes before pulling",
+      );
+    });
+  });
+
+  it("falls back to a generic reason when the failure carries none", async () => {
+    gitSyncApi.mockRejectedValue({});
+    await renderPanel();
+
+    clickSync();
+
+    await waitFor(() => {
+      expect(messageError).toHaveBeenCalledWith("Could not sync");
+    });
+  });
+
+  /** A viewer has no sync: it writes to the worktree. */
+  it("is not offered to a viewer", async () => {
+    await renderPanel(false);
+
+    expect(screen.queryByRole("button", { name: "Sync with remote" })).toBeNull();
+  });
+
+  it("is not offered when the project has no remote", async () => {
+    getGitRemotesApi.mockResolvedValue([]);
+    await renderPanel();
+
+    expect(screen.queryByRole("button", { name: "Sync with remote" })).toBeNull();
   });
 });

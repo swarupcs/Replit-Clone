@@ -81,6 +81,7 @@ import {
   gitHunksController,
   gitPullController,
   gitPushController,
+  gitSyncController,
   gitRemoteController,
   gitRemotesController,
   gitDiffController,
@@ -209,6 +210,10 @@ router.post("/:projectId/git/remote", asyncHandler(gitRemoteController));
 router.post("/:projectId/git/fetch", asyncHandler(gitFetchController));
 router.post("/:projectId/git/pull", asyncHandler(gitPullController));
 router.post("/:projectId/git/push", asyncHandler(gitPushController));
+// Fetch, fast-forward and push in one call. Editor level: the push leg
+// re-checks ownership for itself, and reports rather than fails when it
+// cannot run. See gitSyncController.
+router.post("/:projectId/git/sync", asyncHandler(gitSyncController));
 router.post("/:projectId/git/commit", asyncHandler(gitCommitController));
 
 // Pull requests. Project-scoped because which repository they belong to comes
