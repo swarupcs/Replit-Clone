@@ -15,6 +15,13 @@ process.env["NODE_ENV"] = "test";
 // rather than skipped. Tests that care about the unconfigured path delete it.
 process.env["SECRET_ENCRYPTION_KEY"] ??= Buffer.alloc(32, 7).toString("base64");
 
+// `autoStart.test.ts` exercises the feature, so the suite pins it on rather
+// than inheriting whatever the schema's default happens to be. It used to
+// inherit `true`, and flipping that default to `false` failed exactly the six
+// tests `envIsolation.test.ts` warns about — a test for a behaviour should say
+// which behaviour it wants, not depend on a product decision made elsewhere.
+process.env["AUTO_START_ON_OPEN"] ??= "true";
+
 // Path confinement resolves against this, so it must not be the real projects
 // directory. Each suite creates and removes its own subdirectory beneath it.
 process.env["PROJECTS_DIR"] ??= path.join(os.tmpdir(), "replit-clone-tests");
