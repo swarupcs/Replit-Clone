@@ -26,7 +26,12 @@ vi.mock("dockerode", () => ({
   },
 }));
 
-import { declaredPorts, previewablePorts, getPreviewTarget } from "./containerManager.js";
+import {
+  declaredPorts,
+  previewablePorts,
+  publishedPorts,
+  getPreviewTarget,
+} from "./containerManager.js";
 import type { DevcontainerConfig } from "./devcontainer.js";
 
 const TEMPLATE = { devPort: 3000, extraPorts: [5173, 8080] };
@@ -144,5 +149,46 @@ describe("getPreviewTarget", () => {
     listContainers.mockResolvedValue([]);
 
     expect(await getPreviewTarget(PROJECT)).toBeUndefined();
+  });
+});
+
+describe("publishedPorts", () => {
+  it("maps each container port to its host address", async () => {
+    expect(await publishedPorts(PROJECT)).toEqual({
+      3000: "127.0.0.1:32771",
+      5173: "127.0.0.1:32772",
+      8080: "127.0.0.1:32773",
+      4000: "127.0.0.1:32774",
+    });
+  });
+
+  it("is empty when the container is not running", async () => {
+    listContainers.mockResolvedValue([]);
+
+    expect(await publishedPorts(PROJECT)).toEqual({});
+  });
+
+  /** A port that is exposed but not bound has no address to give. Reporting
+   *  one would send somebody to a port nothing is listening on. */
+  it("skips a port with no host binding", async () => {
+    inspect.mockResolvedValue({
+      NetworkSettings: {
+        Ports: {
+          "3000/tcp": [{ HostIp: "127.0.0.1", HostPort: "32771" }],
+          "5173/tcp": null,
+          "8080/tcp": [],
+        },
+      },
+    });
+
+    expect(await publishedPorts(PROJECT)).toEqual({ 3000: "127.0.0.1:32771" });
+  });
+
+  /** This hangs off an endpoint whose real job is listing ports. An
+   *  unreachable daemon must not take that answer down with it. */
+  it("is empty rather than throwing when Docker cannot be reached", async () => {
+    listContainers.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    await expect(publishedPorts(PROJECT)).resolves.toEqual({});
   });
 });

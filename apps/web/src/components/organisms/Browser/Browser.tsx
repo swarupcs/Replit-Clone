@@ -95,6 +95,41 @@ export const Browser = ({ projectId }: BrowserProps) => {
   });
 
   const activePort = port ?? portInfo?.devPort ?? null;
+
+  /** Where the selected port is published on the host, or null.
+   *
+   *  Present only in development: the server sends `hostPorts` at all only when
+   *  it is publishing on loopback, which is the Windows/macOS case where Docker
+   *  Desktop gives the host no route to a container's IP. A deployment binds
+   *  nothing to the host, so this is absent there and the control does not
+   *  render — no build flag, no environment check, nothing for a refactor to
+   *  get wrong. The address is the only way to reach the app from curl or
+   *  Postman, which is the one thing the preview iframe cannot do for you.
+   */
+  const hostAddress =
+    activePort !== null ? (portInfo?.hostPorts?.[activePort] ?? null) : null;
+
+  const [copied, setCopied] = useState(false);
+
+  /** Copies, and says so for a moment.
+   *
+   *  `navigator.clipboard` needs a secure context, which plain-HTTP localhost
+   *  is and a LAN address is not — so this can genuinely fail, and a control
+   *  that silently did nothing would be worse than one that stays as it was.
+   */
+  const copyHostAddress = async () => {
+    if (hostAddress === null) return;
+
+    try {
+      await navigator.clipboard.writeText(`http://${hostAddress}`);
+      setCopied(true);
+      setTimeout(() => {
+        setCopied(false);
+      }, 1200);
+    } catch {
+      // No clipboard here. The address is on screen and can be read off it.
+    }
+  };
   const src = previewUrl(
     projectId,
     activePort !== null && activePort !== portInfo?.devPort ? activePort : undefined,
@@ -197,6 +232,31 @@ export const Browser = ({ projectId }: BrowserProps) => {
                 label: `:${String(entry)}`,
               }))}
             />
+          </Tooltip>
+        )}
+
+        {hostAddress !== null && (
+          <Tooltip
+            title={
+              `This project's port ${String(activePort ?? "")} is published at ` +
+              `${hostAddress} on the machine running Docker. For curl, Postman ` +
+              "or a REST client — the preview beside it needs no port. Click to copy."
+            }
+          >
+            <Button
+              size="small"
+              type="text"
+              aria-label={`Copy the host address for port ${String(activePort ?? "")}`}
+              onClick={() => void copyHostAddress()}
+              style={{
+                fontFamily: "var(--rc-mono)",
+                fontSize: 11,
+                color: copied ? "var(--rc-green)" : "var(--rc-text-muted)",
+                flex: "none",
+              }}
+            >
+              {copied ? "copied" : hostAddress}
+            </Button>
           </Tooltip>
         )}
 

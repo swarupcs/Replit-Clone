@@ -102,6 +102,17 @@ export interface TemplateSummary {
 export type ProjectPortsResponse = ApiSuccess<{
   devPort: number;
   ports: number[];
+  /** Where each port is published on the host, keyed by container port —
+   *  `{ 3000: "127.0.0.1:32774" }`.
+   *
+   *  Empty unless the server is running outside a container and publishing on
+   *  loopback, which is the Windows/macOS development case and nothing else. A
+   *  deployment reaches project containers by IP and binds nothing to the host,
+   *  so there is no address here to show or to leak. The editor renders it only
+   *  when it is present, which makes "development only" a property of the
+   *  deployment rather than a flag the UI has to be told about.
+   */
+  hostPorts: Record<number, string>;
 }>;
 
 /** GET /api/v1/projects/templates */

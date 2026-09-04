@@ -698,6 +698,51 @@ export async function getRunningContainer(
   return docker.getContainer(info.Id);
 }
 
+/** Where each of this project's ports is published on the host, when any is.
+ *
+ *  Only `host-loopback` mode publishes anything — a deployment reaches project
+ *  containers by IP and binds nothing to the host at all — so this is empty in
+ *  production by construction rather than by a flag somebody has to remember
+ *  to set. That is what makes it safe to hand to the editor: there is no
+ *  address to leak because there is no address.
+ *
+ *  The addresses are always on 127.0.0.1, so they mean something only on the
+ *  machine running Docker. Shown to a user on that machine they are exactly
+ *  what curl and Postman need; shown to anyone else they are inert.
+ */
+export async function publishedPorts(
+  projectId: string,
+): Promise<Record<number, string>> {
+  if (previewTargetMode !== "host-loopback") return {};
+
+  // Every failure is an empty map, never a throw. This hangs off an endpoint
+  // whose real job is to say which ports a project offers, and an unreachable
+  // Docker daemon must not take that answer down with it — the addresses are a
+  // convenience for curl, and the preview does not need them at all.
+  try {
+    const info = await findContainer(projectId);
+    if (!info || info.State !== "running") return {};
+
+    const inspected = await docker.getContainer(info.Id).inspect();
+    const bindings = inspected.NetworkSettings?.Ports ?? {};
+    const published: Record<number, string> = {};
+
+    for (const [key, hosts] of Object.entries(bindings)) {
+      const host = hosts?.[0];
+      if (!host?.HostPort) continue;
+
+      const container = Number(key.split("/")[0]);
+      if (!Number.isInteger(container)) continue;
+
+      published[container] = `${host.HostIp || "127.0.0.1"}:${host.HostPort}`;
+    }
+
+    return published;
+  } catch {
+    return {};
+  }
+}
+
 /** Ports this project's preview may be pointed at.
  *
  *  Reads `devcontainer.json` rather than the running container's exposed
@@ -708,9 +753,21 @@ export async function getRunningContainer(
  *  signature), so the two cannot disagree for long. While they do, a port
  *  added since the last start is listed and simply has nothing behind it yet.
  */
-export async function previewablePorts(projectId: string): Promise<number[]> {
-  const template = await templateForProject(projectId);
-  return declaredPorts(template, await devcontainerQuietly(projectId));
+export async function previewablePorts(
+  projectId: string,
+  /** The project's template, when the caller already has it.
+   *
+   *  Without this the lookup goes back to the database for a row its caller
+   *  usually just read — and worse, could answer from a DIFFERENT row than the
+   *  one the caller's access check resolved. Two reads of one fact is how they
+   *  come to disagree.
+   */
+  template?: { devPort: number; extraPorts?: number[] },
+): Promise<number[]> {
+  return declaredPorts(
+    template ?? (await templateForProject(projectId)),
+    await devcontainerQuietly(projectId),
+  );
 }
 
 export async function stopContainer(projectId: string): Promise<void> {

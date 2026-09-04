@@ -198,9 +198,12 @@ export const getProjectTree = async ({
   return response.data.data;
 };
 
+/** Derived from the response type rather than restated. The hand-written copy
+ *  that used to be here was a second declaration of one shape, and it drifted
+ *  the moment the server grew a field. */
 export const getProjectPorts = async (
   projectId: string,
-): Promise<{ devPort: number; ports: number[] }> => {
+): Promise<ProjectPortsResponse["data"]> => {
   const response = await axios.get<ProjectPortsResponse>(
     `/api/v1/projects/${projectId}/ports`,
   );
