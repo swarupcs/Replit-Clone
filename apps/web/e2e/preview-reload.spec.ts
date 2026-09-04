@@ -113,7 +113,13 @@ test.describe.serial("preview reload on save", () => {
     await page.keyboard.press("Control+S");
 
     // --- Wait for the run, then show the preview and let it settle on FIRST.
-    await expect(page.getByText("Running", { exact: true })).toBeVisible({
+    // `.first()`: two things legitimately say "Running" -- the status bar's
+    // badge and the run control's -- so an exact-text locator is a strict-mode
+    // violation rather than a wait. Either one appearing is the fact this
+    // asserts, and the status bar is the one a person looks at.
+    await expect(
+      page.getByText("Running", { exact: true }).first(),
+    ).toBeVisible({
       timeout: 90_000,
     });
 

@@ -151,7 +151,13 @@ test.describe.serial("playground flow", () => {
     // --- The dev server. Opening a playground auto-starts it (runSubscribe),
     //  so there is no Run to press — the badge reaching "Running" IS the flow,
     //  container and all.
-    await expect(page.getByText("Running", { exact: true })).toBeVisible({
+    // `.first()`: two things legitimately say "Running" -- the status bar's
+    // badge and the run control's -- so an exact-text locator is a strict-mode
+    // violation rather than a wait. Either one appearing is the fact this
+    // asserts, and the status bar is the one a person looks at.
+    await expect(
+      page.getByText("Running", { exact: true }).first(),
+    ).toBeVisible({
       timeout: 90_000,
     });
 
