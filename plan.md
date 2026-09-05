@@ -104,10 +104,10 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 150 items. Open: 25 — five blocked, ten from §10 that are all
-waiting on one decision (§10.1), seven from §11, which reads the sandbox
+**Done: 151 items. Open: 24 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), six from §11, which reads the sandbox
 rather than the editor, and four from §12, which reads neither and asks what a
-cloud machine is for. Six of §11's seven are blocked on nothing; 11.10 is
+cloud machine is for. Five of §11's six are blocked on nothing; 11.10 is
 the one row §11 has produced that needs a decision before it needs code, and
 12.4 is blocked on hardware rather than on anybody.**
 
@@ -125,13 +125,13 @@ Open, in full, so the shape is visible without scrolling: **no defects**
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, **seven in
-§11** (11.2, 11.4 and 11.8 shipped 2026-09-05, the day after the section was
-written; 11.2 also split 11.10 out of itself, and 11.4 named the wrong
-interaction while doing it — see the rows. 11.9's DOTFILES half shipped the
-same day and its signing half did not, so it is still counted open: a row is
-done or it is not, and half a row counted as done is how a count stops meaning
-anything), and **three in §12** (12.1 and 12.2 both shipped
+an architectural route), **ten in §10 behind that same route**, **six in
+§11** (11.2, 11.4, 11.8 and 11.9 shipped 2026-09-05, the day after the section
+was written; 11.2 also split 11.10 out of itself, and 11.4 named the wrong
+interaction while doing it — see the rows. 11.9 shipped in two commits, its
+dotfiles half and then its signing half, and was counted open in between: a
+row is done or it is not, and half a row counted as done is how a count stops
+meaning anything), and **three in §12** (12.1 and 12.2 both shipped
 2026-09-05, the day the section was written; 12.2 split 12.5 out of itself on
 the way, so the section is one row shorter and one row longer than it started;
 12.4 is unstartable without different hardware and has been set aside).
@@ -4334,8 +4334,8 @@ the per-domain challenge machinery §9.2 split out.
       and `/notifications` already use, which is the only kind nobody can
       forget to apply.
 
-- [ ] **11.9 An identity that follows you into the container.**
-      Two halves. **Dotfiles — shipped 2026-09-05.** Three settings on the
+- [x] **11.9 An identity that follows you into the container.** Shipped
+      2026-09-05, both halves. **Dotfiles.** Three settings on the
       account, deliberately the same three VS Code exposes, cloned into every
       container on creation and applied before the devcontainer's own
       lifecycle commands: a `postCreateCommand` may reasonably assume the
@@ -4370,14 +4370,59 @@ the per-domain challenge machinery §9.2 split out.
       the linker skips `.git`, refuses to clobber a real `~/.bashrc`, and is
       safe to re-run — it runs on every container creation, not once.
 
-      **Commit signing** — still absent. `grep` for `gpgsign`, `ssh-agent` and
-      `SSH_AUTH_SOCK` over `apps/server/src` returns nothing, so commits made
-      here structurally cannot be signed. The table this half will use exists
-      already: the `user_personalization` migration carries `signingKey`,
-      `signingKeyPublic` and `signCommits`, unused, so that the two halves are
-      one schema change rather than two. If 11.1's Route C ships an agent
-      socket, this comes most of the way with it, which is the only dependency
-      between any two rows in this section.
+      **Commit signing — shipped 2026-09-05.** SSH signatures rather than GPG,
+      which is what GitHub, GitLab and Gitea all accept now and what needs no
+      keyring, no agent and no daemon inside a sandbox. An ed25519 key is
+      pasted once, sealed with the same box the push tokens use, and used at
+      commit time; the public half is derived and shown so it can be pasted
+      into GitHub, without which a correctly signed commit still reads as
+      "Unverified" and looks like a failure of this feature.
+
+      Three decisions are worth the ink. The key is written to a private
+      temporary directory under `/tmp` and removed by a `trap` whether the
+      commit worked or not — under `/home/sandbox/app` it would have been in
+      the user's repository, on the host disk, and in `git status`. Nothing is
+      interpolated into that script: the key, the author and the MESSAGE all
+      arrive as environment variables, so a commit message containing a quote,
+      a newline or a `$(...)` is text rather than a command, and the key stays
+      out of `/proc` for every process not owned by the container's user —
+      the same property `pushRemote` already holds for its token. And the
+      signing identity is the COMMITTER's, not the project owner's, for the
+      same reason the attribution already is: a signature is a claim about who
+      made this commit, and signing a collaborator's commit with the owner's
+      key would be a false one.
+
+      Two refusals, both at the point of paste rather than at the first commit.
+      A passphrase-protected key is refused because `ssh-keygen -Y sign` would
+      ask for the passphrase, nothing is at the other end of a `docker exec` to
+      answer, and the commit would HANG rather than fail. And signing cannot be
+      turned on without a key, because "signing is on" with nothing to sign
+      with is a state the account screen could only describe as a bug. Reading
+      those two facts needs the OpenSSH private-key header parsed by hand:
+      Node's `createPrivateKey` throws `DECODER routines::unsupported` on a
+      perfectly good ed25519 key, so it is no help at all. The public half is
+      derived from that same header rather than asked for, and was checked byte
+      for byte against what `ssh-keygen` itself wrote.
+
+      `openssh-client` had to be added to all three sandbox images. Git's SSH
+      backend shells out to `ssh-keygen`, and without it git says
+      "cannot run ssh-keygen" and then "failed to write commit object" — two
+      messages that name a symptom two steps downstream. With a bad key it says
+      "gpg failed to sign the data", naming a tool that is not involved at all.
+      Both phrasings were seen in a real container and both are translated into
+      one sentence that says the thing a person needs: the commit was not made,
+      and the work is still staged.
+
+      Proven by running it. A real project, a real container and the real
+      service path produce a commit that `git log --show-signature` calls a
+      **Good signature**, with a multi-line message and an apostrophe intact,
+      nothing left in the workspace, the key at rest as ciphertext — and, with
+      signing switched off, an ordinary unsigned commit rather than a refusal.
+
+      What is still absent, and deliberately: nothing forwards an `ssh-agent`.
+      A key pasted here is a key this server holds. If 11.1's Route C ships an
+      agent socket, that becomes the better answer and this becomes the
+      fallback — which is the dependency this row always named.
 
 ---
 
@@ -4393,8 +4438,11 @@ Checked against the tree on 2026-09-05, in the manner §5 requires:
 - `searchService.ts:120` — `searchProject` is the only exported search.
 - `grep -ril "totp|twoFactor|mfa"` over `apps/server/src` — no hits.
 - `grep -rn "gpgsign|SSH_AUTH_SOCK|ssh-agent"` over `apps/server/src` — no hits.
-  Still none as of 2026-09-05: 11.9's dotfiles half shipped and its signing
-  half did not, so this line is unchanged rather than stale.
+  **This was true when written and is now the row's own history rather than a
+  fact about the tree**: 11.9 shipped SSH signing the day after, so
+  `gpg.format=ssh` and `user.signingkey` are both in `gitService.ts` now.
+  `ssh-agent` and `SSH_AUTH_SOCK` still return nothing, and that part is
+  deliberate — see the row.
 - `apps/web/public` — two SVGs, no manifest, no service worker.
 - `index.css:1194` — the ≤900px drawer layout exists, contrary to what a
   section about mobile would otherwise have assumed.

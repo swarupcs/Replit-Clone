@@ -235,30 +235,119 @@ export async function unstage(
   }
 }
 
+/** The script that makes a SIGNED commit. plan.md §11.9.
+ *
+ *  A shell script rather than an argv, and only because git's SSH signing
+ *  backend needs the private key as a FILE -- there is no way to hand it one
+ *  on a pipe. So: a private temporary directory, the key written into it with
+ *  `umask 077`, the commit, and a `trap` that removes it whether the commit
+ *  worked or not. `mktemp -d` lands in /tmp, which is deliberately NOT the
+ *  bind mount: a key written under /home/sandbox/app would appear in the
+ *  user's project, on the host disk, and in `git status`.
+ *
+ *  Nothing is interpolated into this script. The key, the public half, the
+ *  author and the message all arrive as environment variables, so a commit
+ *  message containing a quote, a newline or a `$(...)` is text rather than a
+ *  command -- and, per `execCapture`'s own note, the key is out of argv and so
+ *  out of /proc for every process not owned by this container's user.
+ *
+ *  The `.pub` beside the private key is not optional: that is where
+ *  `ssh-keygen -Y sign` looks for the public half rather than deriving it.
+ */
+export function signedCommitScript(): string {
+  return [
+    "set -e",
+    // Before anything is written, not after: a chmod after the fact leaves a
+    // window in which the key is world-readable.
+    "umask 077",
+    "d=$(mktemp -d)",
+    `trap 'rm -rf "$d"' EXIT INT TERM`,
+    // `printf '%s\n'` rather than `echo`, whose handling of a value beginning
+    // with a dash is not portable -- and a private key ends in a newline that
+    // ssh-keygen insists on.
+    `printf '%s\\n' "$RC_SIGNING_KEY" > "$d/key"`,
+    `printf '%s\\n' "$RC_SIGNING_PUB" > "$d/key.pub"`,
+    // -c rather than `git config`, so signing never writes to the repository's
+    // own config on the user's behalf -- the same rule the author already
+    // followed, and it matters more here: a `user.signingkey` left behind
+    // would point at a directory that no longer exists.
+    "git" +
+      ' -c user.name="$RC_NAME"' +
+      ' -c user.email="$RC_EMAIL"' +
+      " -c gpg.format=ssh" +
+      ' -c user.signingkey="$d/key"' +
+      ' commit -S -m "$RC_MESSAGE"',
+  ].join("\n");
+}
+
+/** Runs `signedCommitScript` with everything it needs in the environment. */
+async function signedCommit(
+  projectId: string,
+  message: string,
+  author: { name: string; email: string },
+  signing: { privateKey: string; publicKey: string },
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const container = await ensureContainer(assertValidProjectId(projectId));
+
+  return execCapture(container, ["sh", "-c", signedCommitScript()], {
+    workingDir: APP_DIR,
+    env: {
+      RC_SIGNING_KEY: signing.privateKey,
+      RC_SIGNING_PUB: signing.publicKey,
+      RC_NAME: author.name,
+      RC_EMAIL: author.email,
+      RC_MESSAGE: message,
+    },
+  });
+}
+
 export async function commit(
   projectId: string,
   message: string,
   author: { name: string; email: string },
+  signing?: { privateKey: string; publicKey: string } | null,
 ): Promise<GitCommit[]> {
   const trimmed = message.trim();
   if (!trimmed) throw new BadRequestError("A commit needs a message");
 
-  const { stdout, stderr, exitCode } = await git(projectId, [
-    // -c rather than `git config`, so committing never writes to the repo's
-    // own config on the user's behalf.
-    "-c",
-    `user.name=${author.name}`,
-    "-c",
-    `user.email=${author.email}`,
-    "commit",
-    "-m",
-    trimmed,
-  ]);
+  const { stdout, stderr, exitCode } = signing
+    ? await signedCommit(projectId, trimmed, author, signing)
+    : await git(projectId, [
+        // -c rather than `git config`, so committing never writes to the repo's
+        // own config on the user's behalf.
+        "-c",
+        `user.name=${author.name}`,
+        "-c",
+        `user.email=${author.email}`,
+        "commit",
+        "-m",
+        trimmed,
+      ]);
 
   if (exitCode !== 0) {
     const combined = `${stdout}\n${stderr}`;
     if (/nothing to commit|no changes added/i.test(combined)) {
       throw new BadRequestError("Nothing staged to commit", "NOTHING_STAGED");
+    }
+    // Only in the signing branch, and matching several phrasings, because git
+    // does not have one. With a bad key it says "gpg failed to sign the data",
+    // naming a tool that is not involved; with `ssh-keygen` missing from the
+    // image it says "cannot run ssh-keygen" and then "failed to write commit
+    // object", naming a symptom two steps downstream. Both were seen in a real
+    // container. Either way the commit is unmade and the work is still staged,
+    // which is the part the person needs told.
+    if (
+      signing &&
+      /failed to sign|cannot run ssh-keygen|failed to write commit object/i.test(
+        combined,
+      )
+    ) {
+      throw new BadRequestError(
+        "The commit was not made because it could not be signed. Nothing was " +
+          "lost — your changes are still staged. Check the signing key on " +
+          "your account, or turn signing off to commit without it.",
+        "SIGNING_FAILED",
+      );
     }
     throw new BadRequestError(
       stderr.trim().split("\n")[0] ?? "Commit failed",

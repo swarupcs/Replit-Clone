@@ -5,8 +5,10 @@ import type {
 import { prisma } from "../lib/prisma.js";
 import { BadRequestError } from "../utils/errors.js";
 import { resolveTarget, validateRepoUrl } from "../containers/dotfiles.js";
+import { readOpenSshPrivateKey, SshKeyError } from "../lib/sshKey.js";
+import { isSecretBoxConfigured, open, seal } from "../lib/secretBox.js";
 
-/** One account's dotfiles. plan.md §11.9.
+/** One account's dotfiles and signing key. plan.md §11.9.
  *
  *  A service of its own rather than three more fields on `accountService`,
  *  because the two answer different questions: that one reports what an
@@ -31,12 +33,22 @@ function toPersonalization(
     dotfilesRepo: string | null;
     dotfilesTarget: string | null;
     dotfilesInstall: string | null;
+    signingKeyPublic: string | null;
+    signCommits: boolean;
   } | null,
 ): Personalization {
   return {
     dotfilesRepo: row?.dotfilesRepo ?? null,
     dotfilesTarget: row?.dotfilesTarget ?? null,
     dotfilesInstall: row?.dotfilesInstall ?? null,
+    signingKeyPublic: row?.signingKeyPublic ?? null,
+    // Derived from the PUBLIC half rather than from the private one, and not
+    // only for tidiness: the two are always written together and cleared
+    // together, so this is the same answer -- and it is the answer that does
+    // not require the sealed key to be read out of the database to produce a
+    // boolean nobody needed it for.
+    hasSigningKey: Boolean(row?.signingKeyPublic),
+    signCommits: row?.signCommits ?? false,
   };
 }
 
@@ -53,6 +65,8 @@ export async function getPersonalization(
       dotfilesRepo: true,
       dotfilesTarget: true,
       dotfilesInstall: true,
+      signingKeyPublic: true,
+      signCommits: true,
     },
   });
   return toPersonalization(row);
@@ -85,6 +99,39 @@ export async function dotfilesFor(userId: string): Promise<{
     target: row.dotfilesTarget,
     install: row.dotfilesInstall,
   };
+}
+
+/** The signing identity, for the git service. Null when there is nothing to do.
+ *
+ *  Both conditions, and they are separate on purpose: a key that exists is not
+ *  consent to sign with it, and signing turned on with no key is a setting
+ *  somebody half-finished. Either way the answer is "commit unsigned", which
+ *  is what every commit before this did.
+ *
+ *  Opening the box here rather than at the call site keeps the one place that
+ *  handles plaintext private keys in this file, next to the only place that
+ *  ever seals one.
+ */
+export async function signingFor(
+  userId: string,
+): Promise<{ privateKey: string; publicKey: string } | null> {
+  const row = await prisma.userPersonalization.findUnique({
+    where: { userId },
+    select: { signingKey: true, signingKeyPublic: true, signCommits: true },
+  });
+
+  if (!row?.signCommits || !row.signingKey || !row.signingKeyPublic) {
+    return null;
+  }
+
+  try {
+    return { privateKey: open(row.signingKey), publicKey: row.signingKeyPublic };
+  } catch {
+    // Sealed under a key this deployment no longer has. Signing unsigned is
+    // the right failure: the alternative is a commit that cannot be made at
+    // all because of a configuration change nobody connected to git.
+    return null;
+  }
 }
 
 /** Normalises one nullable text field of an update.
@@ -120,6 +167,9 @@ export async function updatePersonalization(
     dotfilesRepo?: string | null;
     dotfilesTarget?: string | null;
     dotfilesInstall?: string | null;
+    signingKey?: string | null;
+    signingKeyPublic?: string | null;
+    signCommits?: boolean;
   } = {};
 
   const repo = optionalText(update.dotfilesRepo, validateRepoUrl);
@@ -143,6 +193,59 @@ export async function updatePersonalization(
     return value;
   });
   if (install !== undefined) data.dotfilesInstall = install;
+
+  // The key and its public half are written together and cleared together, so
+  // `hasSigningKey` can be read off the public one. Anything that changes that
+  // has to change `toPersonalization` with it.
+  if (update.signingKey !== undefined) {
+    if (update.signingKey === null || !update.signingKey.trim()) {
+      data.signingKey = null;
+      data.signingKeyPublic = null;
+      // Turned off with the key, unless this same request says otherwise.
+      // Leaving `signCommits` true with no key would leave an account in the
+      // one state the settings screen cannot explain.
+      if (update.signCommits === undefined) data.signCommits = false;
+    } else {
+      if (!isSecretBoxConfigured()) {
+        throw new BadRequestError(
+          "This server cannot store a private key: SECRET_ENCRYPTION_KEY is " +
+            "not set. Signing is unavailable until it is.",
+          "SECRETS_UNCONFIGURED",
+        );
+      }
+
+      let publicKey: string;
+      try {
+        publicKey = readOpenSshPrivateKey(update.signingKey).line;
+      } catch (error) {
+        if (error instanceof SshKeyError) {
+          throw new BadRequestError(error.message, "INVALID_KEY");
+        }
+        throw error;
+      }
+
+      data.signingKey = seal(update.signingKey.trim());
+      data.signingKeyPublic = publicKey;
+    }
+  }
+
+  if (update.signCommits !== undefined) {
+    // Refused rather than stored, because "signing is on" with nothing to sign
+    // with would be a lie the account screen would then have to tell.
+    if (update.signCommits && !data.signingKey) {
+      const existing = await prisma.userPersonalization.findUnique({
+        where: { userId },
+        select: { signingKeyPublic: true },
+      });
+      if (!existing?.signingKeyPublic) {
+        throw new BadRequestError(
+          "Add a signing key before turning signing on.",
+          "NO_SIGNING_KEY",
+        );
+      }
+    }
+    data.signCommits = update.signCommits;
+  }
 
   await prisma.userPersonalization.upsert({
     where: { userId },

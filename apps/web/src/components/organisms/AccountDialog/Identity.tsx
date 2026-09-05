@@ -1,26 +1,41 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Form, Input, Typography, message } from "antd";
+import {
+  Alert,
+  Button,
+  Form,
+  Input,
+  Switch,
+  Typography,
+  message,
+} from "antd";
 import {
   getPersonalizationApi,
   updatePersonalizationApi,
 } from "../../../apis/projects.ts";
 
-/** Dotfiles: what follows you into every container you open. plan.md §11.9.
+/** Your identity, in a container that is not your machine. plan.md §11.9.
  *
- *  On the account dialog rather than in a project's settings, because it is a
- *  property of the PERSON. The same repository is cloned into a project
- *  somebody else owns and shared with you, and into one you make tomorrow.
+ *  Two halves of one idea, which is why they share a panel. Dotfiles make the
+ *  SHELL yours; the signing key makes the COMMITS yours. Both are properties
+ *  of the person rather than of any project -- they follow you into a project
+ *  somebody else owns and shared with you, and into one you make tomorrow --
+ *  which is why this lives on the account dialog and not in project settings.
  *
- *  Three fields, and deliberately the same three VS Code exposes, so a
- *  dotfiles repository that works there works here unchanged.
+ *  The dotfiles half is deliberately the same three fields VS Code exposes, so
+ *  a dotfiles repository that works there works here unchanged.
  */
-export function Dotfiles() {
+export function Identity() {
   const queryClient = useQueryClient();
   const [form] = Form.useForm();
   const [dirty, setDirty] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const primed = useRef(false);
+
+  /** Held outside the form, because it is the one field that is never read
+   *  back: the form is primed from the server's answer, and the server's
+   *  answer cannot contain a private key. */
+  const [key, setKey] = useState("");
 
   const { data, isLoading } = useQuery({
     queryKey: ["personalization"],
@@ -49,6 +64,7 @@ export function Dotfiles() {
       queryClient.setQueryData(["personalization"], saved);
       setDirty(false);
       setRefusal(null);
+      setKey("");
       void message.success(
         saved.dotfilesRepo
           ? "Saved. The next container you open will have them."
@@ -140,6 +156,111 @@ export function Dotfiles() {
           Save
         </Button>
       </Form>
+
+      <Typography.Title level={5} style={{ marginTop: 28 }}>
+        Commit signing
+      </Typography.Title>
+      <Typography.Paragraph
+        style={{ color: "var(--rc-text-subtle)", fontSize: 12.5 }}
+      >
+        An SSH key, used to sign the commits you make here. It has to be an
+        OpenSSH key with no passphrase — nothing can be asked for one at the
+        moment a commit is made.
+      </Typography.Paragraph>
+
+      {data?.signingKeyPublic && (
+        <div style={{ marginBottom: 12 }}>
+          {/* Shown so it can be pasted into GitHub's signing-keys page, which
+              is the step without which a correctly signed commit still shows
+              as "Unverified" and reads as a failure of this feature. */}
+          <label htmlFor="rc-signing-public">Public key</label>
+          <Input.TextArea
+            id="rc-signing-public"
+            readOnly
+            autoSize
+            value={data.signingKeyPublic}
+            style={{ marginTop: 4 }}
+          />
+          <Typography.Paragraph
+            style={{
+              color: "var(--rc-text-subtle)",
+              fontSize: 12,
+              marginTop: 4,
+            }}
+          >
+            Add this to GitHub under SSH and GPG keys, as a <b>signing</b> key,
+            or your signed commits will still show as unverified there.
+          </Typography.Paragraph>
+        </div>
+      )}
+
+      <div style={{ marginBottom: 12 }}>
+        <label htmlFor="rc-signing-key">
+          {data?.hasSigningKey ? "Replace the key" : "Private key"}
+        </label>
+        <Input.TextArea
+          id="rc-signing-key"
+          rows={4}
+          value={key}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+          style={{ marginTop: 4 }}
+          onChange={(event) => {
+            setKey(event.target.value);
+          }}
+        />
+        <Typography.Paragraph
+          style={{ color: "var(--rc-text-subtle)", fontSize: 12, marginTop: 4 }}
+        >
+          Make one with <code>ssh-keygen -t ed25519</code> and paste the file
+          without the <code>.pub</code>. It is encrypted before it is stored,
+          and never shown again.
+        </Typography.Paragraph>
+      </div>
+
+      <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+        <Button
+          type="primary"
+          loading={save.isPending}
+          disabled={!key.trim()}
+          onClick={() => {
+            save.mutate({ signingKey: key });
+          }}
+        >
+          {data?.hasSigningKey ? "Replace key" : "Add key"}
+        </Button>
+
+        {data?.hasSigningKey && (
+          <>
+            {/* Off is not the same as gone: somebody pausing signing should not
+                have to paste their key again to resume. */}
+            <label
+              htmlFor="rc-sign-commits"
+              style={{ display: "flex", gap: 8, alignItems: "center" }}
+            >
+              <Switch
+                id="rc-sign-commits"
+                checked={data.signCommits}
+                onChange={(checked) => {
+                  save.mutate({ signCommits: checked });
+                }}
+              />
+              Sign my commits
+            </label>
+
+            <Button
+              danger
+              type="text"
+              onClick={() => {
+                save.mutate({ signingKey: null });
+              }}
+            >
+              Remove key
+            </Button>
+          </>
+        )}
+      </div>
 
       {/* Said here rather than discovered later. A container is only rebuilt
           when something about it changes, so a project already open keeps the

@@ -9,6 +9,11 @@ RUN apt-get update \
         curl \
         git \
         nano \
+        # ssh-keygen, and only for `git commit -S`: git's SSH signing backend
+        # shells out to it. Without this, an account with signing turned on
+        # gets "gpg failed to sign the data" on every commit -- a message that
+        # names the wrong tool and the wrong problem. plan.md §11.9.
+        openssh-client \
         procps \
     && rm -rf /var/lib/apt/lists/*
 

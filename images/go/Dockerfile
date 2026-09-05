@@ -7,6 +7,11 @@ RUN apt-get update \
         curl \
         git \
         nano \
+        # ssh-keygen, and only for `git commit -S`: git's SSH signing backend
+        # shells out to it. The golang image happens to ship it already, so
+        # this is here to keep the three sandbox images saying the same thing
+        # rather than depending on that. plan.md §11.9.
+        openssh-client \
         procps \
     && rm -rf /var/lib/apt/lists/*
 

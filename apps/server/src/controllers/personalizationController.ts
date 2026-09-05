@@ -21,6 +21,12 @@ const updateSchema = z.object({
   dotfilesRepo: z.string().max(500).nullable().optional(),
   dotfilesTarget: z.string().max(500).nullable().optional(),
   dotfilesInstall: z.string().max(500).nullable().optional(),
+
+  // Generous, because an RSA key is several kilobytes and refusing one for
+  // being long would be a confusing way to say "use ed25519". The parser is
+  // what decides whether it is a key.
+  signingKey: z.string().max(20000).nullable().optional(),
+  signCommits: z.boolean().optional(),
 });
 
 export async function getPersonalizationController(

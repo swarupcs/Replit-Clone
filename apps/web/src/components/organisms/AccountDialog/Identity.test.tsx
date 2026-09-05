@@ -32,7 +32,7 @@ vi.mock("../../../apis/projects.ts", () => ({
     updatePersonalization(update) as unknown,
 }));
 
-import { Dotfiles } from "./Dotfiles.tsx";
+import { Identity } from "./Identity.tsx";
 
 // antd's Form reads `matchMedia` for its responsive layout, and jsdom ships
 // none. Nothing here depends on the answer, so a fixed one is enough.
@@ -52,6 +52,9 @@ function settings(over: Partial<Personalization> = {}): Personalization {
     dotfilesRepo: null,
     dotfilesTarget: null,
     dotfilesInstall: null,
+    signingKeyPublic: null,
+    hasSigningKey: false,
+    signCommits: false,
     ...over,
   };
 }
@@ -63,7 +66,7 @@ function show() {
 
   return render(
     <QueryClientProvider client={client}>
-      <Dotfiles />
+      <Identity />
     </QueryClientProvider>,
   );
 }
@@ -79,7 +82,7 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe("the dotfiles panel", () => {
+describe("dotfiles", () => {
   /** The one a `initialValues` version would fail. */
   it("shows what is already saved", async () => {
     getPersonalization.mockResolvedValue(
@@ -192,5 +195,164 @@ describe("the dotfiles panel", () => {
     expect(
       screen.getByText(/Applied when a container is created/),
     ).toBeTruthy();
+  });
+});
+
+describe("commit signing", () => {
+  const PUBLIC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXguBo1EwjQT3vSGsro";
+
+  /** The button is the only way to send a key, and a blank box is not a
+   *  request to do anything. */
+  it("will not send an empty key", async () => {
+    show();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Add key" }).hasAttribute("disabled"),
+      ).toBe(true);
+    });
+  });
+
+  it("sends a pasted key on its own, touching nothing else", async () => {
+    show();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Private key")).toBeTruthy();
+    });
+    fireEvent.change(screen.getByLabelText("Private key"), {
+      target: { value: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add key" }));
+
+    await waitFor(() => {
+      expect(updatePersonalization).toHaveBeenCalled();
+    });
+    const sent = updatePersonalization.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    // Only the key: sending the dotfiles fields as well would let this button
+    // save a half-typed URL somebody had not finished.
+    expect(Object.keys(sent)).toEqual(["signingKey"]);
+  });
+
+  /** The parser's refusals are the point of having a parser. They have to
+   *  reach the person rather than becoming "something went wrong". */
+  it("shows why a key was refused", async () => {
+    updatePersonalization.mockRejectedValue({
+      response: {
+        data: {
+          message:
+            "That key has a passphrase, and nothing here can be asked for one.",
+        },
+      },
+    });
+
+    show();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Private key")).toBeTruthy();
+    });
+    fireEvent.change(screen.getByLabelText("Private key"), {
+      target: { value: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add key" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/has a passphrase/)).toBeTruthy();
+    });
+  });
+
+  /** Nothing offers to turn signing on before there is a key, because the
+   *  server refuses that combination and a switch that always fails is worse
+   *  than no switch. */
+  it("offers no switch until a key exists", async () => {
+    show();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Private key")).toBeTruthy();
+    });
+    expect(screen.queryByLabelText("Sign my commits")).toBeNull();
+  });
+
+  /** The step people miss. A correctly signed commit still shows as
+   *  "Unverified" on GitHub until the public half is added there, which reads
+   *  as this feature being broken. */
+  it("shows the public half and says where it has to go", async () => {
+    getPersonalization.mockResolvedValue(
+      settings({ signingKeyPublic: PUBLIC, hasSigningKey: true }),
+    );
+
+    show();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Public key")).toBeTruthy();
+    });
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Public key").value).toBe(
+      PUBLIC,
+    );
+    expect(screen.getByText(/unverified/i)).toBeTruthy();
+  });
+
+  it("turns signing on without resending the key", async () => {
+    getPersonalization.mockResolvedValue(
+      settings({ signingKeyPublic: PUBLIC, hasSigningKey: true }),
+    );
+
+    show();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Sign my commits")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByLabelText("Sign my commits"));
+
+    await waitFor(() => {
+      expect(updatePersonalization).toHaveBeenCalledWith({
+        signCommits: true,
+      });
+    });
+  });
+
+  /** Off is not gone: pausing signing must not cost somebody their key. */
+  it("keeps the key when signing is switched off", async () => {
+    getPersonalization.mockResolvedValue(
+      settings({
+        signingKeyPublic: PUBLIC,
+        hasSigningKey: true,
+        signCommits: true,
+      }),
+    );
+
+    show();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Sign my commits")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByLabelText("Sign my commits"));
+
+    await waitFor(() => {
+      expect(updatePersonalization).toHaveBeenCalledWith({
+        signCommits: false,
+      });
+    });
+  });
+
+  /** Explicitly null, not an empty string, and not omitted: the API tells
+   *  "clear it" from "leave it alone" by exactly that. */
+  it("removes a key by sending null", async () => {
+    getPersonalization.mockResolvedValue(
+      settings({ signingKeyPublic: PUBLIC, hasSigningKey: true }),
+    );
+
+    show();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Remove key" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Remove key" }));
+
+    await waitFor(() => {
+      expect(updatePersonalization).toHaveBeenCalledWith({ signingKey: null });
+    });
   });
 });

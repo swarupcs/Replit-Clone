@@ -10,7 +10,7 @@ import {
 } from "@replit-clone/shared";
 import { getAccountApi } from "../../../apis/projects.ts";
 import { ApiKeys } from "./ApiKeys.tsx";
-import { Dotfiles } from "./Dotfiles.tsx";
+import { Identity } from "./Identity.tsx";
 import { TrashPanel } from "../TrashPanel/TrashPanel.tsx";
 import { useDeployment } from "../../../hooks/useDeployment.ts";
 
@@ -224,7 +224,7 @@ function hours(seconds: number): string {
 
 export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
   const [tab, setTab] = useState<
-    "usage" | "keys" | "trash" | "dotfiles"
+    "usage" | "keys" | "trash" | "identity"
   >("usage");
 
   const { data, isLoading, error } = useQuery<AccountSummary>({
@@ -259,19 +259,19 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
           // plan.md §11.9. Here because it is a property of the account and
           // not of any one project: the same dotfiles follow you into a
           // project somebody else owns.
-          { label: "Dotfiles", value: "dotfiles" },
+          { label: "Identity", value: "identity" },
         ]}
         value={tab}
         onChange={(value) => {
-          setTab(value as "usage" | "keys" | "trash" | "dotfiles");
+          setTab(value as "usage" | "keys" | "trash" | "identity");
         }}
         style={{ marginBottom: 16 }}
       />
 
       {tab === "keys" ? (
         <ApiKeys />
-      ) : tab === "dotfiles" ? (
-        <Dotfiles />
+      ) : tab === "identity" ? (
+        <Identity />
       ) : tab === "trash" ? (
         <TrashPanel />
       ) : error ? (
