@@ -2594,6 +2594,78 @@ so on a shared one the whole feature is off until somebody sets it.
 
 ---
 
+### 2.43 Since (2026-09-05) — "Latest" built a project the registry no longer described
+
+Reported as "the preview is still not working", and it was: a project built
+with **Latest** rendered "Preview unavailable" while its dev server was plainly
+running in the terminal beside it. Every one of the six Latest recipes had it,
+since the day 2.41 shipped.
+
+**The whole defect in one sentence: Latest replaces the starter's files but
+keeps the template id, and the registry describes the starter.** `registry.ts`
+says so itself, in the comment on `expectsPreviewBase` — *"The starter
+templates are written accordingly."* That sentence was true when it was
+written and became a guess the moment a project could be built by
+`npm create` instead. Three of its facts were then wrong at once:
+
+- The starters' `vite.config` binds `0.0.0.0`; a generated one does not. So
+  Vite listened on `[::1]:5173` **inside** the container while the proxy dials
+  the container's address on the sandbox network. Proven rather than argued:
+  from inside the container `localhost:5173` answered 200 and the container's
+  own `172.25.0.3:5173` was refused.
+- `HOST=0.0.0.0` is in the container's environment — `containerManager.ts`
+  sets it, and the node image's comment says it is there so "dev servers must
+  listen on all interfaces to be reachable from the proxy". **Vite 8 ignores
+  it.** The env var was doing nothing and had been silently doing nothing for
+  however long; the starters worked because their config said `host` outright.
+- `expectsPreviewBase: true` makes the proxy forward `/preview/<id>/`
+  unchanged, and a generated app serves at `/`. That one had not been reached
+  yet, because nothing got past the connection refusal to hit it.
+
+**What 2.41's verification actually established, and what it did not.** It
+recorded "SCAFFOLDING → READY in 31s" and "Vite 8.2.2 against the starter's
+6.1.0" — both true. Nobody loaded the preview. The step that would have caught
+this is one line further on than the step that was run, which is the most
+ordinary way for a verification to be honest and still miss.
+
+**The fix writes the starter's config into the generated project**, and the
+cost is worth stating rather than hiding: a "Latest" project carries a config
+this platform wrote instead of the one its generator produced. It is the
+narrowest deviation available — a generated Vite config contains the framework
+plugin and nothing else, and the starter's contains that too. Copied from the
+committed starter rather than re-stated in code, because the starter's is the
+one known to work and a second copy is the same drift one level down. The dev
+script gets the same flags, redundantly and deliberately: a flag survives
+somebody editing a file we have just told them is theirs.
+
+**The trap inside the fix.** Vite resolves `vite.config.js` before
+`vite.config.ts`, so writing ours as `.ts` beside a generated `.js` would leave
+both on disk and use theirs — a preview that stays broken with the fix
+apparently applied. Every name the framework would resolve is removed first,
+and that is a test rather than a comment.
+
+Five mutants, all caught, including leaving the generated config beside ours
+and letting a failed adaptation throw — which would mark a project FAILED for
+a copy that did not work, when the scaffold itself succeeded. One of the five
+needed a test written after it survived: the unknown-template guard, whose only
+observable effect is not logging an error, because the catch below it already
+made the project untouched either way.
+
+**Verified on the reported project.** After the adaptation, Vite advertised
+`Network: http://172.25.0.3:5173/preview/<id>/`, that address answered 200, the
+served HTML carried `/preview/<id>/src/main.tsx`, and that asset answered 200.
+
+Server: 2283 passing, 296 skipped. Typecheck and lint clean, 3/3.
+
+**Not fixed by this: projects already built with Latest.** The adaptation runs
+during a scaffold, so anything created before it stays broken until its config
+is edited or it is rebuilt. There is no backfill, and it is a real gap rather
+than an oversight — rewriting a config in a project somebody has since edited
+is a different decision from writing one into a project that is thirty seconds
+old.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong

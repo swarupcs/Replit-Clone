@@ -5,6 +5,7 @@ import { increment } from "../lib/metrics.js";
 import { logger } from "../lib/logger.js";
 import { prisma } from "../lib/prisma.js";
 import { claimForSandbox, projectRoot } from "../utils/projectPaths.js";
+import { adaptForPreview } from "./previewContract.js";
 import {
   detectPackageManager,
   detectStartCommand,
@@ -211,6 +212,14 @@ export async function runScaffold(
     // to read what it produced.
     const dir = projectRoot(projectId);
     await claimForSandbox(dir).catch(() => {});
+
+    // Before the directory is read, because it rewrites `scripts.dev` and the
+    // start command below is derived from it.
+    //
+    // A generated project does not know it is going to be served through a
+    // proxy under /preview/<id>/, and the registry's facts about this template
+    // describe the STARTER, which did. See `previewContract`.
+    await adaptForPreview(projectId, recipe.templateId, dir);
 
     // What the scaffolder produced, not what the template assumed. Its own
     // package.json is the authority on how to run it, and its lockfile on how
