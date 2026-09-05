@@ -141,15 +141,20 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 153 items. Open: 22 — five blocked, ten from §10 that are all
-waiting on one decision (§10.1), four from §11, which reads the sandbox
+**Done: 154 items. Open: 21 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), three from §11, which reads the sandbox
 rather than the editor, and three from §12, which reads neither and asks what
-a cloud machine is for. Three of §11's four are blocked on nothing; 11.10 is
+a cloud machine is for. Two of §11's three are blocked on nothing; 11.10 is
 the one row §11 has produced that needs a decision before it needs code, and
 12.4 is blocked on hardware rather than on anybody.**
 
-Those four numbers are 5 + 10 + 4 + 3 = 22, and they are written out because
+Those four numbers are 5 + 10 + 3 + 3 = 21, and they are written out because
 they did not add up once already — see the paragraph below.
+
+**§10.1 is now the whole of the critical path.** Ten of the twenty-one open
+items are behind it, it is a decision rather than work, and as of 2026-09-05 it
+has a third option costed against a real spike rather than an argument. It is
+the single most valuable thing anybody could spend an hour on.
 
 **The Done figure jumped from 123 to 148 in one edit on 2026-09-05, and that
 was a correction rather than a day's work.** By the same count §1 has always
@@ -171,9 +176,9 @@ Open, in full, so the shape is visible without scrolling: **no defects**
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, **four in
-§11** (11.2, 11.4, 11.6, 11.7, 11.8 and 11.9 all shipped 2026-09-05, the day
-after the section was written — six of its eight rows in one day; 11.2 also split 11.10 out of itself, and 11.4 named the
+an architectural route), **ten in §10 behind that same route**, **three in
+§11** (11.1, 11.2, 11.4, 11.6, 11.7, 11.8 and 11.9 all shipped 2026-09-05, the
+day after the section was written — seven of its eight rows in one day; 11.2 also split 11.10 out of itself, and 11.4 named the
 wrong interaction while doing it — see the rows. 11.9 shipped in two commits,
 its dotfiles half and then its signing half, and was counted open in between:
 a row is done or it is not, and half a row counted as done is how a count
@@ -355,12 +360,18 @@ signup.
 
 ### Not built, and honest about why
 
-**Waiting on one decision — the largest single thing here.** Ten rows of
-editor parity (§10.6–§10.14: debugging, extensions, more languages,
-settings-as-files, tasks, a real diff editor, local history, the rest of git,
-and the small ones) are all behind §10.1: Monaco, openvscode-server, or the
-Route C spike §11.1 argues should be run before either is chosen. Building any
-of them before that decision is waste, and that is the whole argument of §10.
+**Waiting on one decision — the largest single thing here, and now ten of the
+twenty-one open items.** Editor parity (§10.6–§10.14: debugging, extensions,
+more languages, settings-as-files, tasks, a real diff editor, local history,
+the rest of git, and the small ones) is all behind §10.1: Monaco,
+openvscode-server, or **Route C** — attach your own editor over SSH. Route C
+is no longer a proposal: §11.1's spike ran on 2026-09-05 and got the real VS
+Code server running inside a sandbox with `ms-python.python`, Pylance and
+debugpy installed, under the platform's full security posture. So the two most
+expensive rows in §10 are reachable for 7 MB of image and one volume, and the
+sentence "Route B can never reach extensions" is no longer true. Building any
+of these by hand before the decision is waste, and that is the whole argument
+of §10.
 
 **Blocked on something outside this repository** (§3.3): a certificate's
 private key, an autoscaler's cost model, a disk budget for snapshots, a backup
@@ -390,8 +401,10 @@ and TOTP enrolment through to a spent recovery code.
 
 **Not run, and load-bearing:** the service worker has never registered — no
 browser available here can — so §11.7's caching behaviour is asserted rather
-than observed. Nobody has put an sshd in a sandbox image and attached a real
-editor to it, which is what §11.1's whole argument rests on.
+than observed. Nobody has driven a real VS Code client through Remote-SSH into
+a sandbox (§11.1's spike reproduced what that client does server-side, which is
+strong evidence and not the same thing), and nothing has been tested behind the
+egress gateway.
 Nobody has run two differently-sized containers on one host and watched the sum
 (§12.1). Nobody has scanned the two-factor QR with a real phone — the RFC 6238
 vectors are the evidence there, and they are good evidence, but they are not
@@ -3975,11 +3988,67 @@ those four is about the platform underneath.
       Code extensions, and no amount of work changes that.** Decision 1 says so
       in its last sentence.
 
+      **Route C — make the workspace attachable, and let the user bring the
+      editor.** Added 2026-09-05 by §11.1, *after the spike that §11 said had
+      to be run first*. An sshd in the sandbox image, a key the account owns,
+      and the user's own VS Code, Cursor, Zed or `nvim` attaches directly. §11.0
+      makes the argument; what follows is what actually happened when it was
+      run, because the argument rested on a claim nobody had tested.
+
+      **It works, under this platform's real security posture.** `sshd` starts
+      as uid 1001 with `CapDrop: ["ALL"]`, `no-new-privileges` and tini as pid
+      1, on a high port with a host key in the home directory — no root, no
+      setuid, no privilege separation needed, because the user it authenticates
+      is the user it already runs as. A key-authenticated session runs commands
+      in the workspace.
+
+      **And the expensive rows really do arrive.** The genuine VS Code server
+      (1.136.1) — the same tarball Remote-SSH fetches — downloads, extracts and
+      starts inside that container: extension host agent up, extensions folder
+      initialised, HTTP answering. `ms-python.python` then installs from the
+      marketplace, bringing **Pylance and debugpy** with it. That is 10.7 and
+      10.6, the two most expensive rows in this section, arriving as working
+      software rather than as a prediction.
+
+      **Three costs the spike found that the argument had not.**
+
+      *The image cost is trivial:* `openssh-server` is 7 MB on a 516 MB image.
+
+      *The disk cost is not.* `~/.vscode-server` reached **1.3 GB** after one
+      extension pack. And it lands in the container's **writable layer** —
+      `Binds` covers `/home/sandbox/app` and `/home/sandbox/.cache` and nothing
+      else — which `reconcileOnBoot` and every environment-signature change
+      throw away. As it stands, attaching would re-download 229 MB and
+      re-install every extension on each container rebuild. The fix is one line
+      (a volume for `~/.vscode-server`, exactly as §2.x did for the package
+      cache) but it has to be *in* the estimate, not discovered afterwards.
+
+      *The spike did not test egress.* It ran on the default bridge with a
+      published port, not on `SANDBOX_NETWORK` behind the egress gateway, and
+      that 229 MB download is the first thing a filtered sandbox would refuse.
+
+      What is still true from §11.0's honest list: Route C does nothing on an
+      iPad, it concedes that the browser editor is not where serious work
+      happens, and it leaves 10.10, 10.12 and 10.14 where they were. Nobody has
+      driven a real VS Code *client* through Remote-SSH into this — the spike
+      reproduced what that client does server-side, which is strong evidence
+      and not the same thing.
+
+      **What this does to the decision.** §10 argued Route B is defensible only
+      if multiplayer is the point, *because Route B can never reach 10.7*. That
+      sentence is now false: 10.7 and 10.6 both arrive over SSH, at a cost of
+      7 MB of image and one volume. So staying on Monaco no longer costs you
+      extensions and debugging, and the browser editor is free to be what it is
+      already good at — the thing you open on a machine you do not control. A
+      and C are not exclusive; Codespaces ships both.
+
       Route B is defensible if the multiplayer layer is the point of this
       product and the personal use is a side effect. Route A is defensible if
-      the personal use is the point. What is not defensible is building
-      10.6–10.14 by hand *while undecided*, which is the failure this row
-      exists to prevent.
+      the personal use is the point — **and it is now the more expensive of the
+      two ways to get there**, since C reaches the same two rows without giving
+      up the editor this repository controls. What is not defensible is
+      building 10.6–10.14 by hand *while undecided*, which is the failure this
+      row exists to prevent.
 
 ---
 
@@ -4269,10 +4338,29 @@ at — the thing you open on a machine you do not control, to fix one file. Rout
 A and Route C are also not exclusive; Codespaces ships both, which is the
 existence proof that the two-item framing was the accident and not the answer.
 
-- [ ] **11.1 Put Route C in front of the §10.1 decision before it is taken.**
-      Not a build — a paragraph in §10.1 and a re-read of its table. Doing it
-      afterwards is how a route gets chosen against a cost that was never the
-      real one.
+- [x] **11.1 Put Route C in front of the §10.1 decision before it is taken.**
+      Shipped 2026-09-05. The paragraph is in §10.1, and it is written against
+      a spike rather than against an argument — which is what this section's
+      own "what was verified" block insisted on, and it was right to.
+
+      **Running it changed the entry.** Three things the argument had not
+      costed: `openssh-server` is 7 MB, which is cheaper than expected;
+      `~/.vscode-server` is 1.3 GB after one extension pack and lands in the
+      container's writable layer, which every rebuild discards, so attaching
+      would re-download 229 MB each time until it gets a volume; and the spike
+      never touched the egress gateway, which is the first thing that would
+      refuse that download. None of the three would have appeared in a
+      paragraph written from the table.
+
+      **What it proved.** sshd runs as uid 1001 under `CapDrop: ["ALL"]` and
+      `no-new-privileges` with no root anywhere; the real VS Code server starts
+      inside that container; and `ms-python.python` installs with Pylance and
+      debugpy. 10.6 and 10.7 — the two most expensive rows in §10 — arrive as
+      working software.
+
+      Still not a build: nothing shipped into the product. An sshd in the
+      sandbox image needs key management, per-account `authorized_keys` and a
+      way in from outside, which is 11.5.
 
 ---
 
@@ -4806,11 +4894,16 @@ which of them changed *is* the record of what shipped.
   `scaffold_recipes` table beside them rather than more directories, which is
   the point of that row.
 
-**Not verified, and load-bearing for 11.1:** nobody has put an sshd in a
-sandbox image and attached a real editor to it. The claim that 10.6 and 10.7
-"arrive complete" is how Remote-SSH works elsewhere, not something this
-repository has demonstrated. It is a day's spike and it should be run **before**
-11.1's paragraph is written into §10.1, because the whole argument rests on it.
+**~~Not verified, and load-bearing for 11.1~~ — run 2026-09-05, and it held.**
+This said nobody had put an sshd in a sandbox image and attached a real editor
+to it, and that the spike had to happen *before* 11.1's paragraph went into
+§10.1. It did, in that order, and the insistence earned its keep: the spike
+found three costs the argument had missed — see 11.1 and §10.1. sshd runs
+unprivileged under the full posture, the genuine VS Code server starts inside
+the container, and `ms-python.python` installs with Pylance and debugpy.
+**What remains untested** is a real VS Code client driven through Remote-SSH
+(the spike reproduced what it does server-side), and the whole thing behind the
+egress gateway rather than on the default bridge.
 
 **A caution, in the spirit of §4 and of §10's own closing note.** §10 warned
 that it had not been validated by anybody using this as their daily editor for
