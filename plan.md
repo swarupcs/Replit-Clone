@@ -104,21 +104,42 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 123 items. Open: 22 — five blocked, ten from §10 that are all
-waiting on one decision (§10.1), and seven from §11, which reads the sandbox
-rather than the editor. Six of those seven are blocked on nothing; 11.10 is
-new, and is the one row §11 has produced that needs a decision before it needs
-code.**
+**Done: 148 items. Open: 26 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), seven from §11, which reads the sandbox
+rather than the editor, and four from §12, which reads neither and asks what a
+cloud machine is for. Six of §11's seven are blocked on nothing; 11.10 is
+the one row §11 has produced that needs a decision before it needs code, and
+12.4 is blocked on hardware rather than on anybody.**
+
+**The Done figure was 123 and is now 148, and that is a correction rather than
+this section's own growth.** By the same count §1 has always used — top-level
+checkboxes in this file — 148 was already true before §12 was written; the Open
+figure beside it was right, which is the tell. It is the exact failure §7's
+second paragraph was added to stop, one section later and in the other column:
+each commit fixed the row it owned and none of them owned the sum. Recorded
+here rather than quietly changed, because a count that moves 25 in one edit is
+otherwise indistinguishable from a section that added 25 items.
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, and **seven in
+an architectural route), **ten in §10 behind that same route**, **seven in
 §11** (11.2, 11.4 and 11.8 shipped 2026-09-05, the day after the section was
 written; 11.2 also split 11.10 out of itself, and 11.4 named the wrong
-interaction while doing it — see the rows).
+interaction while doing it — see the rows), and **four in §12**, of which one
+is worth starting (12.1) and one is unstartable without different hardware
+(12.4).
+
+**§12 was written on 2026-09-05 and adds four.** It is the residue of §10 and
+§11 rather than a third reading of the same ground: §10 asks what Monaco cannot
+do, §11 asks which of the platform's refusals expired at n=1, and §12 asks the
+question neither of those can reach — what a machine in a datacentre does that
+the laptop in front of you does not. Its own closing note argues that this is
+the weakest of the three methods and should be trusted least, because asking
+what a category has produces long lists cheaply. Two of its four rows say in
+their own text that they may have no user here.
 
 **§11 was written on 2026-09-05 and adds nine.** It asks §10's question of
 the platform instead of the editor — the container's refusal list, the idle
@@ -4060,3 +4081,174 @@ the code, and none is the kind of thing that appears on a roadmap. **The most
 likely error in this section is not a wrong row; it is that the container layer
 holds more of these, and they are found by running the thing rather than by
 writing about it.**
+
+---
+
+## 12. What a cloud machine is for
+
+Written 2026-09-05, the same day as §11 and out of the same reading. §11 asked
+what the *sandbox* assumes that stops being true at n=1 and found seven things.
+This section is what is left after that: **four capabilities that are not
+multi-tenant posture at all, and are simply absent.** They did not appear in
+§10 because §10 was written against the parity ledger — it asks what VS Code
+does that Monaco cannot — and none of these is an editor feature. They did not
+appear in §11 because §11 reads refusals and policies, and an absence has no
+refusal string to find.
+
+The organising question is narrower than §10's and §11's, and it is the one a
+person actually asks when deciding to keep a workspace on a server instead of
+on the laptop in front of them: **what can this machine do that the laptop
+cannot?** Everything below is an answer to that and nothing below is an answer
+to anything else. That is also the honest ceiling on this section — none of it
+makes the editor better, and somebody who wants a better editor should read
+§10, or §11.0, which argues the cheapest route to most of §10.
+
+**One correction, recorded because this section exists to be read later.** An
+earlier reading of the tree said container CPU and memory were deployment-wide
+constants with no notion of a personal deployment. That was wrong: `env.ts:382`
+and `env.ts:430` already read `unshared ? 2048 : 512` and `unshared ? 2 : 0.5`,
+which is §10.5's sole-tenant flag doing exactly what §10.4 said it should. The
+gap is real but a size smaller than first stated, and 12.1 is written against
+what is actually there.
+
+---
+
+- [ ] **12.1 A workspace that is not the same size as every other workspace.**
+      The strongest row here, and the only one that is about the *reason* to
+      use a server at all.
+
+      `containerManager.ts:593–597` sizes every project container from
+      `env.CONTAINER_MEMORY_MB` and `env.CONTAINER_CPUS`. §10.5's `unshared`
+      flag already raises those to 2048 MB and 2 CPUs on a personal deployment,
+      so the multi-tenant default is not the problem. **The problem is that
+      there is one number.** Every workspace on the host is the same size, and
+      the thing a cloud machine is *for* — the Rust workspace that wants 8 GB
+      while eleven others idle at 512 MB — cannot be expressed.
+
+      **Read §6 decision 15 carefully before building this, because it is
+      nearly but not quite in the way.** Decision 15 says a plan may promise
+      more of what the platform allocates and must never promise more of what
+      the host has: a "Pro" tier claiming more memory per container than the
+      machine can give is a promise kept by an OOM kill in somebody's terminal.
+      That forbids *selling* a size. It does not forbid a workspace differing
+      from its neighbour, and the two have been treated as one question because
+      only the first was ever asked. The personal case has no tenant to
+      over-promise to; the constraint is arithmetic against one host, which is
+      a sum this server can actually do.
+
+      Which suggests the shape: a per-project size, defaulting to today's
+      constant, refused at the point of setting it if the sum of the sizes of
+      what is *currently running* would exceed what the host has — not a plan
+      entitlement, and not a promise made in advance. `MAX_CONCURRENT_CONTAINERS`
+      is the existing crude version of that sum and would become redundant.
+
+      **Second call site, and it is the one that would be missed.**
+      `containerManager.ts:1187` computes `memoryLimitBytes` for the stats
+      panel from the same global constant. A per-workspace size that did not
+      reach it would show every project a ceiling that is not its own, which is
+      worse than showing none — §2.22's argument about a limit that appears on
+      no pricing page, in a different costume.
+
+- [ ] **12.2 Build before somebody is waiting.** `warmStart.ts` exists and
+      skips the redundant install on a container that already has one, which is
+      the half of this that was worth doing first. What does not exist is
+      anything that builds **ahead of** a session: the first open of a
+      workspace after a dependency change pays the full cost with a person
+      watching it.
+
+      The mechanism is mostly present rather than mostly absent, which is what
+      makes this cheap: there is a scheduler (§2.13), a run reconciler, and a
+      warm-start path that already knows what "already installed" means. What
+      is missing is a trigger and a policy — build on push, or build on a
+      schedule, or build when a `devcontainer.json` changes — and a decision
+      about what happens when a prebuild fails, which should be *nothing
+      visible*: a prebuild that announces its own failure to somebody who was
+      not waiting for it has converted a saved minute into an interruption.
+
+      **Not to be confused with §3.3's process snapshots**, which is a
+      different and genuinely blocked thing. A prebuild produces a warm
+      *image*; a snapshot resumes a running *process*. This row needs no new
+      mechanism and that one needs a mechanism nothing here resembles.
+
+- [ ] **12.3 Notebooks.** Zero occurrences of `notebook` or `ipynb` anywhere in
+      `apps/` or `packages/`. It appears twice in this document, both times
+      inside a parenthetical list of things VS Code has, and has never been a
+      row.
+
+      Listed here rather than in §10 because it is not editor parity in the
+      sense §10 means: a notebook is a document format with an execution model
+      attached, and the execution model is a kernel process in the container —
+      which is this section's subject and not Monaco's. **Worth doing only if
+      you write Python**, and worth saying so plainly rather than carrying it
+      as a neutral gap: for somebody who does not, it is a large feature with
+      no user, and this file has enough of those.
+
+      The honest note is that the sandbox already runs Python and already has
+      an LSP for it (§6 decision 3), so the distance is a kernel protocol and a
+      renderer, not a language.
+
+- [ ] **12.4 A machine with hardware the laptop does not have.** Zero hits for
+      `gpu`, `nvidia`, `cuda` or `DeviceRequests`. Dockerode supports device
+      requests; nothing here passes any.
+
+      Ranked last deliberately, and kept because it is the *purest* form of
+      this section's question — it is the one thing on this page a laptop
+      cannot answer by being a better laptop. It is also the row most likely to
+      be somebody else's product: renting a GPU is a market with incumbents,
+      and a personal IDE that grew one would be competing on the hardware
+      rather than on the editor.
+
+      **Blocked on hardware, not on a decision**, which puts it in §3.3's class
+      rather than this one's — and it is here rather than there only because
+      §3.3 is about this platform's gaps and this is about a machine's. If the
+      host has no GPU the row is unstartable, and if it has one the work is a
+      `DeviceRequests` entry and a plan flag, which is an afternoon.
+
+---
+
+### The pattern these four share, and what it predicts
+
+None of these was found by reading the code. §11's seven came out of
+`devcontainer.ts`'s refusal list, the reaper's condition and `index.ts:83` —
+all of them things the tree says out loud. **These four came out of asking what
+is not there**, which is a question no grep answers and no test fails.
+
+That is worth recording because it is the third distinct method this document
+has used, and the three find different things:
+
+| Method | Finds | Sections |
+|---|---|---|
+| Reading two shipped features against each other | defects | §2.16, §2.20, §2.21 |
+| Reading a policy and asking who it is for | posture that expired | §10.4, §11 |
+| Asking what a category has that this does not | absences | §12 |
+
+The third is the weakest of the three and should be trusted least: it produces
+long lists cheaply, most of an ecosystem's features are not wanted by any
+particular person, and the only defence is the one applied above — say who each
+row is for, and say plainly when the answer is "possibly nobody here". Two of
+these four rows carry that caveat in their own text.
+
+### What was verified for this section
+
+Checked against the tree on 2026-09-05, in the manner §5 requires:
+
+- `containerManager.ts:593`, `:596`, `:597` — `Memory`, `MemorySwap` and
+  `NanoCpus` all read the global `env` values; no per-project term.
+- `containerManager.ts:1187` — `const limit = env.CONTAINER_MEMORY_MB * 1024 *
+  1024`, the second call site named in 12.1.
+- `env.ts:378–382` and `:427–430` — `CONTAINER_MEMORY_MB` defaults to
+  `unshared ? 2048 : 512` and `CONTAINER_CPUS` to `unshared ? 2 : 0.5`;
+  `unshared` is `inDevelopment || soleTenant` (`env.ts:46`). This is the fact
+  that corrected 12.1 downward.
+- `grep -rniE "\bgpu\b|nvidia|DeviceRequests|cuda"` over `apps/server/src` and
+  `packages/shared/src` — **0 hits.**
+- `grep -rniE "notebook|ipynb"` over `apps/server/src`, `apps/web/src` and
+  `packages/shared/src` — **0 hits.**
+- `apps/server/src/containers/warmStart.ts` exists, with tests; nothing in it
+  is triggered by anything but a session starting.
+
+**Not verified, and it is the load-bearing one for 12.1:** nobody has run two
+containers of different sizes on this host and watched the sum. The arithmetic
+argument against decision 15 is a paragraph, not an experiment, and the failure
+mode it is reasoning about — an OOM kill in somebody's terminal — is precisely
+the kind §1 says a mock cannot be trusted about.
