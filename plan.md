@@ -104,7 +104,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 149 items. Open: 25 — five blocked, ten from §10 that are all
+**Done: 150 items. Open: 25 — five blocked, ten from §10 that are all
 waiting on one decision (§10.1), seven from §11, which reads the sandbox
 rather than the editor, and four from §12, which reads neither and asks what a
 cloud machine is for. Six of §11's seven are blocked on nothing; 11.10 is
@@ -128,8 +128,10 @@ autoscaler's cost model, a disk budget for snapshots, a backup destination, and
 an architectural route), **ten in §10 behind that same route**, **seven in
 §11** (11.2, 11.4 and 11.8 shipped 2026-09-05, the day after the section was
 written; 11.2 also split 11.10 out of itself, and 11.4 named the wrong
-interaction while doing it — see the rows), and **three in §12** (12.1 shipped 2026-09-05, the day
-it was written; 12.4 is unstartable without different hardware).
+interaction while doing it — see the rows), and **three in §12** (12.1 and 12.2 both shipped
+2026-09-05, the day the section was written; 12.2 split 12.5 out of itself on
+the way, so the section is one row shorter and one row longer than it started;
+12.4 is unstartable without different hardware and has been set aside).
 
 **§12 was written on 2026-09-05 and adds four.** It is the residue of §10 and
 §11 rather than a third reading of the same ground: §10 asks what Monaco cannot
@@ -2078,6 +2080,68 @@ The one red file is `localRoots.test.ts`, which cannot create a symlink
 (EPERM) on this Windows host and fails identically on a clean checkout —
 confirmed by stashing this branch and running it alone. Environmental, and
 not this work's.
+
+---
+
+### 2.39 Since (2026-09-05) — §12.2, the install nobody watched
+
+Second of §12, and the cheap one: `warmStart` already answered half of this and
+the mechanism it needed was all present. What it does is skip an install that
+would have changed nothing. What it could not do is anything about the case
+where the install *would* change something — pull a branch that adds a
+dependency and the next start pays for a full resolution with somebody watching
+the terminal, after the machine sat idle for twenty minutes.
+
+So: every fifteen minutes, for workspaces that are already running, if the
+dependency fingerprint has drifted from the stamp, run the install now and
+stamp it. The next start then takes the warm path and nobody watched anything.
+
+**The whole design is about when NOT to stamp**, because the two directions
+cost wildly different amounts. A prebuild that does not happen costs a minute
+somebody was going to spend anyway. A stamp claiming an install that did not
+happen makes the next start skip installing and serve against dependencies that
+are not there — silently, which is the failure `warmStart`'s own note says it
+exists to prevent. So the stamp is withheld when the install exits non-zero,
+when it throws, when it is abandoned at the timeout, and — the subtle one —
+**when the fingerprint moved while the install was running**. An install takes
+minutes and a lockfile can move underneath it; stamping the value read before
+the run would vouch for an install that never happened for the files as they
+now stand.
+
+**It reuses `splitStartCommand` rather than reimplementing the parse**, and
+that is load-bearing rather than tidy. That function's allowlist is the only
+thing standing between this and running the *serve* half of somebody's command
+in the background. A command it cannot take apart with certainty returns null
+and nothing is prebuilt — a project carrying `./deploy.sh && npm start` is left
+alone, which is the right answer and not an accident.
+
+**A prebuild that fails tells nobody**, deliberately. Nobody asked for the
+work, so a notification about it failing converts a saved minute into an
+interruption — §6 decision 14's argument one step on. It is a log line and
+three counters (`prebuilds_completed`, `_failed`, `_abandoned`), and
+`prebuilds_completed` against `runs_install_skipped` is how much of the warm
+path was earned here rather than by nothing having changed.
+
+**One at a time across every project**, because the premise is that this runs
+while the machine is quiet, and a background task that makes the foreground
+slower is worse than no background task. Not run on boot either: a restart is
+the one moment several containers come up together.
+
+**What it deliberately does not do is start a stopped container**, which is the
+half that is a decision rather than a line of code — it fights the idle reaper,
+it spends memory the capacity gate is rationing, and on a plan whose workspaces
+never sleep (§11.4) it would leave them running. **§12.5 is that row**, split
+out here the way §11.2 split out §11.10, so this entry cannot be read as having
+closed it.
+
+Six mutants, all caught: stamping a failed install, stamping the pre-install
+fingerprint, running a command it could not take apart, prebuilding a trashed
+or taken-down project, ignoring a deleted `node_modules`, and prebuilding a
+workspace that is not running.
+
+Server: 1936 passing, 296 skipped — no database here. Web: 1117 passing.
+Typecheck and lint clean, 3/3. `localRoots.test.ts` stays red on this Windows
+host over symlink EPERM, identically on a clean checkout.
 
 ---
 
@@ -4228,7 +4292,11 @@ what is actually there.
       worse than showing none — §2.22's argument about a limit that appears on
       no pricing page, in a different costume.
 
-- [ ] **12.2 Build before somebody is waiting.** `warmStart.ts` exists and
+- [x] **12.2 Build before somebody is waiting.** Shipped 2026-09-05 — see
+      §2.39, which took the running-workspace half and split the rest out as
+      12.5. Original note follows.
+
+      `warmStart.ts` exists and
       skips the redundant install on a container that already has one, which is
       the half of this that was worth doing first. What does not exist is
       anything that builds **ahead of** a session: the first open of a
@@ -4248,6 +4316,34 @@ what is actually there.
       different and genuinely blocked thing. A prebuild produces a warm
       *image*; a snapshot resumes a running *process*. This row needs no new
       mechanism and that one needs a mechanism nothing here resembles.
+
+- [ ] **12.5 Start a stopped workspace to build it.** Split out of 12.2 on
+      2026-09-05, the way 11.10 was split out of 11.2 — and for the same
+      reason: building it revealed which half was a line of code and which was
+      a decision nobody has taken.
+
+      12.2 prebuilds workspaces that are **already running**, which covers the
+      case it was written for (a `git pull` that adds a dependency while you
+      have the project open) and not the one its own title describes. The first
+      open of a workspace that has been stopped all week still pays the full
+      install with somebody watching.
+
+      **Three things collide here and none of them is code.** Starting a
+      container to build it spends memory the capacity gate is rationing, on
+      work nobody asked for, at a moment the host may want that memory for a
+      workspace somebody is actually opening. It fights the idle reaper, which
+      exists to stop exactly this. And on the personal plan, whose workspaces
+      never sleep (§11.4), nothing would stop it again afterwards — so a
+      prebuild would silently convert a stopped workspace into a running one,
+      which is a change to what the machine costs rather than to how fast it
+      opens.
+
+      The shape of an answer is probably: only when the host is below some
+      fraction of its budget, only for workspaces opened recently enough to be
+      likely to be opened again, and stop it afterwards unless the plan says
+      otherwise. All three of those are numbers somebody has to choose, and
+      choosing them without having watched a real host is how a background task
+      becomes the reason a machine is always busy.
 
 - [ ] **12.3 Notebooks.** Zero occurrences of `notebook` or `ipynb` anywhere in
       `apps/` or `packages/`. It appears twice in this document, both times

@@ -16,6 +16,16 @@ export type CounterName =
   // install half of the command out. Against `runs_started`, this is how much
   // of the warm-start path is actually being taken.
   | "runs_install_skipped"
+  // Installs done ahead of a session rather than in front of one (§12.2).
+  // Against `runs_install_skipped`, this says how much of the warm-start path
+  // was earned by a prebuild rather than by nothing having changed.
+  | "prebuilds_completed"
+  // A prebuild that exited non-zero, or threw. Deliberately not notified --
+  // nobody asked for the work -- so this counter is the only place it shows.
+  | "prebuilds_failed"
+  // Gave up after the install timeout. The stamp is untouched, so the next
+  // real start installs exactly as it would have.
+  | "prebuilds_abandoned"
   | "runs_failed"
   | "preview_errors"
   | "preview_upgrades_rejected"

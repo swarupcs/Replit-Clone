@@ -60,6 +60,7 @@ import {
   stopAllContainers,
   setOnProjectReaped,
 } from "./containers/containerManager.js";
+import { sweepPrebuilds } from "./containers/prebuild.js";
 import { ensureEgressGateway } from "./containers/egressGateway.js";
 import { reconcileDeployments, restoreServices } from "./service/deployService.js";
 import { recheckDomains } from "./service/customDomainService.js";
@@ -343,6 +344,29 @@ function startTokenPrune(): void {
  *  not stop the sweep -- one stuck project holding every other account's disk
  *  is a far worse outcome than one project that needs looking at by hand.
  */
+/** Installs dependencies that have moved, before somebody waits for them.
+ *
+ *  plan.md §12.2. Every fifteen minutes rather than hourly: the case this
+ *  exists for is a `git pull` that adds a dependency, and an hour is long
+ *  enough that the next start would usually beat it to the work. Only
+ *  workspaces that are already running are considered -- starting a stopped
+ *  one to build it is §12.5, and is a decision rather than a line of code.
+ */
+function startPrebuildSweep(): void {
+  const sweep = (): void => {
+    void sweepPrebuilds().catch((error: unknown) => {
+      // Nothing is waiting on this, so a failure is a log line and not an
+      // incident.
+      logger.info("could not sweep prebuilds", { error });
+    });
+  };
+
+  // Not on boot. A restart is the one moment several containers come up at
+  // once, and adding an install to each of them is the opposite of what this
+  // is for.
+  setInterval(sweep, 15 * 60 * 1000).unref();
+}
+
 function startTrashSweep(): void {
   const sweep = (): void => {
     void purgeExpiredTrash().catch((error: unknown) => {
@@ -554,6 +578,7 @@ async function start(): Promise<void> {
   startComputeMeter();
   startTokenPrune();
   startTrashSweep();
+  startPrebuildSweep();
   startGraceSweep();
   startDomainRecheck();
   startJobSweeper();
