@@ -2710,13 +2710,11 @@ what follows the script name and warns about a `--` it does not need. That is
 per-manager, so it lives beside the per-manager install and run commands that
 2.40 already put there.
 
-**One thing this does not fix, and it is not an oversight.** Next has no flag
-for `basePath` — it is config-only. So an imported Next app gets its host bound
-and still serves `/_next/...` outside the preview prefix. Fixing that means
-either editing their `next.config`, which is the thing this path exists not to
-do, or making `expectsPreviewBase` a per-project column, which is the larger
-change that was considered and not taken. It is written down here rather than
-discovered later.
+**One thing this does not fix.** Next has no flag for `basePath` — it is
+config-only. So an imported Next app gets its host bound and still serves
+`/_next/...` outside the preview prefix. **Fixed in 2.45, and the reason given
+here for deferring it was half wrong**: the per-project column named as the
+alternative would not have been enough on its own.
 
 **The other limitation, stated plainly:** these flags arrive through the
 **stored start command**, so they apply when a project is started by Run. A dev
@@ -2736,6 +2734,79 @@ network address, emitted `src="/preview/<id>/src/main.tsx"` in its HTML, and
 served that asset with a 200. Nothing but the flags did that.
 
 Server: 2294 passing, 296 skipped. Typecheck and lint clean, 3/3.
+
+---
+
+### 2.45 Since (2026-09-05) — the column, and the half of the answer it was not
+
+2.44 said an imported Next app could be fixed by making `expectsPreviewBase` a
+per-project column instead of a per-template fact. **That was half right, and
+the half it got wrong is the interesting one.**
+
+Next emits `/_next/...` absolutely and has no flag for `basePath`. Set the
+column to false and the proxy strips the prefix, so Next's *pages* resolve —
+and every asset on them is then requested at the **origin root**, where the only
+thing listening was a 404 saying this origin serves previews. `registry.ts` had
+said so all along, in the sentence under `expectsPreviewBase`: *"Prefix-stripping
+only works for apps whose assets use relative URLs; an absolute /styles.css
+would escape the prefix."* The column moves the failure; it does not remove it.
+
+So both halves. **`Project.expectsPreviewBase` is nullable and null means "ask
+the template"** — which is what almost every project still says, because a
+starter and an adapted scaffold were both built to match. It is set only where
+the flags of 2.44 could not deliver the base, which today is exactly Next.
+`canSetPreviewBase` is that question, asked of the same dev script
+`detectStartCommand` will run — `devScriptOf` is exported so the two cannot
+choose differently.
+
+**And `createPreviewAssetRoute` serves the assets that then land at the root.**
+The project comes from the `Referer`, which for a same-origin subresource is
+the preview document that asked for it — not from the cookie, because somebody
+with two previews open has one cookie and two projects, and guessing between
+them serves one project's assets into the other's page. **The Referer selects;
+it never authorises.** `authorisePreview` runs exactly as on the ordinary route,
+so a forged one reaches only a project the cookie already opens, and it widens
+nothing a sandboxed app could not already do: every preview shares this origin,
+so a project's own script can already fetch `/preview/<other>/` directly.
+
+**A test caught a real defect in the first version of this.** It was written as
+a guard chained ahead of the proxy in one `app.use`. Express runs the handlers
+in a `use` in order, so calling `next()` to *decline* landed on the next handler
+in that same chain — the proxy — which has no target for the request and dials
+its dead fallback address. Every request this origin could not identify would
+have answered 502 instead of the 404 that says what the origin is for. Building
+the route around the proxy and calling it explicitly makes declining mean one
+thing. The refusal tests now assert the proxy was never reached, which is the
+assertion that would have caught it.
+
+**A second thing the tests caught, about the tests.** The first draft mocked
+`authorisePreview` by spying on the module's namespace, which never intercepts
+a call the module makes through its own binding. Three tests failed outright —
+and one REFUSAL test passed while the mock was broken, because the real check
+rejected a token the fake had never issued. It declined for a reason the test
+was not about. **A refusal test that cannot tell "refused for my reason" from
+"refused for any reason" is not testing anything**, which is worth writing down
+because nothing about it looks wrong.
+
+Ten mutants, all caught: ignoring the project's own answer, defaulting a
+missing project to keeping the prefix, trusting a cross-origin Referer,
+authorising nobody, dropping the CSP, proxying to a dead dev server, serving on
+a path with no project in it, claiming Next accepts a base flag, and treating a
+script that merely mentions `next dev` as Next.
+
+One line is inert and is labelled as such rather than left looking
+load-bearing: `keepsPrefix.set(req, false)` on this route cannot change the
+outcome, because at the origin root `req.originalUrl` and the path the proxy
+computes are the same string. It is set so the intent survives being mounted
+somewhere else.
+
+Server: 2317 passing, 296 skipped. Typecheck and lint clean, 3/3. The migration
+is applied — 38 now, `migrate status` clean.
+
+**Still not verified against a real imported Next app.** The pieces are tested
+and the migration is real, but nobody has imported a Next repository and loaded
+its preview. That needs a GitHub import, and it is the same one-step-further
+gap 2.43 was written about.
 
 ---
 

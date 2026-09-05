@@ -10,6 +10,14 @@ vi.mock("./routes/preview.js", () => ({
   // Stands in for the proxy: answers with something identifiable so the route
   // can be seen to have been reached.
   previewGuard: ((_req, _res, next) => next()) as RequestHandler,
+  // The root-asset route. Built around the proxy, and either serves through
+  // it or declines to `next()` -- so the 404 below still answers everything
+  // this origin cannot identify, which is most of what this file is about.
+  createPreviewAssetRoute: ((proxy: RequestHandler) =>
+    ((req, res, next) =>
+      req.headers["x-pretend-asset"]
+        ? proxy(req, res, next)
+        : next()) as RequestHandler) as unknown as RequestHandler,
   installPreviewUpgrade: () => undefined,
 }));
 
@@ -88,5 +96,32 @@ describe("cross-origin headers", () => {
     );
 
     expect(response.headers["cross-origin-resource-policy"]).toBeUndefined();
+  });
+});
+
+describe("a root-relative asset belonging to a preview", () => {
+  /** Next emits `/_next/...` absolutely and has no flag for `basePath`, so its
+   *  page loads under /preview/<id>/ and every asset on it is then asked for
+   *  at the origin root. Before this route that was a 404 saying the origin
+   *  serves previews -- true, and the reason an imported Next app showed a
+   *  blank page. */
+  it("reaches the proxy when the guard claims it", async () => {
+    const response = await request(createPreviewServer(proxy))
+      .get("/_next/static/chunks/main.js")
+      .set("x-pretend-asset", "1");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain("the project's app");
+  });
+
+  /** The guard declines whenever it cannot identify the preview confidently,
+   *  and this origin must keep saying so for everything that is not one. */
+  it("still 404s when the guard cannot claim it", async () => {
+    const response = await request(createPreviewServer(proxy)).get(
+      "/_next/static/chunks/main.js",
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.body.message).toContain("previews only");
   });
 });

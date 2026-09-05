@@ -3,6 +3,8 @@ import {
   detectPackageManager,
   detectStartCommand,
   previewFlagsFor,
+  canSetPreviewBase,
+  devScriptOf,
   detectTemplate,
 } from "./repoImportService.js";
 
@@ -300,5 +302,51 @@ describe("the flags reaching the start command", () => {
     expect(
       detectStartCommand({ scripts: { dev: "node server.js" } }, "npm", BASE),
     ).toBe("npm install && npm run dev");
+  });
+});
+
+describe("whether the base can be delivered as a flag at all", () => {
+  /** Vite can be told; Next cannot -- `basePath` is config-only. That single
+   *  difference is why an imported Next app needs the proxy to strip the
+   *  prefix while an imported Vite app does not. */
+  it("says yes for Vite", () => {
+    expect(canSetPreviewBase("vite")).toBe(true);
+    expect(canSetPreviewBase("vite --port 4000")).toBe(true);
+  });
+
+  it("says no for Next, which has no flag for it", () => {
+    expect(canSetPreviewBase("next dev")).toBe(false);
+    expect(canSetPreviewBase("next dev --turbo")).toBe(false);
+  });
+
+  /** "Change nothing" is the safer default: an unknown dev server is more
+   *  likely a plain server serving relative paths than a bundler, and the
+   *  template's own answer is a better guess than one made here. */
+  it("changes nothing for a tool it does not know", () => {
+    expect(canSetPreviewBase("node server.js")).toBe(true);
+    expect(canSetPreviewBase("")).toBe(true);
+  });
+
+  it("is not fooled by a script that merely mentions next", () => {
+    expect(canSetPreviewBase(`concurrently "next dev" "node api"`)).toBe(true);
+  });
+});
+
+describe("the dev script a project would be started with", () => {
+  /** Exported so `canSetPreviewBase` asks about the SAME script the start
+   *  command runs. Deriving the choice twice is how the two disagree. */
+  it("picks a dev server ahead of start, which usually means production", () => {
+    expect(devScriptOf({ scripts: { start: "next start", dev: "next dev" } })).toBe(
+      "next dev",
+    );
+  });
+
+  it("falls back through develop and serve", () => {
+    expect(devScriptOf({ scripts: { serve: "vite preview" } })).toBe("vite preview");
+  });
+
+  it("is null when there is nothing to run", () => {
+    expect(devScriptOf(null)).toBeNull();
+    expect(devScriptOf({ scripts: {} })).toBeNull();
   });
 });

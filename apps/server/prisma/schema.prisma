@@ -854,6 +854,17 @@ model Project {
   /// path, and why `reconcileScaffolds` exists: a restart mid-scaffold would
   /// otherwise leave the row saying SCAFFOLDING for ever. plan.md §2.26 is the
   /// record of that exact bug happening twice already.
+  /// Whether THIS project's dev server serves under the proxy's
+  /// /preview/<id>/ prefix, overriding what its template says.
+  ///
+  /// Null means "whatever the template says", which is right for a starter and
+  /// for a scaffold the preview contract has adapted -- both were built to
+  /// match. It is set only where that assumption is known to be false: an
+  /// imported repository whose framework cannot be told a base on the command
+  /// line, which today means Next. Vite imports do not need it, because
+  /// `previewFlagsFor` passes them `--base`.
+  expectsPreviewBase Boolean?
+
   scaffoldStatus ScaffoldStatus @default(READY)
 
   /// What the scaffolder said, when it failed.

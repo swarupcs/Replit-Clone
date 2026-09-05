@@ -17,6 +17,8 @@ import {
   detectPackageManager,
   detectStartCommand,
   detectTemplate,
+  canSetPreviewBase,
+  devScriptOf,
   inspectDirectory,
 } from "./repoImportService.js";
 import { previewBaseFor } from "./previewContract.js";
@@ -125,6 +127,14 @@ export async function openLocalFolderService(
     previewBaseFor(template, projectId),
   );
 
+  // Same rule as the import path: false only where the flags could not carry
+  // the base, so the proxy strips the prefix instead.
+  const expectsPreviewBase =
+    previewBaseFor(template, projectId) !== null &&
+    !canSetPreviewBase(devScriptOf(packageJson) ?? "")
+      ? false
+      : null;
+
   const project = await prisma.project.create({
     data: {
       id: projectId,
@@ -133,6 +143,7 @@ export async function openLocalFolderService(
       template,
       localPath: root,
       startCommand,
+      ...(expectsPreviewBase === null ? {} : { expectsPreviewBase }),
     },
   });
 

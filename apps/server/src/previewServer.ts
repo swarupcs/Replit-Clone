@@ -5,6 +5,7 @@ import helmet from "helmet";
 import { installPreviewUpgrade, previewGuard } from "./routes/preview.js";
 import type { PreviewProxy } from "./routes/preview.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
+import { createPreviewAssetRoute } from "./routes/preview.js";
 import { requestLogger } from "./middlewares/requestLogger.js";
 import { logger } from "./lib/logger.js";
 
@@ -62,6 +63,13 @@ export function createPreviewServer(previewProxy: PreviewProxy): Server {
   app.use(requestLogger);
 
   app.use("/preview/:projectId", previewGuard, previewProxy);
+
+  // A root-relative asset belonging to the preview above it. An app that emits
+  // absolute URLs -- Next's /_next/..., a Flask app's /static/... -- asks for
+  // them here rather than under the prefix, and the 404 below is what used to
+  // answer. See `previewAssetGuard`; it falls through to that 404 whenever it
+  // cannot identify the preview confidently.
+  app.use(createPreviewAssetRoute(previewProxy));
 
   // Anything else on this origin is not a preview. Said plainly, because an
   // API call landing here is a misconfiguration worth seeing rather than a

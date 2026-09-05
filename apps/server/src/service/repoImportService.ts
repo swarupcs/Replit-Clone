@@ -215,6 +215,25 @@ const PREVIEW_FLAGS: {
   },
 ];
 
+/** Whether this dev script's tool can be told the preview base on the command
+ *  line at all.
+ *
+ *  Vite can (`--base`). Next cannot -- `basePath` is config-only -- so an
+ *  imported Next app cannot be made to serve under the prefix without editing
+ *  a file this path deliberately does not touch. The answer for those is the
+ *  other direction: record `expectsPreviewBase: false` on the project so the
+ *  proxy strips the prefix instead, and let `previewAssetGuard` catch the
+ *  absolute asset URLs that then land at the origin root.
+ *
+ *  A tool this does not recognise returns true, which means "change nothing".
+ *  An unknown dev server is more likely to be a plain server serving relative
+ *  paths than a bundler, and its template's own answer is a better guess than
+ *  one made here.
+ */
+export function canSetPreviewBase(script: string): boolean {
+  return !/^next\s+dev(\s|$)/.test(script.trim());
+}
+
 /** The flags for one dev script, or none when its tool is not one we know.
  *
  *  Exported for its tests: the interesting cases are the ones where it must
@@ -224,6 +243,21 @@ export function previewFlagsFor(script: string, base: string | null): string[] {
   const trimmed = script.trim();
   const rule = PREVIEW_FLAGS.find((entry) => entry.matches.test(trimmed));
   return rule ? rule.flags(base) : [];
+}
+
+/** The dev script a project would be started with, by the same rules
+ *  `detectStartCommand` uses. Exported so a caller can ask about the script
+ *  itself -- `canSetPreviewBase` needs it -- without re-deriving the choice
+ *  and risking the two disagreeing. */
+export function devScriptOf(
+  packageJson: { scripts?: Record<string, string> } | null,
+): string | null {
+  const scripts = packageJson?.scripts;
+  if (!scripts) return null;
+  const chosen = ["dev", "develop", "start", "serve"].find(
+    (name) => typeof scripts[name] === "string" && scripts[name].trim(),
+  );
+  return chosen ? (scripts[chosen] ?? null) : null;
 }
 
 export function detectStartCommand(
@@ -449,12 +483,23 @@ export async function importRepository(
       previewBaseFor(template, project.id),
     );
 
-    if (template !== IMPORT_TEMPLATE || startCommand) {
+    // False only where the flags above could not deliver the base, which
+    // today means Next: the proxy strips the prefix instead, and
+    // `previewAssetGuard` catches the absolute asset URLs that then arrive at
+    // the origin root. Left null otherwise, so the template keeps answering.
+    const expectsPreviewBase =
+      previewBaseFor(template, project.id) !== null &&
+      !canSetPreviewBase(devScriptOf(packageJson) ?? "")
+        ? false
+        : null;
+
+    if (template !== IMPORT_TEMPLATE || startCommand || expectsPreviewBase !== null) {
       await prisma.project.update({
         where: { id: project.id },
         data: {
           template,
           ...(startCommand ? { startCommand } : {}),
+          ...(expectsPreviewBase === null ? {} : { expectsPreviewBase }),
         },
       });
     }

@@ -40,10 +40,19 @@ function requestedPort(raw: unknown): number | undefined {
   return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
 }
 
-async function expectsPreviewBase(projectId: string): Promise<boolean> {
+/** Whether this project's dev server serves under the /preview/<id>/ prefix.
+ *
+ *  **The project's own answer wins over its template's.** The template's is
+ *  right for a starter and for a scaffold the preview contract has adapted --
+ *  both were built to match it. It is a guess for anything else, and 2.43 is
+ *  the story of that guess being wrong. `expectsPreviewBase` on the row is how
+ *  a project says so: null means "ask the template", which is what almost
+ *  every project still says.
+ */
+export async function expectsPreviewBase(projectId: string): Promise<boolean> {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) return false;
-  return getTemplate(project.template).expectsPreviewBase;
+  return project.expectsPreviewBase ?? getTemplate(project.template).expectsPreviewBase;
 }
 
 /** The CSP every preview response carries — ours, never the dev server's.
@@ -284,6 +293,97 @@ export function createPreviewProxy(health?: {
 export function extractProjectId(urlOrPath: string): string | undefined {
   const match = /\/preview\/([0-9a-f-]{36})/i.exec(urlOrPath);
   return match?.[1];
+}
+
+/** Serves a root-relative asset for the preview the browser is looking at.
+ *
+ *  **Without this, stripping the prefix does not actually work**, and the
+ *  registry has said so all along: *"Prefix-stripping only works for apps whose
+ *  assets use relative URLs; an absolute /styles.css would escape the prefix."*
+ *  That sentence is the reason a per-project `expectsPreviewBase` was not on
+ *  its own enough to fix an imported Next app. Next emits `/_next/...`
+ *  absolutely and has no flag for `basePath`, so its page loads from
+ *  `/preview/<id>/` and every asset on it is then requested at the ORIGIN
+ *  root, where the only thing listening is a 404 saying this origin serves
+ *  previews.
+ *
+ *  The project comes from the `Referer`, which for a same-origin subresource
+ *  is the preview document that asked for it. Not from the cookie: a person
+ *  with two previews open has one cookie and two projects, and guessing
+ *  between them would serve one project's assets into the other's page.
+ *
+ *  **The Referer selects; it never authorises.** `authorisePreview` runs
+ *  exactly as it does on the ordinary route, so a forged one reaches only a
+ *  project the cookie already opens. It also cannot widen what a sandboxed app
+ *  can read: every preview shares this origin, so a project's own script can
+ *  already `fetch("/preview/<other>/")` directly.
+ *
+ *  Falls through to the 404 whenever it cannot answer confidently -- no
+ *  Referer, a cross-origin one, or a path with no project in it.
+ */
+export function createPreviewAssetRoute(proxy: PreviewProxy): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    void (async () => {
+      try {
+        const referer = req.headers.referer;
+        if (!referer) return next();
+
+      // Same-origin only. A Referer from anywhere else is not a preview page
+      // of ours, whatever its path happens to spell.
+        const host = req.headers.host;
+        let parsed: URL;
+        try {
+          parsed = new URL(referer);
+        } catch {
+          return next();
+        }
+        if (!host || parsed.host !== host) return next();
+
+        const projectId = extractProjectId(parsed.pathname);
+        if (!projectId) return next();
+
+        const cookies = req.cookies as Record<string, string> | undefined;
+        await authorisePreview(projectId, cookies?.[PREVIEW_COOKIE_NAME]);
+
+        // The page it belongs to chose the port; the asset request carries no
+        // query of its own to say so.
+        const target = await resolveTarget(
+          projectId,
+          requestedPort(parsed.searchParams.get("port") ?? undefined),
+        );
+        if (!target) return next();
+
+        res.setHeader("Content-Security-Policy", previewCsp);
+        targets.set(req, target);
+        // The dev server asked for this path at its own root, which is exactly
+        // what it sent the browser. Forward it unchanged.
+        //
+        // Inert as things stand, and said rather than left to look
+        // load-bearing: this is mounted at the origin root, so
+        // `req.originalUrl` and the path the proxy computes are the same
+        // string and `pathRewrite` returns the same either way. Mutating it to
+        // `true` changes nothing and no test can catch that. It is set so the
+        // intent survives being mounted anywhere else.
+        keepsPrefix.set(req, false);
+
+        // **Calls the proxy itself rather than falling through to it.**
+        //
+        // This began as a guard chained ahead of the proxy in one `app.use`,
+        // which is wrong in a way a test caught: `next()` to DECLINE lands on
+        // the next handler in that same chain, which was the proxy -- so every
+        // request this origin could not identify was proxied to the router's
+        // dead fallback address and answered 502 instead of the 404 that says
+        // what this origin is for. Dispatching here makes declining mean one
+        // thing.
+        proxy(req, res, next);
+      } catch {
+        // Unauthorised, or the container is not up. The 404 is the right
+        // answer either way, and a preview asset is not the place to explain
+        // authentication.
+        next();
+      }
+    })();
+  };
 }
 
 /** The proxy middleware, which also exposes an upgrade handler. */
