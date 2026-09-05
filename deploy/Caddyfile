@@ -1,0 +1,71 @@
+# The reverse proxy that puts this platform on a real name, with TLS.
+#
+# plan.md §11.5. Used by docker-compose.expose.yml; see docs/EXPOSING.md for
+# what has to be true before it works and for the tunnel alternative, which is
+# very likely the right answer for a machine behind NAT.
+#
+# Three names, because this platform serves three things that must not share an
+# origin — the editor, the API, and project previews. That is not a preference:
+# a preview is arbitrary code the user is running, and on the API's origin it
+# could mint itself a session from the refresh cookie. `config/env.ts` argues
+# it at length; this file is that argument as hostnames rather than as ports.
+#
+# Set DOMAIN and ACME_EMAIL in a .env beside the compose file.
+{
+	email {$ACME_EMAIL}
+	# Uncomment to use Let's Encrypt's staging CA while getting this working.
+	# Its certificates are untrusted by browsers, but its rate limits are not
+	# the ones that lock you out for a week.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# The editor. Static files out of the web image's nginx.
+ide.{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:80
+}
+
+# The API, the terminal WebSocket and the socket.io connection. Caddy proxies
+# WebSocket upgrades with no configuration, which is most of why it is the
+# recommendation here.
+api.{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy server:3000
+}
+
+# Project previews, on an origin of their own. The editor frames this, and the
+# preview cookie reaches it because COOKIE_DOMAIN is set to {$DOMAIN} — a
+# host-only cookie set on api.{$DOMAIN} would never arrive here, and every
+# preview would be refused. The server refuses to start if that is misset; see
+# config/exposure.ts.
+#
+# No `encode` here: a preview proxies a user's own dev server, which sets its
+# own content types and its own encodings, and HMR is a stream.
+preview.{$DOMAIN} {
+	reverse_proxy server:3001
+}
+
+# Published sites, at <label>.{$SITES_DOMAIN}.
+#
+# Commented out because it needs two things this file cannot supply on its own:
+#
+#   1. A WILDCARD certificate, which requires the DNS-01 challenge, which
+#      requires a Caddy build carrying your DNS provider's plugin. The stock
+#      `caddy:2-alpine` image has none, so uncommenting this against it gets a
+#      certificate error rather than a site. Build one with, e.g.:
+#        FROM caddy:2-builder AS build
+#        RUN xcaddy build --with github.com/caddy-dns/cloudflare
+#
+#   2. A SECOND registrable domain. Not a style choice: the preview cookie is
+#      scoped to {$DOMAIN} so it can cross from the API to the preview host,
+#      and a published site is somebody's code behind a name this platform
+#      hands out. Under the same domain it would receive that cookie and be
+#      able to overwrite it. The boot check refuses that combination outright,
+#      so this must be a different domain, not sites.{$DOMAIN}.
+#
+# *.{$SITES_DOMAIN} {
+# 	tls {
+# 		dns cloudflare {$CLOUDFLARE_API_TOKEN}
+# 	}
+# 	reverse_proxy server:3002
+# }

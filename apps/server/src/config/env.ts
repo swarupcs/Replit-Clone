@@ -75,6 +75,17 @@ const envSchema = z.object({
    *  withholds `allow-same-origin` and only server-rendered previews work. */
   PREVIEW_PORT: z.coerce.number().int().min(0).optional(),
 
+  /** The public origin previews are reachable at, when that is not simply this
+   *  server's own host on PREVIEW_PORT.
+   *
+   *  Needed the moment a reverse proxy is in front, because then the three
+   *  concerns are three NAMES rather than three ports and the server can no
+   *  longer derive this. Nothing routes by it — the proxy does that — but
+   *  `config/exposure.ts` cannot check the cookie policy without knowing it,
+   *  and that check is the only thing standing between a mistake here and
+   *  every preview silently answering "No preview session". */
+  PREVIEW_ORIGIN: z.string().url().optional(),
+
   /** Port serving published deployments, on a third origin of its own.
    *
    *  It cannot share the API's origin for the reason previews cannot, and it
@@ -619,6 +630,29 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === "true")),
+
+  /** The `Domain` put on the PREVIEW cookie, so it reaches a preview origin
+   *  that is a different HOSTNAME from the API rather than a different port.
+   *
+   *  Empty -- the default -- leaves it host-only, which is correct for every
+   *  arrangement where the API and the previews share a host and differ only
+   *  by port. That is the local setup and the compose one, and cookies ignore
+   *  ports, so the cookie already travels.
+   *
+   *  Behind a reverse proxy it does not: `ide.example.com` and
+   *  `preview.example.com` are two hosts, a host-only cookie set on the first
+   *  is never sent to the second, and every preview is refused with nothing in
+   *  any log to say why. Set this to the domain they share -- `example.com`.
+   *
+   *  Deliberately NOT applied to the refresh cookie. That one is spent only at
+   *  the API's own `/api/v1/auth` path, so widening it would hand a session
+   *  credential to every sibling name for no benefit at all.
+   *
+   *  Published sites must not sit under this domain; the boot check refuses
+   *  that combination, because a site is arbitrary code behind a name this
+   *  platform hands out and a cookie scoped to the shared parent is sent to
+   *  it. */
+  COOKIE_DOMAIN: z.string().trim().default(""),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -683,6 +717,24 @@ export const DEPLOYMENTS_ROOT: string = path.resolve(env.DEPLOYMENTS_DIR);
 export const deployOrigin: URL = new URL(
   env.DEPLOY_ORIGIN ?? `http://localhost:${String(deployPort)}`,
 );
+
+/** The origin previews are actually reachable at.
+ *
+ *  Declared when a proxy is in front, and otherwise derived: this server's own
+ *  scheme and host on the preview port, or the API's origin outright when
+ *  PREVIEW_PORT is 0 and previews share it.
+ */
+export const previewOrigin: string = (() => {
+  if (env.PREVIEW_ORIGIN) return env.PREVIEW_ORIGIN;
+  if (previewPort === 0) return env.API_ORIGIN;
+
+  const url = new URL(env.API_ORIGIN);
+  url.port = String(previewPort);
+  return url.origin;
+})();
+
+/** Whether that came from PREVIEW_ORIGIN rather than from the port. */
+export const previewOriginDeclared: boolean = env.PREVIEW_ORIGIN !== undefined;
 
 /** True when deployments are configured at all. */
 export const deploymentsEnabled: boolean = deployPort !== 0;

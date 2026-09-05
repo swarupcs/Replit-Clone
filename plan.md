@@ -141,17 +141,17 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 154 items. Open: 21 — five blocked, ten from §10 that are all
-waiting on one decision (§10.1), three from §11, which reads the sandbox
+**Done: 155 items. Open: 20 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), two from §11, which reads the sandbox
 rather than the editor, and three from §12, which reads neither and asks what
-a cloud machine is for. Two of §11's three are blocked on nothing; 11.10 is
+a cloud machine is for. One of §11's two is blocked on nothing; 11.10 is
 the one row §11 has produced that needs a decision before it needs code, and
 12.4 is blocked on hardware rather than on anybody.**
 
-Those four numbers are 5 + 10 + 3 + 3 = 21, and they are written out because
+Those four numbers are 5 + 10 + 2 + 3 = 20, and they are written out because
 they did not add up once already — see the paragraph below.
 
-**§10.1 is now the whole of the critical path.** Ten of the twenty-one open
+**§10.1 is now the whole of the critical path.** Ten of the twenty open
 items are behind it, it is a decision rather than work, and as of 2026-09-05 it
 has a third option costed against a real spike rather than an argument. It is
 the single most valuable thing anybody could spend an hour on.
@@ -176,15 +176,17 @@ Open, in full, so the shape is visible without scrolling: **no defects**
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, **three in
-§11** (11.1, 11.2, 11.4, 11.6, 11.7, 11.8 and 11.9 all shipped 2026-09-05, the
-day after the section was written — seven of its eight rows in one day; 11.2 also split 11.10 out of itself, and 11.4 named the
+an architectural route), **ten in §10 behind that same route**, **two in
+§11** (11.1, 11.2, 11.4, 11.5, 11.6, 11.7, 11.8 and 11.9 all shipped
+2026-09-05, the day after the section was written — eight of its ten rows in
+one day; 11.2 also split 11.10 out of itself, and 11.4 named the
 wrong interaction while doing it — see the rows. 11.9 shipped in two commits,
 its dotfiles half and then its signing half, and was counted open in between:
 a row is done or it is not, and half a row counted as done is how a count
-stops meaning anything. 11.6 shipped without 11.5, which is the row that gives
+stops meaning anything. 11.6 shipped before 11.5, which is the row that gives
 it its urgency — the order is backwards and deliberately so: the protection
-should exist before the exposure, not after), and **three in §12** (12.1 and 12.2 both shipped
+should exist before the exposure, not after, and 11.5's own document now asks
+for the second factor to be turned on before the name exists), and **three in §12** (12.1 and 12.2 both shipped
 2026-09-05, the day the section was written; 12.2 split 12.5 out of itself on
 the way, so the section is one row shorter and one row longer than it started;
 12.4 is unstartable without different hardware and has been set aside).
@@ -351,6 +353,12 @@ appeals (§8.7), a compute meter (§8.8), Stripe subscription state and webhooks
 (§8.4, minus the two calls that need real keys), dotfiles that follow you into
 every container (§11.9), and TOTP two-factor with recovery codes (§11.6).
 
+**A way in from outside** (§11.5): a Caddy overlay and a Caddyfile, a written
+answer that puts a tunnel first, and — the part that was a defect rather than a
+setting — a `COOKIE_DOMAIN` without which every preview behind any reverse
+proxy is refused silently, plus a boot check that refuses nine origin and
+cookie combinations a browser would break without reporting.
+
 **Offline tolerance** (§11.7): an installable shell with a manifest and a
 service worker, a legible "you are offline" state, and unsaved edits kept
 across a lost connection or a reload and offered back rather than replayed.
@@ -384,10 +392,9 @@ workspace (§12.5) needs three numbers somebody has to choose by watching a real
 host. Teams (§8.5) needs a pricing decision and turns every `ownerId === userId`
 into a membership question.
 
-**Simply absent, and unblocked.** A documented way in from outside with TLS
-(§11.5) — the row that gives §11.6 its urgency and shipped after it. Compose,
-so a repository with four services can run at all (§11.3). Notebooks (§12.3).
-GPUs (§12.4), which need different hardware.
+**Simply absent, and unblocked.** Compose, so a repository with four services
+can run at all (§11.3). Notebooks (§12.3). GPUs (§12.4), which need different
+hardware.
 
 ### What is verified, and what is asserted
 
@@ -397,11 +404,16 @@ mislead a reader of the lists above.
 **Run against real infrastructure:** every migration (all 37), the DB-gated
 suites, container start and reap, both scaffolder paths, a signed commit
 verified by `git log --show-signature`, a dotfiles clone and its failure mode,
-and TOTP enrolment through to a spent recovery code.
+TOTP enrolment through to a spent recovery code, and §11.5's cookie behaviour
+against a real server on three hostnames — including reintroducing the defect
+and watching every preview go back to `401`.
 
 **Not run, and load-bearing:** the service worker has never registered — no
 browser available here can — so §11.7's caching behaviour is asserted rather
-than observed. Nobody has driven a real VS Code client through Remote-SSH into
+than observed. §11.5's Caddy route has never faced a real domain: the Caddyfile
+is validated by Caddy and the compose overlay resolves, but ACME issuance and
+the WebSocket upgrade through the proxy have not been exercised, and the
+wildcard-certificate build published sites need is described rather than built. Nobody has driven a real VS Code client through Remote-SSH into
 a sandbox (§11.1's spike reproduced what that client does server-side, which is
 strong evidence and not the same thing), and nothing has been tested behind the
 egress gateway.
@@ -4569,16 +4581,81 @@ custom domains* — the third origin, the published sites. This is about reachin
 **the editor itself**, which needs one hostname and one certificate and none of
 the per-domain challenge machinery §9.2 split out.
 
-- [ ] **11.5 A documented way in from outside, and the smallest one that is
-      honest.** A reverse proxy terminating TLS in front of the API and web
-      origins, one name, and a written answer for how it is obtained — Caddy
-      with a DNS challenge, or a tunnel (Tailscale, Cloudflare) that sidesteps
-      certificates and inbound ports entirely and is very likely the right
-      answer for a laptop behind NAT. What makes this a row rather than a
-      README is that the *app* has opinions about it: `COOKIE_SECURE`,
-      `COOKIE_SAME_SITE` and `WEB_ORIGIN` all change meaning once there is a
-      real origin, and the preview origin and the deployment origin have to
-      come along or half the product 404s.
+- [x] **11.5 A documented way in from outside, and the smallest one that is
+      honest.** Shipped 2026-09-05. The row guessed that the app would have
+      opinions about being exposed; it had one nobody had noticed, and it is a
+      defect rather than a setting.
+
+      **Previews would have been dead on arrival behind any reverse proxy.**
+      The preview cookie is set by the API and spent on the preview origin.
+      Locally those two differ by PORT — and cookies ignore ports, so
+      `localhost:3000` and `localhost:3101` share one jar and the cookie
+      arrives for free. Behind a proxy they differ by NAME, at which point a
+      host-only cookie set on `api.example.com` is never sent to
+      `preview.example.com`, `previewGuard` answers *"No preview session"* for
+      every request, and **nothing anywhere reports it**: the browser stores
+      the cookie and silently declines to send it. Signed in, editor working,
+      preview pane empty, no line in any log. `COOKIE_DOMAIN` closes it, on
+      that cookie only — the refresh cookie stays host-only, because nothing
+      but the API ever presents it and widening a session credential to every
+      sibling name buys nothing.
+
+      **Demonstrated rather than reasoned about.** A real server on three
+      hostnames and a cookie jar implementing the same RFC 6265 rules a browser
+      does: with the fix, `preview_token` is stored for `.rc.test` while
+      `refresh_token` stays host-only to `api.rc.test`, and a preview request
+      carrying that jar gets past the auth gate. Remove the `Domain` attribute
+      and the same request is `401`. The bug and the fix, both observed.
+
+      **The `Set-Cookie` a browser dislikes is the failure mode of this whole
+      area**, so the answer is a boot check rather than a paragraph.
+      `config/exposure.ts` reads the three origins, the cookie policy and the
+      proxy setting together and refuses to start on nine combinations that
+      cannot work — two hostnames with no `COOKIE_DOMAIN`, `SameSite=None`
+      without `Secure`, `Secure` on plain HTTP away from loopback, a
+      `COOKIE_DOMAIN` that is an IP or a single label or does not cover the
+      hosts it must, and the three origins collapsing into each other. Each
+      exit names the consequence, not the rule.
+
+      **Published sites must go on a second registrable domain, and that is
+      now enforced.** §10 already argued the deploy origin cannot be the
+      preview origin, because a preview is authenticated and a site is public.
+      `COOKIE_DOMAIN` created a version of that nobody had: a cookie scoped to
+      the shared parent is sent to every sibling, and a published site is
+      arbitrary user code behind a name this platform hands out. Refused at
+      boot.
+
+      **The proxy-hops setting gets a second guard, because it cannot be
+      checked at boot.** A plain-HTTP proxy on a LAN is indistinguishable from
+      no proxy at all, so `middlewares/proxyHeaderWarning.ts` waits for the
+      evidence and says so once when a forwarded header arrives with
+      `TRUSTED_PROXY_HOPS=0` — the setting whose absence makes every rate limit
+      key on the proxy, so one account's failed sign-ins throttle everybody. It
+      names the header without logging what was in it.
+
+      **The written answer gives the tunnel first.** `docs/EXPOSING.md` puts
+      Tailscale or Cloudflare ahead of the proxy, because for a laptop behind
+      NAT that is not a lesser answer — it is a stronger one, reachable only by
+      devices already on your own network, with no inbound port and no
+      certificate to renew. `deploy/Caddyfile` and `docker-compose.expose.yml`
+      are the proxy route, as a working overlay on the LAN stack rather than a
+      fourth copy of it, and the overlay unpublishes the base file's plain-HTTP
+      ports — an API answering beside the TLS one is a way past every cookie
+      and CORS decision above it.
+
+      **Not verified: the Caddy route against a real domain.** The Caddyfile is
+      validated by Caddy itself and the compose overlay resolves, but ACME
+      issuance, HTTP/3 and the WebSocket upgrade through Caddy have not been
+      exercised end to end, and the wildcard-certificate build that published
+      sites need is described rather than built. `docs/EXPOSING.md` says so in
+      its own words.
+
+      One thing the row asked for that this deliberately does not do: it does
+      not make exposure safe. It makes it possible to do deliberately. The
+      document opens by saying what is actually being published — an editor
+      running arbitrary code on a host whose Docker socket is mounted into the
+      server — and asks for `SANDBOX_EGRESS_FILTERED` and the second factor
+      before the name exists.
 
 - [x] **11.6 Re-read the auth surface for an editor on the open internet.**
       Shipped 2026-09-05. §10.3's single-user mode was designed for a laptop
@@ -4863,7 +4940,10 @@ acted on the same week. Each is marked rather than silently corrected, because
 which of them changed *is* the record of what shipped.
 
 - `apps/server/src/index.ts:85` — `createServer(app)`, `node:http`. **Still no
-  TLS**, and 11.5 is the row about it. (Line 83 → 85.)
+  TLS in this process, and that is now the answer rather than the gap**: 11.5
+  put TLS in Caddy in front of it, which is where it belongs — a Node process
+  holding a private key and an ACME client is strictly more to get wrong.
+  (Line 83 → 85.)
 - `devcontainer.ts:119–140` — the ten refusals quoted are the actual strings.
   **Still ten**, but `mounts` is no longer unconditional: 11.2 made it a plan
   capability, so the same map now yields a shorter refusal list under the

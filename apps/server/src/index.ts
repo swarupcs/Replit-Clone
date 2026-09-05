@@ -24,7 +24,18 @@ import {
   installServiceUpgrade,
   listenForSites,
 } from "./deploySite.js";
-import { deployPort, env, isProduction, previewPort } from "./config/env.js";
+import {
+  deployOrigin,
+  deployPort,
+  deploymentsEnabled,
+  env,
+  isProduction,
+  previewOrigin,
+  previewOriginDeclared,
+  previewPort,
+} from "./config/env.js";
+import { checkExposure } from "./config/exposure.js";
+import { proxyHeaderWarning } from "./middlewares/proxyHeaderWarning.js";
 import { prisma } from "./lib/prisma.js";
 import { logger } from "./lib/logger.js";
 import { touchProject } from "./service/projectService.js";
@@ -128,6 +139,10 @@ app.use(apiSecurityHeaders(previewPort === 0));
 
 // Before the routes, so everything below inherits a request id.
 app.use(requestLogger);
+
+// Says so, once, if something is forwarding to this server and TRUSTED_PROXY_HOPS
+// has been left at 0 -- which makes every rate limit key on the proxy.
+app.use(proxyHeaderWarning(env.TRUSTED_PROXY_HOPS));
 
 // Liveness only, and deliberately trivial: kept because things may already
 // point at it. /health is the one that checks Postgres and Docker.
@@ -489,6 +504,40 @@ function withTimeout<T>(
 }
 
 async function start(): Promise<void> {
+  // Before anything else, and before the port opens. Every failure this
+  // catches is one a browser reports as nothing at all -- a Set-Cookie it
+  // dislikes is discarded in silence -- so the symptom arrives as "sign-in
+  // does nothing" or "every preview says No preview session" with no line in
+  // any log pointing at the cause. See config/exposure.ts; plan.md §11.5.
+  const exposure = checkExposure({
+    webOrigin: env.WEB_ORIGIN,
+    apiOrigin: env.API_ORIGIN,
+    previewOrigin,
+    previewOriginDeclared,
+    deployOrigin: deployOrigin.origin,
+    deploymentsEnabled,
+    cookieDomain: env.COOKIE_DOMAIN,
+    cookieSameSite: env.COOKIE_SAME_SITE,
+    cookieSecure: env.COOKIE_SECURE ?? isProduction,
+    trustedProxyHops: env.TRUSTED_PROXY_HOPS,
+  });
+
+  for (const warning of exposure.warnings) {
+    logger.warn("exposure", { detail: warning });
+  }
+
+  // Fatal, for the same reason SandboxNetworkMismatch is: the server would
+  // otherwise carry on serving a product that is half broken, with the
+  // explanation in a log line nobody reads until afterwards.
+  if (exposure.errors.length > 0) {
+    for (const problem of exposure.errors) {
+      // `undefined` where an Error would go: this is a configuration
+      // problem, not a thrown one, and there is no stack worth printing.
+      logger.error("refusing to start", undefined, { detail: problem });
+    }
+    process.exit(1);
+  }
+
   // The one account, when this deployment has one. Before the listener, so
   // that a first boot with SINGLE_USER_PASSWORD set is signable-in the moment
   // the port opens rather than on whatever request happens to race it.

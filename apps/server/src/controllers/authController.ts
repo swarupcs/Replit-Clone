@@ -1,6 +1,6 @@
-import type { CookieOptions, Request, Response } from "express";
+import type { Request, Response } from "express";
 import { credentialsSchema } from "@replit-clone/shared";
-import { env, isProduction } from "../config/env.js";
+import { env } from "../config/env.js";
 import {
   authenticateUser,
   getUserById,
@@ -9,8 +9,6 @@ import {
 import {
   PREVIEW_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
-  previewCookieMaxAgeMs,
-  refreshCookieMaxAgeMs,
   signAccessToken,
   signMfaToken,
   signPreviewToken,
@@ -21,6 +19,10 @@ import {
   revokeRefreshToken,
   rotateRefreshToken,
 } from "../service/refreshTokenService.js";
+import {
+  previewCookieOptions,
+  refreshCookieOptions,
+} from "./sessionCookies.js";
 import { getAuthContext } from "../middlewares/requireAuth.js";
 import { UnauthorizedError } from "../utils/errors.js";
 import { z } from "zod";
@@ -39,31 +41,6 @@ import {
   requiresSecondFactor,
 } from "../service/twoFactorService.js";
 
-const refreshCookieOptions: CookieOptions = {
-  httpOnly: true,
-  // COOKIE_SAME_SITE defaults to "lax" for a same-site deployment (frontend
-  // and API on the same domain). A split deployment -- e.g. the web app on
-  // Vercel and the API on a separate host -- MUST set this to "none", or the
-  // browser drops the cookie on every cross-site request and login appears to
-  // just not work.
-  sameSite: env.COOKIE_SAME_SITE,
-  // Secure defaults to true in production and false otherwise, but is
-  // explicitly overridable: "none" REQUIRES Secure, while a plain-HTTP LAN
-  // deployment in production mode needs it forced to false, or the browser
-  // silently discards the cookie.
-  secure: env.COOKIE_SECURE ?? isProduction,
-  maxAge: refreshCookieMaxAgeMs,
-  path: "/api/v1/auth",
-};
-
-/** Scoped to /preview so it is sent with the preview iframe and its HMR
- *  socket, and with nothing else. Its lifetime tracks the token's, which is far
- *  shorter than the refresh token's — see signPreviewToken. */
-const previewCookieOptions: CookieOptions = {
-  ...refreshCookieOptions,
-  path: "/preview",
-  maxAge: previewCookieMaxAgeMs,
-};
 
 /** Writes the session cookies and returns the access token.
  *

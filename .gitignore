@@ -4,6 +4,9 @@ build/
 .env
 .env.*
 !.env.example
+# ...and the one beside it. `.env.*` is what keeps a filled-in secret out of
+# the history, and an example file that ships no secrets is the exception.
+!.env.expose.example
 *.log
 .DS_Store
 .migration-src/
