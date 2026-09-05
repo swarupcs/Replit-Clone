@@ -52,11 +52,22 @@ vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
+/** `retryScaffold` empties the project's directory. Mocked rather than run,
+ *  obviously — but also so the ORDER can be asserted, which is the part that
+ *  matters: recreating before removing would leave the tree gone. */
+const rm = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const mkdir = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, default: { ...actual, rm, mkdir }, rm, mkdir };
+});
+
 import {
   ABANDONED_SCAFFOLD,
   parseRecipe,
   recipeFor,
   reconcileScaffolds,
+  retryScaffold,
   runScaffold,
   tail,
   templatesWithRecipes,
@@ -298,5 +309,79 @@ describe("the log that is kept", () => {
 
   it("is empty rather than whitespace when there was no output", () => {
     expect(tail("   \n\n")).toBe("");
+  });
+});
+
+/** Trying again after a failure.
+ *
+ *  The most destructive function here by a distance: it empties the project's
+ *  directory and removes its container. What makes that safe is a guard in a
+ *  different file — `retryScaffoldController` refuses anything whose status is
+ *  not FAILED — so the rule and the deletion do not sit together and cannot be
+ *  read in one place. That is the reason to pin both ends.
+ *
+ *  Emptying is not incidental. `npm create` refuses a directory it considers
+ *  non-empty, and a scaffold that failed halfway leaves exactly that.
+ */
+describe("trying again after a failure", () => {
+  it("empties the tree before recreating it, not after", async () => {
+    await retryScaffold(PROJECT, "react-vite");
+
+    expect(rm).toHaveBeenCalledWith(
+      expect.stringContaining(PROJECT),
+      { recursive: true, force: true },
+    );
+    expect(rm.mock.invocationCallOrder[0]).toBeLessThan(
+      mkdir.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  /** The old attempt's writable layer is stale, and the image may be wrong
+   *  outright if the template changed. Cheaper to rebuild than to reason about
+   *  what is left in it. */
+  it("throws the old container away too", async () => {
+    await retryScaffold(PROJECT, "react-vite");
+
+    expect(removeContainer).toHaveBeenCalledWith(PROJECT);
+  });
+
+  it("marks it as building again, and clears the old reason", async () => {
+    await retryScaffold(PROJECT, "react-vite");
+
+    expect(projectUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { scaffoldStatus: "SCAFFOLDING", scaffoldLog: null },
+      }),
+    );
+  });
+
+  /** The check comes first for a reason. A recipe that has been turned off —
+   *  because upstream changed a flag, which is the case it exists for — must
+   *  not cost somebody the files they still have. */
+  it("deletes nothing when there is no recipe to run", async () => {
+    recipeFindUnique.mockResolvedValue(null);
+
+    await expect(retryScaffold(PROJECT, "react-vite")).resolves.toBe(false);
+    expect(rm).not.toHaveBeenCalled();
+    expect(removeContainer).not.toHaveBeenCalled();
+    expect(projectUpdate).not.toHaveBeenCalled();
+  });
+
+  it("deletes nothing when the recipe has been turned off", async () => {
+    recipeFindUnique.mockResolvedValue({
+      templateId: "react-vite",
+      label: "Vite · React",
+      argv: RECIPE.argv,
+      enabled: false,
+    });
+
+    await expect(retryScaffold(PROJECT, "react-vite")).resolves.toBe(false);
+    expect(rm).not.toHaveBeenCalled();
+  });
+
+  it("runs the scaffolder again once the tree is clear", async () => {
+    await retryScaffold(PROJECT, "react-vite");
+
+    expect(execCapture).toHaveBeenCalledTimes(RECIPE.argv.length);
   });
 });

@@ -9,6 +9,7 @@ import {
   Modal,
   Segmented,
   Select,
+  Spin,
   Tooltip,
   Typography,
   message,
@@ -633,6 +634,31 @@ export const Dashboard = () => {
               // broken project rather than an unfinished one.
               const building = project.scaffoldStatus === "SCAFFOLDING";
               const broken = project.scaffoldStatus === "FAILED";
+              /** Said before the click rather than after it.
+               *
+               *  The click handler below already refuses to open a project
+               *  that is still being built, but until now that refusal was the
+               *  FIRST time anybody heard about it: the card looked ordinary,
+               *  and clicking it produced a toast explaining why nothing had
+               *  happened. A state that changes what a control does has to be
+               *  visible on the control. */
+              const statusBadge = building ? (
+                <span
+                  className="rc-badge"
+                  title="A scaffolder is writing this project's files. It will open when it is done."
+                >
+                  <Spin size="small" /> Setting up
+                </span>
+              ) : broken ? (
+                <span
+                  className="rc-badge"
+                  title="The scaffolder did not finish. Open it to see what it said."
+                  style={{ color: "var(--rc-danger, #ff4d4f)" }}
+                >
+                  Setup failed
+                </span>
+              ) : null;
+
               const open = () => {
                 if (building) {
                   void messageApi.info("Still being built. It will open when it is ready.");
@@ -678,6 +704,12 @@ export const Dashboard = () => {
                     className="rc-project-row"
                     role="button"
                     tabIndex={0}
+                    // Still focusable and still clickable — the click says why.
+                    // `aria-disabled` rather than removing it from the tab
+                    // order, so a screen reader hears the same thing the dimming
+                    // shows rather than the card simply vanishing.
+                    aria-disabled={building}
+                    style={building ? { opacity: 0.6 } : undefined}
                     onClick={open}
                     onKeyDown={activate}
                   >
@@ -685,6 +717,7 @@ export const Dashboard = () => {
                       {project.name}
                     </span>
                     <span className="rc-badge">{project.template}</span>
+                    {statusBadge}
                     {project.takenDownAt && (
                       <span
                         className="rc-badge"
@@ -717,6 +750,8 @@ export const Dashboard = () => {
                   className="rc-card"
                   role="button"
                   tabIndex={0}
+                  aria-disabled={building}
+                  style={building ? { opacity: 0.6 } : undefined}
                   onClick={open}
                   onKeyDown={activate}
                 >
@@ -730,6 +765,7 @@ export const Dashboard = () => {
                   >
                     <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <span className="rc-badge">{project.template}</span>
+                      {statusBadge}
                       {project.takenDownAt && (
                         <span
                           className="rc-badge"

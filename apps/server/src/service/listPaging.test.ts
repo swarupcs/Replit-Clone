@@ -123,3 +123,46 @@ describe.each(LISTS)("%s", (_name, list) => {
     expect(short.nextCursor).toBeNull();
   });
 });
+
+/** What the dashboard is allowed to know about a project.
+ *
+ *  `listAccessibleProjects` selects an explicit column list rather than
+ *  returning the row — deliberately, because a `Project` carries share tokens
+ *  and env var names that read-only access is not access to. The cost of that
+ *  choice is that adding a column anywhere else does not add it here, and
+ *  nothing says so.
+ *
+ *  That is exactly how `scaffoldStatus` came to be added to the schema, to the
+ *  API type and to three places in the dashboard, and then left out of this
+ *  select: the client never received it, the poll never started, and a project
+ *  still being built rendered as an ordinary card that opened onto an empty
+ *  editor. Nothing failed — the feature was inert.
+ *
+ *  `ListedProject` now declares it as required, so an omitted key stops
+ *  compiling. This is the same rule stated where a reader will meet it.
+ */
+describe("the dashboard's view of a project", () => {
+  it("asks for the scaffold status, which decides whether a card opens", async () => {
+    await listAccessibleProjects("u1", {});
+
+    const query = findMany.mock.calls.at(-1)?.[0] as {
+      select: Record<string, boolean>;
+    };
+
+    expect(query.select["scaffoldStatus"]).toBe(true);
+  });
+
+  /** The reason for the select in the first place. If this ever passes, a
+   *  read-only collaborator can mint a link at their own role. */
+  it("still asks for nothing that read-only access does not carry", async () => {
+    await listAccessibleProjects("u1", {});
+
+    const query = findMany.mock.calls.at(-1)?.[0] as {
+      select: Record<string, boolean>;
+    };
+
+    for (const secret of ["shareToken", "embedToken", "envVars"]) {
+      expect(query.select[secret]).toBeUndefined();
+    }
+  });
+});

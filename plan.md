@@ -2206,6 +2206,7 @@ install is minutes; an HTTP request that waited would be killed by a proxy or a
 browser long before it finished. So `POST /projects` returns `201` immediately
 with the row saying `SCAFFOLDING`, and the dashboard polls — **and only while
 something is actually being built**, so an idle tab is not a background load.
+(That poll did not run at all in the first version. See below.)
 
 **The reconcile was written with it rather than after somebody noticed.** A row
 left `SCAFFOLDING` is a container exec this process was awaiting, and nothing
@@ -2244,16 +2245,62 @@ would be a control that does nothing.
 Seven mutants, all caught, including carrying on past a failed step, reconciling
 the wrong rows on boot, and letting a non-string reach `docker exec`.
 
-Server: 1970 passing, 296 skipped — no database here. Web: 1131 passing.
-Typecheck and lint clean, 3/3. `localRoots.test.ts` stays red on this Windows
-host over symlink EPERM, identically on a clean checkout.
+**Two defects shipped in the first version of this, and both are worth keeping
+on the page, because neither was the kind of mistake tests were going to find.**
 
-**Unverified, and it is most of what matters here.** No scaffolder has actually
-run: Docker is not up on this machine, so every `execCapture` above is a mock,
-and the two new migrations have never touched Postgres. Whether
-`npm create vite@latest` cleanly accepts `.` in a bind-mounted directory owned
-by uid 1001, and whether `create-next-app`'s flags are still the ones seeded
-here, are exactly the claims §1 says a mock cannot be trusted about.
+**The dashboard never learned the status.** `scaffoldStatus` was added to the
+schema, to the API type and to three places in `Dashboard.tsx` — and left out of
+the `select` in `listAccessibleProjects`, four files away. So the field never
+reached the client: the poll above never started, the disabled card was never
+disabled, and the failure dialog was unreachable. A project built with Latest
+rendered as an ordinary card and opened onto an empty editor. Nothing failed.
+Typecheck was clean because `Project.scaffoldStatus` is optional in the shared
+type, and an absent optional field is exactly what an unfinished project looks
+like. `ListedProject` now declares it **required**, so an omitted `select` key
+stops compiling at `toPage` — which is the only guard that survives somebody
+adding the next column in a hurry.
+
+**Both new migrations named the Prisma MODEL rather than the table.**
+`ALTER TABLE "Project"` — but `Project` carries `@@map("projects")`, so it is
+not a relation Postgres has ever heard of. The first `migrate deploy` failed on
+`relation "Project" does not exist`, and it failed on **§12.1's** migration
+first, which had been sitting committed and green. Typecheck, lint and 1970
+tests do not read `migration.sql`; only Postgres does, and until this week
+nobody had run it. `ScaffoldRecipe` also gained the `@@map("scaffold_recipes")`
+every other table here has.
+
+Server: 1984 passing, 296 skipped. Web: 1135 passing. Typecheck and lint clean,
+3/3. `localRoots.test.ts` stays red on this Windows host over symlink EPERM,
+identically on a clean checkout.
+
+**Verified against a real database and real containers on 2026-09-05**, which
+is what the first version of this paragraph said was missing.
+
+- All 35 migrations applied; `migrate status` clean; six recipes seeded.
+- **`react-vite` with Latest: SCAFFOLDING → READY in 31s**, and it produced
+  **Vite 8.2.2 against the committed starter's 6.1.0** — two major versions,
+  which is the whole argument for the feature stated as a number.
+- `react-vite` with Starter: READY in 1.6s, and `diff -rq` against the template
+  is empty. The path this change was not allowed to alter did not alter.
+- **`nextjs-ts` with Latest took 289 seconds.** The flags seeded here are still
+  the ones `create-next-app` accepts, and five minutes is the async decision
+  above justified rather than argued: a request that waited would have been
+  killed several times over.
+- A step exiting non-zero left the project FAILED with the command's own stderr
+  and no start command. **Try again** on that project emptied the tree, rebuilt,
+  and cleared the log.
+- A row stranded in SCAFFOLDING across a restart came back FAILED, with the
+  message that says what is and is not known.
+
+**One thing the real run found that no test would have.**
+`npm create vite@latest . -- --template no-such-template` **exits 0** and
+silently scaffolds a vanilla TypeScript project. So "a failed scaffold fails the
+project" is exactly as true as the scaffolder's exit code, and for a bad
+template name upstream does not consider that a failure. Nothing here is wrong,
+but the guarantee is narrower than the sentence sounds, and the recipes are the
+only thing standing between a user and a project that is quietly not what they
+asked for. That is an argument for the recipe table being seeded and not
+user-writable, which it is.
 
 ---
 

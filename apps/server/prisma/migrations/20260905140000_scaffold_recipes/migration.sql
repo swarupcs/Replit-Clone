@@ -1,26 +1,33 @@
--- plan.md Part A: "Starter" copies a committed directory; "Latest" runs the
+-- plan.md §2.41: "Starter" copies a committed directory; "Latest" runs the
 -- real upstream scaffolder inside the project's container.
+--
+-- Table names are the MAPPED ones. The first draft of this file wrote
+-- ALTER TABLE "Project", which is the Prisma model; the table is "projects",
+-- because the model carries @@map. It would have failed on the first
+-- `migrate deploy` with `relation "Project" does not exist` -- and it was not
+-- caught for the reason it is worth writing down: nothing in typecheck, lint
+-- or the test suite reads this file. Only Postgres does.
 
 CREATE TYPE "ScaffoldStatus" AS ENUM ('READY', 'SCAFFOLDING', 'FAILED');
 
 -- READY as the default is what makes this migration a no-op for every existing
 -- row: a project copied from a starter is finished the moment it is created,
 -- which is what every project before this one was.
-ALTER TABLE "Project" ADD COLUMN "scaffoldStatus" "ScaffoldStatus" NOT NULL DEFAULT 'READY';
-ALTER TABLE "Project" ADD COLUMN "scaffoldLog" TEXT;
+ALTER TABLE "projects" ADD COLUMN "scaffoldStatus" "ScaffoldStatus" NOT NULL DEFAULT 'READY';
+ALTER TABLE "projects" ADD COLUMN "scaffoldLog" TEXT;
 
 -- Only ever queried for the handful that are not READY -- the dashboard poll
 -- and the boot reconcile both ask "which of these is unfinished".
-CREATE INDEX "Project_scaffoldStatus_idx" ON "Project"("scaffoldStatus");
+CREATE INDEX "projects_scaffoldStatus_idx" ON "projects"("scaffoldStatus");
 
-CREATE TABLE "ScaffoldRecipe" (
+CREATE TABLE "scaffold_recipes" (
     "templateId" TEXT NOT NULL,
     "label" TEXT NOT NULL,
     "argv" JSONB NOT NULL,
     "enabled" BOOLEAN NOT NULL DEFAULT true,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "ScaffoldRecipe_pkey" PRIMARY KEY ("templateId")
+    CONSTRAINT "scaffold_recipes_pkey" PRIMARY KEY ("templateId")
 );
 
 -- The recipes themselves, seeded here rather than by a script so a fresh
@@ -35,7 +42,7 @@ CREATE TABLE "ScaffoldRecipe" (
 -- mismatch the old host-side `npm create` produced, which projectService.ts:82
 -- still records), and `--` stops npm from eating the flags meant for the
 -- scaffolder.
-INSERT INTO "ScaffoldRecipe" ("templateId", "label", "argv", "enabled", "updatedAt") VALUES
+INSERT INTO "scaffold_recipes" ("templateId", "label", "argv", "enabled", "updatedAt") VALUES
   ('react-vite', 'Vite · React',
    '[["npm","create","vite@latest",".","--","--template","react"],["npm","install"]]', true, NOW()),
   ('react-vite-ts', 'Vite · React + TypeScript',

@@ -803,6 +803,9 @@ model Project {
   /// Only the trash. Every other query asks for `deletedAt IS NULL`, which is
   /// almost every row; the index that helps is over the few that are not.
   @@index([deletedAt])
+  /// Only ever queried for the handful that are not READY -- the dashboard
+  /// poll and the boot reconcile both ask which of these is unfinished.
+  @@index([scaffoldStatus])
   @@map("projects")
 }
 
@@ -1019,6 +1022,8 @@ model ScaffoldRecipe {
   enabled Boolean @default(true)
 
   updatedAt DateTime @updatedAt
+
+  @@map("scaffold_recipes")
 }
 
 enum DeploymentStatus {
