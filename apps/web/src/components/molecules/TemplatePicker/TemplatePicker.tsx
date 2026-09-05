@@ -13,7 +13,8 @@ import {
   SiVuedotjs,
 } from "react-icons/si";
 import { VscCheck, VscCode } from "react-icons/vsc";
-import type { TemplateSummary } from "@replit-clone/shared";
+import { Segmented } from "antd";
+import type { CreateVariant, TemplateSummary } from "@replit-clone/shared";
 
 /** What the picker needs to draw a template that the API does not send.
  *
@@ -134,6 +135,10 @@ interface TemplatePickerProps {
   templates: TemplateSummary[];
   value: string;
   onChange: (id: string) => void;
+  /** Omitted by callers that do not offer the choice, in which case no toggle
+   *  is rendered at all rather than a disabled one. */
+  variant?: CreateVariant;
+  onVariantChange?: (variant: CreateVariant) => void;
 }
 
 /** The grid of starting points in the New playground dialog.
@@ -148,8 +153,11 @@ export const TemplatePicker = ({
   templates,
   value,
   onChange,
+  variant = "starter",
+  onVariantChange,
 }: TemplatePickerProps) => {
   const gridRef = useRef<HTMLDivElement>(null);
+  const active = templates.find((template) => template.id === value);
 
   /** Grouped in a fixed order, and only for headings that have members — a
    *  deployment whose registry drops every Python template should not be left
@@ -263,6 +271,35 @@ export const TemplatePicker = ({
           </div>
         </div>
       ))}
+
+      {/* Only for templates that actually have a recipe. A toggle offered on
+          `go-http`, where "latest" means nothing, is a control that does
+          nothing -- and the server answers this from its recipe table, so a
+          recipe turned off because upstream changed a flag also removes the
+          option that would now fail. */}
+      {onVariantChange && active?.latestAvailable && (
+        <div className="rc-template-variant">
+          <Segmented
+            size="small"
+            aria-label="How to build it"
+            value={variant}
+            onChange={(next) => {
+              onVariantChange(next as CreateVariant);
+            }}
+            options={[
+              { label: "Starter", value: "starter" },
+              { label: "Latest", value: "latest" },
+            ]}
+          />
+          {/* Says what each one costs, because the difference is not visible
+              anywhere else until one of them takes two minutes. */}
+          <span className="rc-template-variant-hint">
+            {variant === "latest"
+              ? `Runs ${active.label}'s own setup tool, so the versions are today's. Needs the network and takes a minute or two.`
+              : "A pinned copy that is ready instantly and works offline. The versions are the ones this platform ships."}
+          </span>
+        </div>
+      )}
     </div>
   );
 };

@@ -26,6 +26,11 @@ export type CounterName =
   // Gave up after the install timeout. The stamp is untouched, so the next
   // real start installs exactly as it would have.
   | "prebuilds_abandoned"
+  // Projects built by running the upstream scaffolder rather than by copying a
+  // committed starter, and the ones where that did not work. The ratio is the
+  // honest measure of whether "Latest" is a feature or a coin toss.
+  | "scaffolds_completed"
+  | "scaffolds_failed"
   | "runs_failed"
   | "preview_errors"
   | "preview_upgrades_rejected"

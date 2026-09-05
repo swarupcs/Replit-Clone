@@ -61,6 +61,7 @@ import {
   setOnProjectReaped,
 } from "./containers/containerManager.js";
 import { sweepPrebuilds } from "./containers/prebuild.js";
+import { reconcileScaffolds } from "./service/scaffoldService.js";
 import { ensureEgressGateway } from "./containers/egressGateway.js";
 import { reconcileDeployments, restoreServices } from "./service/deployService.js";
 import { recheckDomains } from "./service/customDomainService.js";
@@ -555,8 +556,21 @@ async function start(): Promise<void> {
   // settled table.
   const abandonedRuns = await withTimeout(reconcileJobRuns(), "job run reconcile");
   const abandonedBuilds = await withTimeout(reconcileDeployments(), "deployment reconcile");
-  if (abandonedRuns || abandonedBuilds) {
-    logger.info("reconciled rows", { abandonedRuns, abandonedBuilds });
+  // The third row of the same shape, written with its reconcile from the start
+  // rather than after somebody noticed. A project left SCAFFOLDING is a
+  // container exec this process was awaiting, and nothing survives the process
+  // to finish it or to notice -- so without this the dashboard says "Setting
+  // up" for ever.
+  const abandonedScaffolds = await withTimeout(
+    reconcileScaffolds(),
+    "scaffold reconcile",
+  );
+  if (abandonedRuns || abandonedBuilds || abandonedScaffolds) {
+    logger.info("reconciled rows", {
+      abandonedRuns,
+      abandonedBuilds,
+      abandonedScaffolds,
+    });
   }
 
   // Published services, which the reconcile above deliberately does not touch:

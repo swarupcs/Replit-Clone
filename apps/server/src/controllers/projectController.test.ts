@@ -104,6 +104,7 @@ describe("createProjectController", () => {
       TEST_USER.sub,
       "demo",
       "python-flask",
+      "starter",
     );
   });
 
@@ -116,7 +117,39 @@ describe("createProjectController", () => {
       TEST_USER.sub,
       undefined,
       DEFAULT_TEMPLATE_ID,
+      // The starter unless somebody asks otherwise: it is instant and needs no
+      // network, so the slower path is one you choose rather than one you get.
+      "starter",
     );
+  });
+
+  /** "Latest" runs the upstream scaffolder in the project's container instead
+   *  of copying the committed directory. */
+  it("passes the variant through when one is asked for", async () => {
+    projectService.createProjectService.mockResolvedValue(PROJECT);
+
+    await request(app)
+      .post("/projects")
+      .set("Authorization", bearer())
+      .send({ variant: "latest" });
+
+    expect(projectService.createProjectService).toHaveBeenCalledWith(
+      TEST_USER.sub,
+      undefined,
+      DEFAULT_TEMPLATE_ID,
+      "latest",
+    );
+  });
+
+  /** A user picks a template and a variant; they never pick a command. */
+  it("refuses a variant it does not know", async () => {
+    const response = await request(app)
+      .post("/projects")
+      .set("Authorization", bearer())
+      .send({ variant: "npm install && curl evil.example" });
+
+    expect(response.status).toBe(400);
+    expect(projectService.createProjectService).not.toHaveBeenCalled();
   });
 
   it("creates the project for the caller, never for an id in the body", async () => {
@@ -131,6 +164,7 @@ describe("createProjectController", () => {
       TEST_USER.sub,
       "demo",
       DEFAULT_TEMPLATE_ID,
+      "starter",
     );
   });
 
@@ -195,7 +229,18 @@ describe("listTemplatesController", () => {
 
     for (const template of response.body.data) {
       expect(Object.keys(template).sort()).toEqual(
-        ["devPort", "id", "label", "previewPorts", "startCommand"].sort(),
+        [
+          "devPort",
+          "id",
+          "label",
+          "previewPorts",
+          "startCommand",
+          // Whether this template can be built by running the upstream
+          // scaffolder. Answered from the recipe table rather than hard-coded
+          // in the client, so turning a broken recipe off also removes the
+          // option that would fail.
+          "latestAvailable",
+        ].sort(),
       );
       // `image` and `filesDir` describe the host's layout and its Docker tags.
       expect(template).not.toHaveProperty("image");

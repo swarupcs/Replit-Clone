@@ -33,7 +33,8 @@ import {
   VscTerminal,
   VscGrabber,
 } from "react-icons/vsc";
-import type { Project } from "@replit-clone/shared";
+import type { CreateVariant, Project } from "@replit-clone/shared";
+import { ScaffoldFailureDialog } from "../components/organisms/ScaffoldFailureDialog/ScaffoldFailureDialog.tsx";
 import {
   createProjectApi,
   deleteProjectApi,
@@ -296,6 +297,7 @@ export const Dashboard = () => {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [template, setTemplate] = useState<string | null>(null);
+  const [variant, setVariant] = useState<CreateVariant>("starter");
 
   /** Filter and ordering. The list was created-descending with no way to find
    *  anything, which stops being usable at about a dozen projects. */
@@ -320,10 +322,19 @@ export const Dashboard = () => {
   const { capabilities } = useDeployment();
   const [sharing, setSharing] = useState<Project | null>(null);
   const [moderating, setModerating] = useState<Project | null>(null);
+  /** The failed project whose reason is being shown. */
+  const [rebuilding, setRebuilding] = useState<Project | null>(null);
 
   const { data: projects, isLoading } = useQuery({
     queryKey: ["projects"],
     queryFn: listProjectsApi,
+    // Only while something is actually being built, and it stops on its own
+    // when nothing is. A dashboard that polled every three seconds for ever
+    // would be a background load on every idle tab.
+    refetchInterval: (query) =>
+      query.state.data?.some((project) => project.scaffoldStatus === "SCAFFOLDING")
+        ? 3000
+        : false,
   });
 
   const { data: templates } = useQuery({
@@ -393,8 +404,23 @@ export const Dashboard = () => {
   async function handleCreate() {
     setCreating(true);
     try {
-      const project = await createProjectApi(name || undefined, selectedTemplate);
+      const project = await createProjectApi(
+        name || undefined,
+        selectedTemplate,
+        variant,
+      );
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
+
+      // A "Latest" project has no files yet -- a scaffolder is running in its
+      // container and will be for a minute or two. Opening the editor on an
+      // empty tree would look like a broken project rather than an unfinished
+      // one, so the dashboard keeps them here and says what is happening.
+      if (project.scaffoldStatus === "SCAFFOLDING") {
+        void messageApi.info("Building it now. It will open when it is ready.");
+        setIsCreating(false);
+        return;
+      }
+
       void navigate(`/project/${project.id}`);
     } catch {
       void messageApi.error("Could not create the project. Check the server logs.");
@@ -602,7 +628,22 @@ export const Dashboard = () => {
           >
             {visibleProjects.map((project) => {
               const isOwner = project.ownerId === user?.id;
-              const open = () => void navigate(`/project/${project.id}`);
+              // A scaffolder is writing this project's files right now.
+              // Opening the editor on a tree that is half written looks like a
+              // broken project rather than an unfinished one.
+              const building = project.scaffoldStatus === "SCAFFOLDING";
+              const broken = project.scaffoldStatus === "FAILED";
+              const open = () => {
+                if (building) {
+                  void messageApi.info("Still being built. It will open when it is ready.");
+                  return;
+                }
+                if (broken) {
+                  setRebuilding(project);
+                  return;
+                }
+                void navigate(`/project/${project.id}`);
+              };
               const actions = (
                 <ProjectActions
                   project={project}
@@ -828,6 +869,23 @@ export const Dashboard = () => {
         />
       )}
 
+      {/* A project whose scaffolder failed. The reason is the whole content:
+          "creation failed" is not something anybody can act on, and "npm ERR!
+          network timeout" is -- so the scaffolder's own last words are shown
+          verbatim rather than summarised. */}
+      <ScaffoldFailureDialog
+        project={rebuilding}
+        onClose={() => setRebuilding(null)}
+        onRetried={() => {
+          setRebuilding(null);
+          void queryClient.invalidateQueries({ queryKey: ["projects"] });
+        }}
+        onDelete={(project) => {
+          setRebuilding(null);
+          setDeleting(project);
+        }}
+      />
+
       <Modal
         open={renaming !== null}
         title="Rename project"
@@ -941,6 +999,8 @@ export const Dashboard = () => {
               templates={templates}
               value={selectedTemplate}
               onChange={setTemplate}
+              variant={variant}
+              onVariantChange={setVariant}
             />
           )}
 

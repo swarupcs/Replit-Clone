@@ -34,6 +34,8 @@ import type {
   LocalFolderSettingsResponse,
   OpenLocalFolderResponse,
   TemplateSummary,
+  CreateVariant,
+  ScaffoldState,
   CreateProjectResponse,
   ListProjectsResponse,
   Project,
@@ -57,12 +59,32 @@ import axios from "../config/axiosConfig.ts";
 export const createProjectApi = async (
   name?: string,
   template?: string,
+  /** `starter` copies the committed directory and is instant; `latest` runs the
+   *  upstream scaffolder in the project's container and takes minutes, so the
+   *  project comes back SCAFFOLDING and is polled. */
+  variant: CreateVariant = "starter",
 ): Promise<Project> => {
   const response = await axios.post<CreateProjectResponse>("/api/v1/projects", {
     name,
     template,
+    variant,
   });
   return response.data.data;
+};
+
+/** Whether a "Latest" project has finished being built, and why not. */
+export const getScaffoldStateApi = async (
+  projectId: string,
+): Promise<ScaffoldState> => {
+  const response = await axios.get<{ data: ScaffoldState }>(
+    `/api/v1/projects/${projectId}/scaffold`,
+  );
+  return response.data.data;
+};
+
+/** Empties the working tree and runs the recipe again. Only from FAILED. */
+export const retryScaffoldApi = async (projectId: string): Promise<void> => {
+  await axios.post(`/api/v1/projects/${projectId}/scaffold/retry`);
 };
 
 /** What this deployment will let somebody open from disk.

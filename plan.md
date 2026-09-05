@@ -2145,6 +2145,118 @@ host over symlink EPERM, identically on a clean checkout.
 
 ---
 
+### 2.40 Since (2026-09-05) — the lockfile decides, not the code
+
+Found while reading the creation path for §2.41, by the method §3.1 keeps
+recommending: two shipped things read against each other.
+
+`warmStart` fingerprints `pnpm-lock.yaml` and `yarn.lock`, and its
+`INSTALL_PREFIXES` knows how to skip `pnpm install` and `yarn install`. But
+`detectStartCommand` emitted `npm install && npm run <script>` whatever had just
+been cloned — so **nothing in this codebase ever produced the commands the warm
+path was written for.** Three consequences, all real:
+
+- The lockfile was ignored, which is the entire point of a lockfile: you got
+  whatever npm resolved today rather than what the repository pinned.
+- A `workspace:*` dependency failed outright. npm cannot resolve the protocol.
+- Even a correct `pnpm install` would have died with command-not-found, because
+  neither pnpm nor yarn was in the node image — **although that image already
+  set `PNPM_HOME` and `YARN_CACHE_FOLDER`**, so it was written expecting them.
+  They were simply never installed.
+
+So `detectPackageManager(files)` reads the lockfile, `detectStartCommand` takes
+the manager, and the image enables corepack with both pinned and downloaded at
+**build** time, so a project's first install does not also pay to fetch its
+package manager. `yarn <script>` and not `yarn run <script>`: the other form is
+a usage message rather than anything a person can act on.
+
+**Fixed at both call sites, not one.** `localFolderService` had the identical
+bug and is the worse of the two — a folder somebody already had is their real
+working tree with whatever they chose years ago, where a fresh clone at least
+tends to be recent.
+
+Where more than one lockfile is present, the newer tool wins: that means a
+migration nobody finished, and a stale `package-lock.json` left behind by a move
+*to* pnpm is the common case while the reverse is not.
+
+Four mutants, all caught, including reverting the whole thing to npm.
+
+---
+
+### 2.41 Since (2026-09-05) — a starter is pinned; "Latest" is not
+
+A committed starter directory is frozen at whatever was committed: ask for React
+today and you get the React of the day somebody added the folder. So the
+template picker gained a second choice — **Starter** or **Latest** — where
+Latest runs the tool the ecosystem actually publishes (`npm create vite@latest`,
+`create-next-app@latest`) and builds the project from what it produces.
+
+**The reason this is a service and not three lines in `createProjectService` is
+a decision this repository already took once and undid.** The original code
+shelled out to `npm create` on the **host**; the comment at
+`projectService.ts:82` still records why it was removed — an arbitrary command
+outside any sandbox, needing the network, producing a nested directory so the
+bind-mount root and the app root disagreed by one level. Running the scaffolder
+**inside the project's container** answers all three without giving up any of
+what the starter copy bought. `importRepository` is the precedent and this
+follows it closely.
+
+**Creation stopped being synchronous, for this path only.** A scaffolder plus an
+install is minutes; an HTTP request that waited would be killed by a proxy or a
+browser long before it finished. So `POST /projects` returns `201` immediately
+with the row saying `SCAFFOLDING`, and the dashboard polls — **and only while
+something is actually being built**, so an idle tab is not a background load.
+
+**The reconcile was written with it rather than after somebody noticed.** A row
+left `SCAFFOLDING` is a container exec this process was awaiting, and nothing
+survives the process to finish it or to notice; without `reconcileScaffolds` the
+dashboard says "Setting up" for ever. That is the third appearance of the shape
+§2.26 already fixed twice, for scheduled runs and for deployments, and the first
+time it was built with the boot pass from the start. Its message says what is
+and is not known: the server restarted, and whatever the scaffolder had finished
+is still in the project.
+
+**The commands live in a table and are argv arrays.** A recipe is genuinely data
+— what `npm create vite@latest` produces, and which flags it accepts, change
+without anybody here deploying — but it is handed to `docker exec` as an array
+and is never seen by a shell, which is the whole of what keeps a table of
+commands from being a remote code execution surface with extra steps. **No route
+writes that table.** A user picks a template and a variant; they never pick a
+command, and the schema refuses a `variant` that is not one of two words.
+`parseRecipe` is the boundary and it is tested as one: a bare string, a nested
+non-string, an empty step and an empty recipe are each refused rather than
+reaching `docker exec` as `undefined`.
+
+**A failed scaffold fails the project and says why, in the scaffolder's own
+words.** It does not quietly substitute the pinned starter: handing somebody a
+different, older project than the one they chose is worse than telling them it
+did not work. "npm ERR! network timeout" says try again; "creation failed" says
+nothing anybody can act on. The dialog offers **Try again** — which empties the
+tree first, because a half-finished scaffold leaves files behind and
+`npm create` refuses a directory it considers non-empty — and **Delete**,
+because those are different decisions and only the person knows which applies.
+
+Only six templates offer it, and the UI asks the **database** which rather than
+carrying a list: a recipe turned off because upstream changed a flag also
+removes the option that would now fail. For `go-http` or `static-html`, "latest"
+would be a control that does nothing.
+
+Seven mutants, all caught, including carrying on past a failed step, reconciling
+the wrong rows on boot, and letting a non-string reach `docker exec`.
+
+Server: 1970 passing, 296 skipped — no database here. Web: 1131 passing.
+Typecheck and lint clean, 3/3. `localRoots.test.ts` stays red on this Windows
+host over symlink EPERM, identically on a clean checkout.
+
+**Unverified, and it is most of what matters here.** No scaffolder has actually
+run: Docker is not up on this machine, so every `execCapture` above is a mock,
+and the two new migrations have never touched Postgres. Whether
+`npm create vite@latest` cleanly accepts `.` in a bind-mounted directory owned
+by uid 1001, and whether `create-next-app`'s flags are still the ones seeded
+here, are exactly the claims §1 says a mock cannot be trusted about.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong

@@ -737,6 +737,27 @@ model Project {
   /// on a 4-core box for no reason a user could act on.
   cpus Float?
 
+  /// How this project got its files, and whether that has finished.
+  ///
+  /// `READY` for every project that was copied from a committed starter, which
+  /// is instant and cannot half-happen -- so the default is correct for every
+  /// row that existed before this column did, with no backfill.
+  ///
+  /// `SCAFFOLDING` means an upstream scaffolder is running inside this
+  /// project's container right now (`npm create vite@latest` and friends). That
+  /// takes minutes, which is why creation stopped being synchronous for this
+  /// path, and why `reconcileScaffolds` exists: a restart mid-scaffold would
+  /// otherwise leave the row saying SCAFFOLDING for ever. plan.md §2.26 is the
+  /// record of that exact bug happening twice already.
+  scaffoldStatus ScaffoldStatus @default(READY)
+
+  /// What the scaffolder said, when it failed.
+  ///
+  /// Kept so a FAILED project can explain itself rather than merely being
+  /// broken -- "npm ERR! network timeout" is something a person can act on and
+  /// "creation failed" is not.
+  scaffoldLog String?
+
   envVars Json @default("{}")
 
   /// Secret in the share link, when one has been created. Null means the
@@ -957,6 +978,47 @@ model DeploymentRelease {
   /// Newest first, per deployment, is the whole read pattern.
   @@index([deploymentId, createdAt])
   @@map("deployment_releases")
+}
+
+/// Whether a project's files are there yet.
+///
+/// Deliberately three states and not a boolean: "not ready" is two different
+/// situations -- still working, and gave up -- and a screen that cannot tell
+/// them apart either spins for ever or gives up too early.
+enum ScaffoldStatus {
+  READY
+  SCAFFOLDING
+  FAILED
+}
+
+/// The commands that build a project of a given template from scratch.
+///
+/// A table rather than a constant in the registry because the versions these
+/// pull move independently of this codebase: `npm create vite@latest` changes
+/// what it produces without anybody here deploying, and the flags it accepts
+/// change with it. Editing a row beats shipping a release.
+///
+/// **Seeded, and no route writes it.** A user chooses a template; they never
+/// choose a command. The argv is stored as an array of arrays and is passed to
+/// `docker exec` as an array, so nothing in it is ever parsed by a shell --
+/// which is what makes a table of commands a table of data rather than a
+/// remote code execution surface with extra steps.
+model ScaffoldRecipe {
+  /// Matches a template id in the server-side registry.
+  templateId String @id
+
+  /// What this actually produces, for the UI: "Vite 6 · React".
+  label String
+
+  /// Ordered argv arrays. Each runs in the project's container, in the
+  /// workspace directory, and a non-zero exit stops the sequence.
+  argv Json
+
+  /// So a recipe upstream has broken can be turned off without deleting what
+  /// it used to be -- the row is the record of what was tried.
+  enabled Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
 }
 
 enum DeploymentStatus {

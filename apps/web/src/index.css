@@ -2906,3 +2906,18 @@ body {
   flex: none;
   color: var(--rc-text-faint, var(--rc-text-subtle));
 }
+
+/* The Starter/Latest choice under the template grid (plan.md Part A).
+   Its own block rather than inline styles, matching the rest of the picker. */
+.rc-template-variant {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.rc-template-variant-hint {
+  font-size: 12px;
+  color: var(--rc-text-subtle);
+  line-height: 1.45;
+}

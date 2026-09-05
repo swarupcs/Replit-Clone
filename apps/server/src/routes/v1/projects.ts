@@ -27,6 +27,8 @@ import {
   getStartCommandController,
   setStartCommandController,
   getWorkspaceSizeController,
+  getScaffoldStatusController,
+  retryScaffoldController,
   setWorkspaceSizeController,
   getProjectPorts,
   getProjectTree,
@@ -395,6 +397,10 @@ router.put("/:projectId/start-command", asyncHandler(setStartCommandController))
 // §12.1. GET is viewer -- knowing how big the box is is part of reading the
 // project; PUT is owner, because how much of the host one workspace holds is a
 // decision about every other workspace on it.
+// Whether a "Latest" project has finished building. Polled while it has not.
+router.get("/:projectId/scaffold", asyncHandler(getScaffoldStatusController));
+router.post("/:projectId/scaffold/retry", asyncHandler(retryScaffoldController));
+
 router.get("/:projectId/size", asyncHandler(getWorkspaceSizeController));
 router.put("/:projectId/size", asyncHandler(setWorkspaceSizeController));
 
