@@ -119,6 +119,7 @@ import {
   updateJobController,
 } from "../../controllers/scheduleController.js";
 import { getDevcontainerController } from "../../controllers/devcontainerController.js";
+import { getComposeController } from "../../controllers/composeController.js";
 import {
   createEmbedController,
   getEmbedController,
@@ -383,6 +384,10 @@ router.post(
 // What the project's own .devcontainer/devcontainer.json asked for, and what
 // this server did with it.
 router.get("/:projectId/devcontainer", asyncHandler(getDevcontainerController));
+
+// What the project's own docker-compose.yml declares, and what is running of
+// it. plan.md §11.3.
+router.get("/:projectId/compose", asyncHandler(getComposeController));
 
 // Embeds. The OWNER's half only -- what an anonymous reader calls lives on
 // its own router, outside the `requireAuth` above.

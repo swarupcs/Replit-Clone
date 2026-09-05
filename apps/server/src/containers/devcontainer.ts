@@ -116,11 +116,24 @@ const REFUSALS: Record<string, string> = {
   dockerFile:
     "Building an image from a Dockerfile is not supported here. Set \"image\" " +
     "to a permitted base image instead.",
+  // These three said "This platform runs one container per project" until
+  // plan.md §11.3, and that sentence is no longer true: a project's own
+  // docker-compose.yml now starts the services it declares beside the
+  // project's container. What is still not supported is the devcontainer
+  // spec's compose INTEGRATION, which is a different thing -- it asks this
+  // platform to build the app container out of a compose service, and the app
+  // container here is the project's, made the way every other project's is.
   dockerComposeFile:
-    "Compose projects are not supported. This platform runs one container per " +
-    "project.",
-  service: "Compose projects are not supported.",
-  runServices: "Compose projects are not supported.",
+    "A devcontainer cannot describe the app container through Compose here. " +
+    "The project's own docker-compose.yml is read separately, and the " +
+    "services it declares are started beside this project — see project " +
+    "settings.",
+  service:
+    "\"service\" names which Compose service the devcontainer IS, which this " +
+    "platform does not do: the project's own container is the app.",
+  runServices:
+    "\"runServices\" is not read. Every service in the project's " +
+    "docker-compose.yml that this deployment permits is started.",
   features:
     "Dev Container Features are not supported. Install what you need in " +
     "\"postCreateCommand\" instead.",

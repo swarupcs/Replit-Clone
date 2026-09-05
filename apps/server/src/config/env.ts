@@ -305,6 +305,74 @@ const envSchema = z.object({
         .filter(Boolean),
     ),
 
+  /* ---- compose services (plan.md §11.3) ---- */
+
+  /** Whether a project's own `docker-compose.yml` starts the services it
+   *  declares, beside the project's container and with the same lifecycle.
+   *
+   *  Defaults to ON only when nothing here is shared -- development, or a
+   *  single-user deployment -- and OFF otherwise, and the reason is arithmetic
+   *  rather than caution. Every other limit on this host is per PROJECT;
+   *  this is the one setting that multiplies a project into several
+   *  containers, so on a shared VM MAX_CONCURRENT_CONTAINERS would quietly
+   *  stop meaning what it says. On a machine with one tenant there is nobody
+   *  to take the room from, which is the same argument
+   *  `CONTAINER_MEMORY_MB` and `LSP_ENABLED` already make.
+   *
+   *  Off, a project with a compose file behaves exactly as it did before this
+   *  existed: the file is still read, and project settings still say what
+   *  would have been started. */
+  COMPOSE_SERVICES_ENABLED: z
+    .string()
+    .optional()
+    // Explicit rather than z.coerce.boolean(), which reads the string "false"
+    // as true and would turn the setting on for everyone who tried to turn it
+    // off. The same shape SANDBOX_EGRESS_FILTERED uses.
+    .transform((value) =>
+      value === undefined ? unshared : value === "true" || value === "1",
+    ),
+
+  /** Images a compose service may ask for. A trailing * is a prefix wildcard.
+   *
+   *  An allowlist for the reason DEVCONTAINER_IMAGE_ALLOWLIST is one: this
+   *  decides what code runs on the host, and the request comes out of a file
+   *  in a repository that may have been cloned from a stranger.
+   *
+   *  The default is the data services that are what compose files in real
+   *  repositories overwhelmingly declare -- a database, a cache, a queue,
+   *  object storage -- as official images, by prefix. That is a deliberate
+   *  supply-chain decision and not a neutral one: it says this platform will
+   *  run Docker Official Images of well-known datastores without being asked
+   *  again. Narrow it if that is not a trade you want; widen it and you are
+   *  agreeing to run whatever a repository names. */
+  COMPOSE_IMAGE_ALLOWLIST: z
+    .string()
+    .default(
+      "postgres:*,mysql:*,mariadb:*,mongo:*,redis:*,valkey:*,memcached:*," +
+        "rabbitmq:*,nats:*,minio/minio:*,elasticsearch:*,opensearchproject/opensearch:*",
+    )
+    .transform((value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+
+  /** How many services one project may start.
+   *
+   *  A cap rather than a budget, because the failure it prevents is not
+   *  gradual: a compose file declaring twenty services would otherwise take
+   *  the host on the first project that opened it. */
+  COMPOSE_MAX_SERVICES: z.coerce.number().int().positive().default(4),
+
+  /** Memory for one service container.
+   *
+   *  Its own figure rather than a share of the workspace's: a Postgres beside
+   *  a project is not competing with the editor for the same allowance, and
+   *  sizing it from CONTAINER_MEMORY_MB would make a bigger workspace silently
+   *  buy a bigger database. */
+  COMPOSE_SERVICE_MEMORY_MB: z.coerce.number().int().positive().default(512),
+
   /** Longest a devcontainer's postCreate/postStart commands may run.
    *
    *  These sit directly in the path of opening a project, and they are

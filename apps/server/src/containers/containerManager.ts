@@ -43,6 +43,12 @@ const docker = new Docker();
 // Re-exported so existing importers keep working; it lives in its own
 // module now because the database service needs it too.
 export { SANDBOX_NETWORK, ensureNetwork } from "./sandboxNetwork.js";
+import {
+  reconcileServices,
+  removeServices,
+  startServices,
+  stopServices,
+} from "./composeServices.js";
 
 const CONTAINER_PREFIX = "rc-project-";
 /** Kept here rather than imported from the database service, which imports
@@ -652,6 +658,14 @@ async function startContainer(projectId: string): Promise<Container> {
   increment("containers_started");
   logger.info("container started", { projectId, image });
 
+  // The services the project's own docker-compose.yml declares, started as
+  // part of the same lifecycle -- plan.md §11.3. Before the lifecycle
+  // commands, because a `postCreateCommand` that runs a migration needs the
+  // database it migrates to be answering. Never throws: a compose file is a
+  // file in a repository this platform did not write, and a bad one must not
+  // be able to hold a project closed.
+  await startServices(projectId, container.id);
+
   // Before the lifecycle commands, not after: a `postCreateCommand` may
   // reasonably assume the shell it is typed for. After the container is
   // running, because there is nothing to exec into until then.
@@ -965,6 +979,11 @@ export async function stopContainer(projectId: string): Promise<void> {
 
   const container = docker.getContainer(info.Id);
   await container.stop({ t: 5 }).catch(() => {});
+
+  // One lifecycle unit. A project's services outliving the project's own
+  // container is the memory leak §6 decision 4 already described about the
+  // managed database, multiplied by however many the file declares.
+  await stopServices(projectId).catch(() => {});
 }
 
 export async function removeContainer(projectId: string): Promise<void> {
@@ -978,6 +997,13 @@ export async function removeContainer(projectId: string): Promise<void> {
   // else knows its id once the row is gone.
   await container.stop({ t: 2 }).catch(() => {});
   await container.remove({ force: true }).catch(() => {});
+
+  // The service containers and their network -- and NOT their volumes. This
+  // is the path putting a project in the trash takes, where the rule is the
+  // one `projectService` states about the managed database: restoring is
+  // worthless without the data. `destroyServices` is the purge's job.
+  await removeServices(projectId).catch(() => {});
+
   activeAttachments.delete(projectId);
   lastActiveAt.delete(projectId);
 }
@@ -1140,6 +1166,10 @@ export function startIdleReaper(): void {
           // cause. Only this direction is safe, and only because the app has
           // already gone.
           await onProjectReaped?.(name);
+
+          // ...and the services the project declared for itself, for exactly
+          // the same reason and by exactly the same argument.
+          await stopServices(name).catch(() => undefined);
         }
       } catch (error) {
         logger.error("idle reaper failed", error);
@@ -1161,6 +1191,17 @@ export async function stopAllContainers(): Promise<void> {
     containers.map((info) =>
       docker.getContainer(info.Id).stop({ t: 3 }).catch(() => {}),
     ),
+  );
+
+  // The compose services beside them. Without this a restart leaves every
+  // project's Postgres and Redis running and holding memory, which is the
+  // exact orphan this function exists to prevent -- just under a different
+  // name prefix, so the sweep above never sees them.
+  await Promise.all(
+    containers
+      .map((info) => projectIdFromNames(info.Names))
+      .filter((id): id is string => id !== undefined)
+      .map((id) => stopServices(id).catch(() => undefined)),
   );
 
   if (reaperTimer) clearInterval(reaperTimer);
@@ -1215,6 +1256,11 @@ export async function reconcileOnBoot(): Promise<{
     await docker.getContainer(info.Id).remove({ force: true }).catch(() => {});
     containersRemoved += 1;
   }
+
+  // The same sweep for compose services, which a crash leaves behind exactly
+  // as it leaves project containers -- and which nothing else on this host
+  // would ever clean up, because they are not named `rc-project-`.
+  containersRemoved += await reconcileServices(known).catch(() => 0);
 
   // Directories are reported, not deleted. A row missing at boot is far more
   // likely to mean the database is not the one this server used last than that

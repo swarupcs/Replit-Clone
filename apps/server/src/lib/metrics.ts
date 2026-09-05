@@ -47,6 +47,13 @@ export type CounterName =
   | "two_factor_failures"
   | "two_factor_replays"
   | "two_factor_recovery_used"
+  // Services a project's own docker-compose.yml declared, started beside it
+  // (plan.md §11.3). The failures are the half worth watching: a service that
+  // does not start is swallowed on purpose -- a file in a cloned repository
+  // must not be able to hold a project closed -- so without a counter the only
+  // signal is somebody's app failing to connect to a database.
+  | "compose_services_started"
+  | "compose_services_failed"
   | "runs_failed"
   | "preview_errors"
   | "preview_upgrades_rejected"

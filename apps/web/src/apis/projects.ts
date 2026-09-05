@@ -14,6 +14,7 @@ import type {
   ModerationAction,
   ProjectVisibility,
   PublicProject,
+  ComposeState,
   DevcontainerState,
   GitBranch,
   GitRemote,
@@ -936,6 +937,16 @@ export const getDevcontainerApi = async (
 ): Promise<DevcontainerState> => {
   const response = await axios.get<ApiSuccess<DevcontainerState>>(
     `/api/v1/projects/${projectId}/devcontainer`,
+  );
+  return response.data.data;
+};
+
+/** What the project's own docker-compose.yml declares, and what is running. */
+export const getComposeApi = async (
+  projectId: string,
+): Promise<ComposeState> => {
+  const response = await axios.get<ApiSuccess<ComposeState>>(
+    `/api/v1/projects/${projectId}/compose`,
   );
   return response.data.data;
 };

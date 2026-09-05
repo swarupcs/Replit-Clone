@@ -21,6 +21,7 @@ import {
   removeCacheVolume,
   removeContainer,
 } from "../containers/containerManager.js";
+import { destroyServices } from "../containers/composeServices.js";
 import {
   destroy as destroyManagedDatabase,
   provision as provisionManagedDatabase,
@@ -290,6 +291,10 @@ export async function purgeProject(projectId: string): Promise<void> {
   // pointed at it is the mistake `deployService.unpublish` learned about
   // published files, with rather more disk attached to it.
   await destroyManagedDatabase(projectId).catch(() => undefined);
+  // ...and the same for the services the project's own compose file declared.
+  // `removeContainer` above has already taken their containers and network;
+  // this is the volumes, which the TRASH deliberately kept. plan.md §11.3.
+  await destroyServices(projectId).catch(() => undefined);
   // Snapshots must not outlive what they are snapshots of.
   await forgetCheckpoints(projectId).catch(() => undefined);
   // The cache volume outlives a restart deliberately, but not the project.

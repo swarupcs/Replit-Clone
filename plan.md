@@ -141,17 +141,17 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 155 items. Open: 20 — five blocked, ten from §10 that are all
-waiting on one decision (§10.1), two from §11, which reads the sandbox
+**Done: 156 items. Open: 19 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), one from §11, which reads the sandbox
 rather than the editor, and three from §12, which reads neither and asks what
-a cloud machine is for. One of §11's two is blocked on nothing; 11.10 is
-the one row §11 has produced that needs a decision before it needs code, and
-12.4 is blocked on hardware rather than on anybody.**
+a cloud machine is for. §11's last row is 11.10, which needs a decision before
+it needs code, and 12.4 is blocked on hardware rather than on anybody, so nothing
+outside §12 is both open and unblocked.**
 
-Those four numbers are 5 + 10 + 2 + 3 = 20, and they are written out because
+Those four numbers are 5 + 10 + 1 + 3 = 19, and they are written out because
 they did not add up once already — see the paragraph below.
 
-**§10.1 is now the whole of the critical path.** Ten of the twenty open
+**§10.1 is now the whole of the critical path.** Ten of the nineteen open
 items are behind it, it is a decision rather than work, and as of 2026-09-05 it
 has a third option costed against a real spike rather than an argument. It is
 the single most valuable thing anybody could spend an hour on.
@@ -176,10 +176,9 @@ Open, in full, so the shape is visible without scrolling: **no defects**
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, **two in
-§11** (11.1, 11.2, 11.4, 11.5, 11.6, 11.7, 11.8 and 11.9 all shipped
-2026-09-05, the day after the section was written — eight of its ten rows in
-one day; 11.2 also split 11.10 out of itself, and 11.4 named the
+an architectural route), **ten in §10 behind that same route**, **one in
+§11** (11.1 through 11.9 all shipped 2026-09-05, the day after the section was
+written — nine of its ten rows in one day, and 11.10 is the tenth; 11.2 also split 11.10 out of itself, and 11.4 named the
 wrong interaction while doing it — see the rows. 11.9 shipped in two commits,
 its dotfiles half and then its signing half, and was counted open in between:
 a row is done or it is not, and half a row counted as done is how a count
@@ -353,6 +352,12 @@ appeals (§8.7), a compute meter (§8.8), Stripe subscription state and webhooks
 (§8.4, minus the two calls that need real keys), dotfiles that follow you into
 every container (§11.9), and TOTP two-factor with recovery codes (§11.6).
 
+**More than one container per project** (§11.3): a project's own
+`docker-compose.yml` starts the services it declares beside it, on a private
+internal network where the app reaches them by the names the file gave them.
+Parsed rather than executed — a deliberate subset, with everything that would
+hand a cloned repository control of the host refused and the reason shown.
+
 **A way in from outside** (§11.5): a Caddy overlay and a Caddyfile, a written
 answer that puts a tunnel first, and — the part that was a defect rather than a
 setting — a `COOKIE_DOMAIN` without which every preview behind any reverse
@@ -392,9 +397,8 @@ workspace (§12.5) needs three numbers somebody has to choose by watching a real
 host. Teams (§8.5) needs a pricing decision and turns every `ownerId === userId`
 into a membership question.
 
-**Simply absent, and unblocked.** Compose, so a repository with four services
-can run at all (§11.3). Notebooks (§12.3). GPUs (§12.4), which need different
-hardware.
+**Simply absent, and unblocked.** Notebooks (§12.3). GPUs (§12.4), which need
+different hardware.
 
 ### What is verified, and what is asserted
 
@@ -404,9 +408,11 @@ mislead a reader of the lists above.
 **Run against real infrastructure:** every migration (all 37), the DB-gated
 suites, container start and reap, both scaffolder paths, a signed commit
 verified by `git log --show-signature`, a dotfiles clone and its failure mode,
-TOTP enrolment through to a spent recovery code, and §11.5's cookie behaviour
+TOTP enrolment through to a spent recovery code, §11.5's cookie behaviour
 against a real server on three hostnames — including reintroducing the defect
-and watching every preview go back to `401`.
+and watching every preview go back to `401` — and §11.3's compose services,
+where a real Postgres and Redis answered a real project's container by name and
+a row survived being trashed and restored.
 
 **Not run, and load-bearing:** the service worker has never registered — no
 browser available here can — so §11.7's caching behaviour is asserted rather
@@ -4451,32 +4457,87 @@ which half.** See 11.2 and 11.10.
 **And one that is not a line on that list but the largest single gap in this
 document.**
 
-- [ ] **11.3 Compose — more than one container per project.**
-      `dockerComposeFile`, `service` and `runServices` all refuse with the same
-      sentence: *"This platform runs one container per project."* That is an
-      architecture statement, not a policy, and it is why this row is separate
-      from 11.2 and cannot be granted by an entitlement.
+- [x] **11.3 Compose — more than one container per project.** Shipped
+      2026-09-05, and built as the shape this row guessed at: **not compose
+      support, but "the project's container, plus the services it declares, as
+      one lifecycle unit"** — §6 decision 4's relationship with the managed
+      database, generalised from one sidecar to several. A `build:` service is
+      named and not started, because the project's own container already is
+      that service, and nothing about how the app container is made changed.
 
-      It matters more than its position in the format suggests. A very large
-      share of real repositories are not "an app" — they are an app, a
-      Postgres, a Redis and sometimes a worker, wired together in
-      `docker-compose.yml`, and `docker compose up` is the documented way to
-      start them. Today such a repository opens in this editor, shows a
-      `docker-compose.yml` with a Docker icon (`fileTypes.ts:209`), and cannot
-      be run at all. The database panel does not close this: it gives a project
-      *a* Postgres this platform manages (§6 decision 4 pairs it with the
-      container's lifecycle), which is a different thing from the four services
-      the repository's own file describes.
+      **It is parsed, not executed, and that is the whole design.** Handing
+      `docker compose` a file out of a cloned repository is handing the daemon
+      `privileged: true`, `network_mode: host`, `pid: host` and
+      `volumes: ["/:/host"]` — an arbitrary-container-run primitive on the
+      host, from a file nobody here wrote. Validating every key first is the
+      only safe version of that, and once every key is validated the file has
+      been parsed anyway. So: a deliberate subset, refused loudly rather than
+      ignored quietly, exactly as `devcontainer.ts` does. A host path as a
+      volume is refused rather than silently rewritten to a named one, because
+      a quietly-relocated data directory is a nastier surprise than a message.
 
-      **Check the shape before starting, because three subsystems assume the
-      singular.** `containerName(projectId)` is one name per project;
-      `getPreviewTarget` and `publishedPorts` resolve ports against one
-      container; the idle reaper and `stopAllContainers` enumerate by a single
-      prefix. The honest first version is probably not general compose support
-      but **"the project's container, plus the services it declares, as one
-      lifecycle unit"** — which is precisely the relationship §6 decision 4
-      already built and argued for the database container, generalised from one
-      sidecar to several.
+      **Each project's services get a private network, and that is the
+      load-bearing decision.** The obvious build puts them on the shared
+      sandbox bridge with a network alias equal to the service name, so the app
+      reaches `db:5432` as compose promises. Every sandbox on this host shares
+      that bridge — so two projects both declaring `postgres` would share the
+      alias, Docker's DNS would round-robin between them, and one project's app
+      would *intermittently* connect to another project's database. That
+      network is `Internal: true` unconditionally, and not for tidiness: the
+      project's container joins it as a SECOND network, and a routable one
+      would be a hole straight through `SANDBOX_EGRESS_FILTERED`.
+
+      **Two things only running it could have found, and both were wrong in
+      code the tests were happy with.**
+
+      *`CapDrop: ["ALL"]` breaks every official datastore image.* Postgres
+      exits 1 with *"failed switching to 'postgres': operation not
+      permitted"*, Redis exits 127 with *"setpriv: setresuid failed"* — both
+      start as root, prepare a data directory and drop to their own user. Five
+      capabilities go back: CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID. Still
+      tighter than Docker's default set, and the omissions are pinned by a test
+      as well as the additions — no NET_RAW, no MKNOD, and no
+      NET_BIND_SERVICE, so nothing here can take a privileged port.
+
+      *Trashing a project destroyed its database.* `removeServices` was wired
+      into `removeContainer`, which is the path the TRASH takes — against this
+      repository's own rule, stated in `projectService`: *"Held: the tree, the
+      row, the managed database's volume. Restoring is worthless without the
+      data."* A compose file's `pgdata` is that data. Split into
+      `removeServices` (containers and network, rebuilt from the file in
+      seconds) and `destroyServices` (the volumes, purge only), mirroring
+      `managedDatabaseService.stop` / `.destroy`.
+
+      **Proven end to end** against a real project: an app/Postgres/Redis file
+      with a deliberately hostile fourth service, `db:5432` and `cache:6379`
+      resolving and open from inside the project's container, PostgreSQL 17.11
+      answering a real query on the file's own credentials, the sidecar unable
+      to reach anything off its network, and a row written, trashed, restored
+      and read back intact — then purged, taking the volume with it.
+
+      **Off by default where anything is shared.** It is the one setting that
+      multiplies one project into several containers, so
+      `MAX_CONCURRENT_CONTAINERS` would quietly stop meaning what it says on a
+      shared host; on by default in development and single-user mode, which is
+      the argument `CONTAINER_MEMORY_MB` and `LSP_ENABLED` already make. Off,
+      the file is still read and project settings still say what would have
+      run.
+
+      **The three subsystems this row warned about were not the problem.**
+      `containerName`, `getPreviewTarget`/`publishedPorts` and the reapers all
+      still assume one container per project and all still hold, because the
+      project's container is still the only one they are about. What did need
+      wiring is the lifecycle in both directions — start, stop, reap, trash,
+      purge, shutdown and the boot sweep — and the boot sweep is the one that
+      would have been missed: these are not named `rc-project-`, so nothing
+      else on the host would ever have cleaned them up.
+
+      **What is deliberately not supported**, and each is refused with a reason
+      the user can act on: `build` for a second service, `env_file`, `extends`,
+      `profiles`, `deploy`, secrets and configs, `container_name`, host-path
+      volumes, host ports, and a `command` with shell syntax in it — that last
+      because the command goes to the daemon rather than to `sh`, and running
+      half of what a file asked for is worse than refusing it.
 
 ---
 
@@ -4945,10 +5006,13 @@ which of them changed *is* the record of what shipped.
   holding a private key and an ACME client is strictly more to get wrong.
   (Line 83 → 85.)
 - `devcontainer.ts:119–140` — the ten refusals quoted are the actual strings.
-  **Still ten**, but `mounts` is no longer unconditional: 11.2 made it a plan
-  capability, so the same map now yields a shorter refusal list under the
-  `personal` plan. The default with no capability granted is unchanged.
-  (Lines 88–110 → 119–140.)
+  **Still ten, and two of them changed.** `mounts` is no longer unconditional:
+  11.2 made it a plan capability, so the same map yields a shorter refusal list
+  under the `personal` plan. And `dockerComposeFile`/`service`/`runServices` no
+  longer say *"This platform runs one container per project"* — 11.3 made that
+  sentence false, so they now refuse the devcontainer spec's compose
+  INTEGRATION and point at the project's own compose file, which is read
+  separately. (Lines 88–110 → 119–140.)
 - The idle reaper — **changed by 11.4.** It was `activeAttachments === 0` and
   `CONTAINER_IDLE_MINUTES`, default 20 (`env.ts:408`); it now asks
   `idleAllowanceMs(projectId)` (`containerManager.ts:1081`), which the personal
