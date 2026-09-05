@@ -37,29 +37,60 @@ than left in history where nobody would look for them.
 
 ## 1. Status at a glance
 
-Verified by running it rather than reading about it. The numbers are as of
-2026-08-31 (night); the notes under the table say which rows were **not**
-re-run that day, and why that matters more than usual:
+**Looking for what this actually does today rather than how the suite is
+doing? §1a.** This section is the health of the tree; that one is the
+inventory.
+
+Verified by running it rather than reading about it. **The numbers are as of
+2026-09-05**, and every row below was re-run that day — including the one that
+had been carried as "not re-run" since §2.22, which is the row that most needed
+it and is dealt with under the table.
 
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1676 passing**, 280 skipped (124 files) — no database on this machine |
-| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds seven migrations — see §5 |
-| `pnpm --filter web test` | **1055 passing** (82 files) |
-| `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
-| Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
+| `pnpm -r lint` | clean, 3/3 packages |
+| `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
+| the same, with `TEST_DATABASE_URL` set | **2384 passing**, 36 skipped. Green 2026-09-05 against all **37** migrations |
+| `pnpm --filter web test` | **1166 passing** (91 files) |
+| Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
-The skipped server tests are the DB-gated suites (`TEST_DATABASE_URL` unset)
-and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both run in
-CI. The count in that row is what remains skipped **with** the database
-configured; without it the figure is an order of magnitude larger, which is
-why the two rows are listed separately rather than as one number that would
-mean different things on different machines.
+The debt scan returns two hits and neither is debt: both are the literal word
+"TODO" inside prose about *searching* for it, in `searchService.ts` and its
+test. Recorded rather than filtered, because a scan whose exclusions are not
+written down is a scan somebody will quietly widen.
 
-The DB-gated row was run rather than quoted for §2.11 and §2.12:
+The size figure is the whole of `apps/server/src`, `apps/web/src` and
+`packages/shared/src`: 564 files, ~116k lines, of which ~64.6k are not tests.
+It was "~51k" here for a long time and that was never re-measured; the growth
+is real but the number had also been measuring something narrower.
+
+**The skips are two different things and the two rows exist to keep them
+apart.** With no database, 296 tests are skipped: the DB-gated suites plus the
+shell-quoting round-trips. With `TEST_DATABASE_URL` set, 36 remain, and those
+are only the shell-quoting ones — `/bin/bash` is absent on this Windows host.
+Both run in CI.
+
+**The DB-gated row is green again, and that mattered more than usual.** It had
+been carried since §2.22 as "not re-run", and eleven migrations have landed
+since — §12.1's `workspace_size`, §2.41's `scaffold_recipes`, §11.4's
+`plan_idle_minutes`, §11.2's `plan_devcontainer_mounts`, §11.9's
+`user_personalization` and §11.6's `two_factor` among them. **Two of those
+turned out to be broken**, and neither could have been caught by anything in
+this table except this row: they wrote `ALTER TABLE "Project"` where the table
+is `projects`, because the model carries `@@map`. Nothing in typecheck, lint
+or 2384 tests reads `migration.sql`. Only Postgres does. See §2.41.
+
+The DB-gated row was originally run rather than quoted for §2.11 and §2.12:
 both put load-bearing claims in a unique index, a foreign key and a
 transaction, and a mock cannot be wrong about those in any way worth trusting.
+That argument has only got stronger.
+
+**One test fails on this machine and is expected to.** `localRoots.test.ts`
+creates a symlink, and Windows refuses that without Developer Mode or an
+elevated shell — `EPERM`. It fails identically on a clean checkout and passes
+in CI. It is named here so it is not mistaken for a regression by whoever runs
+the suite next.
 
 **The debt recorded here against §2.13 and §2.14 is now cleared**, and
 clearing it was not a formality. Docker came back on the evening of
@@ -80,17 +111,23 @@ With those fixed the whole suite is green against a live database, which also
 means §2.13's hand-written migration has now been applied and exercised rather
 than only read.
 
-Two flakes are worth knowing about, since both will otherwise be mistaken for
-regressions:
+Three flakes are worth knowing about, since each will otherwise be mistaken
+for a regression. **All three were seen again on 2026-09-05**, and the first
+got materially worse that day for a reason worth writing down: Docker was
+building images and running containers while the suites ran, and every one of
+these is a timing failure under CPU contention. The suite is not less reliable
+than it was; the machine was busier.
 
-- Under load the **web** suite fails 9–10 at the default 5s timeout, always
-  the *first* test in a file and always passing in isolation. Verified as
-  environmental by running it on a clean checkout, which failed the same way.
-  `--testTimeout=20000` is green at 74/74.
+- Under load the **web** suite fails at the default 5s timeout, always the
+  *first* test in a file and always passing in isolation. On 2026-09-05 this
+  reached **15 files failing on a clean checkout** and 8 on a working tree with
+  changes in it — which is the right way round to notice that the changes were
+  not the cause. Verified as environmental by stashing and re-running.
+  `--testTimeout=20000` is green.
 - The server suite occasionally dies with `ERR_IPC_CHANNEL_CLOSED` / "Channel
-  closed" from tinypool, reporting no test failures at all. Seen three times
-  on 2026-08-31. It is the worker pool, not the tests: the next run passes.
-  **Not investigated.**
+  closed" from tinypool, reporting no test failures at all. Seen three times on
+  2026-08-31 and once on 2026-09-05. It is the worker pool, not the tests: the
+  next run passes. **Not investigated.**
 - `refreshTokenService.test.ts` — "lets exactly one of several concurrent
   refreshes claim the row" — fails under load roughly one run in three, with
   "Session was reused and has been revoked". It is timing against a reuse
@@ -106,19 +143,28 @@ everything else.
 
 **Done: 152 items. Open: 23 — five blocked, ten from §10 that are all
 waiting on one decision (§10.1), five from §11, which reads the sandbox
-rather than the editor, and four from §12, which reads neither and asks what a
-cloud machine is for. Four of §11's five are blocked on nothing; 11.10 is
+rather than the editor, and three from §12, which reads neither and asks what
+a cloud machine is for. Four of §11's five are blocked on nothing; 11.10 is
 the one row §11 has produced that needs a decision before it needs code, and
 12.4 is blocked on hardware rather than on anybody.**
 
-**The Done figure was 123 and is now 148, and that is a correction rather than
-this section's own growth.** By the same count §1 has always used — top-level
-checkboxes in this file — 148 was already true before §12 was written; the Open
-figure beside it was right, which is the tell. It is the exact failure §7's
-second paragraph was added to stop, one section later and in the other column:
-each commit fixed the row it owned and none of them owned the sum. Recorded
-here rather than quietly changed, because a count that moves 25 in one edit is
-otherwise indistinguishable from a section that added 25 items.
+Those four numbers are 5 + 10 + 5 + 3 = 23, and they are written out because
+they did not add up once already — see the paragraph below.
+
+**The Done figure jumped from 123 to 148 in one edit on 2026-09-05, and that
+was a correction rather than a day's work.** By the same count §1 has always
+used — top-level checkboxes in this file — 148 was already true before §12 was
+written; the Open figure beside it was right, which is the tell. It is the
+exact failure §7's second paragraph was added to stop, one section later and in
+the other column: each commit fixed the row it owned and none of them owned the
+sum. Recorded here rather than quietly changed, because a count that moves 25
+in one edit is otherwise indistinguishable from a section that added 25 items.
+
+**It happened again in miniature the same day, in the sentence above.** The
+§12 figure stayed at "four" through 12.1 and 12.2 shipping and 12.5 being split
+out, while the more detailed sentence below it said three — the two disagreed
+for three commits. The arithmetic is now written out beside the numbers, which
+is the cheapest thing that would have caught either of them.
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
@@ -257,7 +303,122 @@ carried forward on trust. Three claims did not survive it — see §5.
 
 ---
 
+## 1a. What is built, and what is not
+
+Added 2026-09-05, because §1 counts items and §2 tells stories and neither
+answers the question somebody actually arrives with: *what does this thing do
+today?* Every line below was checked against the tree on the day it was
+written. **This section is a view, not a source** — if it disagrees with a
+row, the row wins, and the disagreement is a bug in this section.
+
+### Built and working
+
+**The editor and the session.** Monaco with LSP for Python and Go, a terminal,
+a live preview through a proxy, multi-file search and replace, cross-project
+search, real-time collaboration with presence and follow-mode, checkpoints,
+a test panel, an AI assistant, and an embeddable read-only view.
+
+**The sandbox.** One Docker container per project, sized per workspace
+(§12.1), started on demand and reaped when idle — unless the plan says
+otherwise (§11.4). tini as pid 1, all capabilities dropped, no new privileges,
+a private network, a pids limit, and a package cache on a named volume.
+`devcontainer.json` is honoured for image, env, ports, lifecycle commands and —
+under the personal plan — `mounts` (§11.2). Installs happen before somebody
+waits for them when the workspace is already running (§12.2).
+
+**Projects.** 13 templates, plus "Latest", which runs the real upstream
+scaffolder inside the container instead of copying a pinned starter (§2.41).
+Import from GitHub with the package manager the lockfile actually names
+(§2.40). Open a folder that is already on the host (§10.2). Fork, export,
+trash with undo (§9.1), and a delete that is not a mistake waiting to happen.
+
+**Git.** Status, diff, stage, unstage, discard, commit, branches, remotes,
+fetch, pull, push, and — since §11.9 — SSH-signed commits.
+
+**Publishing.** Static and service deployments with history and rollback,
+custom domains (the code half — §9.2), scheduled jobs, and managed Postgres
+and Mongo per project.
+
+**The account.** Plans and entitlements with per-account overrides (§8.1), a
+usage screen with a per-project breakdown (§8.2), quota warnings before the
+wall (§8.3), API keys (§8.6), an operator console with a moderation trail and
+appeals (§8.7), a compute meter (§8.8), Stripe subscription state and webhooks
+(§8.4, minus the two calls that need real keys), dotfiles that follow you into
+every container (§11.9), and TOTP two-factor with recovery codes (§11.6).
+
+**Single-user mode** (§10.3), for a deployment with exactly one account and no
+signup.
+
+### Not built, and honest about why
+
+**Waiting on one decision — the largest single thing here.** Ten rows of
+editor parity (§10.6–§10.14: debugging, extensions, more languages,
+settings-as-files, tasks, a real diff editor, local history, the rest of git,
+and the small ones) are all behind §10.1: Monaco, openvscode-server, or the
+Route C spike §11.1 argues should be run before either is chosen. Building any
+of them before that decision is waste, and that is the whole argument of §10.
+
+**Blocked on something outside this repository** (§3.3): a certificate's
+private key, an autoscaler's cost model, a disk budget for snapshots, a backup
+destination — and note that *nothing* backs up a project today, which is the
+one entry on this page that loses data rather than failing to add a feature.
+
+**Blocked on a decision nobody has taken.** Dev Container Features (§11.10) is
+a question with three answers, none obviously right. Prebuilding a *stopped*
+workspace (§12.5) needs three numbers somebody has to choose by watching a real
+host. Teams (§8.5) needs a pricing decision and turns every `ownerId === userId`
+into a membership question.
+
+**Simply absent, and unblocked.** A documented way in from outside with TLS
+(§11.5) — the row that gives §11.6 its urgency and shipped after it. Compose,
+so a repository with four services can run at all (§11.3). An installable,
+offline-tolerant shell (§11.7). Notebooks (§12.3). GPUs (§12.4), which need
+different hardware.
+
+### What is verified, and what is asserted
+
+The distinction §5 exists for, restated because it is the thing most likely to
+mislead a reader of the lists above.
+
+**Run against real infrastructure:** every migration (all 37), the DB-gated
+suites, container start and reap, both scaffolder paths, a signed commit
+verified by `git log --show-signature`, a dotfiles clone and its failure mode,
+and TOTP enrolment through to a spent recovery code.
+
+**Not run, and load-bearing:** nobody has put an sshd in a sandbox image and
+attached a real editor to it, which is what §11.1's whole argument rests on.
+Nobody has run two differently-sized containers on one host and watched the sum
+(§12.1). Nobody has scanned the two-factor QR with a real phone — the RFC 6238
+vectors are the evidence there, and they are good evidence, but they are not
+the same thing. And nobody has used this as their daily editor for a week,
+which §10 warned about and which remains the largest untested claim in this
+document.
+
+---
+
 ## 2. Done
+
+**A convention, added 2026-09-05 after it caused real confusion.** Entries in
+this section carry the test counts and migration counts that were true **when
+that entry shipped**, and they are left that way on purpose: they are the
+evidence that the work was verified, and rewriting them every time a later
+commit adds a test would destroy exactly that. **§1 is the only place with
+current numbers.** Where an entry below says "all 35 migrations applied", read
+"all 35 migrations that existed that day" — there are 37 now.
+
+This is not a licence to let anything else drift. §7's rule is unchanged for
+every claim about what the code DOES; it is only these two derived figures,
+inside dated records, that are allowed to stay at their date.
+
+**And a second convention, also stated late because it was never written
+down.** §10, §11 and §12 record their own shipped rows **in place** — the row
+is ticked and its own paragraph says what shipped — rather than getting an
+entry here. §2.33–2.36 and §2.38–2.39 are the exception rather than the rule,
+written when those sections were new. So **nine shipped rows are not listed in
+this section**: §11.2, §11.4, §11.6, §11.8 and §11.9, plus §10's and §12's
+that already have entries. If you are looking for what shipped and cannot find
+it here, it is in the row itself. §1's count reads the checkboxes wherever
+they are, so it is unaffected either way.
 
 ### 2.1 The 2026-08-22 analysis
 
@@ -2281,7 +2442,8 @@ identically on a clean checkout.
 **Verified against a real database and real containers on 2026-09-05**, which
 is what the first version of this paragraph said was missing.
 
-- All 35 migrations applied; `migrate status` clean; six recipes seeded.
+- All 35 migrations then in the tree applied; `migrate status` clean; six
+  recipes seeded. (37 now — see the note at the top of this section.)
 - **`react-vite` with Latest: SCAFFOLDING → READY in 31s**, and it produced
   **Vite 8.2.2 against the committed starter's 6.1.0** — two major versions,
   which is the whole argument for the feature stated as a number.
@@ -2319,17 +2481,43 @@ closed on 2026-08-30 (§2.11).
 
 **This section has now read "Empty" three times while merged code was wrong**,
 and it is worth being precise about why, because the pattern is not bad luck.
-Five defects have been found since it was emptied, and not one of them arrived
-by being written down first:
+**Thirteen defects have been found since it was emptied**, and not one of them
+arrived by being written down first:
 
 - a viewer could duplicate a project and take its environment variables (§2.14)
 - `withTimeout` reported a crashed exec as a timeout (§2.15)
 - `updateJob` never checked which project a job belonged to (§2.15)
-- and the two below.
+- the two below.
 
-Every one was found by reading two shipped things against each other. A list
-of *known* defects cannot prompt that, so an empty §3.1 means "nobody has
-looked lately" and never "the code is right". Read it that way.
+Those five were found **by reading two shipped things against each other**.
+The eight since were not, and the difference is the more useful half of this
+paragraph — they were found **by running the thing**:
+
+- three in the container layer on 2026-09-04, none of which any test or any
+  section of this document predicted: an orphaned shell holding port 3000, a
+  pid file that a reused terminal id could overwrite, and `sleep infinity` as
+  pid 1 reaping nothing, so every terminal ever closed left a zombie against a
+  `PidsLimit` of 256. All three had been there for the life of the project and
+  all three were found by looking at a running container.
+- a `select` in `listAccessibleProjects` that omitted `scaffoldStatus`, four
+  files from everything that depended on it, leaving the whole client half of
+  §2.41 dead. Typecheck was clean because the shared type declares the field
+  optional, and an absent optional field is indistinguishable from an
+  unfinished project.
+- **two migrations that had never been run**, both writing `ALTER TABLE
+  "Project"` where the table is `projects` — see §5. One had been committed and
+  green for a day.
+- `~/` expanding to `/home/sandbox/`, which is neither equal to the home
+  directory nor outside it, so it walked past the refusal that stops dotfiles
+  being cloned into `~` — where the script's first line is `rm -rf` (§11.9).
+- an installer check written as a shell function called in an `if` condition,
+  where `set -e` is suspended, so an `install.sh` that FAILED read as "no
+  installer found" (§11.9).
+
+**So: a list of known defects cannot prompt any of that.** An empty §3.1 means
+"nobody has looked lately" and never "the code is right" — and "looked" now
+demonstrably has to include running it against a real database and a real
+container, not only reading it. Read the section that way.
 
 - [x] **A moderator's takedown did not take anything down.** Fixed
       2026-08-30 — see §2.16. `reviewReport`'s ACTIONED branch set
@@ -2798,10 +2986,13 @@ whoever owns the data, not to a cleanup script.
 20. ~~**§3.1 — the missing budget on `POST /test`, and the export beside
     it.**~~ Done 2026-08-31 (§2.27). Ten minutes, as billed, and the argument
     for it was already written down for the identical route in §2.13.
-21. **§3.2 — showing people their quota.** The cheapest thing here with a user
-    on the other end of it: the numbers are already computed and already
-    enforced, and the only reason nobody can see them is that no endpoint
-    returns them.
+21. ~~**§3.2 — showing people their quota.**~~ Done 2026-08-31 (§2.22), as
+    part of §8.2 rather than on its own — which is why this line sat unstruck
+    until 2026-09-05: the work was done under a different heading and nothing
+    came back to close the line that asked for it. The cheapest thing here with
+    a user on the other end of it: the numbers were already computed and
+    already enforced, and the only reason nobody could see them was that no
+    endpoint returned them.
 22. ~~**§3.1 — the defaulted access level, and the stray comment.**~~ Done
     2026-08-31 (§2.27), in the same commit as 20 rather than after 21: they are
     one file and the same argument, and splitting them would have been two
@@ -2839,7 +3030,8 @@ A deliberate sweep of the whole tree the same night added nine more items and
 one §3.3 row — and, usefully, confirmed a great deal. What it did *not* find
 is the part worth keeping: no unguarded mutating socket event, no route
 without a named access level, no orphaned endpoint but `/metrics`, no debt
-markers in ~51k lines. The defects it did find cluster on one thing nobody had
+markers in the ~51k lines there were that night (~116k now, still none —
+§1). The defects it did find cluster on one thing nobody had
 thought about, which is that **this process can stop while it is in the middle
 of something**, and the boot that puts the machine right has only ever looked
 at containers.
@@ -2902,8 +3094,26 @@ the data.
 
 ### §8.1 and §8.2, and the one thing not checked
 
+> **Closed 2026-09-05, and it was right.** Everything below was written as a
+> warning that the schema was unverified while the code was. It stayed true for
+> five days. When the migrations were finally applied — all 37, against a real
+> Postgres — **two of them were broken**, and neither was one of the seven this
+> note was about: §12.1's `workspace_size` and §2.41's `scaffold_recipes` both
+> wrote `ALTER TABLE "Project"` where the table is `projects`, because the
+> model carries `@@map`. The first `migrate deploy` failed on
+> `relation "Project" does not exist`, and it failed on the one that had been
+> committed and green for a day.
+>
+> The DB-gated suites then ran and passed: **2384 passing, 36 skipped** (§1).
+> So the instruction at the end of this note was correct and following it cost
+> nothing; not following it for five days cost two broken migrations sitting in
+> `main`. The note is kept rather than deleted because the reasoning in it is
+> the reusable part: **a mock cannot be wrong about a unique index, a foreign
+> key, or a table name.**
+
 `pnpm -r typecheck` clean 3/3, `pnpm -r lint` clean 3/3, 1536 server tests and
-1003 web tests passing — all run, not quoted.
+1003 web tests passing — all run, not quoted. *(Those were that day's figures;
+§1 has current ones.)*
 
 **None of the seven migrations has been applied to any database.** Docker was not running
 on this machine, so the DB-gated suites skipped, `plans` has never existed
@@ -3258,9 +3468,12 @@ claims more memory per container than `CONTAINER_MEMORY_MB` is a promise the
 machine cannot keep, and the failure mode is an OOM kill in somebody's terminal
 rather than an honest refusal. Sell capability and capacity, not the hardware.
 
-### 8.1 Entitlements — the keystone
+### 8.1 Entitlements — **shipped 2026-08-31, see §2.22**
 
-**Unblocked. Everything else in this section depends on it.**
+**Was: unblocked, and everything else in this section depends on it.** The
+marker was missing here and on 8.2 until 2026-09-05, while 8.3, 8.6 and 8.7
+next to them carried theirs — so this section read as three of seven shipped
+when it was five. The original entry follows unchanged.
 
 - A `Plan` catalogue with a stable string id (`free`, `pro`, `team`), a label, a
   price in minor units, and the limit columns above. In the database rather
@@ -3282,10 +3495,16 @@ rather than an honest refusal. Sell capability and capacity, not the hardware.
 The verification that matters is that nothing changes: same suite, same
 numbers, with limits arriving by a different route.
 
-### 8.2 The account screen
+### 8.2 The account screen — **shipped 2026-08-31, see §2.22**
 
-**Unblocked. Closes §3.2's "quotas are enforced and never shown", and is the
-reason 8.1 is worth anything.**
+`accountService.getAccountSummary` and `AccountDialog` are both in the tree,
+with the per-project breakdown this row argued for. It has since grown three
+more tabs — API keys (§8.6), Identity (§11.9) and Security (§11.6) — which is
+worth noting because this row is now the place personal settings land by
+default rather than a screen about quota.
+
+**Was: unblocked. Closes §3.2's "quotas are enforced and never shown", and is
+the reason 8.1 is worth anything.**
 
 `GET /account` returning usage, effective entitlements and the per-project
 breakdown; a screen showing them. The breakdown is the half that makes it
@@ -3942,8 +4161,12 @@ Then, whichever way 10.1 goes:
 ~~**10.2 → 10.3 → 10.4 → 10.5.**~~ **All four shipped 2026-09-03** — §2.33
 to §2.36. What is left in this section is 10.1 and the ten rows behind it. ~~Open-a-folder first~~ — done 2026-09-03
 (§2.33), and the reasoning below held: the mount was an afternoon and finding
-every place that assumes this server made the tree was the rest of it. **Next
-is 10.3.** Original note follows.
+every place that assumes this server made the tree was the rest of it.
+~~**Next is 10.3.**~~ Also done, the same day — this line was written between
+two commits and never updated, which is the small version of the failure §7's
+second paragraph is about. **Nothing in this section is next: 10.1 is a
+decision, and the ten rows behind it are waiting on it.** Original note
+follows.
 
 Open-a-folder first because it is the one
 without which none of the rest is a personal IDE — you cannot use an editor on
@@ -4490,27 +4713,44 @@ the per-domain challenge machinery §9.2 split out.
 
 ### What was verified for this section
 
-Checked against the tree on 2026-09-05, in the manner §5 requires:
+Checked against the tree on 2026-09-05, in the manner §5 requires.
 
-- `apps/server/src/index.ts:83` — `createServer(app)`, `node:http`. No TLS.
-- `devcontainer.ts:88–110` — the ten refusals quoted are the actual strings.
-- `containerManager.ts:842–885` — the reaper's condition is
-  `activeAttachments === 0` and `CONTAINER_IDLE_MINUTES`, default 20
-  (`env.ts:408`), and it calls `onProjectReaped` for the database pair.
-- `searchService.ts:120` — `searchProject` is the only exported search.
-- `grep -ril "totp|twoFactor|mfa"` over `apps/server/src` — no hits. **True
-  when written; 11.6 shipped TOTP the day after, so this line is now the row's
-  history rather than a fact about the tree.**
-- `grep -rn "gpgsign|SSH_AUTH_SOCK|ssh-agent"` over `apps/server/src` — no hits.
-  **This was true when written and is now the row's own history rather than a
-  fact about the tree**: 11.9 shipped SSH signing the day after, so
-  `gpg.format=ssh` and `user.signingkey` are both in `gitService.ts` now.
-  `ssh-agent` and `SSH_AUTH_SOCK` still return nothing, and that part is
-  deliberate — see the row.
-- `apps/web/public` — two SVGs, no manifest, no service worker.
+**Re-checked at the end of that day, after five of these rows shipped.** Four
+of the eight facts below stopped being true within hours of being written,
+which is not a criticism of the reading — it is what a section does when it is
+acted on the same week. Each is marked rather than silently corrected, because
+which of them changed *is* the record of what shipped.
+
+- `apps/server/src/index.ts:85` — `createServer(app)`, `node:http`. **Still no
+  TLS**, and 11.5 is the row about it. (Line 83 → 85.)
+- `devcontainer.ts:119–140` — the ten refusals quoted are the actual strings.
+  **Still ten**, but `mounts` is no longer unconditional: 11.2 made it a plan
+  capability, so the same map now yields a shorter refusal list under the
+  `personal` plan. The default with no capability granted is unchanged.
+  (Lines 88–110 → 119–140.)
+- The idle reaper — **changed by 11.4.** It was `activeAttachments === 0` and
+  `CONTAINER_IDLE_MINUTES`, default 20 (`env.ts:408`); it now asks
+  `idleAllowanceMs(projectId)` (`containerManager.ts:1081`), which the personal
+  plan can answer with "never". It still calls `onProjectReaped` for the
+  database pair.
+- `searchService.ts` — **changed by 11.8.** `searchProject` was the only
+  exported search; `searchAcrossProjects` is now beside it at line 197, which
+  was the whole of that row.
+- `grep -ril "totp|twoFactor|mfa"` over `apps/server/src` — no hits.
+  **Changed by 11.6**, which shipped TOTP that day: `lib/totp.ts`,
+  `service/twoFactorService.ts` and a `user_two_factor` table.
+- `grep -rn "gpgsign|SSH_AUTH_SOCK|ssh-agent"` over `apps/server/src` — no
+  hits. **Half changed by 11.9**: `gpg.format=ssh` and `user.signingkey` are
+  both in `gitService.ts` now. `ssh-agent` and `SSH_AUTH_SOCK` still return
+  nothing, and that half is deliberate — a key pasted here is a key this server
+  holds, and agent forwarding is 11.1's to bring.
+- `apps/web/public` — two SVGs, no manifest, no service worker. **Unchanged**;
+  11.7 is the row about it.
 - `index.css:1194` — the ≤900px drawer layout exists, contrary to what a
   section about mobile would otherwise have assumed.
-- `apps/server/templates` — 13, as §10 says.
+- `apps/server/templates` — 13, as §10 says. **Still 13**: §2.41 added a
+  `scaffold_recipes` table beside them rather than more directories, which is
+  the point of that row.
 
 **Not verified, and load-bearing for 11.1:** nobody has put an sshd in a
 sandbox image and attached a real editor to it. The claim that 10.6 and 10.7
@@ -4714,22 +4954,33 @@ these four rows carry that caveat in their own text.
 
 ### What was verified for this section
 
-Checked against the tree on 2026-09-05, in the manner §5 requires:
+Checked against the tree on 2026-09-05, in the manner §5 requires — and
+**re-checked at the end of that day**, after 12.1 and 12.2 both shipped. Three
+of the six are now the history of those two rows rather than facts about the
+tree, and they are marked rather than corrected away, because which ones
+changed is the record of what was built.
 
-- `containerManager.ts:593`, `:596`, `:597` — `Memory`, `MemorySwap` and
-  `NanoCpus` all read the global `env` values; no per-project term.
-- `containerManager.ts:1187` — `const limit = env.CONTAINER_MEMORY_MB * 1024 *
-  1024`, the second call site named in 12.1.
+- **Changed by 12.1.** It was `containerManager.ts:593–597`, where `Memory`,
+  `MemorySwap` and `NanoCpus` all read the global `env` values with no
+  per-project term. They now read `size.memoryMb` and `size.cpus`
+  (`:625`, `:628`, `:629`), resolved per project by `workspaceSizeService`.
+- **Changed by 12.1.** The second call site named in that row — the bare
+  `env.CONTAINER_MEMORY_MB` — is now the FALLBACK inside `resolveSize`
+  (`:526`), which is where a project nobody has sized still gets the
+  deployment's default. That was the point: one place decides, and the old
+  constant became its default rather than its rival.
 - `env.ts:378–382` and `:427–430` — `CONTAINER_MEMORY_MB` defaults to
   `unshared ? 2048 : 512` and `CONTAINER_CPUS` to `unshared ? 2 : 0.5`;
-  `unshared` is `inDevelopment || soleTenant` (`env.ts:46`). This is the fact
-  that corrected 12.1 downward.
+  `unshared` is `inDevelopment || soleTenant` (`env.ts:46`). **Unchanged**, and
+  still the fact that corrected 12.1 downward.
 - `grep -rniE "\bgpu\b|nvidia|DeviceRequests|cuda"` over `apps/server/src` and
-  `packages/shared/src` — **0 hits.**
+  `packages/shared/src` — **0 hits. Unchanged**; 12.4 is blocked on hardware.
 - `grep -rniE "notebook|ipynb"` over `apps/server/src`, `apps/web/src` and
-  `packages/shared/src` — **0 hits.**
-- `apps/server/src/containers/warmStart.ts` exists, with tests; nothing in it
-  is triggered by anything but a session starting.
+  `packages/shared/src` — **0 hits. Unchanged**; 12.3 is open.
+- **Changed by 12.2.** `warmStart.ts` existed with tests, and nothing in it was
+  triggered by anything but a session starting. `containers/prebuild.ts` now
+  is, from `index.ts` — which is exactly the gap that row named, and 12.5 is
+  the half of it that is still open.
 
 **Not verified, and it is the load-bearing one for 12.1:** nobody has run two
 containers of different sizes on this host and watched the sum. The arithmetic
