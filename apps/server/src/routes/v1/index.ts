@@ -12,6 +12,7 @@ import embedRouter from "./embeds.js";
 import adminRouter from "./admin.js";
 import notificationRouter from "./notifications.js";
 import accountRouter from "./account.js";
+import searchRouter from "./search.js";
 import pubRouter from "./pub.js";
 import tlsRouter from "./tls.js";
 import billingRouter from "./billing.js";
@@ -37,6 +38,9 @@ router.use("/github", githubRouter);
 router.use("/notifications", requireAuth, notificationRouter);
 // The same, and for the same reason.
 router.use("/account", requireAuth, accountRouter);
+// And again: this searches every project the CALLER owns, so the account is
+// the whole of the scope and there is no id anywhere to get wrong.
+router.use("/search", requireAuth, searchRouter);
 // Behind requireAuth here, and behind requireAdmin inside. Both: the inner
 // guard reads the auth context, so a router that mounted it alone would fail
 // as an Unauthorized rather than as the wiring mistake it is.

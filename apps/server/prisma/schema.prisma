@@ -42,8 +42,17 @@ model Plan {
   aiRequestsPerHour    Int
   maxContainersPerUser Int
 
+  /// Minutes a container may sit unattached before it is stopped; 0 is never.
+  /// See EntitlementLimits.idleMinutes. Defaulted so the column can be added
+  /// without a value for every plan that already exists.
+  idleMinutes Int @default(20)
+
   managedDatabases Boolean @default(false)
   customDomains    Boolean @default(false)
+
+  /// Whether a devcontainer.json on this plan may ask for extra host mounts.
+  /// Gated again by DEVCONTAINER_MOUNT_ROOTS, which is empty by default.
+  devcontainerMounts Boolean @default(false)
   scheduledJobs    Boolean @default(false)
 
   /// Withdrawn from the catalogue without being deleted. Accounts already on

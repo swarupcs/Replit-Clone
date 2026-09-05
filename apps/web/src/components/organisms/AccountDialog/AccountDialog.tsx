@@ -92,6 +92,25 @@ function allowance(limit: number, noun: string): string {
   return isUnlimited(limit) ? `Unlimited ${noun}` : `${String(limit)} ${noun}`;
 }
 
+/** How long a workspace survives with nobody looking at it.
+ *
+ *  Said on the plan card because it is a promise about the user's work rather
+ *  than an amount of it — "your dev server was stopped while you were at
+ *  lunch" is the kind of thing somebody should be able to read beforehand.
+ *
+ *  "Never sleeps" is not "runs forever": the machine still reclaims the least
+ *  recently used workspace when it is out of room. It is the closest short
+ *  phrase to what is actually promised, which is that idleness alone will not
+ *  stop it. */
+function sleepsAfter(minutes: number): string {
+  if (isUnlimited(minutes)) return "Never sleeps";
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `Sleeps after ${String(hours)} ${hours === 1 ? "hour" : "hours"}`;
+  }
+  return `Sleeps after ${String(minutes)} minutes`;
+}
+
 function date(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString() : "";
 }
@@ -183,7 +202,8 @@ function PlanCard({ plan, current }: { plan: Plan; current: boolean }) {
         {allowance(plan.maxProjects, "projects")} ·{" "}
         {allowance(plan.userDiskQuotaMb, "MB")} ·{" "}
         {allowance(plan.aiRequestsPerHour, "assistant requests an hour")} ·{" "}
-        {allowance(plan.maxContainersPerUser, "running at once")}
+        {allowance(plan.maxContainersPerUser, "running at once")} ·{" "}
+        {sleepsAfter(plan.idleMinutes)}
       </Typography.Paragraph>
     </li>
   );

@@ -337,6 +337,29 @@ const envSchema = z.object({
         .filter(Boolean),
     ),
 
+  /** Host directories a devcontainer's `mounts` may bind, comma separated.
+   *  Empty -- the default -- refuses every mount, whatever the plan says.
+   *
+   *  The same shape as LOCAL_FOLDER_ROOTS above and for a sharper reason. A
+   *  folder to open is a path the USER typed into a dialog. A mount is a line
+   *  in a file inside the repository, which may have been cloned from a
+   *  stranger five minutes ago -- so without an allowlist, opening somebody
+   *  else's project would mount whatever that project asked for, and
+   *  `/var/run/docker.sock` is a directory entry like any other.
+   *
+   *  Empty by default, and empty means refuse rather than allow. The plan
+   *  decides whether an account MAY ask; this decides what there is to ask
+   *  for, and an operator who has not thought about it has not opted in. */
+  DEVCONTAINER_MOUNT_ROOTS: z
+    .string()
+    .default("")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+
   // Container resource budget, and the defaults differ by environment because
   // the two are not the same problem.
   //
@@ -597,6 +620,13 @@ export const PROJECTS_ROOT: string = path.resolve(env.PROJECTS_DIR);
 export const LOCAL_FOLDER_ROOTS: string[] = env.LOCAL_FOLDER_ROOTS.map((root) =>
   path.resolve(root),
 );
+
+/** The roots beneath which a devcontainer mount may point, absolute.
+ *
+ *  Resolved at startup, like LOCAL_FOLDER_ROOTS and for the same reason.
+ */
+export const DEVCONTAINER_MOUNT_ROOTS: string[] =
+  env.DEVCONTAINER_MOUNT_ROOTS.map((root) => path.resolve(root));
 
 export const isProduction = env.NODE_ENV === "production";
 

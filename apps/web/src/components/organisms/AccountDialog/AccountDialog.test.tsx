@@ -25,9 +25,11 @@ function summary(over: Partial<AccountSummary> = {}): AccountSummary {
       projectDiskQuotaMb: 512,
       aiRequestsPerHour: 60,
       maxContainersPerUser: 2,
+      idleMinutes: 20,
       managedDatabases: true,
       customDomains: true,
       scheduledJobs: true,
+      devcontainerMounts: false,
       overridden: false,
       overrideUntil: null,
     },
@@ -152,9 +154,11 @@ describe("the catalogue", () => {
             projectDiskQuotaMb: 512,
             aiRequestsPerHour: 60,
             maxContainersPerUser: 2,
+            idleMinutes: 20,
             managedDatabases: true,
             customDomains: true,
             scheduledJobs: true,
+            devcontainerMounts: false,
           },
         ],
       }),
@@ -172,8 +176,8 @@ describe("the catalogue", () => {
     getAccount.mockResolvedValue(
       summary({
         plans: [
-          { id: "free", label: "Free", priceCents: 0, currency: "usd", rank: 0, maxProjects: base.maxProjects, userDiskQuotaMb: base.userDiskQuotaMb, projectDiskQuotaMb: base.projectDiskQuotaMb, aiRequestsPerHour: base.aiRequestsPerHour, maxContainersPerUser: base.maxContainersPerUser, managedDatabases: true, customDomains: true, scheduledJobs: true },
-          { id: "pro", label: "Pro", priceCents: 1200, currency: "usd", rank: 1, maxProjects: 100, userDiskQuotaMb: 20480, projectDiskQuotaMb: 2048, aiRequestsPerHour: 500, maxContainersPerUser: 3, managedDatabases: true, customDomains: true, scheduledJobs: true },
+          { id: "free", label: "Free", priceCents: 0, currency: "usd", rank: 0, maxProjects: base.maxProjects, userDiskQuotaMb: base.userDiskQuotaMb, projectDiskQuotaMb: base.projectDiskQuotaMb, aiRequestsPerHour: base.aiRequestsPerHour, maxContainersPerUser: base.maxContainersPerUser, idleMinutes: base.idleMinutes, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
+          { id: "pro", label: "Pro", priceCents: 1200, currency: "usd", rank: 1, maxProjects: 100, userDiskQuotaMb: 20480, projectDiskQuotaMb: 2048, aiRequestsPerHour: 500, maxContainersPerUser: 3, idleMinutes: 60, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
         ],
       }),
     );
@@ -182,6 +186,48 @@ describe("the catalogue", () => {
     expect(await screen.findByText("Current")).toBeTruthy();
     expect(screen.getByText(/12\.00 USD/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /upgrade/i })).toBeNull();
+  });
+
+  /** How long a workspace survives unattended is a promise about the user's
+   *  work rather than an amount of it — "your dev server was stopped while you
+   *  were at lunch" should be readable beforehand rather than discovered. */
+  it("says how long a workspace survives with nobody looking at it", async () => {
+    const base = summary().entitlements;
+    getAccount.mockResolvedValue(
+      summary({
+        plans: [
+          { id: "free", label: "Free", priceCents: 0, currency: "usd", rank: 0, maxProjects: base.maxProjects, userDiskQuotaMb: base.userDiskQuotaMb, projectDiskQuotaMb: base.projectDiskQuotaMb, aiRequestsPerHour: base.aiRequestsPerHour, maxContainersPerUser: base.maxContainersPerUser, idleMinutes: 20, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
+          { id: "pro", label: "Pro", priceCents: 1200, currency: "usd", rank: 1, maxProjects: 100, userDiskQuotaMb: 20480, projectDiskQuotaMb: 2048, aiRequestsPerHour: 500, maxContainersPerUser: 3, idleMinutes: 60, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
+        ],
+      }),
+    );
+    show();
+
+    expect(await screen.findByText(/Sleeps after 20 minutes/)).toBeTruthy();
+    // Read as hours once it divides, because "60 minutes" is a number nobody
+    // says out loud.
+    expect(screen.getByText(/Sleeps after 1 hour/)).toBeTruthy();
+  });
+
+  /** The personal plan's whole point: idleness alone is not a reason to stop
+   *  somebody's dev server. It is deliberately NOT called "runs forever" —
+   *  the machine still reclaims the least recently used workspace when it is
+   *  out of room. */
+  it("says a plan that never sleeps, without promising it runs forever", async () => {
+    const base = summary().entitlements;
+    getAccount.mockResolvedValue(
+      summary({
+        plans: [
+          { id: "free", label: "Free", priceCents: 0, currency: "usd", rank: 0, maxProjects: base.maxProjects, userDiskQuotaMb: base.userDiskQuotaMb, projectDiskQuotaMb: base.projectDiskQuotaMb, aiRequestsPerHour: base.aiRequestsPerHour, maxContainersPerUser: base.maxContainersPerUser, idleMinutes: 20, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
+          // The catalogue is only drawn when there is more than one plan to
+          // choose between, so the personal plan needs something to sit beside.
+          { id: "personal", label: "Personal", priceCents: 0, currency: "usd", rank: 100, maxProjects: 0, userDiskQuotaMb: 0, projectDiskQuotaMb: 0, aiRequestsPerHour: 0, maxContainersPerUser: 0, idleMinutes: 0, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
+        ],
+      }),
+    );
+    show();
+
+    expect(await screen.findByText(/Never sleeps/)).toBeTruthy();
   });
 });
 

@@ -392,6 +392,32 @@ export const ProjectPlayground = () => {
     editorSocket.emit("readFile", { relPath: followedFile });
   }, [followedFile, editorSocket]);
 
+  /** A result clicked in another project's search.
+   *
+   *  A cross-project search hands back a file in a project that is not open,
+   *  so following the result means navigating here first — and the reveal that
+   *  was requested before navigating survives, because the tab store outlives
+   *  the route. What does not survive is the socket it would have been read
+   *  over, which is why the read happens here instead: once this project has
+   *  one, the file the reveal names is opened, and `EditorComponent` consumes
+   *  the reveal as it does for any other jump.
+   *
+   *  Without this the search finds the right project and drops you at its
+   *  front door, which is most of the way to useless — the file it found is
+   *  the answer, not the project.
+   */
+  useEffect(() => {
+    if (!editorSocket) return;
+
+    const reveal = useOpenTabsStore.getState().pendingReveal;
+    if (!reveal) return;
+    // Already open: the reveal is a jump within this project and the editor
+    // will consume it without anything being read.
+    if (useOpenTabsStore.getState().activeRelPath === reveal.relPath) return;
+
+    editorSocket.emit("readFile", { relPath: reveal.relPath });
+  }, [editorSocket]);
+
   const bindingOverrides = useKeybindingStore(selectOverrides);
   const bindings = useMemo(
     () => resolveBindings(bindingOverrides),

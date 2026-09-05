@@ -23,6 +23,8 @@ const CONFIG: DevcontainerState = {
   },
   imageInUse: "sandbox-node:latest",
   error: null,
+  refusedMounts: [],
+  mountsAllowed: false,
   lifecycleLog: "",
   running: false,
   allowedImages: ["sandbox-node:latest"],
@@ -162,6 +164,8 @@ describe("a project without a devcontainer", () => {
       config: null,
       imageInUse: "sandbox-node:latest",
       error: null,
+      refusedMounts: [],
+      mountsAllowed: false,
       lifecycleLog: "",
       running: false,
       allowedImages: [],
@@ -171,5 +175,51 @@ describe("a project without a devcontainer", () => {
       expect(api.getDevcontainerApi).toHaveBeenCalled();
     });
     expect(container.textContent).toBe("");
+  });
+});
+
+
+/** A mount that was read, understood, and then not allowed.
+ *
+ *  Kept apart from the unsupported-keys block on purpose: an unsupported key
+ *  was never read, and a refused mount was — which means only the second can
+ *  be fixed by changing a setting rather than the file.
+ */
+describe("refused mounts", () => {
+  it("says nothing when none were refused", async () => {
+    show(CONFIG);
+
+    await screen.findByText(".devcontainer/devcontainer.json");
+    expect(screen.queryByText(/mount.*refused/i)).toBeNull();
+  });
+
+  it("names each one and why", async () => {
+    show({
+      ...CONFIG,
+      refusedMounts: [
+        {
+          source: "/etc",
+          reason: "That is outside the directories this deployment may mount.",
+        },
+      ],
+      mountsAllowed: true,
+    });
+
+    expect(await screen.findByText("One mount was refused")).toBeTruthy();
+    expect(screen.getByText("/etc")).toBeTruthy();
+  });
+
+  /** A refusal that says only "no" leaves somebody editing the file forever.
+   *  When the deployment permits no mounts at all, that is the thing to say. */
+  it("says when the deployment mounts nothing at all", async () => {
+    show({
+      ...CONFIG,
+      refusedMounts: [{ source: "/data", reason: "Not permitted." }],
+      mountsAllowed: false,
+    });
+
+    expect(
+      await screen.findByText(/mounts nothing but the project itself/),
+    ).toBeTruthy();
   });
 });

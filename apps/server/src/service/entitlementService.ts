@@ -66,8 +66,10 @@ export function freePlanFallback(): Entitlements {
     projectDiskQuotaMb: env.PROJECT_DISK_QUOTA_MB,
     aiRequestsPerHour: env.AI_REQUESTS_PER_HOUR,
     maxContainersPerUser: env.MAX_CONTAINERS_PER_USER,
+    idleMinutes: env.CONTAINER_IDLE_MINUTES,
     managedDatabases: true,
     customDomains: true,
+    devcontainerMounts: false,
     scheduledJobs: true,
     overridden: false,
     overrideUntil: null,
@@ -93,7 +95,9 @@ const overrideSchema = z
     projectDiskQuotaMb: z.number().int().nonnegative().optional(),
     aiRequestsPerHour: z.number().int().nonnegative().optional(),
     maxContainersPerUser: z.number().int().nonnegative().optional(),
+    idleMinutes: z.number().int().nonnegative().optional(),
     managedDatabases: z.boolean().optional(),
+    devcontainerMounts: z.boolean().optional(),
     customDomains: z.boolean().optional(),
     scheduledJobs: z.boolean().optional(),
   })
@@ -152,7 +156,9 @@ function apply(
     projectDiskQuotaMb: number;
     aiRequestsPerHour: number;
     maxContainersPerUser: number;
+    idleMinutes: number;
     managedDatabases: boolean;
+    devcontainerMounts: boolean;
     customDomains: boolean;
     scheduledJobs: boolean;
   },
@@ -165,7 +171,9 @@ function apply(
     projectDiskQuotaMb: plan.projectDiskQuotaMb,
     aiRequestsPerHour: plan.aiRequestsPerHour,
     maxContainersPerUser: plan.maxContainersPerUser,
+    idleMinutes: plan.idleMinutes,
     managedDatabases: plan.managedDatabases,
+    devcontainerMounts: plan.devcontainerMounts,
     customDomains: plan.customDomains,
     scheduledJobs: plan.scheduledJobs,
   };
@@ -312,7 +320,9 @@ export async function listPlans(): Promise<Plan[]> {
     projectDiskQuotaMb: row.projectDiskQuotaMb,
     aiRequestsPerHour: row.aiRequestsPerHour,
     maxContainersPerUser: row.maxContainersPerUser,
+    idleMinutes: row.idleMinutes,
     managedDatabases: row.managedDatabases,
+    devcontainerMounts: row.devcontainerMounts,
     customDomains: row.customDomains,
     scheduledJobs: row.scheduledJobs,
   }));

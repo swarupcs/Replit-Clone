@@ -149,6 +149,36 @@ export const DevcontainerSection = ({
         </div>
       )}
 
+      {/* Distinct from the block above, and deliberately so. An unsupported KEY
+          was never read; a refused MOUNT was read, understood, and then not
+          allowed — and the two need different things from the reader, because
+          only the second one can be fixed by changing a setting rather than
+          the file. */}
+      {data.refusedMounts.length > 0 && (
+        <div className="rc-devcontainer-unsupported">
+          <div className="rc-devcontainer-unsupported-head">
+            <VscInfo size={13} aria-hidden />
+            <span>
+              {data.refusedMounts.length === 1
+                ? "One mount was refused"
+                : `${String(data.refusedMounts.length)} mounts were refused`}
+            </span>
+          </div>
+          <ul>
+            {data.refusedMounts.map((entry) => (
+              <li key={`${entry.source}:${entry.reason}`}>
+                <code>{entry.source}</code> — {entry.reason}
+              </li>
+            ))}
+          </ul>
+          {!data.mountsAllowed && (
+            <p style={{ margin: "6px 0 0" }}>
+              This deployment mounts nothing but the project itself.
+            </p>
+          )}
+        </div>
+      )}
+
       {data.lifecycleLog && (
         <pre className="rc-devcontainer-log" aria-label="Dev container setup output">
           {data.lifecycleLog}

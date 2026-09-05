@@ -1,5 +1,11 @@
 import { Worker } from "node:worker_threads";
-import type { ReplaceOptions, SearchMatch, SearchOptions } from "@replit-clone/shared";
+import type {
+  CrossProjectSearchResult,
+  ProjectSearchHit,
+  ReplaceOptions,
+  SearchMatch,
+  SearchOptions,
+} from "@replit-clone/shared";
 import { IGNORED_DIRECTORIES } from "./fileTreeService.js";
 import { projectRoot } from "../utils/projectPaths.js";
 import { AppError, BadRequestError } from "../utils/errors.js";
@@ -140,6 +146,137 @@ export async function searchProject(
   };
 
   return runInWorker(input, projectId);
+}
+
+/** How many of a user's projects one cross-project search will open.
+ *
+ *  A cap and not a page: each project costs a worker, a directory walk and a
+ *  share of the deadline, and somebody with two hundred projects asking for
+ *  "TODO" should get a fast partial answer rather than a slow complete one.
+ *  Newest first, so the cap falls on the projects least likely to be the one
+ *  being looked for.
+ */
+const MAX_PROJECTS_SEARCHED = 25;
+
+/** How many projects are scanned at once.
+ *
+ *  Each is a worker thread and a directory walk. Four rather than all of them
+ *  because the point of this search is to answer quickly, and twenty-five
+ *  concurrent walks on one disk answer more slowly than four do -- and would
+ *  contend with whatever the user is actually running.
+ */
+const SEARCH_CONCURRENCY = 4;
+
+/** The whole cross-project search's budget.
+ *
+ *  Longer than one project's, and much shorter than the sum: a search across
+ *  everything is expected to take longer than a search across one thing, and
+ *  is not allowed to take twenty-five times as long. Whatever has finished
+ *  when this expires is returned, marked truncated.
+ */
+const CROSS_PROJECT_TIMEOUT_MS = 15_000;
+
+/** Searches every project an account owns.
+ *
+ *  The question this answers is "which project did I write that in", which is
+ *  the one question a per-project search cannot. `searchProject` had been the
+ *  only entry point in this module, so every search in this product was inside
+ *  one project.
+ *
+ *  Owned, not merely accessible. A global search box that reached into
+ *  projects shared WITH you would quietly widen how far one keystroke sees --
+ *  a collaborator invited to one file's worth of work would find their whole
+ *  repository in somebody else's sidebar. Reaching a shared project is what
+ *  opening it is for, and that path already checks access per project.
+ *
+ *  One project's failure is skipped rather than raised. A row whose working
+ *  tree is missing -- §5 has found two -- would otherwise make every
+ *  cross-project search fail for as long as it existed, and the failure would
+ *  look like "that text is nowhere" rather than like a broken project.
+ */
+export async function searchAcrossProjects(
+  ownerId: string,
+  options: SearchOptions,
+): Promise<CrossProjectSearchResult> {
+  if (options.query.trim().length === 0) {
+    return { projects: [], scanned: 0, total: 0, truncated: false };
+  }
+
+  const { prisma } = await import("../lib/prisma.js");
+  const owned = await prisma.project.findMany({
+    where: { ownerId, deletedAt: null },
+    // Newest first, so the cap below falls on the projects least likely to be
+    // the one being looked for.
+    orderBy: { updatedAt: "desc" },
+    select: { id: true, name: true },
+  });
+
+  const shortlist = owned.slice(0, MAX_PROJECTS_SEARCHED);
+  const deadline = Date.now() + CROSS_PROJECT_TIMEOUT_MS;
+
+  const hits: ProjectSearchHit[] = [];
+  let matched = 0;
+  let scanned = 0;
+  let ranOut = false;
+
+  // A shared cursor rather than chunked batches: projects differ enormously in
+  // size, and a batch of four waits for its slowest member before starting the
+  // next four.
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next++;
+      const project = shortlist[index];
+      if (!project) return;
+
+      // Checked per project rather than per batch, so a single slow one cannot
+      // take the whole budget and then start another.
+      if (Date.now() > deadline || matched >= MAX_MATCHES) {
+        ranOut = true;
+        return;
+      }
+
+      try {
+        const result = await searchProject(project.id, options);
+        scanned += 1;
+        if (result.matches.length === 0) continue;
+
+        matched += result.matches.length;
+        hits.push({
+          projectId: project.id,
+          name: project.name,
+          matches: result.matches,
+          truncated: result.truncated,
+        });
+      } catch (error) {
+        // Counted as scanned: it was looked at, and reporting otherwise would
+        // make "scanned 9 of 10" mean two different things.
+        scanned += 1;
+        logger.warn("a project could not be searched", {
+          projectId: project.id,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(SEARCH_CONCURRENCY, shortlist.length) }, () =>
+      worker(),
+    ),
+  );
+
+  // Ordered by where the most was found, not by when the project was last
+  // touched: the question was which project, and the answer with eleven
+  // matches is a better one than the answer with one.
+  hits.sort((a, b) => b.matches.length - a.matches.length);
+
+  return {
+    projects: hits,
+    scanned,
+    total: owned.length,
+    truncated: ranOut || owned.length > shortlist.length,
+  };
 }
 
 export interface ReplaceResult {

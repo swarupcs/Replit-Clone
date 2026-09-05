@@ -52,9 +52,11 @@ function plan(id: string, label: string) {
     projectDiskQuotaMb: 512,
     aiRequestsPerHour: 60,
     maxContainersPerUser: 2,
+    idleMinutes: 20,
     managedDatabases: true,
     customDomains: true,
     scheduledJobs: true,
+    devcontainerMounts: false,
   };
 }
 
@@ -71,9 +73,11 @@ function detail(over: Partial<AccountDetail> = {}): AccountDetail {
       projectDiskQuotaMb: 512,
       aiRequestsPerHour: 60,
       maxContainersPerUser: 2,
+      idleMinutes: 20,
       managedDatabases: true,
       customDomains: true,
       scheduledJobs: true,
+      devcontainerMounts: false,
       overridden: false,
       overrideUntil: null,
     },

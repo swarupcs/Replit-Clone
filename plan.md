@@ -104,17 +104,21 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 120 items. Open: 24 — five blocked, ten from §10 that are all
-waiting on one decision (§10.1), and nine from §11, which reads the sandbox
-rather than the editor and is blocked on nothing.**
+**Done: 123 items. Open: 22 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), and seven from §11, which reads the sandbox
+rather than the editor. Six of those seven are blocked on nothing; 11.10 is
+new, and is the one row §11 has produced that needs a decision before it needs
+code.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, and **nine in
-§11 behind nothing at all**.
+an architectural route), **ten in §10 behind that same route**, and **seven in
+§11** (11.2, 11.4 and 11.8 shipped 2026-09-05, the day after the section was
+written; 11.2 also split 11.10 out of itself, and 11.4 named the wrong
+interaction while doing it — see the rows).
 
 **§11 was written on 2026-09-05 and adds nine.** It asks §10's question of
 the platform instead of the editor — the container's refusal list, the idle
@@ -3740,20 +3744,55 @@ destroy the tree it is mounted on, and §6's confinement work exists to make
 that impossible by construction rather than by care. `initializeCommand` runs
 on the *host*: refuse it forever.
 
-**Wrong at n=1, and cheap.** `features` — "install what you need in
-postCreateCommand instead" is a fair answer to a tenant and a poor one to
-yourself, because Dev Container Features are how the ecosystem distributes
-"add the AWS CLI" and rewriting each one by hand is exactly the work the format
-exists to delete. `mounts` — "the project directory is the only thing mounted,
-deliberately" is a confinement rule about *other people's* directories; your own
-`~/.aws` is not that, and 10.2 already shipped the machinery for a root this
-server did not create.
+**Wrong at n=1.** `features` — "install what you need in postCreateCommand
+instead" is a fair answer to a tenant and a poor one to yourself, because Dev
+Container Features are how the ecosystem distributes "add the AWS CLI" and
+rewriting each one by hand is exactly the work the format exists to delete.
+`mounts` — "the project directory is the only thing mounted, deliberately" is
+a confinement rule about *other people's* directories; your own `~/.aws` is not
+that, and 10.2 already shipped the machinery for a root this server did not
+create.
 
-- [ ] **11.2 Re-decide the refusal list for the personal plan, one line at a
-      time.** As a plan entitlement, per §10.4's precedent, and **not** as a
+~~and cheap~~ — **half of that was wrong, and building it is what showed
+which half.** See 11.2 and 11.10.
+
+- [x] **11.2 Re-decide the refusal list for the personal plan, one line at a
+      time.** Shipped 2026-09-05 **for `mounts`**; `features` came out as its
+      own row, 11.10, because it is not the same size at all.
+      As a plan entitlement, per §10.4's precedent, and **not** as a
       mode flag read in `devcontainer.ts` — §6 decision 13's argument applies
       unchanged. The output is a shorter `UNSUPPORTED_REASON` under the
       `personal` plan and the same one under every other.
+
+      The mechanism came out as decision 13 asks: `interpret` takes a
+      `DevcontainerCapabilities`, the caller resolves the entitlement once and
+      hands the answer down, and **the default is nothing granted** — so a call
+      site that forgets gets the behaviour that existed before this row.
+
+      **What this row did not anticipate is that `mounts` needs two gates, not
+      one.** Every other limit on the plan table rations something the USER
+      asked for. A mount is asked for by a file inside the repository, which
+      may have been cloned from a stranger five minutes ago — so a plan flag
+      alone would mean that opening somebody else's project mounted whatever
+      that project named, and `/var/run/docker.sock` is a path like any other.
+      So: `devcontainerMounts` on the plan says whether an account may ask, and
+      `DEVCONTAINER_MOUNT_ROOTS` — empty by default, where empty means refuse —
+      says what there is to ask for. The confinement itself is
+      `resolveLocalFolder`'s, reasoning and all: shape, then `realpath`, then
+      the allowlist against the RESOLVED path, then the server's own trees
+      refused even inside a named root.
+
+      A refused mount is collected rather than thrown, and shown next to the
+      unsupported keys as a *separate* block — an unsupported key was never
+      read, a refused mount was, and only the second can be fixed by changing a
+      setting rather than the file.
+
+      Writing the tests found a real bug in the first version: the
+      target-inside-the-workspace check used `path.sep`, which is `\` on a
+      Windows host, so a mount over `/home/sandbox/app/data` was accepted
+      there and refused everywhere else. Host separators and container
+      separators are not the same character, and one `within` helper reading
+      like one rule was hiding two.
 
 **And one that is not a line on that list but the largest single gap in this
 document.**
@@ -3787,9 +3826,40 @@ document.**
 
 ---
 
+- [ ] **11.10 Dev Container Features.** Split out of 11.2 on 2026-09-05,
+      because calling it "cheap" there was wrong and only became obvious with
+      `mounts` finished beside it.
+
+      A Feature is not a setting to honour. It is an OCI artifact — a
+      `devcontainer-feature.json` and an `install.sh` — so supporting them
+      means a registry client, manifest and layer fetching, tarball
+      extraction, an options-to-environment mapping, and `installsAfter`
+      ordering between them. None of that is the hard part.
+
+      **The hard part is that install scripts assume root, and this sandbox
+      does not have one.** Containers here run as a uid matched to the bind
+      mount's owner, with `CapDrop: ["ALL"]` and `no-new-privileges` — see
+      §6's confinement work and 11.2's "still right, and should stay refused"
+      list, which keeps `privileged` and `capAdd` refused *however personal
+      this gets*, because a container that can do anything to the host can
+      destroy the tree it is mounted on. A Feature that runs `apt-get install`
+      needs exactly what that list refuses.
+
+      So this is not one row of work, it is a question with three answers, and
+      picking one is what unblocks it: run Features at BUILD time into a
+      derived image (which means this platform builds images, which `build`
+      and `dockerFile` are currently refused for); run them as root in a
+      throwaway container and commit the result; or support only the subset
+      that installs into the user's own home directory, which is a minority of
+      real Features and would refuse the rest confusingly rather than clearly.
+
+      Until one is chosen, `postCreateCommand` remains the honest answer and
+      the refusal string is correct.
+
 ### The lifecycle policies also assume somebody else wants the memory
 
-- [ ] **11.4 Stop reaping a container nobody is watching.**
+- [x] **11.4 Stop reaping a container nobody is watching.** Shipped
+      2026-09-05.
       `startIdleReaper` stops any project container with no active attachments
       after `CONTAINER_IDLE_MINUTES` (default 20), and §6 decision 4 correctly
       takes the project's database down with it. Between tenants that is right:
@@ -3803,15 +3873,39 @@ document.**
       `personal` plan wants it off, or wants it long enough to be about the host
       running out of memory rather than about sharing.
 
-      Note the interaction, which is why this is a row and not a config change:
-      with the reaper off, `stopAllContainers` on shutdown becomes the only
-      thing that stops anything, and **`reconcileOnBoot` then has to bring a
-      project's containers back**, or a host reboot silently ends every
-      long-running process. The reconcile machinery exists
-      (`index.ts` imports `reconcileOnBoot`, `reconcileDeployments`,
-      `restoreServices`, `reconcileJobRuns`) — deployments and jobs already come
-      back after a restart. Projects do not, because until now nothing was
-      supposed to survive.
+      **This row named the wrong interaction, and building it found the right
+      one.** It said that with the reaper off, `reconcileOnBoot` would have to
+      bring a project's containers back or a host reboot would silently end
+      every long-running process. That is not a consequence of this change: a
+      reboot ends the processes either way, and restarting the container does
+      not restart what was running inside it. Resuming a process across a
+      restart is §3.3's process-snapshots row, which is blocked on a mechanism
+      nothing here resembles, and it stayed exactly where it was.
+
+      The real interaction is the opposite one, and it is load-bearing rather
+      than a note. **The reaper is what frees slots against
+      `MAX_CONCURRENT_CONTAINERS`.** Turn it off and nothing ever gives a slot
+      back, so the third project a user opened would be the last one they could
+      open until they restarted the server. Shipping the plan half alone would
+      not have given anybody a long-lived container; it would have traded "your
+      dev server was killed" for "you cannot open a fourth project", which is
+      not an improvement.
+
+      So it shipped as two halves. `idleMinutes` on the plan (0 = never, the
+      `UNLIMITED` sentinel), read per project by the reaper from the owner's
+      entitlements and falling back to `CONTAINER_IDLE_MINUTES` on any failure —
+      because a reaper that stopped reclaiming during a database blip would
+      turn that blip into the memory exhaustion it exists to prevent. And
+      `reclaimForCapacity`, which on a full machine stops the least recently
+      used container nobody is attached to rather than refusing. Attachments
+      are never overridden: when everything is being watched it still refuses,
+      because taking one person's running work to give another a slot is worse
+      than an honest 503.
+
+      That is decision 15's line landing exactly where it should. **The plan
+      decides whether idleness alone is a reason to stop something; the host
+      still decides when it is out of room.** The plan card says "Never sleeps"
+      rather than "runs forever" for the same reason.
 
 ---
 
@@ -3876,13 +3970,45 @@ the per-domain challenge machinery §9.2 split out.
 
 ### The two small ones, so they are not each rediscovered
 
-- [ ] **11.8 Search that knows about more than one project.**
+- [x] **11.8 Search that knows about more than one project.** Shipped
+      2026-09-05.
       `searchService.ts` exports exactly one entry point, `searchProject(projectId, …)`,
       and the worker is handed `root: projectRoot(projectId)`. Every search in
       this product is inside one project. With thirteen templates and a
       personal machine's worth of repositories, "which project did I write that
       in" has no answer, and it is the question you ask most often about code
       you wrote yourself. Cheap: the worker already takes a root.
+
+      It was cheap, and "cheap" hid three decisions worth writing down.
+
+      **Scope is owned, not accessible.** A global search box that reached into
+      projects shared WITH you would quietly widen how far one keystroke sees:
+      a collaborator invited to one file's worth of work would find their whole
+      repository in somebody else's sidebar. Reaching a shared project is what
+      opening it is for, and that path checks access per project.
+
+      **A partial answer has to say so.** Twenty-five projects, four at a time,
+      fifteen seconds, and whatever is done when that expires. A search that
+      stopped early and did not admit it makes a missing result read as proof
+      the text is nowhere — which is worse than a slow answer and much worse
+      than no feature. One project failing is skipped rather than raised, for
+      the same reason: §5 has found two rows with no working tree, and either
+      would otherwise have broken every cross-project search as "not found".
+
+      **The project is the answer, so the result has to leave the project.**
+      Grouped by project rather than by file — "src/index.ts" is in most of
+      somebody's projects — and clicking a result requests the reveal, then
+      navigates. The tab store outlives the route and the socket does not,
+      which is why `ProjectPlayground` now opens whatever a pending reveal
+      names once it has a socket. Without that the search finds the right
+      project and drops you at its front door, which is most of the way to
+      useless.
+
+      A REST route rather than the editor socket, because the socket is bound
+      to one project and is the whole reason this gap existed. Mounted at
+      `/api/v1/search` with no id in the path — the same scoping `/account`
+      and `/notifications` already use, which is the only kind nobody can
+      forget to apply.
 
 - [ ] **11.9 An identity that follows you into the container.**
       Two halves, both absent. **Dotfiles** — every container comes up with a

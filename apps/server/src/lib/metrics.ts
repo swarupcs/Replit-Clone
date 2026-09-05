@@ -9,6 +9,7 @@
 export type CounterName =
   | "containers_started"
   | "containers_reaped"
+  | "containers_reclaimed"
   | "containers_capacity_rejected"
   | "runs_started"
   // Starts that found the dependencies already installed and left the

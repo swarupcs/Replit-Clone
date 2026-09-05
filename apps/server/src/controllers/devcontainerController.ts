@@ -10,7 +10,11 @@ import {
   DevcontainerError,
   type DevcontainerConfig,
 } from "../containers/devcontainer.js";
-import { runningImage } from "../containers/containerManager.js";
+import {
+  devcontainerCapabilities,
+  runningImage,
+} from "../containers/containerManager.js";
+import { mountsConfigured } from "../containers/devcontainerMounts.js";
 
 function summarise(config: DevcontainerConfig) {
   return {
@@ -24,6 +28,7 @@ function summarise(config: DevcontainerConfig) {
     postCreateCommand: config.postCreateCommand ?? [],
     postStartCommand: config.postStartCommand ?? [],
     workspaceFolder: config.workspaceFolder ?? null,
+    mounts: config.mounts ?? [],
     unsupported: config.unsupported,
   };
 }
@@ -44,12 +49,15 @@ export async function getDevcontainerController(
   await assertProjectAccess(projectId, userId, "viewer");
 
   const status = getDevcontainerStatus(projectId);
+  // The same capabilities the build path resolves, so the screen explains the
+  // config that WOULD be applied rather than a different one.
+  const allowed = await devcontainerCapabilities(projectId);
 
   let config: DevcontainerConfig | null = null;
   let error: string | null = status.error;
 
   try {
-    config = await readDevcontainer(projectId);
+    config = await readDevcontainer(projectId, allowed);
     // A file that parses now supersedes an error from a previous start: the
     // user has fixed it, and the next start will pick it up.
     if (config) error = status.config ? status.error : null;
@@ -65,6 +73,8 @@ export async function getDevcontainerController(
     config: config ? summarise(config) : null,
     imageInUse: await runningImage(projectId),
     error,
+    refusedMounts: status.refusedMounts,
+    mountsAllowed: allowed.mounts && mountsConfigured(),
     lifecycleLog: status.lifecycleLog,
     running: status.running,
     allowedImages: env.DEVCONTAINER_IMAGE_ALLOWLIST,
