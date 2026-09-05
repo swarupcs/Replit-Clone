@@ -29,6 +29,7 @@ function summary(over: Partial<AccountSummary> = {}): AccountSummary {
       managedDatabases: true,
       customDomains: true,
       scheduledJobs: true,
+      devcontainerMounts: false,
       overridden: false,
       overrideUntil: null,
     },
@@ -157,6 +158,7 @@ describe("the catalogue", () => {
             managedDatabases: true,
             customDomains: true,
             scheduledJobs: true,
+            devcontainerMounts: false,
           },
         ],
       }),
@@ -174,8 +176,8 @@ describe("the catalogue", () => {
     getAccount.mockResolvedValue(
       summary({
         plans: [
-          { id: "free", label: "Free", priceCents: 0, currency: "usd", rank: 0, maxProjects: base.maxProjects, userDiskQuotaMb: base.userDiskQuotaMb, projectDiskQuotaMb: base.projectDiskQuotaMb, aiRequestsPerHour: base.aiRequestsPerHour, maxContainersPerUser: base.maxContainersPerUser, idleMinutes: base.idleMinutes, managedDatabases: true, customDomains: true, scheduledJobs: true },
-          { id: "pro", label: "Pro", priceCents: 1200, currency: "usd", rank: 1, maxProjects: 100, userDiskQuotaMb: 20480, projectDiskQuotaMb: 2048, aiRequestsPerHour: 500, maxContainersPerUser: 3, idleMinutes: 60, managedDatabases: true, customDomains: true, scheduledJobs: true },
+          { id: "free", label: "Free", priceCents: 0, currency: "usd", rank: 0, maxProjects: base.maxProjects, userDiskQuotaMb: base.userDiskQuotaMb, projectDiskQuotaMb: base.projectDiskQuotaMb, aiRequestsPerHour: base.aiRequestsPerHour, maxContainersPerUser: base.maxContainersPerUser, idleMinutes: base.idleMinutes, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
+          { id: "pro", label: "Pro", priceCents: 1200, currency: "usd", rank: 1, maxProjects: 100, userDiskQuotaMb: 20480, projectDiskQuotaMb: 2048, aiRequestsPerHour: 500, maxContainersPerUser: 3, idleMinutes: 60, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
         ],
       }),
     );
@@ -194,8 +196,8 @@ describe("the catalogue", () => {
     getAccount.mockResolvedValue(
       summary({
         plans: [
-          { id: "free", label: "Free", priceCents: 0, currency: "usd", rank: 0, maxProjects: base.maxProjects, userDiskQuotaMb: base.userDiskQuotaMb, projectDiskQuotaMb: base.projectDiskQuotaMb, aiRequestsPerHour: base.aiRequestsPerHour, maxContainersPerUser: base.maxContainersPerUser, idleMinutes: 20, managedDatabases: true, customDomains: true, scheduledJobs: true },
-          { id: "pro", label: "Pro", priceCents: 1200, currency: "usd", rank: 1, maxProjects: 100, userDiskQuotaMb: 20480, projectDiskQuotaMb: 2048, aiRequestsPerHour: 500, maxContainersPerUser: 3, idleMinutes: 60, managedDatabases: true, customDomains: true, scheduledJobs: true },
+          { id: "free", label: "Free", priceCents: 0, currency: "usd", rank: 0, maxProjects: base.maxProjects, userDiskQuotaMb: base.userDiskQuotaMb, projectDiskQuotaMb: base.projectDiskQuotaMb, aiRequestsPerHour: base.aiRequestsPerHour, maxContainersPerUser: base.maxContainersPerUser, idleMinutes: 20, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
+          { id: "pro", label: "Pro", priceCents: 1200, currency: "usd", rank: 1, maxProjects: 100, userDiskQuotaMb: 20480, projectDiskQuotaMb: 2048, aiRequestsPerHour: 500, maxContainersPerUser: 3, idleMinutes: 60, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
         ],
       }),
     );
@@ -216,10 +218,10 @@ describe("the catalogue", () => {
     getAccount.mockResolvedValue(
       summary({
         plans: [
-          { id: "free", label: "Free", priceCents: 0, currency: "usd", rank: 0, maxProjects: base.maxProjects, userDiskQuotaMb: base.userDiskQuotaMb, projectDiskQuotaMb: base.projectDiskQuotaMb, aiRequestsPerHour: base.aiRequestsPerHour, maxContainersPerUser: base.maxContainersPerUser, idleMinutes: 20, managedDatabases: true, customDomains: true, scheduledJobs: true },
+          { id: "free", label: "Free", priceCents: 0, currency: "usd", rank: 0, maxProjects: base.maxProjects, userDiskQuotaMb: base.userDiskQuotaMb, projectDiskQuotaMb: base.projectDiskQuotaMb, aiRequestsPerHour: base.aiRequestsPerHour, maxContainersPerUser: base.maxContainersPerUser, idleMinutes: 20, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
           // The catalogue is only drawn when there is more than one plan to
           // choose between, so the personal plan needs something to sit beside.
-          { id: "personal", label: "Personal", priceCents: 0, currency: "usd", rank: 100, maxProjects: 0, userDiskQuotaMb: 0, projectDiskQuotaMb: 0, aiRequestsPerHour: 0, maxContainersPerUser: 0, idleMinutes: 0, managedDatabases: true, customDomains: true, scheduledJobs: true },
+          { id: "personal", label: "Personal", priceCents: 0, currency: "usd", rank: 100, maxProjects: 0, userDiskQuotaMb: 0, projectDiskQuotaMb: 0, aiRequestsPerHour: 0, maxContainersPerUser: 0, idleMinutes: 0, managedDatabases: true, customDomains: true, scheduledJobs: true , devcontainerMounts: false },
         ],
       }),
     );

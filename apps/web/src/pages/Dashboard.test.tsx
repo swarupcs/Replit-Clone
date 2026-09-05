@@ -63,6 +63,7 @@ const api = vi.hoisted(() => ({
       managedDatabases: true,
       customDomains: true,
       scheduledJobs: true,
+      devcontainerMounts: false,
       overridden: false,
       overrideUntil: null,
     },

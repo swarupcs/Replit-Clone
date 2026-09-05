@@ -49,6 +49,10 @@ model Plan {
 
   managedDatabases Boolean @default(false)
   customDomains    Boolean @default(false)
+
+  /// Whether a devcontainer.json on this plan may ask for extra host mounts.
+  /// Gated again by DEVCONTAINER_MOUNT_ROOTS, which is empty by default.
+  devcontainerMounts Boolean @default(false)
   scheduledJobs    Boolean @default(false)
 
   /// Withdrawn from the catalogue without being deleted. Accounts already on

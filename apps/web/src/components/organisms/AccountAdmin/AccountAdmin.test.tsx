@@ -56,6 +56,7 @@ function plan(id: string, label: string) {
     managedDatabases: true,
     customDomains: true,
     scheduledJobs: true,
+    devcontainerMounts: false,
   };
 }
 
@@ -76,6 +77,7 @@ function detail(over: Partial<AccountDetail> = {}): AccountDetail {
       managedDatabases: true,
       customDomains: true,
       scheduledJobs: true,
+      devcontainerMounts: false,
       overridden: false,
       overrideUntil: null,
     },

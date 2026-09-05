@@ -41,6 +41,18 @@ export interface DevcontainerState {
    *  template's defaults: being locked out of a project by the very file you
    *  are trying to fix is the worst failure available here. */
   error: string | null;
+  /** Mounts the config asked for that were refused, with the reason.
+   *
+   *  Distinct from `error`, which means the whole file could not be honoured.
+   *  A refused mount is a partial refusal: the container started and the rest
+   *  of the config applied, so reporting it as a read failure would be a lie
+   *  about what happened -- and reporting it not at all is how somebody spends
+   *  an afternoon wondering why their directory is empty. */
+  refusedMounts: { source: string; reason: string }[];
+  /** Whether a mount could be honoured at all on this deployment and plan, so
+   *  a refusal can say what would have to change rather than only that it
+   *  did not work. */
+  mountsAllowed: boolean;
   /** Combined output of the lifecycle commands from the last start. */
   lifecycleLog: string;
   /** True while those commands are still running. */

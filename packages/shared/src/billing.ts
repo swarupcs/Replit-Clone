@@ -98,6 +98,16 @@ export interface EntitlementLimits {
   managedDatabases: boolean;
   customDomains: boolean;
   scheduledJobs: boolean;
+  /** Whether this account's `devcontainer.json` may ask for extra host
+   *  directories to be mounted into its container.
+   *
+   *  Two gates, not one, and the other is the deployment's
+   *  DEVCONTAINER_MOUNT_ROOTS. This says whether an account may ASK; that says
+   *  what there is to ask for, and is empty by default. Both because the
+   *  request comes from a file in the repository rather than from the user --
+   *  a cloned project could otherwise mount whatever it liked the moment
+   *  somebody opened it. */
+  devcontainerMounts: boolean;
 }
 
 /** A tier as offered, which is the limits plus what it is called and costs. */

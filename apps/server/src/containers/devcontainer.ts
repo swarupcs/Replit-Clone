@@ -63,6 +63,32 @@ const IGNORED = new Set([
   "$schema",
 ]);
 
+/** What this deployment and this account will honour.
+ *
+ *  Passed in rather than read from a flag inside this module, because §6
+ *  decision 13's argument applies unchanged: a rule enforced by a mode flag
+ *  consulted deep in a parser is a rule that usually holds. Here the caller
+ *  resolves the entitlement once and hands down the answer, so a call site
+ *  that forgets gets the SAFE behaviour -- the default is nothing granted.
+ */
+export interface DevcontainerCapabilities {
+  /** Whether `mounts` is read at all. False refuses it exactly as before. */
+  mounts: boolean;
+}
+
+/** Nothing granted. The default, and deliberately the safe one. */
+const NOTHING: DevcontainerCapabilities = { mounts: false };
+
+/** One entry of `mounts`, as asked for. Whether it is ALLOWED is a question
+ *  about the host and is answered in devcontainerMounts.ts; this is only the
+ *  shape. */
+export interface DevcontainerMount {
+  type: string;
+  source: string;
+  target: string;
+  readOnly: boolean;
+}
+
 export interface DevcontainerConfig {
   /** Which file it was read from, for error messages. */
   source: string;
@@ -72,6 +98,10 @@ export interface DevcontainerConfig {
   postCreateCommand?: string[];
   postStartCommand?: string[];
   workspaceFolder?: string;
+  /** Extra host directories the file asked to have mounted. Present only when
+   *  the caller said mounts may be read; every one is still checked against
+   *  the deployment's allowlist before it reaches Docker. */
+  mounts?: DevcontainerMount[];
   /** Keys present that this does not act on, with the reason. Shown to the
    *  user, because silently ignoring half a config is how somebody spends an
    *  afternoon wondering why their Dockerfile did nothing. */
@@ -238,12 +268,94 @@ function shellQuote(argument: string): string {
     : `'${argument.replace(/'/g, `'\\''`)}'`;
 }
 
+/** Reads `mounts`, in both forms the spec allows.
+ *
+ *  The string form is a comma-separated list of `key=value` -- Docker's own
+ *  `--mount` syntax, which is what the spec borrowed. The object form is the
+ *  same keys as JSON. Both appear in real repositories, so both are read.
+ *
+ *  `${localWorkspaceFolder}` is expanded because it is by far the most common
+ *  thing a real config puts here and refusing it would fail the ordinary case.
+ *  `${localEnv:...}` deliberately is NOT: it would let a file in a repository
+ *  read this server's environment, which is where the database URL and every
+ *  secret lives, and no amount of path confinement afterwards makes that a
+ *  good idea.
+ */
+function parseMounts(raw: unknown): DevcontainerMount[] {
+  const entries = Array.isArray(raw) ? raw : [raw];
+  const mounts: DevcontainerMount[] = [];
+
+  for (const entry of entries) {
+    const fields: Record<string, string> = {};
+
+    if (typeof entry === "string") {
+      for (const part of entry.split(",")) {
+        const [key, ...rest] = part.split("=");
+        if (!key || rest.length === 0) {
+          throw new DevcontainerError(
+            `"mounts" has an entry that is not key=value: ${JSON.stringify(entry)}`,
+          );
+        }
+        fields[key.trim()] = rest.join("=").trim();
+      }
+    } else if (typeof entry === "object" && entry !== null && !Array.isArray(entry)) {
+      for (const [key, value] of Object.entries(entry as Record<string, unknown>)) {
+        if (typeof value !== "string" && typeof value !== "boolean") {
+          throw new DevcontainerError(`"mounts.${key}" must be a string`);
+        }
+        fields[key] = String(value);
+      }
+    } else {
+      throw new DevcontainerError(
+        `"mounts" entries must be strings or objects, not ${JSON.stringify(entry)}`,
+      );
+    }
+
+    const source = fields["source"] ?? fields["src"];
+    const target = fields["target"] ?? fields["destination"] ?? fields["dst"];
+
+    if (!source || !target) {
+      throw new DevcontainerError(
+        `"mounts" needs both a source and a target: ${JSON.stringify(entry)}`,
+      );
+    }
+
+    mounts.push({
+      // Defaulted to bind, as Docker does, so the common shorthand works.
+      type: (fields["type"] ?? "bind").toLowerCase(),
+      source: expandWorkspace(source),
+      target: expandWorkspace(target),
+      readOnly: fields["readonly"] === "true" || fields["readOnly"] === "true",
+    });
+  }
+
+  return mounts;
+}
+
+/** The one variable this expands. See `parseMounts` for why it is the one. */
+function expandWorkspace(value: string): string {
+  return value.replaceAll("${localWorkspaceFolder}", MOUNT_POINT_LITERAL);
+}
+
+/** The workspace path, written out rather than imported.
+ *
+ *  `containerManager` exports MOUNT_POINT and imports this module, so reading
+ *  it from there would be a cycle. It has never changed -- it is described in
+ *  containerManager as fixed by this platform -- and the constant here is
+ *  asserted against it in the tests so the two cannot drift silently.
+ */
+const MOUNT_POINT_LITERAL = "/home/sandbox/app";
+
 /** Turns the parsed JSON into the subset this acts on.
  *
  *  Exported and pure: the rules are the part worth pinning, and none of them
  *  need a container or a filesystem to exercise.
  */
-export function interpret(raw: unknown, source: string): DevcontainerConfig {
+export function interpret(
+  raw: unknown,
+  source: string,
+  allowed: DevcontainerCapabilities = NOTHING,
+): DevcontainerConfig {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new DevcontainerError(`${source} must contain a JSON object`);
   }
@@ -253,6 +365,8 @@ export function interpret(raw: unknown, source: string): DevcontainerConfig {
 
   for (const key of Object.keys(input)) {
     if (SUPPORTED_KEYS.has(key)) continue;
+    // Understood on this plan, so not a refusal to report.
+    if (key === "mounts" && allowed.mounts) continue;
     config.unsupported.push({
       key,
       reason:
@@ -329,6 +443,10 @@ export function interpret(raw: unknown, source: string): DevcontainerConfig {
     config.workspaceFolder = input["workspaceFolder"].trim();
   }
 
+  if (allowed.mounts && input["mounts"] !== undefined) {
+    config.mounts = parseMounts(input["mounts"]);
+  }
+
   // Keys understood but not acted on are not the user's problem.
   config.unsupported = config.unsupported.filter((entry) => !IGNORED.has(entry.key));
 
@@ -343,6 +461,7 @@ export function interpret(raw: unknown, source: string): DevcontainerConfig {
  */
 export async function readDevcontainer(
   projectId: string,
+  allowed?: DevcontainerCapabilities,
 ): Promise<DevcontainerConfig | null> {
   const root = projectRoot(projectId);
 
@@ -360,7 +479,7 @@ export async function readDevcontainer(
       );
     }
 
-    return interpret(parsed, relative);
+    return interpret(parsed, relative, allowed);
   }
 
   return null;
@@ -403,6 +522,11 @@ export interface DevcontainerStatus {
    *  a file you are trying to fix is the worst possible failure here — but the
    *  reason has to reach the user, or the file looks like it worked. */
   error: string | null;
+  /** Mounts the file asked for that were refused, with the reason. Separate
+   *  from `error` because the container started and everything else in the
+   *  config was honoured -- this is a partial refusal, and reporting it as a
+   *  failure to read the file would be a lie about what happened. */
+  refusedMounts: { source: string; reason: string }[];
   /** Combined output of the lifecycle commands from the last start. */
   lifecycleLog: string;
   /** True while those commands are running. */
@@ -416,6 +540,7 @@ export function getDevcontainerStatus(projectId: string): DevcontainerStatus {
     statuses.get(projectId) ?? {
       config: null,
       error: null,
+      refusedMounts: [],
       lifecycleLog: "",
       running: false,
     }

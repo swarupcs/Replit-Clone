@@ -24,9 +24,11 @@ import {
   readDevcontainer,
   resolveWorkspaceFolder,
   setDevcontainerStatus,
+  type DevcontainerCapabilities,
   type DevcontainerConfig,
 } from "./devcontainer.js";
 import { execCapture } from "./execCapture.js";
+import { resolveMounts } from "./devcontainerMounts.js";
 
 const docker = new Docker();
 
@@ -128,6 +130,10 @@ export function envSignature(
         workspaceFolder: devcontainer.workspaceFolder ?? null,
         postCreateCommand: devcontainer.postCreateCommand ?? null,
         postStartCommand: devcontainer.postStartCommand ?? null,
+        // A container's binds are fixed when Docker creates it, so a changed
+        // mount takes effect only by building again -- the same reason
+        // `image` and `forwardPorts` are here.
+        mounts: devcontainer.mounts ?? null,
       }),
     );
   }
@@ -153,8 +159,11 @@ async function devcontainerFor(
   projectId: string,
 ): Promise<DevcontainerConfig | null> {
   try {
-    const config = await readDevcontainer(projectId);
-    setDevcontainerStatus(projectId, { config, error: null });
+    const config = await readDevcontainer(
+      projectId,
+      await devcontainerCapabilities(projectId),
+    );
+    setDevcontainerStatus(projectId, { config, error: null, refusedMounts: [] });
     return config;
   } catch (error) {
     const reason =
@@ -164,6 +173,39 @@ async function devcontainerFor(
     logger.warn("devcontainer ignored", { projectId, reason });
     setDevcontainerStatus(projectId, { config: null, error: reason });
     return null;
+  }
+}
+
+/** What this project's owner may ask a devcontainer for.
+ *
+ *  Resolved here and handed down, rather than read inside the parser: §6
+ *  decision 13's argument, which is that a rule consulted deep in the thing it
+ *  governs is a rule somebody will forget. A caller that does not ask gets
+ *  nothing granted, which is the pre-existing behaviour.
+ *
+ *  Nothing granted on failure too. This decides whether a file in the
+ *  repository may reach outside the sandbox, and a database that cannot be
+ *  read is not a reason to say yes.
+ */
+export async function devcontainerCapabilities(
+  projectId: string,
+): Promise<DevcontainerCapabilities> {
+  try {
+    const { prisma } = await import("../lib/prisma.js");
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { ownerId: true },
+    });
+    if (!project) return { mounts: false };
+
+    const { resolveEntitlements } = await import(
+      "../service/entitlementService.js"
+    );
+    const { devcontainerMounts } = await resolveEntitlements(project.ownerId);
+
+    return { mounts: devcontainerMounts };
+  } catch {
+    return { mounts: false };
   }
 }
 
@@ -209,7 +251,10 @@ async function devcontainerQuietly(
   projectId: string,
 ): Promise<DevcontainerConfig | null> {
   try {
-    return await readDevcontainer(projectId);
+    return await readDevcontainer(
+      projectId,
+      await devcontainerCapabilities(projectId),
+    );
   } catch {
     return null;
   }
@@ -455,6 +500,16 @@ async function startContainer(projectId: string): Promise<Container> {
     ]),
   );
 
+  // Before the container, because a refusal is something the editor should be
+  // able to show beside the config that asked for it -- and because a mount
+  // that cannot be honoured must not stop the project opening.
+  const { mounts: extraMounts, refused } = await resolveMounts(
+    devcontainer?.mounts ?? [],
+  );
+  if (refused.length > 0) {
+    setDevcontainerStatus(projectId, { refusedMounts: refused });
+  }
+
   const image = imageFor(projectId, template.image, devcontainer);
   const workspaceFolder = resolveWorkspaceFolder(
     devcontainer?.workspaceFolder,
@@ -525,6 +580,10 @@ async function startContainer(projectId: string): Promise<Container> {
         ...(publishPort ? { PortBindings: portBindings } : {}),
         Binds: [
           `${projectRoot(projectId)}:${MOUNT_POINT}`,
+          // Extra host directories the devcontainer asked for, and that both
+          // the plan and DEVCONTAINER_MOUNT_ROOTS permit. Empty unless both
+          // do; see devcontainerMounts.ts for why it takes two gates.
+          ...extraMounts.map((mount) => mount.bind),
           // Package caches, in a named volume rather than the container's
           // writable layer. Containers are stopped when idle and removed on a
           // restart, so without this every cold start re-downloaded the whole of

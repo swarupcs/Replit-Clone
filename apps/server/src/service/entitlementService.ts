@@ -69,6 +69,7 @@ export function freePlanFallback(): Entitlements {
     idleMinutes: env.CONTAINER_IDLE_MINUTES,
     managedDatabases: true,
     customDomains: true,
+    devcontainerMounts: false,
     scheduledJobs: true,
     overridden: false,
     overrideUntil: null,
@@ -96,6 +97,7 @@ const overrideSchema = z
     maxContainersPerUser: z.number().int().nonnegative().optional(),
     idleMinutes: z.number().int().nonnegative().optional(),
     managedDatabases: z.boolean().optional(),
+    devcontainerMounts: z.boolean().optional(),
     customDomains: z.boolean().optional(),
     scheduledJobs: z.boolean().optional(),
   })
@@ -156,6 +158,7 @@ function apply(
     maxContainersPerUser: number;
     idleMinutes: number;
     managedDatabases: boolean;
+    devcontainerMounts: boolean;
     customDomains: boolean;
     scheduledJobs: boolean;
   },
@@ -170,6 +173,7 @@ function apply(
     maxContainersPerUser: plan.maxContainersPerUser,
     idleMinutes: plan.idleMinutes,
     managedDatabases: plan.managedDatabases,
+    devcontainerMounts: plan.devcontainerMounts,
     customDomains: plan.customDomains,
     scheduledJobs: plan.scheduledJobs,
   };
@@ -318,6 +322,7 @@ export async function listPlans(): Promise<Plan[]> {
     maxContainersPerUser: row.maxContainersPerUser,
     idleMinutes: row.idleMinutes,
     managedDatabases: row.managedDatabases,
+    devcontainerMounts: row.devcontainerMounts,
     customDomains: row.customDomains,
     scheduledJobs: row.scheduledJobs,
   }));
