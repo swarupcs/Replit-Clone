@@ -1,4 +1,5 @@
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { Project } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
@@ -18,6 +19,7 @@ import {
   detectTemplate,
   inspectDirectory,
 } from "./repoImportService.js";
+import { previewBaseFor } from "./previewContract.js";
 import { assertCanCreateProject } from "./userQuotaService.js";
 import { BadRequestError } from "../utils/errors.js";
 
@@ -111,10 +113,21 @@ export async function openLocalFolderService(
   // A folder somebody already had is MORE likely to be pnpm or yarn than a
   // fresh clone is -- it is somebody's real working tree, with whatever they
   // chose years ago -- so getting this wrong here is worse, not better.
-  const startCommand = detectStartCommand(packageJson, detectPackageManager(files));
+  // The id is generated here rather than by the database, because the start
+  // command below has to carry this project's own preview path and there is no
+  // second write in which to add it. A folder somebody already had is their
+  // real working tree, so the same rule as the import path applies: the
+  // command is ours to set and the files are not.
+  const projectId = randomUUID();
+  const startCommand = detectStartCommand(
+    packageJson,
+    detectPackageManager(files),
+    previewBaseFor(template, projectId),
+  );
 
   const project = await prisma.project.create({
     data: {
+      id: projectId,
       name: options.name?.trim() || path.basename(root) || "folder",
       ownerId,
       template,

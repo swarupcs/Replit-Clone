@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { TEMPLATE_FILES_ROOT } from "../templates/registry.js";
+import { TEMPLATE_FILES_ROOT, getTemplate } from "../templates/registry.js";
 import { logger } from "../lib/logger.js";
 
 /** Making a scaffolded project reachable by the preview proxy. plan.md §12.3's
@@ -42,6 +42,26 @@ import { logger } from "../lib/logger.js";
  *  somebody editing the config, which is a file we have just told them is
  *  theirs to edit.
  */
+
+/** Where the preview proxy serves a project, when its template expects the app
+ *  to know -- and null when the proxy strips the prefix instead.
+ *
+ *  The same string `containerManager` injects as `PREVIEW_BASE`, built the same
+ *  way, because two spellings of one path is how the prefix and the app stop
+ *  agreeing.
+ *
+ *  Null is a real answer and not an absence: it says "reachable, and serving at
+ *  the root is correct". A caller that means "do not touch the command at all"
+ *  passes nothing.
+ */
+export function previewBaseFor(
+  templateId: string,
+  projectId: string,
+): string | null {
+  return getTemplate(templateId).expectsPreviewBase
+    ? `/preview/${projectId}/`
+    : null;
+}
 
 export interface PreviewAdaptation {
   /** Copied from this template's committed starter into the project. */

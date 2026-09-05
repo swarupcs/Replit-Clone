@@ -2657,12 +2657,85 @@ served HTML carried `/preview/<id>/src/main.tsx`, and that asset answered 200.
 
 Server: 2283 passing, 296 skipped. Typecheck and lint clean, 3/3.
 
+**The import path was the other half of this, and is fixed separately in
+2.44** — differently, because the answer there had to be different.
+
 **Not fixed by this: projects already built with Latest.** The adaptation runs
 during a scaffold, so anything created before it stays broken until its config
 is edited or it is rebuilt. There is no backfill, and it is a real gap rather
 than an oversight — rewriting a config in a project somebody has since edited
 is a different decision from writing one into a project that is thirty seconds
 old.
+
+---
+
+### 2.44 Since (2026-09-05) — the same defect on the import path, and why the fix is not the same
+
+2.43 fixed a scaffolded project by writing this platform's config into it. An
+imported repository has the identical problem — it binds localhost, and it
+serves at `/` while `expectsPreviewBase: true` makes the proxy forward
+`/preview/<id>/` — and **the same fix would be wrong.**
+
+A scaffolded project's config is thirty seconds old and contains a framework
+plugin. An imported repository's config is somebody's actual work: aliases,
+proxies, build settings, things this platform has no business replacing. The
+file says so, in a comment that predates all of this — *"A template's start
+command is right for a project scaffolded from that template and usually wrong
+for somebody's real repository."* That sentence was written about the start
+command and is just as true about the config; nobody had applied it that far.
+
+**So nothing is written to the clone. Everything is a flag on the command this
+platform already owns.** Vite takes both `--host` and `--base` on the command
+line, which is the whole reason an imported Vite app is fixable at all without
+touching a file it did not write.
+
+**The flags are derived from the template's own answer, not applied blindly.**
+`previewBaseFor` returns the path only where `expectsPreviewBase` is true, and
+null where the proxy strips the prefix — and null is a real answer rather than
+an absence, because a `--base` added where the prefix is already stripped
+applies it twice. A caller that passes nothing at all gets the command
+untouched, which is what the scaffold path does: its config already carries the
+base and would otherwise be given it twice by the other route.
+
+**Matched on the start of the dev script, not anywhere in it.** A script like
+`concurrently "vite" "node api"` mentions vite, and would have received the
+flags itself — which does not misconfigure a dev server, it stops it starting.
+`vitest` begins with the same five letters and is not a dev server either. An
+unrecognised tool gets nothing, deliberately: a preview that cannot be reached
+is a much smaller failure than a project that will not run.
+
+**npm needs its separator and the other three do not.** `npm run dev --host`
+is consumed by npm; `npm run dev -- --host` reaches the script. pnpm forwards
+what follows the script name and warns about a `--` it does not need. That is
+per-manager, so it lives beside the per-manager install and run commands that
+2.40 already put there.
+
+**One thing this does not fix, and it is not an oversight.** Next has no flag
+for `basePath` — it is config-only. So an imported Next app gets its host bound
+and still serves `/_next/...` outside the preview prefix. Fixing that means
+either editing their `next.config`, which is the thing this path exists not to
+do, or making `expectsPreviewBase` a per-project column, which is the larger
+change that was considered and not taken. It is written down here rather than
+discovered later.
+
+**The other limitation, stated plainly:** these flags arrive through the
+**stored start command**, so they apply when a project is started by Run. A dev
+server started by typing `npm run dev` in the terminal is the repository's own
+command and is not reachable by the preview. There is no way around that
+without editing their files.
+
+Six mutants, all caught, including matching `vite` anywhere in the script,
+dropping npm's separator, giving pnpm one it warns about, and adding a base
+where the proxy strips the prefix.
+
+**Verified with a stock config and flags only** — the state an imported repo is
+actually in. A Vite dev server started with `--config` pointing at a
+plugin-only config plus `--host 0.0.0.0 --base /preview/<id>/` advertised
+`Network: http://172.25.0.3:5199/...`, answered 200 from the container's own
+network address, emitted `src="/preview/<id>/src/main.tsx"` in its HTML, and
+served that asset with a 200. Nothing but the flags did that.
+
+Server: 2294 passing, 296 skipped. Typecheck and lint clean, 3/3.
 
 ---
 
