@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { detectStartCommand, detectTemplate } from "./repoImportService.js";
+import {
+  detectPackageManager,
+  detectStartCommand,
+  detectTemplate,
+} from "./repoImportService.js";
 
 /** What `inspectClone` hands over: the top-level entries, plus the parsed
  *  package.json when there is one. */
@@ -141,5 +145,64 @@ describe("detectStartCommand", () => {
     expect(detectStartCommand(scripts({ dev: "   ", start: "node ." }))).toBe(
       "npm install && npm run start",
     );
+  });
+});
+
+/** Which package manager a repository actually uses.
+ *
+ *  This existing at all is the fix for a real defect rather than a new
+ *  capability, and the defect is the kind found by reading two shipped things
+ *  against each other: `warmStart` fingerprints `pnpm-lock.yaml` and
+ *  `yarn.lock` and knows how to skip `pnpm install` and `yarn install`, and
+ *  `detectStartCommand` emitted `npm install` whatever had just been cloned. So
+ *  the warm path was written for commands nothing ever produced, the lockfile
+ *  was ignored -- which is the entire point of a lockfile -- and a
+ *  `workspace:*` dependency, which npm cannot resolve at all, failed outright.
+ */
+describe("detectPackageManager", () => {
+  it("reads the lockfile, which is the thing that always exists", () => {
+    expect(detectPackageManager(["package.json", "pnpm-lock.yaml"])).toBe("pnpm");
+    expect(detectPackageManager(["package.json", "yarn.lock"])).toBe("yarn");
+    expect(detectPackageManager(["package.json", "bun.lockb"])).toBe("bun");
+  });
+
+  /** A repository with no lockfile at all is genuinely an npm repository by
+   *  default, so this is the right answer rather than a shrug. */
+  it("is npm when there is nothing to go on", () => {
+    expect(detectPackageManager(["package.json"])).toBe("npm");
+    expect(detectPackageManager([])).toBe("npm");
+    expect(detectPackageManager(["package.json", "package-lock.json"])).toBe("npm");
+  });
+
+  /** More than one lockfile means somebody migrated and did not finish. A
+   *  stale `package-lock.json` left behind by a move TO pnpm is the common
+   *  case; the reverse is not. */
+  it("gives the newer tool the benefit when a migration was left half done", () => {
+    expect(
+      detectPackageManager(["package-lock.json", "pnpm-lock.yaml"]),
+    ).toBe("pnpm");
+    expect(detectPackageManager(["yarn.lock", "pnpm-lock.yaml"])).toBe("pnpm");
+  });
+});
+
+describe("the start command each manager gets", () => {
+  const scripts = { scripts: { dev: "vite" } };
+
+  /** `warmStart`'s INSTALL_PREFIXES already knows all of these, so an imported
+   *  pnpm project takes the warm-start path from here on -- which it could
+   *  never do while this always said npm. */
+  it("installs with the manager the lockfile named", () => {
+    expect(detectStartCommand(scripts, "pnpm")).toBe("pnpm install && pnpm run dev");
+    expect(detectStartCommand(scripts, "bun")).toBe("bun install && bun run dev");
+  });
+
+  /** yarn takes no `run` for a script name. Getting this wrong produces a
+   *  usage message rather than anything a person can act on. */
+  it("uses each manager's own way of running a script", () => {
+    expect(detectStartCommand(scripts, "yarn")).toBe("yarn install && yarn dev");
+  });
+
+  it("still defaults to npm when nobody said otherwise", () => {
+    expect(detectStartCommand(scripts)).toBe("npm install && npm run dev");
   });
 });

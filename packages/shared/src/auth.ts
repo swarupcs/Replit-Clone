@@ -34,6 +34,53 @@ export interface AuthResponse {
   };
 }
 
+/** What `POST /auth/login` answers when the account has a second factor.
+ *
+ *  A different shape rather than an `AuthResponse` with empty fields, so a
+ *  client cannot read `data.accessToken` off a half-finished sign-in and
+ *  believe it has a session. There is no user and no token here because the
+ *  server has not issued either -- and it has not written the cookies either.
+ *  plan.md §11.6.
+ */
+export interface MfaChallengeResponse {
+  success: true;
+  message: string;
+  data: {
+    mfaRequired: true;
+    /** Short-lived proof that the PASSWORD step passed. Not a credential: it
+     *  is signed with its own type and `requireAuth` refuses it. */
+    mfaToken: string;
+  };
+}
+
+export type LoginResponse = AuthResponse | MfaChallengeResponse;
+
+/** Which of the two came back. A type guard rather than a bare check at each
+ *  call site, so the narrowing is stated once. */
+export function isMfaChallenge(
+  response: LoginResponse,
+): response is MfaChallengeResponse {
+  return "mfaRequired" in response.data;
+}
+
+/** Whether an account is protected by a second factor, and how well. */
+export interface TwoFactorStatus {
+  enabled: boolean;
+  /** A setup started and never confirmed. Shown rather than hidden: it is the
+   *  state somebody is most likely to be stuck in. */
+  pending: boolean;
+  /** Zero with `enabled` true is a real and dangerous state -- a lost phone is
+   *  then a lost account -- so it is a number rather than a boolean. */
+  recoveryCodesLeft: number;
+}
+
+export interface TwoFactorEnrolment {
+  /** The text form, for an app that cannot scan. */
+  secret: string;
+  /** The `otpauth://` URL, for one that can. */
+  otpauthUrl: string;
+}
+
 export interface ApiErrorResponse {
   success: false;
   code: string;

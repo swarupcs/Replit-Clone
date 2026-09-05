@@ -16,6 +16,49 @@ export type CounterName =
   // install half of the command out. Against `runs_started`, this is how much
   // of the warm-start path is actually being taken.
   | "runs_install_skipped"
+  // Installs done ahead of a session rather than in front of one (§12.2).
+  // Against `runs_install_skipped`, this says how much of the warm-start path
+  // was earned by a prebuild rather than by nothing having changed.
+  | "prebuilds_completed"
+  // A prebuild that exited non-zero, or threw. Deliberately not notified --
+  // nobody asked for the work -- so this counter is the only place it shows.
+  | "prebuilds_failed"
+  // Gave up after the install timeout. The stamp is untouched, so the next
+  // real start installs exactly as it would have.
+  | "prebuilds_abandoned"
+  // Projects built by running the upstream scaffolder rather than by copying a
+  // committed starter, and the ones where that did not work. The ratio is the
+  // honest measure of whether "Latest" is a feature or a coin toss.
+  | "scaffolds_completed"
+  | "scaffolds_failed"
+  // An account's dotfiles cloned into a new container, and the ones that did
+  // not. The failures are the interesting half: a dotfiles repository breaks
+  // silently by design here -- the container still starts -- so without a
+  // counter, "my shell is wrong" is the only signal anyone ever gets.
+  | "dotfiles_applied"
+  | "dotfiles_failed"
+  // Second factors. `two_factor_replays` is the one to watch: a non-zero count
+  // means a code was presented twice inside its window, which is either a
+  // double-click or somebody replaying one, and those look identical from
+  // here. `two_factor_recovery_used` climbing without an enrolment nearby is
+  // the other shape worth noticing.
+  | "two_factor_enabled"
+  | "two_factor_disabled"
+  | "two_factor_failures"
+  | "two_factor_replays"
+  | "two_factor_recovery_used"
+  // Services a project's own docker-compose.yml declared, started beside it
+  // (plan.md §11.3). The failures are the half worth watching: a service that
+  // does not start is swallowed on purpose -- a file in a cloned repository
+  // must not be able to hold a project closed -- so without a counter the only
+  // signal is somebody's app failing to connect to a database.
+  | "compose_services_started"
+  | "compose_services_failed"
+  // Notebook kernels. A kernel that fails to start is a notebook whose Run
+  // button does nothing, and the gateway refuses before this point for every
+  // reason it can name -- so anything counted here is a reason it could not.
+  | "kernels_started"
+  | "kernels_failed"
   | "runs_failed"
   | "preview_errors"
   | "preview_upgrades_rejected"

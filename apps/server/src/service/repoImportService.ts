@@ -89,8 +89,54 @@ export function detectTemplate(
  *  a wrong guess is worse than the default, because the default is at least
  *  predictable from the template shown in the UI.
  */
+export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
+/** Which package manager a cloned repository is actually using.
+ *
+ *  **The lockfile decides, not `packageManager` in package.json**, because the
+ *  lockfile is the thing that exists in every case: the `packageManager` field
+ *  is corepack-era and most repositories still do not carry one, while a repo
+ *  with no lockfile at all is genuinely an npm repo by default.
+ *
+ *  This existing at all is the fix for a real defect. `warmStart` fingerprints
+ *  `pnpm-lock.yaml` and `yarn.lock` and knows how to skip a `pnpm install` --
+ *  but nothing ever *produced* such a command, because the function below
+ *  emitted `npm install` whatever had just been cloned. So the lockfile was
+ *  ignored (the point of a lockfile), and a `workspace:*` dependency, which npm
+ *  cannot resolve at all, failed outright.
+ *
+ *  Order matters where a repository carries more than one lockfile, which
+ *  happens after a migration somebody did not finish. The newer tool wins,
+ *  because a stale `package-lock.json` left behind by a move TO pnpm is the
+ *  common case and the reverse is not.
+ */
+export function detectPackageManager(files: string[]): PackageManager {
+  const present = new Set(files);
+
+  if (present.has("bun.lockb") || present.has("bun.lock")) return "bun";
+  if (present.has("pnpm-lock.yaml")) return "pnpm";
+  if (present.has("yarn.lock")) return "yarn";
+  return "npm";
+}
+
+/** How each manager installs, and how it runs a script.
+ *
+ *  `yarn` takes no `run` for a script name and `bun` prefers `bun run`; getting
+ *  this wrong produces a command that fails with a usage message rather than
+ *  anything a person can act on.
+ */
+const COMMANDS: Record<PackageManager, { install: string; run: (script: string) => string }> = {
+  npm: { install: "npm install", run: (script) => `npm run ${script}` },
+  pnpm: { install: "pnpm install", run: (script) => `pnpm run ${script}` },
+  // `yarn install` covers both Classic and Berry; `yarn <script>` is the form
+  // both understand.
+  yarn: { install: "yarn install", run: (script) => `yarn ${script}` },
+  bun: { install: "bun install", run: (script) => `bun run ${script}` },
+};
+
 export function detectStartCommand(
   packageJson: { scripts?: Record<string, string> } | null,
+  manager: PackageManager = "npm",
 ): string | null {
   const scripts = packageJson?.scripts;
   if (!scripts) return null;
@@ -103,7 +149,12 @@ export function detectStartCommand(
 
   // The install is part of it: a freshly cloned repository has no node_modules,
   // and a run that fails on a missing dependency looks like a broken import.
-  return `npm install && npm run ${chosen}`;
+  //
+  // And it is the RIGHT install: `warmStart`'s INSTALL_PREFIXES already knows
+  // every one of these, so an imported pnpm project takes the warm-start path
+  // from here on -- which it never could while this always said npm.
+  const commands = COMMANDS[manager];
+  return `${commands.install} && ${commands.run(chosen)}`;
 }
 
 /** Reads a directory's top level, for `detectTemplate`.
@@ -276,7 +327,9 @@ export async function importRepository(
 
     const { files, packageJson } = await inspectDirectory(dir);
     const template = detectTemplate(files, packageJson);
-    const startCommand = detectStartCommand(packageJson);
+    // The lockfile that was just cloned decides how this project installs.
+    const manager = detectPackageManager(files);
+    const startCommand = detectStartCommand(packageJson, manager);
 
     if (template !== IMPORT_TEMPLATE || startCommand) {
       await prisma.project.update({

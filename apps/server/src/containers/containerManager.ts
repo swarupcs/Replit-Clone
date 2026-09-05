@@ -29,6 +29,12 @@ import {
 } from "./devcontainer.js";
 import { execCapture } from "./execCapture.js";
 import { resolveMounts } from "./devcontainerMounts.js";
+import { applyDotfiles } from "./dotfiles.js";
+import {
+  assertFits,
+  resolveSize,
+  type WorkspaceSize,
+} from "../service/workspaceSizeService.js";
 
 const docker = new Docker();
 
@@ -37,6 +43,12 @@ const docker = new Docker();
 // Re-exported so existing importers keep working; it lives in its own
 // module now because the database service needs it too.
 export { SANDBOX_NETWORK, ensureNetwork } from "./sandboxNetwork.js";
+import {
+  reconcileServices,
+  removeServices,
+  startServices,
+  stopServices,
+} from "./composeServices.js";
 
 const CONTAINER_PREFIX = "rc-project-";
 /** Kept here rather than imported from the database service, which imports
@@ -516,7 +528,30 @@ async function startContainer(projectId: string): Promise<Container> {
     MOUNT_POINT,
   );
 
+  let size: WorkspaceSize = {
+    memoryMb: env.CONTAINER_MEMORY_MB,
+    cpus: env.CONTAINER_CPUS,
+    custom: false,
+  };
+
   const container = await withCapacityGate(async () => {
+    // Read inside the gate, with the same argument the count below has: two
+    // projects sized 8 GB each on a 12 GB host both fit when asked separately
+    // and do not when asked together.
+    size = await resolveSize(projectId);
+
+    // A size that fitted when it was set need not fit now -- something else
+    // started in the meantime. Checked here rather than only at the point of
+    // setting, because §6 decision 13 is that the guarantee lives where it
+    // cannot be skipped, and the only unskippable place is the start itself.
+    //
+    // A default-sized workspace is exempt: it is what MAX_CONCURRENT_CONTAINERS
+    // below already rations, and failing it here would refuse projects that
+    // worked before this file existed.
+    if (size.custom) {
+      await assertFits(projectId, size.memoryMb, await runningProjectContainers());
+    }
+
     // Counted and created without interruption, so two projects starting
     // together cannot both read the same figure and both pass.
     if ((await runningCount()) >= env.MAX_CONCURRENT_CONTAINERS) {
@@ -590,11 +625,14 @@ async function startContainer(projectId: string): Promise<Container> {
           // node_modules — minutes of waiting for a project that had not changed.
           `${cacheVolumeName(projectId)}:/home/sandbox/.cache`,
         ],
-        Memory: env.CONTAINER_MEMORY_MB * 1024 * 1024,
+        // This workspace's size, not the deployment's -- plan.md §12.1. Falls
+        // back to CONTAINER_MEMORY_MB / CONTAINER_CPUS for a project nobody has
+        // sized, which is every project until somebody asks.
+        Memory: size.memoryMb * 1024 * 1024,
         // Equal to Memory disables swap, so a container cannot evade its limit
         // by swapping the host to death.
-        MemorySwap: env.CONTAINER_MEMORY_MB * 1024 * 1024,
-        NanoCpus: Math.round(env.CONTAINER_CPUS * 1e9),
+        MemorySwap: size.memoryMb * 1024 * 1024,
+        NanoCpus: Math.round(size.cpus * 1e9),
         // Caps a fork bomb.
         PidsLimit: 256,
         // tini as pid 1, which reaps.
@@ -620,11 +658,78 @@ async function startContainer(projectId: string): Promise<Container> {
   increment("containers_started");
   logger.info("container started", { projectId, image });
 
+  // The services the project's own docker-compose.yml declares, started as
+  // part of the same lifecycle -- plan.md §11.3. Before the lifecycle
+  // commands, because a `postCreateCommand` that runs a migration needs the
+  // database it migrates to be answering. Never throws: a compose file is a
+  // file in a repository this platform did not write, and a bad one must not
+  // be able to hold a project closed.
+  await startServices(projectId, container.id);
+
+  // Before the lifecycle commands, not after: a `postCreateCommand` may
+  // reasonably assume the shell it is typed for. After the container is
+  // running, because there is nothing to exec into until then.
+  await runDotfiles(projectId, container);
+
   // A container that was just created has been created, so both run -- in the
   // order the spec gives them.
   await runLifecycle(projectId, container, devcontainer, "create");
 
   return container;
+}
+
+/** Clones the OWNER's dotfiles into a container that has just been made.
+ *
+ *  The owner's, not the viewer's, and that is a decision rather than an
+ *  accident. A container is one per project and is shared by everyone with
+ *  access to it, so there is no "whose container is this" to answer per
+ *  request -- a collaborator opening a terminal would otherwise get a shell
+ *  configured by whoever happened to start it first, and cloning a second
+ *  person's dotfiles over the first person's would be worse than either.
+ *
+ *  Failure is recorded and swallowed, exactly as `runLifecycle`'s is: a
+ *  dotfiles repository is arbitrary code out of a repository the platform does
+ *  not control, and a broken one must not be able to hold a project closed.
+ */
+async function runDotfiles(
+  projectId: string,
+  container: Container,
+): Promise<void> {
+  try {
+    const { prisma } = await import("../lib/prisma.js");
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { ownerId: true },
+    });
+    if (!project) return;
+
+    const { dotfilesFor } = await import("../service/personalizationService.js");
+    const settings = await dotfilesFor(project.ownerId);
+    if (!settings) {
+      setDevcontainerStatus(projectId, { dotfilesLog: null });
+      return;
+    }
+
+    const budgetMs = env.DOTFILES_TIMEOUT_SECONDS * 1000;
+    const result = await applyDotfiles(container, settings, budgetMs);
+
+    setDevcontainerStatus(projectId, {
+      dotfilesLog: result.ok
+        ? result.log || "Dotfiles applied."
+        : `Dotfiles did not finish.
+${result.log}`,
+    });
+
+    increment(result.ok ? "dotfiles_applied" : "dotfiles_failed");
+  } catch (error) {
+    // Reaching here means the DATABASE or the exec plumbing failed rather than
+    // the user's script, so it is a server-side warning and not a user-facing
+    // log line.
+    logger.warn("dotfiles step failed", {
+      projectId,
+      error: (error as Error).message,
+    });
+  }
 }
 
 /** Runs a devcontainer's lifecycle commands.
@@ -874,6 +979,11 @@ export async function stopContainer(projectId: string): Promise<void> {
 
   const container = docker.getContainer(info.Id);
   await container.stop({ t: 5 }).catch(() => {});
+
+  // One lifecycle unit. A project's services outliving the project's own
+  // container is the memory leak §6 decision 4 already described about the
+  // managed database, multiplied by however many the file declares.
+  await stopServices(projectId).catch(() => {});
 }
 
 export async function removeContainer(projectId: string): Promise<void> {
@@ -887,6 +997,13 @@ export async function removeContainer(projectId: string): Promise<void> {
   // else knows its id once the row is gone.
   await container.stop({ t: 2 }).catch(() => {});
   await container.remove({ force: true }).catch(() => {});
+
+  // The service containers and their network -- and NOT their volumes. This
+  // is the path putting a project in the trash takes, where the rule is the
+  // one `projectService` states about the managed database: restoring is
+  // worthless without the data. `destroyServices` is the purge's job.
+  await removeServices(projectId).catch(() => {});
+
   activeAttachments.delete(projectId);
   lastActiveAt.delete(projectId);
 }
@@ -1049,6 +1166,10 @@ export function startIdleReaper(): void {
           // cause. Only this direction is safe, and only because the app has
           // already gone.
           await onProjectReaped?.(name);
+
+          // ...and the services the project declared for itself, for exactly
+          // the same reason and by exactly the same argument.
+          await stopServices(name).catch(() => undefined);
         }
       } catch (error) {
         logger.error("idle reaper failed", error);
@@ -1070,6 +1191,17 @@ export async function stopAllContainers(): Promise<void> {
     containers.map((info) =>
       docker.getContainer(info.Id).stop({ t: 3 }).catch(() => {}),
     ),
+  );
+
+  // The compose services beside them. Without this a restart leaves every
+  // project's Postgres and Redis running and holding memory, which is the
+  // exact orphan this function exists to prevent -- just under a different
+  // name prefix, so the sweep above never sees them.
+  await Promise.all(
+    containers
+      .map((info) => projectIdFromNames(info.Names))
+      .filter((id): id is string => id !== undefined)
+      .map((id) => stopServices(id).catch(() => undefined)),
   );
 
   if (reaperTimer) clearInterval(reaperTimer);
@@ -1124,6 +1256,11 @@ export async function reconcileOnBoot(): Promise<{
     await docker.getContainer(info.Id).remove({ force: true }).catch(() => {});
     containersRemoved += 1;
   }
+
+  // The same sweep for compose services, which a crash leaves behind exactly
+  // as it leaves project containers -- and which nothing else on this host
+  // would ever clean up, because they are not named `rc-project-`.
+  containersRemoved += await reconcileServices(known).catch(() => 0);
 
   // Directories are reported, not deleted. A row missing at boot is far more
   // likely to mean the database is not the one this server used last than that
@@ -1184,7 +1321,11 @@ export async function readContainerStats(projectId: string): Promise<{
   memoryLimitBytes: number;
   cpuPercent: number;
 }> {
-  const limit = env.CONTAINER_MEMORY_MB * 1024 * 1024;
+  // This project's ceiling, not the deployment's. §12.1 names this as the
+  // call site that would be missed: a per-workspace size that did not reach
+  // here would show every project a limit that is not its own, which is worse
+  // than showing none.
+  const limit = (await resolveSize(projectId)).memoryMb * 1024 * 1024;
   const info = await findContainer(projectId);
 
   if (!info || info.State !== "running") {

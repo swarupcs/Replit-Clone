@@ -141,10 +141,115 @@ model User {
   computeUsage     ComputeUsage[]
   subscription     Subscription?
 
+  /// A second factor, when the account has one. A table of its own for the
+  /// same reason as the row below it, and more sharply: the TOTP secret is a
+  /// password equivalent, and `authenticateUser` does a bare `findUnique` on
+  /// this model with no `select` at all.
+  twoFactor        UserTwoFactor?
+
+  /// Dotfiles and a signing key. A table of its own rather than columns here,
+  /// and the private key is the reason: a column on `users` is returned by
+  /// every `findUnique` that forgets a `select`, and this repository has
+  /// already shipped one defect that was exactly a forgotten `select` key.
+  /// A separate row cannot be loaded by accident.
+  personalization  UserPersonalization?
+
   /// "Which accounts are on this plan" is the operator's question, and the one
   /// a pricing change has to answer before it is made.
   @@index([planId])
   @@map("users")
+}
+
+/// What makes a container feel like YOUR machine rather than a machine.
+///
+/// One row per account, created on first use. Everything here is optional and
+/// the product works without it -- which is the point of the row existing at
+/// all: none of this belongs on `users`, where it would be read by every
+/// query that touches an account.
+model UserPersonalization {
+  /// The primary key IS the user id. One row per account, enforced by the
+  /// database rather than by whoever writes the next upsert.
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// A publicly clonable https:// repository of dotfiles, cloned into every
+  /// container this account opens. The devcontainer ecosystem's convention,
+  /// and the same three fields VS Code exposes.
+  ///
+  /// No credential is ever sent with the clone, so a private repository fails
+  /// rather than working -- see dotfiles.ts for why that is deliberate.
+  dotfilesRepo String?
+
+  /// Where it lands inside the container. Null means `~/dotfiles`.
+  dotfilesTarget String?
+
+  /// What to run after cloning. Null means look for install.sh, setup.sh or
+  /// bootstrap.sh, and fall back to symlinking the repository's top-level
+  /// dotfiles into the home directory -- which is what most dotfiles
+  /// repositories expect and none of them say.
+  dotfilesInstall String?
+
+  /// An OpenSSH private key, sealed with the same box the push tokens use.
+  /// Never returned by the API in any form; the public half below is what the
+  /// account screen shows.
+  signingKey String?
+
+  /// The public half, stored in the clear so it can be displayed and pasted
+  /// into GitHub's signing-keys page without the server having to derive it.
+  signingKeyPublic String?
+
+  /// Whether commits made here are signed. Separate from the key existing, so
+  /// signing can be turned off without deleting the key -- and so that adding
+  /// a key does not silently change what every future commit is.
+  signCommits Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_personalization")
+}
+
+/// A second factor for one account. plan.md §11.6.
+///
+/// §10.3 argued that sign-in stays even at n=1, because "a server that issued
+/// one to anybody who asked would be an unauthenticated server on whatever
+/// network it is reachable from". This is the other half of that sentence:
+/// once the network in question is the internet, the threat model is not
+/// somebody reading your code, it is `docker exec` on your machine with your
+/// source tree mounted, and one password is thin for that.
+model UserTwoFactor {
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The TOTP shared secret, sealed. Password-equivalent: anyone holding it
+  /// can produce codes for ever.
+  secret String
+
+  /// Set when the first correct code proved the app was really enrolled. Null
+  /// means a setup somebody started and did not finish, and such a row must
+  /// NOT be treated as protection -- it would lock the account behind a secret
+  /// nobody has.
+  confirmedAt DateTime?
+
+  /// SHA-256 of each unused recovery code. Hashed rather than sealed, because
+  /// they are only ever compared, never read back -- the same reason
+  /// `user_tokens` hashes rather than encrypts.
+  ///
+  /// Without these, a lost phone is a permanently lost account on a
+  /// deployment whose whole point is that there is no support desk.
+  recoveryCodeHashes String[]
+
+  /// The last TOTP counter accepted, so a code cannot be used twice.
+  ///
+  /// A code is valid for a whole window, so without this one read over
+  /// somebody's shoulder -- or captured by a proxy in front of a phishing
+  /// page -- still works for the next thirty seconds.
+  lastUsedStep BigInt?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_two_factor")
 }
 
 /// A long-lived credential for something that is not a person.
@@ -711,6 +816,53 @@ model Project {
   /// Environment variables injected into this project's container, as a JSON
   /// object of string values. Stored per project rather than in a file so they
   /// are not committed, exported, or visible in the file tree.
+  /// How much memory this workspace gets, in MB, or null for the deployment's
+  /// default (`CONTAINER_MEMORY_MB`).
+  ///
+  /// The whole of plan.md §12.1, and the reason it is a column rather than a
+  /// plan entitlement is §6 decision 15. That decision says a plan may promise
+  /// more of what the platform ALLOCATES and must never promise more of what
+  /// the host HAS -- so a size sold in advance is a promise kept by an OOM
+  /// kill in somebody's terminal. This is the other thing: not a promise made
+  /// when an account is created, but an allocation checked against the running
+  /// sum at the moment somebody asks for it.
+  ///
+  /// Null rather than a default so the deployment-wide number stays the one
+  /// place to change every unconfigured workspace at once. `unshared` already
+  /// makes that number 2048 on a personal deployment (env.ts:382).
+  memoryMb Int?
+
+  /// CPUs for this workspace, or null for `CONTAINER_CPUS`.
+  ///
+  /// Not rationed against a host total the way memory is, deliberately. Docker
+  /// gives CPU as a share of time rather than an exclusive reservation, so
+  /// oversubscribing makes everything slower and nothing fails; memory
+  /// oversubscription kills a process. Two different failure modes deserve two
+  /// different rules, and pretending otherwise would refuse a workspace 4 CPUs
+  /// on a 4-core box for no reason a user could act on.
+  cpus Float?
+
+  /// How this project got its files, and whether that has finished.
+  ///
+  /// `READY` for every project that was copied from a committed starter, which
+  /// is instant and cannot half-happen -- so the default is correct for every
+  /// row that existed before this column did, with no backfill.
+  ///
+  /// `SCAFFOLDING` means an upstream scaffolder is running inside this
+  /// project's container right now (`npm create vite@latest` and friends). That
+  /// takes minutes, which is why creation stopped being synchronous for this
+  /// path, and why `reconcileScaffolds` exists: a restart mid-scaffold would
+  /// otherwise leave the row saying SCAFFOLDING for ever. plan.md §2.26 is the
+  /// record of that exact bug happening twice already.
+  scaffoldStatus ScaffoldStatus @default(READY)
+
+  /// What the scaffolder said, when it failed.
+  ///
+  /// Kept so a FAILED project can explain itself rather than merely being
+  /// broken -- "npm ERR! network timeout" is something a person can act on and
+  /// "creation failed" is not.
+  scaffoldLog String?
+
   envVars Json @default("{}")
 
   /// Secret in the share link, when one has been created. Null means the
@@ -756,6 +908,9 @@ model Project {
   /// Only the trash. Every other query asks for `deletedAt IS NULL`, which is
   /// almost every row; the index that helps is over the few that are not.
   @@index([deletedAt])
+  /// Only ever queried for the handful that are not READY -- the dashboard
+  /// poll and the boot reconcile both ask which of these is unfinished.
+  @@index([scaffoldStatus])
   @@map("projects")
 }
 
@@ -931,6 +1086,49 @@ model DeploymentRelease {
   /// Newest first, per deployment, is the whole read pattern.
   @@index([deploymentId, createdAt])
   @@map("deployment_releases")
+}
+
+/// Whether a project's files are there yet.
+///
+/// Deliberately three states and not a boolean: "not ready" is two different
+/// situations -- still working, and gave up -- and a screen that cannot tell
+/// them apart either spins for ever or gives up too early.
+enum ScaffoldStatus {
+  READY
+  SCAFFOLDING
+  FAILED
+}
+
+/// The commands that build a project of a given template from scratch.
+///
+/// A table rather than a constant in the registry because the versions these
+/// pull move independently of this codebase: `npm create vite@latest` changes
+/// what it produces without anybody here deploying, and the flags it accepts
+/// change with it. Editing a row beats shipping a release.
+///
+/// **Seeded, and no route writes it.** A user chooses a template; they never
+/// choose a command. The argv is stored as an array of arrays and is passed to
+/// `docker exec` as an array, so nothing in it is ever parsed by a shell --
+/// which is what makes a table of commands a table of data rather than a
+/// remote code execution surface with extra steps.
+model ScaffoldRecipe {
+  /// Matches a template id in the server-side registry.
+  templateId String @id
+
+  /// What this actually produces, for the UI: "Vite 6 · React".
+  label String
+
+  /// Ordered argv arrays. Each runs in the project's container, in the
+  /// workspace directory, and a non-zero exit stops the sequence.
+  argv Json
+
+  /// So a recipe upstream has broken can be turned off without deleting what
+  /// it used to be -- the row is the record of what was tried.
+  enabled Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("scaffold_recipes")
 }
 
 enum DeploymentStatus {

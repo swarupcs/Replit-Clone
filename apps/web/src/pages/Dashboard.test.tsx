@@ -613,3 +613,64 @@ describe("Dashboard, a project taken down", () => {
     expect(await screen.findByLabelText("Your appeal")).toBeDefined();
   });
 });
+
+/** What a project that is still being built looks like.
+ *
+ *  The click handler has always refused to open one, but until now that
+ *  refusal was the FIRST time anybody heard about it: the card looked
+ *  ordinary, and clicking produced a toast explaining why nothing had
+ *  happened. A state that changes what a control does has to be visible on
+ *  the control.
+ *
+ *  These render at all only because `scaffoldStatus` now reaches the client.
+ *  It was added to the schema, the API type and three places in this file, and
+ *  omitted from the `select` in listAccessibleProjects — so every one of these
+ *  assertions would have failed against the version that shipped it.
+ */
+describe("a project that is still being built", () => {
+  it("says so on the card, before anybody clicks it", async () => {
+    api.listProjectsApi.mockResolvedValue([
+      project({ id: "s", name: "Building", scaffoldStatus: "SCAFFOLDING" }),
+    ]);
+    renderDashboard();
+
+    expect(await screen.findByText("Setting up")).toBeTruthy();
+  });
+
+  /** Not removed from the tab order: a screen reader should hear the same
+   *  thing the dimming shows, rather than the card simply vanishing. */
+  it("is marked disabled while staying reachable", async () => {
+    api.listProjectsApi.mockResolvedValue([
+      project({ id: "s", name: "Building", scaffoldStatus: "SCAFFOLDING" }),
+    ]);
+    renderDashboard();
+
+    await screen.findByText("Setting up");
+    const card = document.querySelector(".rc-card");
+
+    expect(card?.getAttribute("aria-disabled")).toBe("true");
+    expect(card?.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("says when the scaffolder gave up", async () => {
+    api.listProjectsApi.mockResolvedValue([
+      project({ id: "f", name: "Broken", scaffoldStatus: "FAILED" }),
+    ]);
+    renderDashboard();
+
+    expect(await screen.findByText("Setup failed")).toBeTruthy();
+  });
+
+  /** The ordinary case is every project anybody has, so a badge that appeared
+   *  on all of them would be worse than none. */
+  it("says nothing at all about a project that is ready", async () => {
+    renderDashboard();
+
+    await screen.findByText("Zebra");
+    expect(screen.queryByText("Setting up")).toBeNull();
+    expect(screen.queryByText("Setup failed")).toBeNull();
+    expect(document.querySelector(".rc-card")?.getAttribute("aria-disabled")).toBe(
+      "false",
+    );
+  });
+});

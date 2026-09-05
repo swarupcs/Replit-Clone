@@ -13,6 +13,7 @@ import {
   resolveLocalFolder,
 } from "../utils/localRoots.js";
 import {
+  detectPackageManager,
   detectStartCommand,
   detectTemplate,
   inspectDirectory,
@@ -107,7 +108,10 @@ export async function openLocalFolderService(
 
   const { files, packageJson } = await inspectDirectory(root);
   const template = detectTemplate(files, packageJson);
-  const startCommand = detectStartCommand(packageJson);
+  // A folder somebody already had is MORE likely to be pnpm or yarn than a
+  // fresh clone is -- it is somebody's real working tree, with whatever they
+  // chose years ago -- so getting this wrong here is worse, not better.
+  const startCommand = detectStartCommand(packageJson, detectPackageManager(files));
 
   const project = await prisma.project.create({
     data: {

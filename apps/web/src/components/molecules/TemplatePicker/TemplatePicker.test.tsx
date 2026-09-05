@@ -129,3 +129,80 @@ describe("TemplatePicker", () => {
     expect(screen.getByText("Rust (Axum)")).toBeDefined();
   });
 });
+
+/** Starter or Latest (plan.md Part A).
+ *
+ *  A starter is a committed directory: instant, offline, and pinned to whatever
+ *  was committed. Latest runs the upstream scaffolder in the project's
+ *  container: current, but it needs the network and takes minutes. Both are
+ *  real answers, which is why this is a choice somebody makes rather than a
+ *  heuristic — and why the control has to say what each one costs.
+ */
+describe("choosing how it gets built", () => {
+  const withLatest = template("react-vite", "React (Vite)");
+  withLatest.latestAvailable = true;
+
+  function show(props: Partial<Parameters<typeof TemplatePicker>[0]> = {}) {
+    return render(
+      <TemplatePicker
+        templates={[withLatest, template("go-http", "Go (net/http)")]}
+        value="react-vite"
+        onChange={() => undefined}
+        variant="starter"
+        onVariantChange={() => undefined}
+        {...props}
+      />,
+    );
+  }
+
+  it("is offered for a template that has a recipe", () => {
+    show();
+
+    expect(screen.getByLabelText("How to build it")).toBeTruthy();
+  });
+
+  /** A toggle on `go-http`, where "latest" means nothing, is a control that
+   *  does nothing. The server answers this from its recipe table, so a recipe
+   *  turned off also removes the option that would now fail. */
+  it("is not offered for a template that has none", () => {
+    show({ value: "go-http" });
+
+    expect(screen.queryByLabelText("How to build it")).toBeNull();
+  });
+
+  /** Callers that do not offer the choice get no toggle rather than a disabled
+   *  one, because a disabled control invites somebody to look for how to
+   *  enable it. */
+  it("is not rendered at all when the caller does not offer it", () => {
+    show({ onVariantChange: undefined });
+
+    expect(screen.queryByLabelText("How to build it")).toBeNull();
+  });
+
+  it("reports the choice", () => {
+    const onVariantChange = vi.fn();
+    show({ onVariantChange });
+
+    fireEvent.click(screen.getByText("Latest"));
+
+    expect(onVariantChange).toHaveBeenCalledWith("latest");
+  });
+
+  /** The difference between them is invisible anywhere else until one of them
+   *  takes two minutes, so the control is where it has to be said. */
+  it("says what each one costs", () => {
+    const { rerender } = show();
+    expect(screen.getByText(/ready instantly and works offline/i)).toBeTruthy();
+
+    rerender(
+      <TemplatePicker
+        templates={[withLatest]}
+        value="react-vite"
+        onChange={() => undefined}
+        variant="latest"
+        onVariantChange={() => undefined}
+      />,
+    );
+    expect(screen.getByText(/needs the network/i)).toBeTruthy();
+  });
+});

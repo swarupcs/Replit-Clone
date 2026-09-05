@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import type { GitPushSkipReason } from "@replit-clone/shared";
 import { z } from "zod";
 import { getAuthContext } from "../middlewares/requireAuth.js";
+import { signingFor } from "../service/personalizationService.js";
 import { assertProjectAccess } from "../service/projectAccessService.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
 import { BadRequestError } from "../utils/errors.js";
@@ -226,10 +227,18 @@ export async function gitCommitController(
   });
   const email = user?.email ?? "unknown@example.com";
 
-  const commits = await git.commit(projectId, message, {
-    name: email.split("@")[0] ?? "user",
-    email,
-  });
+  // The COMMITTER's signing key, not the project owner's, for exactly the
+  // reason the attribution above is the committer's: a signature is a claim
+  // about who made this commit, and signing somebody else's commit with the
+  // owner's key would be a false one. plan.md §11.9.
+  const signing = await signingFor(userId);
+
+  const commits = await git.commit(
+    projectId,
+    message,
+    { name: email.split("@")[0] ?? "user", email },
+    signing,
+  );
 
   res.json({
     success: true,

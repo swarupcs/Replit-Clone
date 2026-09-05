@@ -1,7 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { pageRequest, toPage, type Page, type PublicProject } from "@replit-clone/shared";
 import type { Project } from "../generated/prisma/client.js";
-import { ProjectRole, ProjectVisibility } from "../generated/prisma/enums.js";
+import {
+  ProjectRole,
+  ProjectVisibility,
+  type ScaffoldStatus,
+} from "../generated/prisma/enums.js";
 import { prisma } from "../lib/prisma.js";
 import { ForbiddenError, NotFoundError } from "../utils/errors.js";
 
@@ -67,6 +71,20 @@ export interface ListedProject {
   visibility: ProjectVisibility;
   forkedFromId: string | null;
   takenDownAt: Date | null;
+  /** Whether a scaffolder is still writing this project's files.
+   *
+   *  REQUIRED, and that is the point of it. This field was added to the
+   *  schema, to the API type and to three places in the dashboard, and then
+   *  omitted from the `select` below — so the client never received it, the
+   *  poll never started, and a project being built rendered as an ordinary
+   *  card that opened onto an empty editor. Nothing failed; the feature was
+   *  simply inert.
+   *
+   *  Optional here would have let that happen again. Required means an
+   *  omitted `select` key stops compiling at `toPage` rather than going
+   *  quiet, which is the only guard that survives somebody adding the next
+   *  column in a hurry. */
+  scaffoldStatus: ScaffoldStatus;
 }
 
 /** What this user may do with this project. */
@@ -284,6 +302,8 @@ export async function listAccessibleProjects(
       // The owner has to be able to see that this happened, and the dashboard
       // is where they look. Not a secret: it is a fact about them.
       takenDownAt: true,
+      // What decides whether the card is openable at all. See ListedProject.
+      scaffoldStatus: true,
     },
   });
 

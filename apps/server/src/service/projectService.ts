@@ -21,6 +21,7 @@ import {
   removeCacheVolume,
   removeContainer,
 } from "../containers/containerManager.js";
+import { destroyServices } from "../containers/composeServices.js";
 import {
   destroy as destroyManagedDatabase,
   provision as provisionManagedDatabase,
@@ -38,6 +39,7 @@ import {
 import { unpublish } from "./deployService.js";
 import { revokeEmbed } from "./embedService.js";
 import { ForbiddenError, NotFoundError } from "../utils/errors.js";
+import { recipeFor, runScaffold } from "./scaffoldService.js";
 import { logger } from "../lib/logger.js";
 
 export function projectDir(projectId: string): string {
@@ -55,21 +57,39 @@ export async function listProjects(ownerId: string): Promise<Project[]> {
  *  became role-aware. See projectAccessService for what the levels mean. */
 export { assertProjectAccess } from "./projectAccessService.js";
 
+/** How a new project gets its files.
+ *
+ *  `starter` copies a committed directory: instant, offline, deterministic, and
+ *  pinned to whatever was committed. `latest` runs the upstream scaffolder
+ *  inside the project's container, so the project is current on the day it is
+ *  made and takes minutes rather than milliseconds.
+ *
+ *  Both are real answers rather than one being a fallback for the other, which
+ *  is why this is a choice a person makes and not a heuristic.
+ */
+export type CreateVariant = "starter" | "latest";
+
 export async function createProjectService(
   ownerId: string,
   name?: string,
   templateId: string = DEFAULT_TEMPLATE_ID,
+  variant: CreateVariant = "starter",
 ): Promise<Project> {
   const template = getTemplate(templateId);
 
   // Before the row is written, so a refusal leaves nothing behind.
   await assertCanCreateProject(ownerId);
 
+  // Asked before the row exists: a project created as SCAFFOLDING for a
+  // template with no recipe would sit on "Setting up" with nothing coming.
+  const recipe = variant === "latest" ? await recipeFor(template.id) : null;
+
   const project = await prisma.project.create({
     data: {
       name: name?.trim() || template.label,
       ownerId,
       template: template.id,
+      scaffoldStatus: recipe ? "SCAFFOLDING" : "READY",
     },
   });
 
@@ -82,9 +102,16 @@ export async function createProjectService(
     // on the HOST. That call ran an arbitrary configured command outside any
     // sandbox, needed the network, and produced a nested `sandbox/` directory
     // so the bind-mount root and the app root disagreed by one level.
-    await fs.cp(path.join(TEMPLATE_FILES_ROOT, template.filesDir), dir, {
-      recursive: true,
-    });
+    //
+    // "Latest" answers all three of those by running the scaffolder INSIDE the
+    // project's container instead -- see scaffoldService -- so the starter copy
+    // is skipped rather than being overwritten by it. A scaffolder also refuses
+    // a directory it considers non-empty, which the copy would have made it.
+    if (!recipe) {
+      await fs.cp(path.join(TEMPLATE_FILES_ROOT, template.filesDir), dir, {
+        recursive: true,
+      });
+    }
 
     // The container runs as the sandbox user, not as the server. Without this
     // the bind mount is read-only to it and `npm install` fails with EACCES.
@@ -105,6 +132,17 @@ export async function createProjectService(
     await prisma.project.delete({ where: { id: project.id } }).catch(() => {});
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     throw error;
+  }
+
+  if (recipe) {
+    // Deliberately not awaited. A scaffolder takes minutes; an HTTP request
+    // that waited for one would be killed by a proxy or a browser long before
+    // it finished, and the caller has a row saying SCAFFOLDING to poll instead.
+    //
+    // `runScaffold` never throws, so there is no rejection to leak here, and a
+    // restart mid-scaffold is caught by `reconcileScaffolds` on the next boot
+    // rather than leaving the row saying SCAFFOLDING for ever.
+    void runScaffold(project.id, recipe);
   }
 
   return project;
@@ -253,6 +291,10 @@ export async function purgeProject(projectId: string): Promise<void> {
   // pointed at it is the mistake `deployService.unpublish` learned about
   // published files, with rather more disk attached to it.
   await destroyManagedDatabase(projectId).catch(() => undefined);
+  // ...and the same for the services the project's own compose file declared.
+  // `removeContainer` above has already taken their containers and network;
+  // this is the volumes, which the TRASH deliberately kept. plan.md §11.3.
+  await destroyServices(projectId).catch(() => undefined);
   // Snapshots must not outlive what they are snapshots of.
   await forgetCheckpoints(projectId).catch(() => undefined);
   // The cache volume outlives a restart deliberately, but not the project.

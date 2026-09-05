@@ -9,6 +9,11 @@ RUN apt-get update \
         curl \
         git \
         nano \
+        # ssh-keygen, and only for `git commit -S`: git's SSH signing backend
+        # shells out to it. Without this, an account with signing turned on
+        # gets "gpg failed to sign the data" on every commit -- a message that
+        # names the wrong tool and the wrong problem. plan.md §11.9.
+        openssh-client \
         procps \
     && rm -rf /var/lib/apt/lists/*
 
@@ -29,6 +34,22 @@ RUN useradd --create-home --shell /bin/bash --uid 1001 --gid 0 sandbox \
 # re-fetching it through `npx --yes` on every run.
 RUN npm install --global serve@14 \
     && npm cache clean --force
+
+# pnpm and yarn, via the corepack that ships with Node.
+#
+# Not a convenience. `warmStart` already fingerprints `pnpm-lock.yaml` and
+# `yarn.lock` and knows how to skip their installs, and the import path now
+# emits `pnpm install` for a repository whose lockfile says pnpm -- all of which
+# fails with command-not-found unless the binaries are here. The ENV below
+# already points PNPM_HOME and YARN_CACHE_FOLDER at the cache volume, so this
+# image was written expecting them; they were simply never installed.
+#
+# `corepack prepare` pins and downloads them at BUILD time, so a project's first
+# install does not also pay to fetch its package manager -- and so a sandbox
+# whose egress allowlist does not include corepack's CDN still works.
+RUN corepack enable \
+    && corepack prepare pnpm@9.15.4 --activate \
+    && corepack prepare yarn@4.6.0 --activate
 
 USER 1001:0
 ENV HOME=/home/sandbox \

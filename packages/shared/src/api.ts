@@ -35,6 +35,13 @@ export interface Project {
    *  is where they would look for it. What it stops is spelled out in
    *  `packages/shared/src/moderation.ts`. */
   takenDownAt: string | null;
+  /** Whether this project's files are there yet.
+   *
+   *  `READY` for everything copied from a committed starter, which is instant
+   *  and cannot half-happen. Anything else means an upstream scaffolder was
+   *  asked for, and the dashboard must not open the editor on a tree that is
+   *  still being written. */
+  scaffoldStatus?: ScaffoldStatus;
   /** Absolute host path when this project is a folder somebody opened rather
    *  than a tree this server created, and null otherwise.
    *
@@ -96,6 +103,39 @@ export interface TemplateSummary {
   previewPorts: number[];
   /** Shown in the UI so the user knows what to run. */
   startCommand: string;
+  /** Whether this template can be built by running the upstream scaffolder
+   *  (`npm create vite@latest`) rather than by copying the committed starter.
+   *
+   *  Answered by the server from its recipe table rather than hard-coded here,
+   *  so a recipe turned off because upstream changed a flag also stops the UI
+   *  offering the option that would now fail. */
+  latestAvailable?: boolean;
+}
+
+/** How a new project gets its files.
+ *
+ *  `starter` copies a committed directory: instant, offline, deterministic, and
+ *  pinned to whatever was committed. `latest` runs the upstream scaffolder
+ *  inside the project's container, so it is current on the day it is made and
+ *  takes minutes rather than milliseconds. Both are real answers; neither is a
+ *  fallback for the other.
+ */
+export type CreateVariant = "starter" | "latest";
+
+/** Whether a project's files are there yet.
+ *
+ *  Three states and not a boolean, because "not ready" is two situations --
+ *  still working, and gave up -- and a screen that cannot tell them apart
+ *  either spins for ever or gives up too early.
+ */
+export type ScaffoldStatus = "READY" | "SCAFFOLDING" | "FAILED";
+
+/** GET /api/v1/projects/:projectId/scaffold */
+export interface ScaffoldState {
+  status: ScaffoldStatus;
+  /** What the scaffolder said when it failed, and null otherwise. It is the
+   *  only thing that knows why. */
+  log: string | null;
 }
 
 /** GET /api/v1/projects/:projectId/ports */

@@ -9,9 +9,12 @@ import type {
   ApiSuccess,
   CreatedApiKey,
   MachineStatus,
+  Personalization,
+  PersonalizationUpdate,
   ModerationAction,
   ProjectVisibility,
   PublicProject,
+  ComposeState,
   DevcontainerState,
   GitBranch,
   GitRemote,
@@ -34,6 +37,8 @@ import type {
   LocalFolderSettingsResponse,
   OpenLocalFolderResponse,
   TemplateSummary,
+  CreateVariant,
+  ScaffoldState,
   CreateProjectResponse,
   ListProjectsResponse,
   Project,
@@ -57,12 +62,32 @@ import axios from "../config/axiosConfig.ts";
 export const createProjectApi = async (
   name?: string,
   template?: string,
+  /** `starter` copies the committed directory and is instant; `latest` runs the
+   *  upstream scaffolder in the project's container and takes minutes, so the
+   *  project comes back SCAFFOLDING and is polled. */
+  variant: CreateVariant = "starter",
 ): Promise<Project> => {
   const response = await axios.post<CreateProjectResponse>("/api/v1/projects", {
     name,
     template,
+    variant,
   });
   return response.data.data;
+};
+
+/** Whether a "Latest" project has finished being built, and why not. */
+export const getScaffoldStateApi = async (
+  projectId: string,
+): Promise<ScaffoldState> => {
+  const response = await axios.get<{ data: ScaffoldState }>(
+    `/api/v1/projects/${projectId}/scaffold`,
+  );
+  return response.data.data;
+};
+
+/** Empties the working tree and runs the recipe again. Only from FAILED. */
+export const retryScaffoldApi = async (projectId: string): Promise<void> => {
+  await axios.post(`/api/v1/projects/${projectId}/scaffold/retry`);
 };
 
 /** What this deployment will let somebody open from disk.
@@ -691,6 +716,45 @@ export const setStartCommandApi = async (
   return response.data.data;
 };
 
+/** How big this workspace is, and what the host could give it.
+ *
+ *  Both halves in one response deliberately (plan.md §12.1): "2048 MB" on its
+ *  own is not something anybody can act on, and the question somebody opens
+ *  this to answer is "can I give it more" — which needs the budget and what is
+ *  already spoken for.
+ */
+export interface WorkspaceSize {
+  memoryMb: number;
+  cpus: number;
+  custom: boolean;
+  defaultMemoryMb: number;
+  defaultCpus: number;
+  budgetMb: number;
+  committedMb: number;
+  minMemoryMb: number;
+}
+
+export const getWorkspaceSizeApi = async (
+  projectId: string,
+): Promise<WorkspaceSize> => {
+  const response = await axios.get<{ data: WorkspaceSize }>(
+    `/api/v1/projects/${projectId}/size`,
+  );
+  return response.data.data;
+};
+
+/** Null for either half means "back to the deployment's default", which is the
+ *  only way to undo a size without knowing what the default was. */
+export const setWorkspaceSizeApi = async (
+  projectId: string,
+  size: { memoryMb: number | null; cpus: number | null },
+): Promise<Pick<WorkspaceSize, "memoryMb" | "cpus" | "custom">> => {
+  const response = await axios.put<{
+    data: Pick<WorkspaceSize, "memoryMb" | "cpus" | "custom">;
+  }>(`/api/v1/projects/${projectId}/size`, size);
+  return response.data.data;
+};
+
 // --- Database (query editor) ---
 
 export interface DatabaseConnection {
@@ -877,6 +941,16 @@ export const getDevcontainerApi = async (
   return response.data.data;
 };
 
+/** What the project's own docker-compose.yml declares, and what is running. */
+export const getComposeApi = async (
+  projectId: string,
+): Promise<ComposeState> => {
+  const response = await axios.get<ApiSuccess<ComposeState>>(
+    `/api/v1/projects/${projectId}/compose`,
+  );
+  return response.data.data;
+};
+
 /** Reporting a published project, and the operator's queue.
  *
  *  Reporting is available to any signed-in user; the queue is not, and asking
@@ -985,6 +1059,30 @@ export const reinstateProjectApi = async (
 export const getAccountApi = async (): Promise<AccountSummary> => {
   const response = await axios.get<ApiSuccess<AccountSummary>>(
     "/api/v1/account",
+  );
+  return response.data.data;
+};
+
+/** Dotfiles: what follows this account into every container it opens.
+ *
+ *  On /account rather than under a project, because it is a property of the
+ *  PERSON -- the same settings apply in a project somebody else owns. */
+export const getPersonalizationApi = async (): Promise<Personalization> => {
+  const response = await axios.get<ApiSuccess<Personalization>>(
+    "/api/v1/account/personalization",
+  );
+  return response.data.data;
+};
+
+/** PATCH, and the verb is the point: an absent field is left alone and an
+ *  empty one is cleared, so "stop cloning my dotfiles" and "do not touch my
+ *  dotfiles" are different requests rather than the same one. */
+export const updatePersonalizationApi = async (
+  update: PersonalizationUpdate,
+): Promise<Personalization> => {
+  const response = await axios.patch<ApiSuccess<Personalization>>(
+    "/api/v1/account/personalization",
+    update,
   );
   return response.data.data;
 };

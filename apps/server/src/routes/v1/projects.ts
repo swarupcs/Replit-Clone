@@ -26,6 +26,10 @@ import {
   getProjectEnvController,
   getStartCommandController,
   setStartCommandController,
+  getWorkspaceSizeController,
+  getScaffoldStatusController,
+  retryScaffoldController,
+  setWorkspaceSizeController,
   getProjectPorts,
   getProjectTree,
   listProjectsController,
@@ -115,6 +119,7 @@ import {
   updateJobController,
 } from "../../controllers/scheduleController.js";
 import { getDevcontainerController } from "../../controllers/devcontainerController.js";
+import { getComposeController } from "../../controllers/composeController.js";
 import {
   createEmbedController,
   getEmbedController,
@@ -380,6 +385,10 @@ router.post(
 // this server did with it.
 router.get("/:projectId/devcontainer", asyncHandler(getDevcontainerController));
 
+// What the project's own docker-compose.yml declares, and what is running of
+// it. plan.md §11.3.
+router.get("/:projectId/compose", asyncHandler(getComposeController));
+
 // Embeds. The OWNER's half only -- what an anonymous reader calls lives on
 // its own router, outside the `requireAuth` above.
 router.get("/:projectId/embed", asyncHandler(getEmbedController));
@@ -389,6 +398,16 @@ router.delete("/:projectId/embed", asyncHandler(revokeEmbedController));
 
 router.get("/:projectId/start-command", asyncHandler(getStartCommandController));
 router.put("/:projectId/start-command", asyncHandler(setStartCommandController));
+
+// §12.1. GET is viewer -- knowing how big the box is is part of reading the
+// project; PUT is owner, because how much of the host one workspace holds is a
+// decision about every other workspace on it.
+// Whether a "Latest" project has finished building. Polled while it has not.
+router.get("/:projectId/scaffold", asyncHandler(getScaffoldStatusController));
+router.post("/:projectId/scaffold/retry", asyncHandler(retryScaffoldController));
+
+router.get("/:projectId/size", asyncHandler(getWorkspaceSizeController));
+router.put("/:projectId/size", asyncHandler(setWorkspaceSizeController));
 
 router.get("/:projectId/github/repo", asyncHandler(githubRepoController));
 router.get("/:projectId/github/pulls", asyncHandler(githubPullsController));

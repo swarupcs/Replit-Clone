@@ -75,6 +75,17 @@ const envSchema = z.object({
    *  withholds `allow-same-origin` and only server-rendered previews work. */
   PREVIEW_PORT: z.coerce.number().int().min(0).optional(),
 
+  /** The public origin previews are reachable at, when that is not simply this
+   *  server's own host on PREVIEW_PORT.
+   *
+   *  Needed the moment a reverse proxy is in front, because then the three
+   *  concerns are three NAMES rather than three ports and the server can no
+   *  longer derive this. Nothing routes by it — the proxy does that — but
+   *  `config/exposure.ts` cannot check the cookie policy without knowing it,
+   *  and that check is the only thing standing between a mistake here and
+   *  every preview silently answering "No preview session". */
+  PREVIEW_ORIGIN: z.string().url().optional(),
+
   /** Port serving published deployments, on a third origin of its own.
    *
    *  It cannot share the API's origin for the reason previews cannot, and it
@@ -294,6 +305,74 @@ const envSchema = z.object({
         .filter(Boolean),
     ),
 
+  /* ---- compose services (plan.md §11.3) ---- */
+
+  /** Whether a project's own `docker-compose.yml` starts the services it
+   *  declares, beside the project's container and with the same lifecycle.
+   *
+   *  Defaults to ON only when nothing here is shared -- development, or a
+   *  single-user deployment -- and OFF otherwise, and the reason is arithmetic
+   *  rather than caution. Every other limit on this host is per PROJECT;
+   *  this is the one setting that multiplies a project into several
+   *  containers, so on a shared VM MAX_CONCURRENT_CONTAINERS would quietly
+   *  stop meaning what it says. On a machine with one tenant there is nobody
+   *  to take the room from, which is the same argument
+   *  `CONTAINER_MEMORY_MB` and `LSP_ENABLED` already make.
+   *
+   *  Off, a project with a compose file behaves exactly as it did before this
+   *  existed: the file is still read, and project settings still say what
+   *  would have been started. */
+  COMPOSE_SERVICES_ENABLED: z
+    .string()
+    .optional()
+    // Explicit rather than z.coerce.boolean(), which reads the string "false"
+    // as true and would turn the setting on for everyone who tried to turn it
+    // off. The same shape SANDBOX_EGRESS_FILTERED uses.
+    .transform((value) =>
+      value === undefined ? unshared : value === "true" || value === "1",
+    ),
+
+  /** Images a compose service may ask for. A trailing * is a prefix wildcard.
+   *
+   *  An allowlist for the reason DEVCONTAINER_IMAGE_ALLOWLIST is one: this
+   *  decides what code runs on the host, and the request comes out of a file
+   *  in a repository that may have been cloned from a stranger.
+   *
+   *  The default is the data services that are what compose files in real
+   *  repositories overwhelmingly declare -- a database, a cache, a queue,
+   *  object storage -- as official images, by prefix. That is a deliberate
+   *  supply-chain decision and not a neutral one: it says this platform will
+   *  run Docker Official Images of well-known datastores without being asked
+   *  again. Narrow it if that is not a trade you want; widen it and you are
+   *  agreeing to run whatever a repository names. */
+  COMPOSE_IMAGE_ALLOWLIST: z
+    .string()
+    .default(
+      "postgres:*,mysql:*,mariadb:*,mongo:*,redis:*,valkey:*,memcached:*," +
+        "rabbitmq:*,nats:*,minio/minio:*,elasticsearch:*,opensearchproject/opensearch:*",
+    )
+    .transform((value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+
+  /** How many services one project may start.
+   *
+   *  A cap rather than a budget, because the failure it prevents is not
+   *  gradual: a compose file declaring twenty services would otherwise take
+   *  the host on the first project that opened it. */
+  COMPOSE_MAX_SERVICES: z.coerce.number().int().positive().default(4),
+
+  /** Memory for one service container.
+   *
+   *  Its own figure rather than a share of the workspace's: a Postgres beside
+   *  a project is not competing with the editor for the same allowance, and
+   *  sizing it from CONTAINER_MEMORY_MB would make a bigger workspace silently
+   *  buy a bigger database. */
+  COMPOSE_SERVICE_MEMORY_MB: z.coerce.number().int().positive().default(512),
+
   /** Longest a devcontainer's postCreate/postStart commands may run.
    *
    *  These sit directly in the path of opening a project, and they are
@@ -304,6 +383,16 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(10),
+
+  /** Longest an account's dotfiles clone-and-install may run.
+   *
+   *  Its own budget rather than a share of the devcontainer's, because it is a
+   *  different person's code: the lifecycle commands come from the project's
+   *  repository and this comes from the user's, and a slow one of either must
+   *  not be able to spend the other's time. Sixty seconds is a shallow clone
+   *  and a script; anything longer is a dotfiles repository doing something a
+   *  sandbox should not wait for. */
+  DOTFILES_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(60),
 
   PROJECTS_DIR: z.string().default("projects"),
 
@@ -424,11 +513,72 @@ const envSchema = z.object({
    *  Development's larger default clears this bar on its own, so a language
    *  server is eligible there as soon as LSP_ENABLED is set. */
   LSP_MIN_CONTAINER_MEMORY_MB: z.coerce.number().int().positive().default(1024),
+
+  /** Whether a notebook may start a kernel inside its project's container.
+   *
+   *  plan.md §12.3. The same off-unless-single-tenant default LSP_ENABLED
+   *  carries, and for a reason that is one step stronger here. The image cost
+   *  is 81 MB on the Python image, paid on every cold start by people who
+   *  never open a notebook -- but a kernel also HOLDS whatever the user's
+   *  dataframe weighs, for as long as the tab is open, inside a container
+   *  whose memory limit the dev server is also living within.
+   *
+   *  On a single-seat deployment there is nobody else to pay for that, and
+   *  the person deciding is the person who would be running the notebook.
+   *
+   *  Set it explicitly to "false" to override; the raw value is consulted so
+   *  unset and false stay distinguishable. */
+  NOTEBOOKS_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value === undefined ? soleTenant : value === "true" || value === "1",
+    ),
+
+  /** Below this, a kernel is refused rather than started.
+   *
+   *  Higher than LSP's 1024 on purpose. A language server has a ceiling -- it
+   *  indexes a project and idles in the low hundreds of MB. A kernel has
+   *  none: it holds whatever was assigned to a variable, and the whole point
+   *  of running one on a server is that the data does not fit comfortably on
+   *  the laptop. 1536 does not make a kernel safe; it makes the FIRST cell
+   *  that reads a file unlikely to take the dev server down with it, which is
+   *  the failure the user cannot attribute.
+   *
+   *  Development's 2048 default clears this, so a kernel is eligible there as
+   *  soon as NOTEBOOKS_ENABLED is set. */
+  KERNEL_MIN_CONTAINER_MEMORY_MB: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(1536),
   CONTAINER_CPUS: z.coerce
     .number()
     .positive()
     .default(unshared ? 2 : 0.5),
   CONTAINER_IDLE_MINUTES: z.coerce.number().int().positive().default(20),
+
+  /** What the host keeps back from workspaces, in MB.
+   *
+   *  plan.md §12.1. This server, Postgres, the egress gateway and the OS all
+   *  live in the same memory the sandboxes are handed out of, and a budget
+   *  that gave every byte away would see the thing doing the giving killed
+   *  first. 1024 is deliberately generous rather than measured: the failure it
+   *  prevents is an OOM in somebody's terminal, and the cost of being wrong
+   *  the other way is one workspace being told to ask for slightly less.
+   */
+  HOST_MEMORY_RESERVE_MB: z.coerce.number().int().positive().default(1024),
+
+  /** Overrides what Docker reports as the host's memory, in MB.
+   *
+   *  Unset, the daemon is asked (`docker info`), which is the right source
+   *  because it is the number the daemon enforces against — on Docker Desktop
+   *  and inside a VM that differs from `os.totalmem()`, and the daemon's is
+   *  the one that kills a container. Set it when this server shares a host
+   *  with something Docker cannot see and the budget should be smaller than
+   *  the machine.
+   */
+  HOST_MEMORY_MB: z.coerce.number().int().positive().optional(),
   /** Ceiling on a single project's working tree.
    *
    *  Containers get memory, CPU and PID limits; storage had none, and the
@@ -587,6 +737,29 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === "true")),
+
+  /** The `Domain` put on the PREVIEW cookie, so it reaches a preview origin
+   *  that is a different HOSTNAME from the API rather than a different port.
+   *
+   *  Empty -- the default -- leaves it host-only, which is correct for every
+   *  arrangement where the API and the previews share a host and differ only
+   *  by port. That is the local setup and the compose one, and cookies ignore
+   *  ports, so the cookie already travels.
+   *
+   *  Behind a reverse proxy it does not: `ide.example.com` and
+   *  `preview.example.com` are two hosts, a host-only cookie set on the first
+   *  is never sent to the second, and every preview is refused with nothing in
+   *  any log to say why. Set this to the domain they share -- `example.com`.
+   *
+   *  Deliberately NOT applied to the refresh cookie. That one is spent only at
+   *  the API's own `/api/v1/auth` path, so widening it would hand a session
+   *  credential to every sibling name for no benefit at all.
+   *
+   *  Published sites must not sit under this domain; the boot check refuses
+   *  that combination, because a site is arbitrary code behind a name this
+   *  platform hands out and a cookie scoped to the shared parent is sent to
+   *  it. */
+  COOKIE_DOMAIN: z.string().trim().default(""),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -651,6 +824,24 @@ export const DEPLOYMENTS_ROOT: string = path.resolve(env.DEPLOYMENTS_DIR);
 export const deployOrigin: URL = new URL(
   env.DEPLOY_ORIGIN ?? `http://localhost:${String(deployPort)}`,
 );
+
+/** The origin previews are actually reachable at.
+ *
+ *  Declared when a proxy is in front, and otherwise derived: this server's own
+ *  scheme and host on the preview port, or the API's origin outright when
+ *  PREVIEW_PORT is 0 and previews share it.
+ */
+export const previewOrigin: string = (() => {
+  if (env.PREVIEW_ORIGIN) return env.PREVIEW_ORIGIN;
+  if (previewPort === 0) return env.API_ORIGIN;
+
+  const url = new URL(env.API_ORIGIN);
+  url.port = String(previewPort);
+  return url.origin;
+})();
+
+/** Whether that came from PREVIEW_ORIGIN rather than from the port. */
+export const previewOriginDeclared: boolean = env.PREVIEW_ORIGIN !== undefined;
 
 /** True when deployments are configured at all. */
 export const deploymentsEnabled: boolean = deployPort !== 0;

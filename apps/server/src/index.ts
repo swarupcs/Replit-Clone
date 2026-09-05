@@ -24,7 +24,18 @@ import {
   installServiceUpgrade,
   listenForSites,
 } from "./deploySite.js";
-import { deployPort, env, isProduction, previewPort } from "./config/env.js";
+import {
+  deployOrigin,
+  deployPort,
+  deploymentsEnabled,
+  env,
+  isProduction,
+  previewOrigin,
+  previewOriginDeclared,
+  previewPort,
+} from "./config/env.js";
+import { checkExposure } from "./config/exposure.js";
+import { proxyHeaderWarning } from "./middlewares/proxyHeaderWarning.js";
 import { prisma } from "./lib/prisma.js";
 import { logger } from "./lib/logger.js";
 import { touchProject } from "./service/projectService.js";
@@ -51,6 +62,7 @@ import { healthCheck } from "./controllers/healthController.js";
 import { asyncHandler } from "./middlewares/errorHandler.js";
 import { installTerminalGateway } from "./terminal/terminalGateway.js";
 import { installLspGateway } from "./lsp/lspGateway.js";
+import { installKernelGateway } from "./notebooks/kernelGateway.js";
 import {
   attach,
   detach,
@@ -60,6 +72,8 @@ import {
   stopAllContainers,
   setOnProjectReaped,
 } from "./containers/containerManager.js";
+import { sweepPrebuilds } from "./containers/prebuild.js";
+import { reconcileScaffolds } from "./service/scaffoldService.js";
 import { ensureEgressGateway } from "./containers/egressGateway.js";
 import { reconcileDeployments, restoreServices } from "./service/deployService.js";
 import { recheckDomains } from "./service/customDomainService.js";
@@ -126,6 +140,10 @@ app.use(apiSecurityHeaders(previewPort === 0));
 
 // Before the routes, so everything below inherits a request id.
 app.use(requestLogger);
+
+// Says so, once, if something is forwarding to this server and TRUSTED_PROXY_HOPS
+// has been left at 0 -- which makes every rate limit key on the proxy.
+app.use(proxyHeaderWarning(env.TRUSTED_PROXY_HOPS));
 
 // Liveness only, and deliberately trivial: kept because things may already
 // point at it. /health is the one that checks Postgres and Docker.
@@ -270,6 +288,10 @@ installTerminalGateway(server);
 // Same shape as the terminal gateway, different framing. Refuses before
 // any container work when the memory policy says no.
 installLspGateway(server);
+// The third of the same shape, and the only one that runs the user's code:
+// newline-delimited JSON to a Jupyter kernel in the project's container.
+// plan.md §12.3.
+installKernelGateway(server);
 
 // Vite's HMR socket rides the preview path, and Express middleware does not run
 // for upgrades — so this authorises and routes them itself. Only when previews
@@ -343,6 +365,29 @@ function startTokenPrune(): void {
  *  not stop the sweep -- one stuck project holding every other account's disk
  *  is a far worse outcome than one project that needs looking at by hand.
  */
+/** Installs dependencies that have moved, before somebody waits for them.
+ *
+ *  plan.md §12.2. Every fifteen minutes rather than hourly: the case this
+ *  exists for is a `git pull` that adds a dependency, and an hour is long
+ *  enough that the next start would usually beat it to the work. Only
+ *  workspaces that are already running are considered -- starting a stopped
+ *  one to build it is §12.5, and is a decision rather than a line of code.
+ */
+function startPrebuildSweep(): void {
+  const sweep = (): void => {
+    void sweepPrebuilds().catch((error: unknown) => {
+      // Nothing is waiting on this, so a failure is a log line and not an
+      // incident.
+      logger.info("could not sweep prebuilds", { error });
+    });
+  };
+
+  // Not on boot. A restart is the one moment several containers come up at
+  // once, and adding an install to each of them is the opposite of what this
+  // is for.
+  setInterval(sweep, 15 * 60 * 1000).unref();
+}
+
 function startTrashSweep(): void {
   const sweep = (): void => {
     void purgeExpiredTrash().catch((error: unknown) => {
@@ -464,6 +509,40 @@ function withTimeout<T>(
 }
 
 async function start(): Promise<void> {
+  // Before anything else, and before the port opens. Every failure this
+  // catches is one a browser reports as nothing at all -- a Set-Cookie it
+  // dislikes is discarded in silence -- so the symptom arrives as "sign-in
+  // does nothing" or "every preview says No preview session" with no line in
+  // any log pointing at the cause. See config/exposure.ts; plan.md §11.5.
+  const exposure = checkExposure({
+    webOrigin: env.WEB_ORIGIN,
+    apiOrigin: env.API_ORIGIN,
+    previewOrigin,
+    previewOriginDeclared,
+    deployOrigin: deployOrigin.origin,
+    deploymentsEnabled,
+    cookieDomain: env.COOKIE_DOMAIN,
+    cookieSameSite: env.COOKIE_SAME_SITE,
+    cookieSecure: env.COOKIE_SECURE ?? isProduction,
+    trustedProxyHops: env.TRUSTED_PROXY_HOPS,
+  });
+
+  for (const warning of exposure.warnings) {
+    logger.warn("exposure", { detail: warning });
+  }
+
+  // Fatal, for the same reason SandboxNetworkMismatch is: the server would
+  // otherwise carry on serving a product that is half broken, with the
+  // explanation in a log line nobody reads until afterwards.
+  if (exposure.errors.length > 0) {
+    for (const problem of exposure.errors) {
+      // `undefined` where an Error would go: this is a configuration
+      // problem, not a thrown one, and there is no stack worth printing.
+      logger.error("refusing to start", undefined, { detail: problem });
+    }
+    process.exit(1);
+  }
+
   // The one account, when this deployment has one. Before the listener, so
   // that a first boot with SINGLE_USER_PASSWORD set is signable-in the moment
   // the port opens rather than on whatever request happens to race it.
@@ -531,8 +610,21 @@ async function start(): Promise<void> {
   // settled table.
   const abandonedRuns = await withTimeout(reconcileJobRuns(), "job run reconcile");
   const abandonedBuilds = await withTimeout(reconcileDeployments(), "deployment reconcile");
-  if (abandonedRuns || abandonedBuilds) {
-    logger.info("reconciled rows", { abandonedRuns, abandonedBuilds });
+  // The third row of the same shape, written with its reconcile from the start
+  // rather than after somebody noticed. A project left SCAFFOLDING is a
+  // container exec this process was awaiting, and nothing survives the process
+  // to finish it or to notice -- so without this the dashboard says "Setting
+  // up" for ever.
+  const abandonedScaffolds = await withTimeout(
+    reconcileScaffolds(),
+    "scaffold reconcile",
+  );
+  if (abandonedRuns || abandonedBuilds || abandonedScaffolds) {
+    logger.info("reconciled rows", {
+      abandonedRuns,
+      abandonedBuilds,
+      abandonedScaffolds,
+    });
   }
 
   // Published services, which the reconcile above deliberately does not touch:
@@ -554,6 +646,7 @@ async function start(): Promise<void> {
   startComputeMeter();
   startTokenPrune();
   startTrashSweep();
+  startPrebuildSweep();
   startGraceSweep();
   startDomainRecheck();
   startJobSweeper();

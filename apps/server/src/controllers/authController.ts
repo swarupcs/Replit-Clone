@@ -1,6 +1,6 @@
-import type { CookieOptions, Request, Response } from "express";
+import type { Request, Response } from "express";
 import { credentialsSchema } from "@replit-clone/shared";
-import { env, isProduction } from "../config/env.js";
+import { env } from "../config/env.js";
 import {
   authenticateUser,
   getUserById,
@@ -9,16 +9,20 @@ import {
 import {
   PREVIEW_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
-  previewCookieMaxAgeMs,
-  refreshCookieMaxAgeMs,
   signAccessToken,
+  signMfaToken,
   signPreviewToken,
+  verifyMfaToken,
 } from "../service/tokenService.js";
 import {
   issueRefreshToken,
   revokeRefreshToken,
   rotateRefreshToken,
 } from "../service/refreshTokenService.js";
+import {
+  previewCookieOptions,
+  refreshCookieOptions,
+} from "./sessionCookies.js";
 import { getAuthContext } from "../middlewares/requireAuth.js";
 import { UnauthorizedError } from "../utils/errors.js";
 import { z } from "zod";
@@ -32,32 +36,11 @@ import {
 } from "../service/userTokenService.js";
 import { revokeAllForUser } from "../service/refreshTokenService.js";
 import { logger } from "../lib/logger.js";
+import {
+  consumeSecondFactor,
+  requiresSecondFactor,
+} from "../service/twoFactorService.js";
 
-const refreshCookieOptions: CookieOptions = {
-  httpOnly: true,
-  // COOKIE_SAME_SITE defaults to "lax" for a same-site deployment (frontend
-  // and API on the same domain). A split deployment -- e.g. the web app on
-  // Vercel and the API on a separate host -- MUST set this to "none", or the
-  // browser drops the cookie on every cross-site request and login appears to
-  // just not work.
-  sameSite: env.COOKIE_SAME_SITE,
-  // Secure defaults to true in production and false otherwise, but is
-  // explicitly overridable: "none" REQUIRES Secure, while a plain-HTTP LAN
-  // deployment in production mode needs it forced to false, or the browser
-  // silently discards the cookie.
-  secure: env.COOKIE_SECURE ?? isProduction,
-  maxAge: refreshCookieMaxAgeMs,
-  path: "/api/v1/auth",
-};
-
-/** Scoped to /preview so it is sent with the preview iframe and its HMR
- *  socket, and with nothing else. Its lifetime tracks the token's, which is far
- *  shorter than the refresh token's — see signPreviewToken. */
-const previewCookieOptions: CookieOptions = {
-  ...refreshCookieOptions,
-  path: "/preview",
-  maxAge: previewCookieMaxAgeMs,
-};
 
 /** Writes the session cookies and returns the access token.
  *
@@ -89,9 +72,58 @@ export async function signup(req: Request, res: Response): Promise<void> {
 export async function login(req: Request, res: Response): Promise<void> {
   const { email, password } = credentialsSchema.parse(req.body);
   const user = await authenticateUser(email, password);
+
+  // The password is only the first half once an account has a second factor.
+  // What comes back is a challenge, not a session: no cookies are written, so
+  // a caller that ignores `mfaRequired` and carries on gets nothing it can use
+  // rather than a working session. plan.md §11.6.
+  if (await requiresSecondFactor(user.id)) {
+    res.json({
+      success: true,
+      message: "Enter your authentication code",
+      data: { mfaRequired: true, mfaToken: signMfaToken(user.id) },
+    });
+    return;
+  }
+
   const { token } = await issueRefreshToken(user.id);
 
   issueSession(res, user, token, "Signed in");
+}
+
+/** The second half of a sign-in. plan.md §11.6.
+ *
+ *  The user id comes from the SIGNED challenge and never from the body, which
+ *  is what stops this being an endpoint that trades a code for a session on
+ *  any account somebody names. The password was checked to mint that challenge
+ *  and is not rechecked here -- rechecking it would mean the client holding
+ *  the password through the second step for no gain.
+ */
+const mfaSchema = z.object({
+  mfaToken: z.string().min(1),
+  code: z.string().trim().min(1).max(64),
+});
+
+export async function loginTotp(req: Request, res: Response): Promise<void> {
+  const { mfaToken, code } = mfaSchema.parse(req.body);
+  const { sub: userId } = verifyMfaToken(mfaToken);
+
+  const kind = await consumeSecondFactor(userId, code);
+
+  const user = await getUserById(userId);
+  if (!user) throw new UnauthorizedError("Account no longer exists");
+
+  const { token } = await issueRefreshToken(user.id);
+
+  // Said out loud, because a recovery code is a thing you have one fewer of.
+  issueSession(
+    res,
+    user,
+    token,
+    kind === "recovery"
+      ? "Signed in with a recovery code"
+      : "Signed in",
+  );
 }
 
 export async function refresh(req: Request, res: Response): Promise<void> {

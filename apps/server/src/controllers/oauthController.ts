@@ -12,10 +12,12 @@ import { issueRefreshToken } from "../service/refreshTokenService.js";
 import {
   PREVIEW_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
-  previewCookieMaxAgeMs,
-  refreshCookieMaxAgeMs,
   signPreviewToken,
 } from "../service/tokenService.js";
+import {
+  previewCookieOptions,
+  refreshCookieOptions,
+} from "./sessionCookies.js";
 import { BadRequestError, UnauthorizedError } from "../utils/errors.js";
 import { logger } from "../lib/logger.js";
 
@@ -111,20 +113,15 @@ export async function githubCallback(req: Request, res: Response): Promise<void>
     const user = await signInWithGithub(code);
     const { token } = await issueRefreshToken(user.id);
 
-    res.cookie(REFRESH_COOKIE_NAME, token, {
-      httpOnly: true,
-      sameSite: env.COOKIE_SAME_SITE,
-      secure: env.COOKIE_SECURE ?? isProduction,
-      maxAge: refreshCookieMaxAgeMs,
-      path: "/api/v1/auth",
-    });
-    res.cookie(PREVIEW_COOKIE_NAME, signPreviewToken(user.id), {
-      httpOnly: true,
-      sameSite: env.COOKIE_SAME_SITE,
-      secure: env.COOKIE_SECURE ?? isProduction,
-      maxAge: previewCookieMaxAgeMs,
-      path: "/preview",
-    });
+    // The same options the password path uses, imported rather than repeated.
+    // They were copied here, which is how the preview cookie's Domain (§11.5)
+    // would have reached one sign-in route and not the other.
+    res.cookie(REFRESH_COOKIE_NAME, token, refreshCookieOptions);
+    res.cookie(
+      PREVIEW_COOKIE_NAME,
+      signPreviewToken(user.id),
+      previewCookieOptions,
+    );
 
     logger.info("github sign-in", { userId: user.id });
     res.redirect(env.WEB_ORIGIN);

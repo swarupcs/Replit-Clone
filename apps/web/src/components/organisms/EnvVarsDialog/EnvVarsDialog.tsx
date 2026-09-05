@@ -9,6 +9,8 @@ import {
   setStartCommandApi,
 } from "../../../apis/projects.ts";
 import { DevcontainerSection } from "./DevcontainerSection.tsx";
+import { ComposeSection } from "./ComposeSection.tsx";
+import { WorkspaceSizeSection } from "./WorkspaceSizeSection.tsx";
 
 interface EnvVarsDialogProps {
   projectId: string;
@@ -156,6 +158,13 @@ export const EnvVarsDialog = ({ projectId, open, onClose }: EnvVarsDialogProps) 
         {/* First, because it decides the container everything else runs in --
             and because it renders nothing at all for a project without one. */}
         <DevcontainerSection projectId={projectId} enabled={open} />
+        <ComposeSection projectId={projectId} enabled={open} />
+
+        {/* Second, for the same reason the devcontainer is first: it decides
+            how much machine everything below runs on, and it is the one
+            setting here whose wrong value is felt as the editor being slow
+            rather than as a thing not working. */}
+        <WorkspaceSizeSection projectId={projectId} enabled={open} />
 
         {/* The run command sits above the variables because it is the thing an
             imported repository most often needs corrected: the template is

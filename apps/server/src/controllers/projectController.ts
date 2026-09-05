@@ -29,12 +29,23 @@ import {
 import {
   previewablePorts,
   publishedPorts,
+  runningProjectContainers,
 } from "../containers/containerManager.js";
+import { env } from "../config/env.js";
+import {
+  budgetMb,
+  committedMb,
+  MIN_MEMORY_MB,
+  resolveSize,
+  setWorkspaceSize,
+} from "../service/workspaceSizeService.js";
 import { logger } from "../lib/logger.js";
 import { prisma } from "../lib/prisma.js";
 import { buildFileTree } from "../service/fileTreeService.js";
 import { getAuthContext } from "../middlewares/requireAuth.js";
 import { assertValidProjectId } from "../utils/projectPaths.js";
+import { BadRequestError, NotFoundError } from "../utils/errors.js";
+import { retryScaffold, templatesWithRecipes } from "../service/scaffoldService.js";
 import {
   listTemplates,
   DEFAULT_TEMPLATE_ID,
@@ -44,6 +55,9 @@ import {
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   template: z.string().trim().min(1).max(50).optional(),
+  /** Defaults to the starter, so every existing caller keeps its behaviour and
+   *  the slower, network-dependent path is one somebody has to ask for. */
+  variant: z.enum(["starter", "latest"]).default("starter"),
 });
 
 export async function createProjectController(
@@ -51,12 +65,13 @@ export async function createProjectController(
   res: Response,
 ): Promise<void> {
   const { userId } = getAuthContext(req);
-  const { name, template } = createProjectSchema.parse(req.body ?? {});
+  const { name, template, variant } = createProjectSchema.parse(req.body ?? {});
 
   const project = await createProjectService(
     userId,
     name,
     template ?? DEFAULT_TEMPLATE_ID,
+    variant,
   );
 
   res.status(201).json({
@@ -222,10 +237,17 @@ export async function purgeProjectController(
   res.json({ success: true, message: "Project deleted", data: null });
 }
 
-export function listTemplatesController(
+export async function listTemplatesController(
   _req: Request,
   res: Response,
 ): Promise<void> {
+  // Asked of the database rather than hard-coded in the client, so turning a
+  // recipe off -- because upstream changed a flag and it now fails -- also
+  // removes the option that would fail, without a deploy of the web app.
+  const withRecipes = await templatesWithRecipes().catch(
+    () => new Set<string>(),
+  );
+
   // `image` and `filesDir` are server-side details; the client only needs
   // enough to render the picker.
   const data = listTemplates().map(
@@ -235,11 +257,11 @@ export function listTemplatesController(
       devPort,
       previewPorts: [devPort, ...(extraPorts ?? [])],
       startCommand,
+      latestAvailable: withRecipes.has(id),
     }),
   );
 
   res.json({ success: true, message: "Templates", data });
-  return Promise.resolve();
 }
 
 const renameSchema = z.object({
@@ -505,4 +527,143 @@ export async function setStartCommandController(
       templateDefault: getTemplate(project.template).startCommand,
     },
   });
+}
+
+/** What this workspace is sized at, and what the host could give it.
+ *
+ *  plan.md §12.1. Both halves in one response deliberately: a number on its own
+ *  ("2048 MB") is not something anybody can act on, and the question somebody
+ *  opens this to answer is "can I give it more", which needs the budget and
+ *  what is already committed against it.
+ */
+export async function getWorkspaceSizeController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const projectId = assertValidProjectId(req.params.projectId);
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "viewer");
+
+  const running = await runningProjectContainers();
+  const [size, budget, committed] = await Promise.all([
+    resolveSize(projectId),
+    budgetMb(),
+    committedMb(running.filter((id) => id !== projectId)),
+  ]);
+
+  res.json({
+    success: true,
+    message: "Workspace size",
+    data: {
+      ...size,
+      defaultMemoryMb: env.CONTAINER_MEMORY_MB,
+      defaultCpus: env.CONTAINER_CPUS,
+      budgetMb: budget,
+      committedMb: committed,
+      minMemoryMb: MIN_MEMORY_MB,
+    },
+  });
+}
+
+const workspaceSizeSchema = z.object({
+  /** Null means "back to the deployment's default", which is the only way to
+   *  undo a size without knowing what the default was -- the same argument the
+   *  start command's empty string makes above. */
+  memoryMb: z.number().int().nullable().optional(),
+  cpus: z.number().nullable().optional(),
+});
+
+export async function setWorkspaceSizeController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const projectId = assertValidProjectId(req.params.projectId);
+  // Owner, and not editor. A collaborator with write access decides what runs
+  // in the container; how much of the host it is allowed to hold is a decision
+  // about somebody else's machine, and every other project on it.
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "owner");
+
+  const request = workspaceSizeSchema.parse(req.body ?? {});
+  const size = await setWorkspaceSize(
+    projectId,
+    request,
+    await runningProjectContainers(),
+  );
+
+  res.json({
+    // Not "applied": Docker can change a running container's cgroup, but the
+    // process inside it has already read /proc/meminfo and sized its heap. A
+    // Node process told it had 512 MB does not start using 8 GB because the
+    // limit moved underneath it.
+    success: true,
+    message: "Saved. It takes effect the next time this workspace starts.",
+    data: size,
+  });
+}
+
+/** Whether this project's files are there yet, and why not.
+ *
+ *  Polled by the dashboard while a scaffold runs. Viewer, not owner: a
+ *  collaborator looking at a project that is still being built should be told
+ *  that rather than shown an empty tree.
+ */
+export async function getScaffoldStatusController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const projectId = assertValidProjectId(req.params.projectId);
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "viewer");
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { scaffoldStatus: true, scaffoldLog: true },
+  });
+
+  res.json({
+    success: true,
+    message: "Scaffold",
+    data: {
+      status: project?.scaffoldStatus ?? "READY",
+      // The scaffolder's own words when it failed, and null otherwise. It is
+      // the only thing that knows why -- "creation failed" is not something
+      // anybody can act on.
+      log: project?.scaffoldLog ?? null,
+    },
+  });
+}
+
+export async function retryScaffoldController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const projectId = assertValidProjectId(req.params.projectId);
+  // Owner: this empties the working tree before it starts again, which is not
+  // a collaborator's call to make.
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "owner");
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { template: true, scaffoldStatus: true },
+  });
+
+  if (!project) throw new NotFoundError("No such project.");
+
+  // Only from FAILED. Retrying one that is READY would delete a project that
+  // works, and retrying one already SCAFFOLDING would run two scaffolders over
+  // the same directory.
+  if (project.scaffoldStatus !== "FAILED") {
+    throw new BadRequestError(
+      "This project is not waiting to be rebuilt.",
+      "NOT_FAILED",
+    );
+  }
+
+  const started = await retryScaffold(projectId, project.template);
+  if (!started) {
+    throw new BadRequestError(
+      "This template has no recipe to build from.",
+      "NO_RECIPE",
+    );
+  }
+
+  res.json({ success: true, message: "Building again", data: null });
 }

@@ -1,0 +1,100 @@
+# Put the stack on a real name, with TLS, behind Caddy.
+#
+# plan.md §11.5. An OVERLAY on docker-compose.prod.yml rather than a fourth
+# copy of it — the base file is a working LAN deployment and everything here is
+# the delta between "reachable on the LAN" and "reachable from the internet".
+#
+#   cp .env.expose.example .env      # then fill it in
+#   docker compose -f docker-compose.prod.yml -f docker-compose.expose.yml \
+#     up -d --build
+#
+# Read docs/EXPOSING.md first. Two things in particular:
+#
+#   - This publishes an editor that runs arbitrary code in containers, with the
+#     host's Docker socket mounted into the server. The base file says "do not
+#     expose this service to the internet" about exactly that, and this file is
+#     how you stop it being exposed CARELESSLY, not a statement that it is now
+#     safe. Turn on SANDBOX_EGRESS_FILTERED, and turn on the second factor
+#     (§11.6) before you tell anyone the name.
+#
+#   - A tunnel (Tailscale, Cloudflare) may be the better answer, and needs none
+#     of this. docs/EXPOSING.md makes that case honestly.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - server
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+      # HTTP/3. Harmless to omit; browsers fall back.
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account keys. Losing this volume means asking the
+      # CA for everything again, which is how a deployment meets a rate limit.
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN, e.g. example.com}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+
+  server:
+    environment:
+      # The three origins, as names rather than ports. Every one of these is
+      # read by config/exposure.ts at boot, which refuses to start on a
+      # combination a browser would silently break.
+      WEB_ORIGIN: https://ide.${DOMAIN}
+      API_ORIGIN: https://api.${DOMAIN}
+      PREVIEW_ORIGIN: https://preview.${DOMAIN}
+      PREVIEW_PORT: 3001
+
+      # The whole point of this file, in one line. Previews are served from
+      # preview.${DOMAIN} and the cookie authorising them is set by
+      # api.${DOMAIN}: without this it is host-only to the API's name, never
+      # reaches the preview host, and every preview is refused with nothing in
+      # any log to say why. Only the PREVIEW cookie takes it — the refresh
+      # cookie stays host-only, because nothing but the API ever presents it.
+      COOKIE_DOMAIN: ${DOMAIN}
+
+      # Same site (ide/api/preview share ${DOMAIN}), so "lax" is correct and
+      # is what you want: "none" would send these cookies from any site on the
+      # internet that made a request here.
+      COOKIE_SAME_SITE: lax
+      COOKIE_SECURE: "true"
+
+      # Caddy is the one hop. Left at 0 every rate limit would key on Caddy's
+      # own address, so one account's failed sign-ins would lock everybody out.
+      TRUSTED_PROXY_HOPS: 1
+
+      # Published sites need a wildcard certificate on a SECOND domain — see
+      # the commented block in deploy/Caddyfile for why both. Off until you
+      # have arranged it; the endpoints then refuse rather than publishing to
+      # a listener nobody is proxying to.
+      DEPLOY_PORT: ${DEPLOY_PORT:-0}
+      DEPLOY_ORIGIN: ${DEPLOY_ORIGIN:-http://localhost:0}
+
+      # A sandbox on a machine that is now reachable from the internet. The
+      # base file leaves this off so an upgrade does not break package
+      # installs; a deployment being exposed has no such excuse.
+      SANDBOX_EGRESS_FILTERED: ${SANDBOX_EGRESS_FILTERED:-true}
+    # Nothing published to the host any more: Caddy reaches these over the
+    # compose network. This overrides the base file's 8080/8081, which would
+    # otherwise leave the API answering on a plain-HTTP port beside the TLS
+    # one — a way past every cookie and CORS decision above.
+    ports: !override []
+
+  web:
+    build:
+      args:
+        # Baked at build time, so these must be the URLs a BROWSER will use.
+        VITE_BACKEND_URL: https://api.${DOMAIN}
+        VITE_PREVIEW_ORIGIN: https://preview.${DOMAIN}
+    ports: !override []
+
+volumes:
+  caddy-data:
+  caddy-config:

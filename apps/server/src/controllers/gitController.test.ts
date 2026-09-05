@@ -28,6 +28,13 @@ const findUnique = vi.hoisted(() => vi.fn());
 
 vi.mock("../service/projectAccessService.js", () => projectAccessService);
 vi.mock("../service/gitService.js", () => git);
+
+/** The committer's signing identity, looked up on every commit (plan.md
+ *  §11.9). Null here, which is the ordinary case: signing is opt-in and every
+ *  assertion in this file is about the UNSIGNED path. `gitSigning.test.ts`
+ *  covers the other one. */
+const signingFor = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
+vi.mock("../service/personalizationService.js", () => ({ signingFor }));
 /** Whether the project is the owner's alone, which is what gates pushing. */
 const collaboratorCount = vi.hoisted(() => vi.fn());
 const projectFindUnique = vi.hoisted(() => vi.fn());
@@ -324,10 +331,14 @@ describe("gitCommitController", () => {
       where: { id: TEST_USER.sub },
       select: { email: true },
     });
-    expect(git.commit).toHaveBeenCalledWith(TEST_PROJECT, "a change", {
-      name: "committer",
-      email: "committer@example.com",
-    });
+    expect(git.commit).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      "a change",
+      { name: "committer", email: "committer@example.com" },
+      // No signing identity: signing is opt-in, and null is what every commit
+      // before §11.9 effectively passed.
+      null,
+    );
   });
 
   it("still commits when the user row has vanished", async () => {
@@ -344,6 +355,7 @@ describe("gitCommitController", () => {
       TEST_PROJECT,
       "a change",
       expect.objectContaining({ email: "unknown@example.com" }),
+      null,
     );
   });
 

@@ -3,7 +3,10 @@ import type {
   AuthResponse,
   Credentials,
   DeploymentCapabilities,
+  LoginResponse,
   PublicUser,
+  TwoFactorEnrolment,
+  TwoFactorStatus,
 } from "@replit-clone/shared";
 import axios from "../config/axiosConfig.ts";
 
@@ -12,9 +15,71 @@ export const signupApi = async (body: Credentials): Promise<AuthResponse> => {
   return response.data;
 };
 
-export const loginApi = async (body: Credentials): Promise<AuthResponse> => {
-  const response = await axios.post<AuthResponse>("/api/v1/auth/login", body);
+/** Returns EITHER a session or a challenge. The union is the point: a caller
+ *  that ignores the difference cannot accidentally read a token that is not
+ *  there, because there is no field to read. plan.md §11.6. */
+export const loginApi = async (body: Credentials): Promise<LoginResponse> => {
+  const response = await axios.post<LoginResponse>("/api/v1/auth/login", body);
   return response.data;
+};
+
+/** The second half of a sign-in. The account is named by the signed challenge
+ *  and never by this request, which is what stops it being a way to trade a
+ *  code for a session on somebody else's account. */
+export const loginTotpApi = async (
+  mfaToken: string,
+  code: string,
+): Promise<AuthResponse> => {
+  const response = await axios.post<AuthResponse>("/api/v1/auth/login/totp", {
+    mfaToken,
+    code,
+  });
+  return response.data;
+};
+
+export const twoFactorStatusApi = async (): Promise<TwoFactorStatus> => {
+  const response = await axios.get<{ data: TwoFactorStatus }>("/api/v1/auth/2fa");
+  return response.data.data;
+};
+
+export const beginTwoFactorApi = async (): Promise<TwoFactorEnrolment> => {
+  const response = await axios.post<{ data: TwoFactorEnrolment }>(
+    "/api/v1/auth/2fa/begin",
+  );
+  return response.data.data;
+};
+
+/** Returns the recovery codes, which are readable here and nowhere else, ever
+ *  again. */
+export const confirmTwoFactorApi = async (
+  code: string,
+): Promise<{ recoveryCodes: string[]; status: TwoFactorStatus }> => {
+  const response = await axios.post<{
+    data: { recoveryCodes: string[]; status: TwoFactorStatus };
+  }>("/api/v1/auth/2fa/confirm", { code });
+  return response.data.data;
+};
+
+/** Both of the operations that make an account weaker take the password
+ *  again: a session is not consent to remove the protection on the account it
+ *  belongs to. */
+export const disableTwoFactorApi = async (
+  password: string,
+): Promise<TwoFactorStatus> => {
+  const response = await axios.post<{ data: TwoFactorStatus }>(
+    "/api/v1/auth/2fa/disable",
+    { password },
+  );
+  return response.data.data;
+};
+
+export const regenerateRecoveryCodesApi = async (
+  password: string,
+): Promise<{ recoveryCodes: string[]; status: TwoFactorStatus }> => {
+  const response = await axios.post<{
+    data: { recoveryCodes: string[]; status: TwoFactorStatus };
+  }>("/api/v1/auth/2fa/recovery-codes", { password });
+  return response.data.data;
 };
 
 // Refresh is deliberately NOT exposed here. It must go through

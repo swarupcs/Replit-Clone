@@ -7,7 +7,8 @@ import type {
 import { useOpenTabsStore } from "./openTabsStore.ts";
 import { takeOpenIntent } from "../lib/openIntent.ts";
 import { useTreeStructureStore } from "./treeStructureStore.ts";
-import { discardWrite, renameWrite } from "../lib/pendingWrites.ts";
+import { confirmWrite, discardWrite, renameWrite } from "../lib/pendingWrites.ts";
+import { useConnectionStore } from "./connectionStore.ts";
 
 export type EditorSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -44,17 +45,55 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
   setEditorSocket: (incomingSocket) => {
     if (!incomingSocket) {
       set({ editorSocket: null, accessLevel: null });
+      // Not "closed": there is no socket because the editor is not open, which
+      // is not a connection problem and must not be reported as one.
+      useConnectionStore.getState().setSocketState("connecting");
       return;
     }
 
     const tabs = useOpenTabsStore.getState();
     const refreshTree = useTreeStructureStore.getState().refreshTree;
+    const connection = useConnectionStore.getState();
+
+    // The connection's own lifecycle, which nothing watched before §11.7.
+    //
+    // `connected` fires on the first connection and on every reconnection, so
+    // it is the only one of these that needs to say "we are fine now".
+    connection.setSocketState(incomingSocket.connected ? "connected" : "connecting");
+
+    incomingSocket.on("connect", () => {
+      useConnectionStore.getState().setSocketState("connected");
+    });
+
+    // socket.io retries on its own, so a disconnect is "reconnecting" rather
+    // than "closed" — except when the SERVER hung up deliberately, which it
+    // does not retry, and which is the one case a person has to act on.
+    incomingSocket.on("disconnect", (reason) => {
+      useConnectionStore
+        .getState()
+        .setSocketState(
+          reason === "io server disconnect" ? "closed" : "reconnecting",
+        );
+    });
+
+    // A failed attempt, not a failed connection: the manager keeps trying.
+    // Reported as reconnecting rather than as an error, or a flaky first
+    // handshake would show a dead-end message on a connection that is about to
+    // come up.
+    incomingSocket.on("connect_error", () => {
+      const current = useConnectionStore.getState();
+      if (current.socket !== "closed") current.setSocketState("reconnecting");
+    });
 
     incomingSocket.on("readFileSuccess", ({ relPath, value }) => {
       tabs.openTab(relPath, value, takeOpenIntent(relPath));
     });
 
     incomingSocket.on("writeFileSuccess", ({ relPath }) => {
+      // The server has it. Until this moment the only proof the edit survived
+      // is the copy in storage, which is why the recovery record is cleared
+      // HERE and not when the write was sent.
+      confirmWrite(relPath);
       useOpenTabsStore.getState().markDirty(relPath, false);
     });
 
@@ -63,6 +102,7 @@ export const useEditorSocketStore = create<EditorSocketStore>((set) => ({
     // file — and since every file an editor opens is shared, that meant every
     // tab, permanently.
     incomingSocket.on("docSaved", ({ relPath }) => {
+      confirmWrite(relPath);
       useOpenTabsStore.getState().markDirty(relPath, false);
     });
 

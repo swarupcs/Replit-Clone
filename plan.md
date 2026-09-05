@@ -37,29 +37,60 @@ than left in history where nobody would look for them.
 
 ## 1. Status at a glance
 
-Verified by running it rather than reading about it. The numbers are as of
-2026-08-31 (night); the notes under the table say which rows were **not**
-re-run that day, and why that matters more than usual:
+**Looking for what this actually does today rather than how the suite is
+doing? §1a.** This section is the health of the tree; that one is the
+inventory.
+
+Verified by running it rather than reading about it. **The numbers are as of
+2026-09-05**, and every row below was re-run that day — including the one that
+had been carried as "not re-run" since §2.22, which is the row that most needed
+it and is dealt with under the table.
 
 | Check | Result |
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
-| `pnpm --filter server test` | **1676 passing**, 280 skipped (124 files) — no database on this machine |
-| the same, with `TEST_DATABASE_URL` set | last green 2026-08-31 evening, four times. **Not re-run since §2.22**, which adds seven migrations — see §5 |
-| `pnpm --filter web test` | **1055 passing** (82 files) |
-| `pnpm -r lint` | clean, 3/3 packages — first time; see §2.21 |
-| Debt scan (`TODO`/`FIXME`/`HACK` over `apps/`, `packages/`) | **0 hits** over ~51k lines |
+| `pnpm -r lint` | clean, 3/3 packages |
+| `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
+| the same, with `TEST_DATABASE_URL` set | **2384 passing**, 36 skipped. Green 2026-09-05 against all **37** migrations |
+| `pnpm --filter web test` | **1166 passing** (91 files) |
+| Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
-The skipped server tests are the DB-gated suites (`TEST_DATABASE_URL` unset)
-and the shell-quoting round-trips (`/bin/bash` absent on Windows). Both run in
-CI. The count in that row is what remains skipped **with** the database
-configured; without it the figure is an order of magnitude larger, which is
-why the two rows are listed separately rather than as one number that would
-mean different things on different machines.
+The debt scan returns two hits and neither is debt: both are the literal word
+"TODO" inside prose about *searching* for it, in `searchService.ts` and its
+test. Recorded rather than filtered, because a scan whose exclusions are not
+written down is a scan somebody will quietly widen.
 
-The DB-gated row was run rather than quoted for §2.11 and §2.12:
+The size figure is the whole of `apps/server/src`, `apps/web/src` and
+`packages/shared/src`: 564 files, ~116k lines, of which ~64.6k are not tests.
+It was "~51k" here for a long time and that was never re-measured; the growth
+is real but the number had also been measuring something narrower.
+
+**The skips are two different things and the two rows exist to keep them
+apart.** With no database, 296 tests are skipped: the DB-gated suites plus the
+shell-quoting round-trips. With `TEST_DATABASE_URL` set, 36 remain, and those
+are only the shell-quoting ones — `/bin/bash` is absent on this Windows host.
+Both run in CI.
+
+**The DB-gated row is green again, and that mattered more than usual.** It had
+been carried since §2.22 as "not re-run", and eleven migrations have landed
+since — §12.1's `workspace_size`, §2.41's `scaffold_recipes`, §11.4's
+`plan_idle_minutes`, §11.2's `plan_devcontainer_mounts`, §11.9's
+`user_personalization` and §11.6's `two_factor` among them. **Two of those
+turned out to be broken**, and neither could have been caught by anything in
+this table except this row: they wrote `ALTER TABLE "Project"` where the table
+is `projects`, because the model carries `@@map`. Nothing in typecheck, lint
+or 2384 tests reads `migration.sql`. Only Postgres does. See §2.41.
+
+The DB-gated row was originally run rather than quoted for §2.11 and §2.12:
 both put load-bearing claims in a unique index, a foreign key and a
 transaction, and a mock cannot be wrong about those in any way worth trusting.
+That argument has only got stronger.
+
+**One test fails on this machine and is expected to.** `localRoots.test.ts`
+creates a symlink, and Windows refuses that without Developer Mode or an
+elevated shell — `EPERM`. It fails identically on a clean checkout and passes
+in CI. It is named here so it is not mistaken for a regression by whoever runs
+the suite next.
 
 **The debt recorded here against §2.13 and §2.14 is now cleared**, and
 clearing it was not a formality. Docker came back on the evening of
@@ -80,17 +111,23 @@ With those fixed the whole suite is green against a live database, which also
 means §2.13's hand-written migration has now been applied and exercised rather
 than only read.
 
-Two flakes are worth knowing about, since both will otherwise be mistaken for
-regressions:
+Three flakes are worth knowing about, since each will otherwise be mistaken
+for a regression. **All three were seen again on 2026-09-05**, and the first
+got materially worse that day for a reason worth writing down: Docker was
+building images and running containers while the suites ran, and every one of
+these is a timing failure under CPU contention. The suite is not less reliable
+than it was; the machine was busier.
 
-- Under load the **web** suite fails 9–10 at the default 5s timeout, always
-  the *first* test in a file and always passing in isolation. Verified as
-  environmental by running it on a clean checkout, which failed the same way.
-  `--testTimeout=20000` is green at 74/74.
+- Under load the **web** suite fails at the default 5s timeout, always the
+  *first* test in a file and always passing in isolation. On 2026-09-05 this
+  reached **15 files failing on a clean checkout** and 8 on a working tree with
+  changes in it — which is the right way round to notice that the changes were
+  not the cause. Verified as environmental by stashing and re-running.
+  `--testTimeout=20000` is green.
 - The server suite occasionally dies with `ERR_IPC_CHANNEL_CLOSED` / "Channel
-  closed" from tinypool, reporting no test failures at all. Seen three times
-  on 2026-08-31. It is the worker pool, not the tests: the next run passes.
-  **Not investigated.**
+  closed" from tinypool, reporting no test failures at all. Seen three times on
+  2026-08-31 and once on 2026-09-05. It is the worker pool, not the tests: the
+  next run passes. **Not investigated.**
 - `refreshTokenService.test.ts` — "lets exactly one of several concurrent
   refreshes claim the row" — fails under load roughly one run in three, with
   "Session was reused and has been revoked". It is timing against a reuse
@@ -104,21 +141,63 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 123 items. Open: 22 — five blocked, ten from §10 that are all
-waiting on one decision (§10.1), and seven from §11, which reads the sandbox
-rather than the editor. Six of those seven are blocked on nothing; 11.10 is
-new, and is the one row §11 has produced that needs a decision before it needs
-code.**
+**Done: 157 items. Open: 18 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), one from §11, which reads the sandbox
+rather than the editor, and two from §12, which reads neither and asks what
+a cloud machine is for. §11's last row is 11.10, which needs a decision before
+it needs code, and 12.4 is blocked on hardware rather than on anybody, so nothing
+outside §12 is both open and unblocked.**
+
+Those four numbers are 5 + 10 + 1 + 3 = 19, and they are written out because
+they did not add up once already — see the paragraph below.
+
+**§10.1 is now the whole of the critical path.** Ten of the nineteen open
+items are behind it, it is a decision rather than work, and as of 2026-09-05 it
+has a third option costed against a real spike rather than an argument. It is
+the single most valuable thing anybody could spend an hour on.
+
+**The Done figure jumped from 123 to 148 in one edit on 2026-09-05, and that
+was a correction rather than a day's work.** By the same count §1 has always
+used — top-level checkboxes in this file — 148 was already true before §12 was
+written; the Open figure beside it was right, which is the tell. It is the
+exact failure §7's second paragraph was added to stop, one section later and in
+the other column: each commit fixed the row it owned and none of them owned the
+sum. Recorded here rather than quietly changed, because a count that moves 25
+in one edit is otherwise indistinguishable from a section that added 25 items.
+
+**It happened again in miniature the same day, in the sentence above.** The
+§12 figure stayed at "four" through 12.1 and 12.2 shipping and 12.5 being split
+out, while the more detailed sentence below it said three — the two disagreed
+for three commits. The arithmetic is now written out beside the numbers, which
+is the cheapest thing that would have caught either of them.
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, and **seven in
-§11** (11.2, 11.4 and 11.8 shipped 2026-09-05, the day after the section was
-written; 11.2 also split 11.10 out of itself, and 11.4 named the wrong
-interaction while doing it — see the rows).
+an architectural route), **ten in §10 behind that same route**, **one in
+§11** (11.1 through 11.9 all shipped 2026-09-05, the day after the section was
+written — nine of its ten rows in one day, and 11.10 is the tenth; 11.2 also split 11.10 out of itself, and 11.4 named the
+wrong interaction while doing it — see the rows. 11.9 shipped in two commits,
+its dotfiles half and then its signing half, and was counted open in between:
+a row is done or it is not, and half a row counted as done is how a count
+stops meaning anything. 11.6 shipped before 11.5, which is the row that gives
+it its urgency — the order is backwards and deliberately so: the protection
+should exist before the exposure, not after, and 11.5's own document now asks
+for the second factor to be turned on before the name exists), and **three in §12** (12.1 and 12.2 both shipped
+2026-09-05, the day the section was written; 12.2 split 12.5 out of itself on
+the way, so the section is one row shorter and one row longer than it started;
+12.4 is unstartable without different hardware and has been set aside).
+
+**§12 was written on 2026-09-05 and adds four.** It is the residue of §10 and
+§11 rather than a third reading of the same ground: §10 asks what Monaco cannot
+do, §11 asks which of the platform's refusals expired at n=1, and §12 asks the
+question neither of those can reach — what a machine in a datacentre does that
+the laptop in front of you does not. Its own closing note argues that this is
+the weakest of the three methods and should be trusted least, because asking
+what a category has produces long lists cheaply. Two of its four rows say in
+their own text that they may have no user here.
 
 **§11 was written on 2026-09-05 and adds nine.** It asks §10's question of
 the platform instead of the editor — the container's refusal list, the idle
@@ -230,7 +309,152 @@ carried forward on trust. Three claims did not survive it — see §5.
 
 ---
 
+## 1a. What is built, and what is not
+
+Added 2026-09-05, because §1 counts items and §2 tells stories and neither
+answers the question somebody actually arrives with: *what does this thing do
+today?* Every line below was checked against the tree on the day it was
+written. **This section is a view, not a source** — if it disagrees with a
+row, the row wins, and the disagreement is a bug in this section.
+
+### Built and working
+
+**The editor and the session.** Monaco with LSP for Python and Go, a terminal,
+a live preview through a proxy, multi-file search and replace, cross-project
+search, real-time collaboration with presence and follow-mode, checkpoints,
+a test panel, an AI assistant, and an embeddable read-only view.
+
+**The sandbox.** One Docker container per project, sized per workspace
+(§12.1), started on demand and reaped when idle — unless the plan says
+otherwise (§11.4). tini as pid 1, all capabilities dropped, no new privileges,
+a private network, a pids limit, and a package cache on a named volume.
+`devcontainer.json` is honoured for image, env, ports, lifecycle commands and —
+under the personal plan — `mounts` (§11.2). Installs happen before somebody
+waits for them when the workspace is already running (§12.2).
+
+**Projects.** 13 templates, plus "Latest", which runs the real upstream
+scaffolder inside the container instead of copying a pinned starter (§2.41).
+Import from GitHub with the package manager the lockfile actually names
+(§2.40). Open a folder that is already on the host (§10.2). Fork, export,
+trash with undo (§9.1), and a delete that is not a mistake waiting to happen.
+
+**Git.** Status, diff, stage, unstage, discard, commit, branches, remotes,
+fetch, pull, push, and — since §11.9 — SSH-signed commits.
+
+**Publishing.** Static and service deployments with history and rollback,
+custom domains (the code half — §9.2), scheduled jobs, and managed Postgres
+and Mongo per project.
+
+**The account.** Plans and entitlements with per-account overrides (§8.1), a
+usage screen with a per-project breakdown (§8.2), quota warnings before the
+wall (§8.3), API keys (§8.6), an operator console with a moderation trail and
+appeals (§8.7), a compute meter (§8.8), Stripe subscription state and webhooks
+(§8.4, minus the two calls that need real keys), dotfiles that follow you into
+every container (§11.9), and TOTP two-factor with recovery codes (§11.6).
+
+**More than one container per project** (§11.3): a project's own
+`docker-compose.yml` starts the services it declares beside it, on a private
+internal network where the app reaches them by the names the file gave them.
+Parsed rather than executed — a deliberate subset, with everything that would
+hand a cloned repository control of the host refused and the reason shown.
+
+**A way in from outside** (§11.5): a Caddy overlay and a Caddyfile, a written
+answer that puts a tunnel first, and — the part that was a defect rather than a
+setting — a `COOKIE_DOMAIN` without which every preview behind any reverse
+proxy is refused silently, plus a boot check that refuses nine origin and
+cookie combinations a browser would break without reporting.
+
+**Offline tolerance** (§11.7): an installable shell with a manifest and a
+service worker, a legible "you are offline" state, and unsaved edits kept
+across a lost connection or a reload and offered back rather than replayed.
+
+**Single-user mode** (§10.3), for a deployment with exactly one account and no
+signup.
+
+### Not built, and honest about why
+
+**Waiting on one decision — the largest single thing here, and now ten of the
+twenty-one open items.** Editor parity (§10.6–§10.14: debugging, extensions,
+more languages, settings-as-files, tasks, a real diff editor, local history,
+the rest of git, and the small ones) is all behind §10.1: Monaco,
+openvscode-server, or **Route C** — attach your own editor over SSH. Route C
+is no longer a proposal: §11.1's spike ran on 2026-09-05 and got the real VS
+Code server running inside a sandbox with `ms-python.python`, Pylance and
+debugpy installed, under the platform's full security posture. So the two most
+expensive rows in §10 are reachable for 7 MB of image and one volume, and the
+sentence "Route B can never reach extensions" is no longer true. Building any
+of these by hand before the decision is waste, and that is the whole argument
+of §10.
+
+**Blocked on something outside this repository** (§3.3): a certificate's
+private key, an autoscaler's cost model, a disk budget for snapshots, a backup
+destination — and note that *nothing* backs up a project today, which is the
+one entry on this page that loses data rather than failing to add a feature.
+
+**Blocked on a decision nobody has taken.** Dev Container Features (§11.10) is
+a question with three answers, none obviously right. Prebuilding a *stopped*
+workspace (§12.5) needs three numbers somebody has to choose by watching a real
+host. Teams (§8.5) needs a pricing decision and turns every `ownerId === userId`
+into a membership question.
+
+**Simply absent, and unblocked.** Notebooks (§12.3). GPUs (§12.4), which need
+different hardware.
+
+### What is verified, and what is asserted
+
+The distinction §5 exists for, restated because it is the thing most likely to
+mislead a reader of the lists above.
+
+**Run against real infrastructure:** every migration (all 37), the DB-gated
+suites, container start and reap, both scaffolder paths, a signed commit
+verified by `git log --show-signature`, a dotfiles clone and its failure mode,
+TOTP enrolment through to a spent recovery code, §11.5's cookie behaviour
+against a real server on three hostnames — including reintroducing the defect
+and watching every preview go back to `401` — and §11.3's compose services,
+where a real Postgres and Redis answered a real project's container by name and
+a row survived being trashed and restored.
+
+**Not run, and load-bearing:** the service worker has never registered — no
+browser available here can — so §11.7's caching behaviour is asserted rather
+than observed. §11.5's Caddy route has never faced a real domain: the Caddyfile
+is validated by Caddy and the compose overlay resolves, but ACME issuance and
+the WebSocket upgrade through the proxy have not been exercised, and the
+wildcard-certificate build published sites need is described rather than built. Nobody has driven a real VS Code client through Remote-SSH into
+a sandbox (§11.1's spike reproduced what that client does server-side, which is
+strong evidence and not the same thing), and nothing has been tested behind the
+egress gateway.
+Nobody has run two differently-sized containers on one host and watched the sum
+(§12.1). Nobody has scanned the two-factor QR with a real phone — the RFC 6238
+vectors are the evidence there, and they are good evidence, but they are not
+the same thing. And nobody has used this as their daily editor for a week,
+which §10 warned about and which remains the largest untested claim in this
+document.
+
+---
+
 ## 2. Done
+
+**A convention, added 2026-09-05 after it caused real confusion.** Entries in
+this section carry the test counts and migration counts that were true **when
+that entry shipped**, and they are left that way on purpose: they are the
+evidence that the work was verified, and rewriting them every time a later
+commit adds a test would destroy exactly that. **§1 is the only place with
+current numbers.** Where an entry below says "all 35 migrations applied", read
+"all 35 migrations that existed that day" — there are 37 now.
+
+This is not a licence to let anything else drift. §7's rule is unchanged for
+every claim about what the code DOES; it is only these two derived figures,
+inside dated records, that are allowed to stay at their date.
+
+**And a second convention, also stated late because it was never written
+down.** §10, §11 and §12 record their own shipped rows **in place** — the row
+is ticked and its own paragraph says what shipped — rather than getting an
+entry here. §2.33–2.36 and §2.38–2.39 are the exception rather than the rule,
+written when those sections were new. So **nine shipped rows are not listed in
+this section**: §11.2, §11.4, §11.6, §11.8 and §11.9, plus §10's and §12's
+that already have entries. If you are looking for what shipped and cannot find
+it here, it is in the row itself. §1's count reads the checkboxes wherever
+they are, so it is unaffected either way.
 
 ### 2.1 The 2026-08-22 analysis
 
@@ -1983,6 +2207,393 @@ that had been quietly flattering every previous local run.
 Server: 2081 passing (0 failing, 9 skipped). Web: 1074 passing. Typecheck and
 lint clean, 3/3. Both apps build.
 
+### 2.38 Since (2026-09-05) — §12.1, a workspace that is not every workspace
+
+First of §12, and the only one of its four that is about the reason to keep a
+workspace on a server at all. Every project container was sized from one pair
+of numbers — `CONTAINER_MEMORY_MB` and `CONTAINER_CPUS` — so the Rust workspace
+that wants 8 GB and the eleven that idle at 512 MB were all the same size.
+
+**§6 decision 15 is what this had to be built around, and it is nearly but not
+quite in the way.** That decision says a plan may promise more of what the
+platform *allocates* and must never promise more of what the host *has*: a tier
+selling more memory per container than the machine can give is a promise kept
+by an OOM kill in somebody's terminal. It forbids *selling* a size. It does not
+forbid one workspace differing from its neighbour, and the two had been treated
+as one question because only the first was ever asked.
+
+So a size here is deliberately **not a plan entitlement**. It is an allocation,
+measured against what is running at the moment somebody asks for it — a sum
+this server can actually do, rather than a promise made in advance to somebody
+who will collect on it later. Concretely:
+
+- **The budget is the host's, asked of Docker rather than of `os.totalmem()`,**
+  because the number that matters is the one the daemon enforces against — in a
+  VM and on Docker Desktop those differ, and the daemon's is the one that kills
+  a container. Less `HOST_MEMORY_RESERVE_MB` (1024) for this server, Postgres,
+  the egress gateway and the OS, which all live in the same memory the
+  sandboxes are handed out of.
+- **Committed, not used.** A container sitting at 40 MB of its 2048 still holds
+  2048 against the next OOM. Sizing the next workspace against `docker stats`
+  would oversubscribe the host by exactly however idle everything happened to
+  be at that moment.
+- **Checked again at the start**, not only when the size is set: something else
+  may have started in between, and §6 decision 13 says the guarantee belongs
+  where it cannot be skipped. A default-sized workspace is exempt, because that
+  is what `MAX_CONCURRENT_CONTAINERS` already rations and failing it here would
+  refuse projects that worked before this existed.
+- **Owner, not editor.** A collaborator with write access decides what runs in
+  the container; how much of the host it holds is a decision about every other
+  workspace on the machine.
+- **It does not resize what is running, and says so.** Docker will move a
+  running container's cgroup, but the process inside has already read
+  `/proc/meminfo` and sized its heap — a Node process told it had 512 MB does
+  not start using 8 GB because the limit moved underneath it.
+
+**The screen shows the budget, not just the size.** A field containing "2048"
+is not something anybody can act on; the question somebody opens it to answer
+is "can I give it more", which needs what the host has and what is already
+spoken for. This is §2.22's argument — a limit you discover by hitting it —
+applied one section later.
+
+**§12.1 named the second call site and it was right to.**
+`containerManager.ts:1187` computes the stats panel's ceiling from the same
+constant, and a per-workspace size that had not reached it would show every
+project a limit that is not its own.
+
+**A defect found by the existing tests rather than by the new ones**, which is
+the §3.1 pattern exactly. `custom` was computed as `memoryMb !== null`, and
+every mock in the new suite sets those columns to an explicit `null` — so
+`undefined`, which is what a caller that selected neither column gets, was a
+state the tests never produced. `undefined !== null` is true, so every
+default-sized project read as custom and took a capacity check it was meant to
+be exempt from. Six container tests failed on a `docker.info` that was never
+supposed to be reached. Fixed with `?? null`, and both states now have a test.
+
+Five mutants, all caught: counting the project being resized against itself,
+ignoring what is committed, treating a vanished project row as free memory,
+never reporting a size as custom, and writing a size without measuring it.
+
+Server: 1916 passing, 296 skipped — no database on this machine, so the
+DB-gated suites did not run; §5 is the standing note on what that does not
+prove. Web: 1117 passing. Typecheck and lint clean, 3/3.
+
+The one red file is `localRoots.test.ts`, which cannot create a symlink
+(EPERM) on this Windows host and fails identically on a clean checkout —
+confirmed by stashing this branch and running it alone. Environmental, and
+not this work's.
+
+---
+
+### 2.39 Since (2026-09-05) — §12.2, the install nobody watched
+
+Second of §12, and the cheap one: `warmStart` already answered half of this and
+the mechanism it needed was all present. What it does is skip an install that
+would have changed nothing. What it could not do is anything about the case
+where the install *would* change something — pull a branch that adds a
+dependency and the next start pays for a full resolution with somebody watching
+the terminal, after the machine sat idle for twenty minutes.
+
+So: every fifteen minutes, for workspaces that are already running, if the
+dependency fingerprint has drifted from the stamp, run the install now and
+stamp it. The next start then takes the warm path and nobody watched anything.
+
+**The whole design is about when NOT to stamp**, because the two directions
+cost wildly different amounts. A prebuild that does not happen costs a minute
+somebody was going to spend anyway. A stamp claiming an install that did not
+happen makes the next start skip installing and serve against dependencies that
+are not there — silently, which is the failure `warmStart`'s own note says it
+exists to prevent. So the stamp is withheld when the install exits non-zero,
+when it throws, when it is abandoned at the timeout, and — the subtle one —
+**when the fingerprint moved while the install was running**. An install takes
+minutes and a lockfile can move underneath it; stamping the value read before
+the run would vouch for an install that never happened for the files as they
+now stand.
+
+**It reuses `splitStartCommand` rather than reimplementing the parse**, and
+that is load-bearing rather than tidy. That function's allowlist is the only
+thing standing between this and running the *serve* half of somebody's command
+in the background. A command it cannot take apart with certainty returns null
+and nothing is prebuilt — a project carrying `./deploy.sh && npm start` is left
+alone, which is the right answer and not an accident.
+
+**A prebuild that fails tells nobody**, deliberately. Nobody asked for the
+work, so a notification about it failing converts a saved minute into an
+interruption — §6 decision 14's argument one step on. It is a log line and
+three counters (`prebuilds_completed`, `_failed`, `_abandoned`), and
+`prebuilds_completed` against `runs_install_skipped` is how much of the warm
+path was earned here rather than by nothing having changed.
+
+**One at a time across every project**, because the premise is that this runs
+while the machine is quiet, and a background task that makes the foreground
+slower is worse than no background task. Not run on boot either: a restart is
+the one moment several containers come up together.
+
+**What it deliberately does not do is start a stopped container**, which is the
+half that is a decision rather than a line of code — it fights the idle reaper,
+it spends memory the capacity gate is rationing, and on a plan whose workspaces
+never sleep (§11.4) it would leave them running. **§12.5 is that row**, split
+out here the way §11.2 split out §11.10, so this entry cannot be read as having
+closed it.
+
+Six mutants, all caught: stamping a failed install, stamping the pre-install
+fingerprint, running a command it could not take apart, prebuilding a trashed
+or taken-down project, ignoring a deleted `node_modules`, and prebuilding a
+workspace that is not running.
+
+Server: 1936 passing, 296 skipped — no database here. Web: 1117 passing.
+Typecheck and lint clean, 3/3. `localRoots.test.ts` stays red on this Windows
+host over symlink EPERM, identically on a clean checkout.
+
+---
+
+### 2.40 Since (2026-09-05) — the lockfile decides, not the code
+
+Found while reading the creation path for §2.41, by the method §3.1 keeps
+recommending: two shipped things read against each other.
+
+`warmStart` fingerprints `pnpm-lock.yaml` and `yarn.lock`, and its
+`INSTALL_PREFIXES` knows how to skip `pnpm install` and `yarn install`. But
+`detectStartCommand` emitted `npm install && npm run <script>` whatever had just
+been cloned — so **nothing in this codebase ever produced the commands the warm
+path was written for.** Three consequences, all real:
+
+- The lockfile was ignored, which is the entire point of a lockfile: you got
+  whatever npm resolved today rather than what the repository pinned.
+- A `workspace:*` dependency failed outright. npm cannot resolve the protocol.
+- Even a correct `pnpm install` would have died with command-not-found, because
+  neither pnpm nor yarn was in the node image — **although that image already
+  set `PNPM_HOME` and `YARN_CACHE_FOLDER`**, so it was written expecting them.
+  They were simply never installed.
+
+So `detectPackageManager(files)` reads the lockfile, `detectStartCommand` takes
+the manager, and the image enables corepack with both pinned and downloaded at
+**build** time, so a project's first install does not also pay to fetch its
+package manager. `yarn <script>` and not `yarn run <script>`: the other form is
+a usage message rather than anything a person can act on.
+
+**Fixed at both call sites, not one.** `localFolderService` had the identical
+bug and is the worse of the two — a folder somebody already had is their real
+working tree with whatever they chose years ago, where a fresh clone at least
+tends to be recent.
+
+Where more than one lockfile is present, the newer tool wins: that means a
+migration nobody finished, and a stale `package-lock.json` left behind by a move
+*to* pnpm is the common case while the reverse is not.
+
+Four mutants, all caught, including reverting the whole thing to npm.
+
+---
+
+### 2.41 Since (2026-09-05) — a starter is pinned; "Latest" is not
+
+A committed starter directory is frozen at whatever was committed: ask for React
+today and you get the React of the day somebody added the folder. So the
+template picker gained a second choice — **Starter** or **Latest** — where
+Latest runs the tool the ecosystem actually publishes (`npm create vite@latest`,
+`create-next-app@latest`) and builds the project from what it produces.
+
+**The reason this is a service and not three lines in `createProjectService` is
+a decision this repository already took once and undid.** The original code
+shelled out to `npm create` on the **host**; the comment at
+`projectService.ts:82` still records why it was removed — an arbitrary command
+outside any sandbox, needing the network, producing a nested directory so the
+bind-mount root and the app root disagreed by one level. Running the scaffolder
+**inside the project's container** answers all three without giving up any of
+what the starter copy bought. `importRepository` is the precedent and this
+follows it closely.
+
+**Creation stopped being synchronous, for this path only.** A scaffolder plus an
+install is minutes; an HTTP request that waited would be killed by a proxy or a
+browser long before it finished. So `POST /projects` returns `201` immediately
+with the row saying `SCAFFOLDING`, and the dashboard polls — **and only while
+something is actually being built**, so an idle tab is not a background load.
+(That poll did not run at all in the first version. See below.)
+
+**The reconcile was written with it rather than after somebody noticed.** A row
+left `SCAFFOLDING` is a container exec this process was awaiting, and nothing
+survives the process to finish it or to notice; without `reconcileScaffolds` the
+dashboard says "Setting up" for ever. That is the third appearance of the shape
+§2.26 already fixed twice, for scheduled runs and for deployments, and the first
+time it was built with the boot pass from the start. Its message says what is
+and is not known: the server restarted, and whatever the scaffolder had finished
+is still in the project.
+
+**The commands live in a table and are argv arrays.** A recipe is genuinely data
+— what `npm create vite@latest` produces, and which flags it accepts, change
+without anybody here deploying — but it is handed to `docker exec` as an array
+and is never seen by a shell, which is the whole of what keeps a table of
+commands from being a remote code execution surface with extra steps. **No route
+writes that table.** A user picks a template and a variant; they never pick a
+command, and the schema refuses a `variant` that is not one of two words.
+`parseRecipe` is the boundary and it is tested as one: a bare string, a nested
+non-string, an empty step and an empty recipe are each refused rather than
+reaching `docker exec` as `undefined`.
+
+**A failed scaffold fails the project and says why, in the scaffolder's own
+words.** It does not quietly substitute the pinned starter: handing somebody a
+different, older project than the one they chose is worse than telling them it
+did not work. "npm ERR! network timeout" says try again; "creation failed" says
+nothing anybody can act on. The dialog offers **Try again** — which empties the
+tree first, because a half-finished scaffold leaves files behind and
+`npm create` refuses a directory it considers non-empty — and **Delete**,
+because those are different decisions and only the person knows which applies.
+
+Only six templates offer it, and the UI asks the **database** which rather than
+carrying a list: a recipe turned off because upstream changed a flag also
+removes the option that would now fail. For `go-http` or `static-html`, "latest"
+would be a control that does nothing.
+
+Seven mutants, all caught, including carrying on past a failed step, reconciling
+the wrong rows on boot, and letting a non-string reach `docker exec`.
+
+**Two defects shipped in the first version of this, and both are worth keeping
+on the page, because neither was the kind of mistake tests were going to find.**
+
+**The dashboard never learned the status.** `scaffoldStatus` was added to the
+schema, to the API type and to three places in `Dashboard.tsx` — and left out of
+the `select` in `listAccessibleProjects`, four files away. So the field never
+reached the client: the poll above never started, the disabled card was never
+disabled, and the failure dialog was unreachable. A project built with Latest
+rendered as an ordinary card and opened onto an empty editor. Nothing failed.
+Typecheck was clean because `Project.scaffoldStatus` is optional in the shared
+type, and an absent optional field is exactly what an unfinished project looks
+like. `ListedProject` now declares it **required**, so an omitted `select` key
+stops compiling at `toPage` — which is the only guard that survives somebody
+adding the next column in a hurry.
+
+**Both new migrations named the Prisma MODEL rather than the table.**
+`ALTER TABLE "Project"` — but `Project` carries `@@map("projects")`, so it is
+not a relation Postgres has ever heard of. The first `migrate deploy` failed on
+`relation "Project" does not exist`, and it failed on **§12.1's** migration
+first, which had been sitting committed and green. Typecheck, lint and 1970
+tests do not read `migration.sql`; only Postgres does, and until this week
+nobody had run it. `ScaffoldRecipe` also gained the `@@map("scaffold_recipes")`
+every other table here has.
+
+Server: 1984 passing, 296 skipped. Web: 1135 passing. Typecheck and lint clean,
+3/3. `localRoots.test.ts` stays red on this Windows host over symlink EPERM,
+identically on a clean checkout.
+
+**Verified against a real database and real containers on 2026-09-05**, which
+is what the first version of this paragraph said was missing.
+
+- All 35 migrations then in the tree applied; `migrate status` clean; six
+  recipes seeded. (37 now — see the note at the top of this section.)
+- **`react-vite` with Latest: SCAFFOLDING → READY in 31s**, and it produced
+  **Vite 8.2.2 against the committed starter's 6.1.0** — two major versions,
+  which is the whole argument for the feature stated as a number.
+- `react-vite` with Starter: READY in 1.6s, and `diff -rq` against the template
+  is empty. The path this change was not allowed to alter did not alter.
+- **`nextjs-ts` with Latest took 289 seconds.** The flags seeded here are still
+  the ones `create-next-app` accepts, and five minutes is the async decision
+  above justified rather than argued: a request that waited would have been
+  killed several times over.
+- A step exiting non-zero left the project FAILED with the command's own stderr
+  and no start command. **Try again** on that project emptied the tree, rebuilt,
+  and cleared the log.
+- A row stranded in SCAFFOLDING across a restart came back FAILED, with the
+  message that says what is and is not known.
+
+**One thing the real run found that no test would have.**
+`npm create vite@latest . -- --template no-such-template` **exits 0** and
+silently scaffolds a vanilla TypeScript project. So "a failed scaffold fails the
+project" is exactly as true as the scaffolder's exit code, and for a bad
+template name upstream does not consider that a failure. Nothing here is wrong,
+but the guarantee is narrower than the sentence sounds, and the recipes are the
+only thing standing between a user and a project that is quietly not what they
+asked for. That is an argument for the recipe table being seeded and not
+user-writable, which it is.
+
+---
+
+### 2.42 Since (2026-09-05) — a notebook, rather than the JSON it is stored in
+
+§12.3, and the row said what it was worth before it said what it was: **worth
+doing only if you write Python.** Opening a `.ipynb` here gave you the file — a
+wall of JSON with a base64 PNG somewhere in the middle of it.
+
+The distance really was a kernel protocol and a renderer, as the row guessed.
+The sandbox already ran Python and already had an LSP for it, so nothing here
+is a new language; it is a process, a wire format and a document view.
+
+**The kernel starts on Run, not on open.** A language server connects as soon
+as a Python file is on screen, which is right for something that only reads. A
+kernel is a process holding whatever the user assigned to a variable, inside a
+container whose memory limit the dev server is also living within — so opening
+a notebook to read it costs nothing, and `KernelClient` connects on the first
+send and queues until the socket opens. Without that queue the click that
+starts the kernel is the one click that gets lost.
+
+**Nothing renders `text/html`, and that is the decision in the renderer.** A
+pandas DataFrame's nice output is HTML, and rendering it means markup from a
+cloned repository running on this app's origin with this app's session. Every
+`text/html` that matters carries a `text/plain` beside it, so the fallback is
+the ASCII table rather than nothing. `image/svg+xml` is out for the same reason
+wearing a less obvious costume. The markdown renderer follows
+`notebookMarkdown.ts`'s existing stance: it produces nodes, never an HTML
+string, so there is nowhere a `dangerouslySetInnerHTML` could be added.
+
+**Cell editors are textareas, and that is a trade rather than a shortcut.** A
+notebook has as many editors as it has cells, and a hundred Monaco instances in
+one document is tens of megabytes of models. What it gives up is syntax
+highlighting and the language server the row itself points at — worth
+revisiting if notebooks turn out to be used for anything longer than a page.
+
+**Outputs stream without saving; `done` saves once.** A cell printing in a loop
+produces hundreds of messages, and a write per message is hundreds of
+whole-file writes for one execution. And the file is written the way
+`nbformat.write` writes it — one-space indent, sorted keys, source as an array
+of lines — so the first save from this editor is not a diff touching every
+line of somebody's notebook.
+
+**The defect the real run found, which no test here would have.** The gateway
+forwards the driver's messages verbatim, and the driver emits nbformat. nbformat
+spells a stream output's text `text`; the in-memory type calls it `source`, and
+that translation lived inside `parseNotebook`, so it applied only to text read
+from a **file**. Every `print()` in a live notebook therefore rendered as an
+empty box.
+
+Nothing failed. Typecheck was clean because `KernelServerMessage` declared
+`output: NotebookOutput` — an assertion about JSON off a socket that the type
+system has no way to check and the wire had no obligation to honour. **And
+every test agreed with the bug**, because each built its fixtures from the
+in-memory type rather than from what the kernel sends. The wire type now says
+`unknown`, `parseOutput` is exported so the live path and the file path go
+through one reader, and the fixtures are the bytes `rc-kernel` actually
+produced.
+
+That is the second time in two sections that a type declaring what it wished
+for hid a defect from a clean build — the first was `Project.scaffoldStatus`
+being optional in 2.41. Both were found by running the thing.
+
+Six mutants, all caught: rendering `text/html` after all, leaving the escapes in
+a traceback, trusting a bad link scheme, carrying on past a failed cell in Run
+All, leaving the last run's outputs under a cell running again, and trusting the
+wire's declared shape. Three of those were written after a first pass survived,
+which is the mutation testing doing its job rather than confirming a result.
+
+**Verified against a real kernel on 2026-09-05.** `sandbox-python` builds at
+**429 MB**, matching the figure the image comment claims; `rc-kernel` runs in
+it, and driving it by hand returned `ready`, a `count`, stdout `42
+`, an
+`error` with a real `ZeroDivisionError` traceback, and `done` with `ok` false —
+which is how the wire defect above was found. `execute_result` and
+`display_data` matched the shared type exactly; only `stream` did not.
+
+Server: 2263 passing, 296 skipped. Web: 1311 passing, up 84. Typecheck and lint
+clean, 3/3. `localRoots.test.ts` stays red on this Windows host over symlink
+EPERM, identically on a clean checkout.
+
+**Not verified, and worth saying rather than implying otherwise.** Nobody has
+opened a notebook in the browser: that needs an account, and creating one is not
+something this session does. The gateway, the policy and the driver have been
+exercised directly; the path from a click in the file tree to a rendered cell
+has not. `NOTEBOOKS_ENABLED` also defaults to a single-tenant deployment only,
+so on a shared one the whole feature is off until somebody sets it.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -1993,17 +2604,43 @@ closed on 2026-08-30 (§2.11).
 
 **This section has now read "Empty" three times while merged code was wrong**,
 and it is worth being precise about why, because the pattern is not bad luck.
-Five defects have been found since it was emptied, and not one of them arrived
-by being written down first:
+**Thirteen defects have been found since it was emptied**, and not one of them
+arrived by being written down first:
 
 - a viewer could duplicate a project and take its environment variables (§2.14)
 - `withTimeout` reported a crashed exec as a timeout (§2.15)
 - `updateJob` never checked which project a job belonged to (§2.15)
-- and the two below.
+- the two below.
 
-Every one was found by reading two shipped things against each other. A list
-of *known* defects cannot prompt that, so an empty §3.1 means "nobody has
-looked lately" and never "the code is right". Read it that way.
+Those five were found **by reading two shipped things against each other**.
+The eight since were not, and the difference is the more useful half of this
+paragraph — they were found **by running the thing**:
+
+- three in the container layer on 2026-09-04, none of which any test or any
+  section of this document predicted: an orphaned shell holding port 3000, a
+  pid file that a reused terminal id could overwrite, and `sleep infinity` as
+  pid 1 reaping nothing, so every terminal ever closed left a zombie against a
+  `PidsLimit` of 256. All three had been there for the life of the project and
+  all three were found by looking at a running container.
+- a `select` in `listAccessibleProjects` that omitted `scaffoldStatus`, four
+  files from everything that depended on it, leaving the whole client half of
+  §2.41 dead. Typecheck was clean because the shared type declares the field
+  optional, and an absent optional field is indistinguishable from an
+  unfinished project.
+- **two migrations that had never been run**, both writing `ALTER TABLE
+  "Project"` where the table is `projects` — see §5. One had been committed and
+  green for a day.
+- `~/` expanding to `/home/sandbox/`, which is neither equal to the home
+  directory nor outside it, so it walked past the refusal that stops dotfiles
+  being cloned into `~` — where the script's first line is `rm -rf` (§11.9).
+- an installer check written as a shell function called in an `if` condition,
+  where `set -e` is suspended, so an `install.sh` that FAILED read as "no
+  installer found" (§11.9).
+
+**So: a list of known defects cannot prompt any of that.** An empty §3.1 means
+"nobody has looked lately" and never "the code is right" — and "looked" now
+demonstrably has to include running it against a real database and a real
+container, not only reading it. Read the section that way.
 
 - [x] **A moderator's takedown did not take anything down.** Fixed
       2026-08-30 — see §2.16. `reviewReport`'s ACTIONED branch set
@@ -2472,10 +3109,13 @@ whoever owns the data, not to a cleanup script.
 20. ~~**§3.1 — the missing budget on `POST /test`, and the export beside
     it.**~~ Done 2026-08-31 (§2.27). Ten minutes, as billed, and the argument
     for it was already written down for the identical route in §2.13.
-21. **§3.2 — showing people their quota.** The cheapest thing here with a user
-    on the other end of it: the numbers are already computed and already
-    enforced, and the only reason nobody can see them is that no endpoint
-    returns them.
+21. ~~**§3.2 — showing people their quota.**~~ Done 2026-08-31 (§2.22), as
+    part of §8.2 rather than on its own — which is why this line sat unstruck
+    until 2026-09-05: the work was done under a different heading and nothing
+    came back to close the line that asked for it. The cheapest thing here with
+    a user on the other end of it: the numbers were already computed and
+    already enforced, and the only reason nobody could see them was that no
+    endpoint returned them.
 22. ~~**§3.1 — the defaulted access level, and the stray comment.**~~ Done
     2026-08-31 (§2.27), in the same commit as 20 rather than after 21: they are
     one file and the same argument, and splitting them would have been two
@@ -2513,7 +3153,8 @@ A deliberate sweep of the whole tree the same night added nine more items and
 one §3.3 row — and, usefully, confirmed a great deal. What it did *not* find
 is the part worth keeping: no unguarded mutating socket event, no route
 without a named access level, no orphaned endpoint but `/metrics`, no debt
-markers in ~51k lines. The defects it did find cluster on one thing nobody had
+markers in the ~51k lines there were that night (~116k now, still none —
+§1). The defects it did find cluster on one thing nobody had
 thought about, which is that **this process can stop while it is in the middle
 of something**, and the boot that puts the machine right has only ever looked
 at containers.
@@ -2576,8 +3217,26 @@ the data.
 
 ### §8.1 and §8.2, and the one thing not checked
 
+> **Closed 2026-09-05, and it was right.** Everything below was written as a
+> warning that the schema was unverified while the code was. It stayed true for
+> five days. When the migrations were finally applied — all 37, against a real
+> Postgres — **two of them were broken**, and neither was one of the seven this
+> note was about: §12.1's `workspace_size` and §2.41's `scaffold_recipes` both
+> wrote `ALTER TABLE "Project"` where the table is `projects`, because the
+> model carries `@@map`. The first `migrate deploy` failed on
+> `relation "Project" does not exist`, and it failed on the one that had been
+> committed and green for a day.
+>
+> The DB-gated suites then ran and passed: **2384 passing, 36 skipped** (§1).
+> So the instruction at the end of this note was correct and following it cost
+> nothing; not following it for five days cost two broken migrations sitting in
+> `main`. The note is kept rather than deleted because the reasoning in it is
+> the reusable part: **a mock cannot be wrong about a unique index, a foreign
+> key, or a table name.**
+
 `pnpm -r typecheck` clean 3/3, `pnpm -r lint` clean 3/3, 1536 server tests and
-1003 web tests passing — all run, not quoted.
+1003 web tests passing — all run, not quoted. *(Those were that day's figures;
+§1 has current ones.)*
 
 **None of the seven migrations has been applied to any database.** Docker was not running
 on this machine, so the DB-gated suites skipped, `plans` has never existed
@@ -2932,9 +3591,12 @@ claims more memory per container than `CONTAINER_MEMORY_MB` is a promise the
 machine cannot keep, and the failure mode is an OOM kill in somebody's terminal
 rather than an honest refusal. Sell capability and capacity, not the hardware.
 
-### 8.1 Entitlements — the keystone
+### 8.1 Entitlements — **shipped 2026-08-31, see §2.22**
 
-**Unblocked. Everything else in this section depends on it.**
+**Was: unblocked, and everything else in this section depends on it.** The
+marker was missing here and on 8.2 until 2026-09-05, while 8.3, 8.6 and 8.7
+next to them carried theirs — so this section read as three of seven shipped
+when it was five. The original entry follows unchanged.
 
 - A `Plan` catalogue with a stable string id (`free`, `pro`, `team`), a label, a
   price in minor units, and the limit columns above. In the database rather
@@ -2956,10 +3618,16 @@ rather than an honest refusal. Sell capability and capacity, not the hardware.
 The verification that matters is that nothing changes: same suite, same
 numbers, with limits arriving by a different route.
 
-### 8.2 The account screen
+### 8.2 The account screen — **shipped 2026-08-31, see §2.22**
 
-**Unblocked. Closes §3.2's "quotas are enforced and never shown", and is the
-reason 8.1 is worth anything.**
+`accountService.getAccountSummary` and `AccountDialog` are both in the tree,
+with the per-project breakdown this row argued for. It has since grown three
+more tabs — API keys (§8.6), Identity (§11.9) and Security (§11.6) — which is
+worth noting because this row is now the place personal settings land by
+default rather than a screen about quota.
+
+**Was: unblocked. Closes §3.2's "quotas are enforced and never shown", and is
+the reason 8.1 is worth anything.**
 
 `GET /account` returning usage, effective entitlements and the per-project
 breakdown; a screen showing them. The breakdown is the half that makes it
@@ -3425,11 +4093,67 @@ those four is about the platform underneath.
       Code extensions, and no amount of work changes that.** Decision 1 says so
       in its last sentence.
 
+      **Route C — make the workspace attachable, and let the user bring the
+      editor.** Added 2026-09-05 by §11.1, *after the spike that §11 said had
+      to be run first*. An sshd in the sandbox image, a key the account owns,
+      and the user's own VS Code, Cursor, Zed or `nvim` attaches directly. §11.0
+      makes the argument; what follows is what actually happened when it was
+      run, because the argument rested on a claim nobody had tested.
+
+      **It works, under this platform's real security posture.** `sshd` starts
+      as uid 1001 with `CapDrop: ["ALL"]`, `no-new-privileges` and tini as pid
+      1, on a high port with a host key in the home directory — no root, no
+      setuid, no privilege separation needed, because the user it authenticates
+      is the user it already runs as. A key-authenticated session runs commands
+      in the workspace.
+
+      **And the expensive rows really do arrive.** The genuine VS Code server
+      (1.136.1) — the same tarball Remote-SSH fetches — downloads, extracts and
+      starts inside that container: extension host agent up, extensions folder
+      initialised, HTTP answering. `ms-python.python` then installs from the
+      marketplace, bringing **Pylance and debugpy** with it. That is 10.7 and
+      10.6, the two most expensive rows in this section, arriving as working
+      software rather than as a prediction.
+
+      **Three costs the spike found that the argument had not.**
+
+      *The image cost is trivial:* `openssh-server` is 7 MB on a 516 MB image.
+
+      *The disk cost is not.* `~/.vscode-server` reached **1.3 GB** after one
+      extension pack. And it lands in the container's **writable layer** —
+      `Binds` covers `/home/sandbox/app` and `/home/sandbox/.cache` and nothing
+      else — which `reconcileOnBoot` and every environment-signature change
+      throw away. As it stands, attaching would re-download 229 MB and
+      re-install every extension on each container rebuild. The fix is one line
+      (a volume for `~/.vscode-server`, exactly as §2.x did for the package
+      cache) but it has to be *in* the estimate, not discovered afterwards.
+
+      *The spike did not test egress.* It ran on the default bridge with a
+      published port, not on `SANDBOX_NETWORK` behind the egress gateway, and
+      that 229 MB download is the first thing a filtered sandbox would refuse.
+
+      What is still true from §11.0's honest list: Route C does nothing on an
+      iPad, it concedes that the browser editor is not where serious work
+      happens, and it leaves 10.10, 10.12 and 10.14 where they were. Nobody has
+      driven a real VS Code *client* through Remote-SSH into this — the spike
+      reproduced what that client does server-side, which is strong evidence
+      and not the same thing.
+
+      **What this does to the decision.** §10 argued Route B is defensible only
+      if multiplayer is the point, *because Route B can never reach 10.7*. That
+      sentence is now false: 10.7 and 10.6 both arrive over SSH, at a cost of
+      7 MB of image and one volume. So staying on Monaco no longer costs you
+      extensions and debugging, and the browser editor is free to be what it is
+      already good at — the thing you open on a machine you do not control. A
+      and C are not exclusive; Codespaces ships both.
+
       Route B is defensible if the multiplayer layer is the point of this
       product and the personal use is a side effect. Route A is defensible if
-      the personal use is the point. What is not defensible is building
-      10.6–10.14 by hand *while undecided*, which is the failure this row
-      exists to prevent.
+      the personal use is the point — **and it is now the more expensive of the
+      two ways to get there**, since C reaches the same two rows without giving
+      up the editor this repository controls. What is not defensible is
+      building 10.6–10.14 by hand *while undecided*, which is the failure this
+      row exists to prevent.
 
 ---
 
@@ -3616,8 +4340,12 @@ Then, whichever way 10.1 goes:
 ~~**10.2 → 10.3 → 10.4 → 10.5.**~~ **All four shipped 2026-09-03** — §2.33
 to §2.36. What is left in this section is 10.1 and the ten rows behind it. ~~Open-a-folder first~~ — done 2026-09-03
 (§2.33), and the reasoning below held: the mount was an afternoon and finding
-every place that assumes this server made the tree was the rest of it. **Next
-is 10.3.** Original note follows.
+every place that assumes this server made the tree was the rest of it.
+~~**Next is 10.3.**~~ Also done, the same day — this line was written between
+two commits and never updated, which is the small version of the failure §7's
+second paragraph is about. **Nothing in this section is next: 10.1 is a
+decision, and the ten rows behind it are waiting on it.** Original note
+follows.
 
 Open-a-folder first because it is the one
 without which none of the rest is a personal IDE — you cannot use an editor on
@@ -3715,10 +4443,29 @@ at — the thing you open on a machine you do not control, to fix one file. Rout
 A and Route C are also not exclusive; Codespaces ships both, which is the
 existence proof that the two-item framing was the accident and not the answer.
 
-- [ ] **11.1 Put Route C in front of the §10.1 decision before it is taken.**
-      Not a build — a paragraph in §10.1 and a re-read of its table. Doing it
-      afterwards is how a route gets chosen against a cost that was never the
-      real one.
+- [x] **11.1 Put Route C in front of the §10.1 decision before it is taken.**
+      Shipped 2026-09-05. The paragraph is in §10.1, and it is written against
+      a spike rather than against an argument — which is what this section's
+      own "what was verified" block insisted on, and it was right to.
+
+      **Running it changed the entry.** Three things the argument had not
+      costed: `openssh-server` is 7 MB, which is cheaper than expected;
+      `~/.vscode-server` is 1.3 GB after one extension pack and lands in the
+      container's writable layer, which every rebuild discards, so attaching
+      would re-download 229 MB each time until it gets a volume; and the spike
+      never touched the egress gateway, which is the first thing that would
+      refuse that download. None of the three would have appeared in a
+      paragraph written from the table.
+
+      **What it proved.** sshd runs as uid 1001 under `CapDrop: ["ALL"]` and
+      `no-new-privileges` with no root anywhere; the real VS Code server starts
+      inside that container; and `ms-python.python` installs with Pylance and
+      debugpy. 10.6 and 10.7 — the two most expensive rows in §10 — arrive as
+      working software.
+
+      Still not a build: nothing shipped into the product. An sshd in the
+      sandbox image needs key management, per-account `authorized_keys` and a
+      way in from outside, which is 11.5.
 
 ---
 
@@ -3797,32 +4544,87 @@ which half.** See 11.2 and 11.10.
 **And one that is not a line on that list but the largest single gap in this
 document.**
 
-- [ ] **11.3 Compose — more than one container per project.**
-      `dockerComposeFile`, `service` and `runServices` all refuse with the same
-      sentence: *"This platform runs one container per project."* That is an
-      architecture statement, not a policy, and it is why this row is separate
-      from 11.2 and cannot be granted by an entitlement.
+- [x] **11.3 Compose — more than one container per project.** Shipped
+      2026-09-05, and built as the shape this row guessed at: **not compose
+      support, but "the project's container, plus the services it declares, as
+      one lifecycle unit"** — §6 decision 4's relationship with the managed
+      database, generalised from one sidecar to several. A `build:` service is
+      named and not started, because the project's own container already is
+      that service, and nothing about how the app container is made changed.
 
-      It matters more than its position in the format suggests. A very large
-      share of real repositories are not "an app" — they are an app, a
-      Postgres, a Redis and sometimes a worker, wired together in
-      `docker-compose.yml`, and `docker compose up` is the documented way to
-      start them. Today such a repository opens in this editor, shows a
-      `docker-compose.yml` with a Docker icon (`fileTypes.ts:209`), and cannot
-      be run at all. The database panel does not close this: it gives a project
-      *a* Postgres this platform manages (§6 decision 4 pairs it with the
-      container's lifecycle), which is a different thing from the four services
-      the repository's own file describes.
+      **It is parsed, not executed, and that is the whole design.** Handing
+      `docker compose` a file out of a cloned repository is handing the daemon
+      `privileged: true`, `network_mode: host`, `pid: host` and
+      `volumes: ["/:/host"]` — an arbitrary-container-run primitive on the
+      host, from a file nobody here wrote. Validating every key first is the
+      only safe version of that, and once every key is validated the file has
+      been parsed anyway. So: a deliberate subset, refused loudly rather than
+      ignored quietly, exactly as `devcontainer.ts` does. A host path as a
+      volume is refused rather than silently rewritten to a named one, because
+      a quietly-relocated data directory is a nastier surprise than a message.
 
-      **Check the shape before starting, because three subsystems assume the
-      singular.** `containerName(projectId)` is one name per project;
-      `getPreviewTarget` and `publishedPorts` resolve ports against one
-      container; the idle reaper and `stopAllContainers` enumerate by a single
-      prefix. The honest first version is probably not general compose support
-      but **"the project's container, plus the services it declares, as one
-      lifecycle unit"** — which is precisely the relationship §6 decision 4
-      already built and argued for the database container, generalised from one
-      sidecar to several.
+      **Each project's services get a private network, and that is the
+      load-bearing decision.** The obvious build puts them on the shared
+      sandbox bridge with a network alias equal to the service name, so the app
+      reaches `db:5432` as compose promises. Every sandbox on this host shares
+      that bridge — so two projects both declaring `postgres` would share the
+      alias, Docker's DNS would round-robin between them, and one project's app
+      would *intermittently* connect to another project's database. That
+      network is `Internal: true` unconditionally, and not for tidiness: the
+      project's container joins it as a SECOND network, and a routable one
+      would be a hole straight through `SANDBOX_EGRESS_FILTERED`.
+
+      **Two things only running it could have found, and both were wrong in
+      code the tests were happy with.**
+
+      *`CapDrop: ["ALL"]` breaks every official datastore image.* Postgres
+      exits 1 with *"failed switching to 'postgres': operation not
+      permitted"*, Redis exits 127 with *"setpriv: setresuid failed"* — both
+      start as root, prepare a data directory and drop to their own user. Five
+      capabilities go back: CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID. Still
+      tighter than Docker's default set, and the omissions are pinned by a test
+      as well as the additions — no NET_RAW, no MKNOD, and no
+      NET_BIND_SERVICE, so nothing here can take a privileged port.
+
+      *Trashing a project destroyed its database.* `removeServices` was wired
+      into `removeContainer`, which is the path the TRASH takes — against this
+      repository's own rule, stated in `projectService`: *"Held: the tree, the
+      row, the managed database's volume. Restoring is worthless without the
+      data."* A compose file's `pgdata` is that data. Split into
+      `removeServices` (containers and network, rebuilt from the file in
+      seconds) and `destroyServices` (the volumes, purge only), mirroring
+      `managedDatabaseService.stop` / `.destroy`.
+
+      **Proven end to end** against a real project: an app/Postgres/Redis file
+      with a deliberately hostile fourth service, `db:5432` and `cache:6379`
+      resolving and open from inside the project's container, PostgreSQL 17.11
+      answering a real query on the file's own credentials, the sidecar unable
+      to reach anything off its network, and a row written, trashed, restored
+      and read back intact — then purged, taking the volume with it.
+
+      **Off by default where anything is shared.** It is the one setting that
+      multiplies one project into several containers, so
+      `MAX_CONCURRENT_CONTAINERS` would quietly stop meaning what it says on a
+      shared host; on by default in development and single-user mode, which is
+      the argument `CONTAINER_MEMORY_MB` and `LSP_ENABLED` already make. Off,
+      the file is still read and project settings still say what would have
+      run.
+
+      **The three subsystems this row warned about were not the problem.**
+      `containerName`, `getPreviewTarget`/`publishedPorts` and the reapers all
+      still assume one container per project and all still hold, because the
+      project's container is still the only one they are about. What did need
+      wiring is the lifecycle in both directions — start, stop, reap, trash,
+      purge, shutdown and the boot sweep — and the boot sweep is the one that
+      would have been missed: these are not named `rc-project-`, so nothing
+      else on the host would ever have cleaned them up.
+
+      **What is deliberately not supported**, and each is refused with a reason
+      the user can act on: `build` for a second service, `env_file`, `extends`,
+      `profiles`, `deploy`, secrets and configs, `container_name`, host-path
+      volumes, host ports, and a `command` with shell syntax in it — that last
+      because the command goes to the daemon rather than to `sh`, and running
+      half of what a file asked for is worse than refusing it.
 
 ---
 
@@ -3927,44 +4729,217 @@ custom domains* — the third origin, the published sites. This is about reachin
 **the editor itself**, which needs one hostname and one certificate and none of
 the per-domain challenge machinery §9.2 split out.
 
-- [ ] **11.5 A documented way in from outside, and the smallest one that is
-      honest.** A reverse proxy terminating TLS in front of the API and web
-      origins, one name, and a written answer for how it is obtained — Caddy
-      with a DNS challenge, or a tunnel (Tailscale, Cloudflare) that sidesteps
-      certificates and inbound ports entirely and is very likely the right
-      answer for a laptop behind NAT. What makes this a row rather than a
-      README is that the *app* has opinions about it: `COOKIE_SECURE`,
-      `COOKIE_SAME_SITE` and `WEB_ORIGIN` all change meaning once there is a
-      real origin, and the preview origin and the deployment origin have to
-      come along or half the product 404s.
+- [x] **11.5 A documented way in from outside, and the smallest one that is
+      honest.** Shipped 2026-09-05. The row guessed that the app would have
+      opinions about being exposed; it had one nobody had noticed, and it is a
+      defect rather than a setting.
 
-- [ ] **11.6 Re-read the auth surface for an editor on the open internet.**
-      §10.3's single-user mode was designed for a laptop and is honest about it,
-      and it got the central thing right — *"a server that issued one to anybody
-      who asked would be an unauthenticated server on whatever network it is
-      reachable from"*, so sign-in stays even at n=1. 11.5 is what makes that
-      sentence load-bearing rather than cautious.
+      **Previews would have been dead on arrival behind any reverse proxy.**
+      The preview cookie is set by the API and spent on the preview origin.
+      Locally those two differ by PORT — and cookies ignore ports, so
+      `localhost:3000` and `localhost:3101` share one jar and the cookie
+      arrives for free. Behind a proxy they differ by NAME, at which point a
+      host-only cookie set on `api.example.com` is never sent to
+      `preview.example.com`, `previewGuard` answers *"No preview session"* for
+      every request, and **nothing anywhere reports it**: the browser stores
+      the cookie and silently declines to send it. Signed in, editor working,
+      preview pane empty, no line in any log. `COOKIE_DOMAIN` closes it, on
+      that cookie only — the refresh cookie stays host-only, because nothing
+      but the API ever presents it and widening a session credential to every
+      sibling name buys nothing.
 
-      What it does not have: **`grep -ril "totp\|twoFactor\|mfa" apps/server/src`
-      returns nothing.** One password, rate-limited (`auth.ts` has
-      `addressLimiter` and `refreshLimiter`, which is more than most), standing
-      between the internet and a shell on your machine with your source tree
-      mounted. On a laptop that is proportionate. Exposed, the threat model is
-      not "somebody reads my code", it is `docker exec`, and this deserves
-      re-deciding rather than inheriting.
+      **Demonstrated rather than reasoned about.** A real server on three
+      hostnames and a cookie jar implementing the same RFC 6265 rules a browser
+      does: with the fix, `preview_token` is stored for `.rc.test` while
+      `refresh_token` stays host-only to `api.rc.test`, and a preview request
+      carrying that jar gets past the auth gate. Remove the `Domain` attribute
+      and the same request is `401`. The bug and the fix, both observed.
 
-- [ ] **11.7 The laptop lid.** No service worker, no manifest —
-      `apps/web/public` is `favicon.svg` and `vite.svg`. A cloud editor is used
-      on trains and on hotel wifi, and today a dropped connection is a blank
-      page rather than a degraded one. Not offline editing, which is a CRDT
-      argument this document does not need: an installable shell, a legible
-      "you are offline" state, and not losing the buffer.
+      **The `Set-Cookie` a browser dislikes is the failure mode of this whole
+      area**, so the answer is a boot check rather than a paragraph.
+      `config/exposure.ts` reads the three origins, the cookie policy and the
+      proxy setting together and refuses to start on nine combinations that
+      cannot work — two hostnames with no `COOKIE_DOMAIN`, `SameSite=None`
+      without `Secure`, `Secure` on plain HTTP away from loopback, a
+      `COOKIE_DOMAIN` that is an IP or a single label or does not cover the
+      hosts it must, and the three origins collapsing into each other. Each
+      exit names the consequence, not the rule.
 
-      The layout half is further along than expected and should not be
-      re-derived: `index.css` already turns the side and bottom panes into
-      overlay drawers below 900px, drops the drag dividers, and has a scrim
-      (lines 1194–1235). What is untested is Monaco itself under a touch
-      keyboard, which is the part that decides whether the iPad case is real.
+      **Published sites must go on a second registrable domain, and that is
+      now enforced.** §10 already argued the deploy origin cannot be the
+      preview origin, because a preview is authenticated and a site is public.
+      `COOKIE_DOMAIN` created a version of that nobody had: a cookie scoped to
+      the shared parent is sent to every sibling, and a published site is
+      arbitrary user code behind a name this platform hands out. Refused at
+      boot.
+
+      **The proxy-hops setting gets a second guard, because it cannot be
+      checked at boot.** A plain-HTTP proxy on a LAN is indistinguishable from
+      no proxy at all, so `middlewares/proxyHeaderWarning.ts` waits for the
+      evidence and says so once when a forwarded header arrives with
+      `TRUSTED_PROXY_HOPS=0` — the setting whose absence makes every rate limit
+      key on the proxy, so one account's failed sign-ins throttle everybody. It
+      names the header without logging what was in it.
+
+      **The written answer gives the tunnel first.** `docs/EXPOSING.md` puts
+      Tailscale or Cloudflare ahead of the proxy, because for a laptop behind
+      NAT that is not a lesser answer — it is a stronger one, reachable only by
+      devices already on your own network, with no inbound port and no
+      certificate to renew. `deploy/Caddyfile` and `docker-compose.expose.yml`
+      are the proxy route, as a working overlay on the LAN stack rather than a
+      fourth copy of it, and the overlay unpublishes the base file's plain-HTTP
+      ports — an API answering beside the TLS one is a way past every cookie
+      and CORS decision above it.
+
+      **Not verified: the Caddy route against a real domain.** The Caddyfile is
+      validated by Caddy itself and the compose overlay resolves, but ACME
+      issuance, HTTP/3 and the WebSocket upgrade through Caddy have not been
+      exercised end to end, and the wildcard-certificate build that published
+      sites need is described rather than built. `docs/EXPOSING.md` says so in
+      its own words.
+
+      One thing the row asked for that this deliberately does not do: it does
+      not make exposure safe. It makes it possible to do deliberately. The
+      document opens by saying what is actually being published — an editor
+      running arbitrary code on a host whose Docker socket is mounted into the
+      server — and asks for `SANDBOX_EGRESS_FILTERED` and the second factor
+      before the name exists.
+
+- [x] **11.6 Re-read the auth surface for an editor on the open internet.**
+      Shipped 2026-09-05. §10.3's single-user mode was designed for a laptop
+      and is honest about it, and it got the central thing right — *"a server
+      that issued one to anybody who asked would be an unauthenticated server
+      on whatever network it is reachable from"*, so sign-in stays even at n=1.
+      11.5 is what makes that sentence load-bearing rather than cautious, and
+      this is the rest of the thought: exposed, the threat model is not
+      "somebody reads my code", it is `docker exec` on the machine with the
+      source tree mounted.
+
+      TOTP, offered and **not enforced**. On a laptop the network is the
+      protection and a phone in the way, and this platform is in no position to
+      decide which of the two somebody is running. What it can do is make the
+      stronger option available and its state legible.
+
+      The algorithm is forty lines in `lib/totp.ts` rather than a dependency,
+      and the reason is proportion: the authentication path is the one place
+      where a supply-chain compromise is indistinguishable from having no
+      authentication at all. SHA-1, six digits, thirty seconds — not the
+      strongest choices but the ones every app implements, because Google
+      Authenticator ignores the `algorithm` and `digits` parameters of an
+      otpauth URL outright, so a server using SHA-256 would produce codes that
+      simply never match with nothing to say why. **Checked against all six of
+      RFC 6238's own test vectors**, which is the only test in that file that
+      could have caught a wrong implementation: everything else would pass just
+      as happily against an algorithm agreeing with itself and with nothing
+      else in the world.
+
+      Four things carry the design, and each is a way second factors usually go
+      wrong.
+
+      **An unconfirmed enrolment is not protection.** The row exists from the
+      moment somebody opens the setup screen, and treating that as a gate would
+      lock the account behind a secret nobody wrote down. `requiresSecondFactor`
+      asks for `confirmedAt`, not for the row.
+
+      **A password alone produces nothing usable.** `login` answers a
+      *challenge* — a distinct shape with no user and no token in it — and
+      writes no cookies. The challenge is a JWT with its own `typ`, so
+      presenting it as a bearer token is refused by the same check that already
+      refuses the preview cookie; that check exists because those two were once
+      interchangeable, and this is the third token to benefit from it. The
+      account is named by the signed challenge and never by the request body,
+      or the second step would be a way to trade a code for a session on
+      anybody's account.
+
+      **A code is spent when it is used.** A TOTP code is valid for a whole
+      window, so without `lastUsedStep` one read over a shoulder — or captured
+      in front of a phishing page — works again for the next thirty seconds.
+      The confirming code counts too, so the code that enabled the factor
+      cannot also be the one that signs you in.
+
+      **The two operations that make an account weaker re-check the password.**
+      Turning it off, and minting a fresh set of recovery codes — the second
+      matters more, because ten permanent bypasses leave nothing looking wrong.
+      An account with no password at all (GitHub sign-in) is refused rather
+      than waved through: "there is nothing to check" is not "the check
+      passed".
+
+      Ten recovery codes, hashed rather than sealed because they are only ever
+      compared — the same argument `user_tokens` already makes. Without them a
+      lost phone is a permanently lost account on a deployment whose whole
+      point is that there is no support desk. **And on a single-user
+      deployment they are the only way back**: `SINGLE_USER_PASSWORD` and a
+      restart rewrite the password and do nothing about this. The panel says so
+      before anybody turns it on, which is where that belongs rather than in a
+      document read afterwards.
+
+      Verified end to end against the real database: sealed at rest, an
+      unconfirmed row not treated as protection, a confirming code refused as a
+      replay, the next window's code accepted and then spent, a recovery code
+      good exactly once. What is NOT verified, and cannot be from here: that a
+      real phone agrees. The RFC vectors are the evidence for that, and they
+      are good evidence, but nobody has scanned the QR.
+
+- [x] **11.7 The laptop lid.** Shipped 2026-09-05 — the three things the row
+      asked for, and the third turned out to be the one that mattered.
+
+      **Not losing the buffer**, which was worse than this row knew. Writes are
+      debounced, and every flush ended at `emit?.(relPath, data)` — an optional
+      call quietly doing the work of an error handler. Be precise about what
+      that lost, because it is less than it looks and the difference is why
+      this is two mechanisms rather than one: **socket.io already buffers**, so
+      a brief drop with the editor still mounted was always survivable. What
+      was not survivable is everything outside one socket's lifetime — the
+      emitter being uninstalled on unmount (reachable by closing a tab with a
+      keystroke on the clock), the socket being rebuilt by navigating away and
+      back, reconnection attempts running out, and any reload or crash at all,
+      since that buffer is in memory. So a write with nowhere to go is now kept
+      and drained when a connection returns, and every queued buffer is
+      mirrored to storage from the moment it is typed, cleared only when the
+      SERVER confirms the save.
+
+      **Nothing is ever written back to disk on its own.** Recovered work is
+      offered, reopened into the tab marked unsaved, and saved by the ordinary
+      path the user can see. Silently replaying a local buffer over a file
+      somebody else has since edited would be a worse failure than the one
+      being fixed, and it is what "restore my work" quietly means if nobody
+      decides otherwise.
+
+      **A legible offline state.** `navigator.onLine` and the socket's own
+      state are tracked as two facts and kept apart, because the first is a
+      claim about the network interface rather than about this server: it goes
+      false in a tunnel and stays true on hotel wifi that has stopped routing.
+      Conflating them gives the wrong message in both directions. A disconnect
+      reads as "reconnecting" because socket.io retries, except when the server
+      hung up deliberately, which it does not.
+
+      **An installable shell**: a manifest, PNG icons rasterised from the
+      existing `favicon.svg` by forty lines of signed-distance maths and a
+      hand-rolled PNG encoder rather than a build dependency, and a
+      hand-written service worker. Not generated: a build-time precache
+      manifest buys a first-visit-offline guarantee this product cannot use
+      anyway, since the first visit has to reach the server to sign in. What is
+      wanted is that a RETURNING visit survives. Navigations are network-first
+      so a deploy still reaches people; `/api/`, `/preview/` and `/socket.io/`
+      are never cached, because a cached 200 for a request that should have
+      401'd is a security bug rather than a stale page.
+
+      **What is NOT verified, and it is the service worker.** Neither browser
+      available here can register one — a one-line control worker fails
+      identically to this one with "An unknown error occurred when fetching the
+      script", which is the environment rather than the code. What was checked:
+      the registration path runs and calls `register`, the script parses, the
+      manifest is valid and its declared icon sizes match the PNGs' actual
+      IHDR bytes, and all three files build and serve. The caching behaviour
+      itself has never run. **Load it in a real browser before believing this
+      row**, in the manner §5 requires.
+
+      The layout half was further along than expected and was not re-derived:
+      `index.css` already turns the side and bottom panes into overlay drawers
+      below 900px, drops the drag dividers, and has a scrim (lines 1194–1235).
+      **Monaco under a touch keyboard is still untested**, which is the part
+      that decides whether the iPad case is real, and it is not part of what
+      shipped here.
 
 ---
 
@@ -4010,42 +4985,156 @@ the per-domain challenge machinery §9.2 split out.
       and `/notifications` already use, which is the only kind nobody can
       forget to apply.
 
-- [ ] **11.9 An identity that follows you into the container.**
-      Two halves, both absent. **Dotfiles** — every container comes up with a
-      stock `/bin/bash` and no aliases, no prompt, no `.vimrc`, no `.gitconfig`
-      beyond what the platform writes; the devcontainer ecosystem's answer is a
-      personal dotfiles repository cloned into every workspace, and at n=1 "it
-      comes up as *my* shell" is a large fraction of what personal means.
-      **Commit signing** — `grep` for `gpgsign`, `ssh-agent` and
-      `SSH_AUTH_SOCK` over `apps/server/src` returns nothing, so commits made
-      here structurally cannot be signed. If 11.1's Route C ships an agent
-      socket, this comes most of the way with it, which is the only dependency
-      between any two rows in this section.
+- [x] **11.9 An identity that follows you into the container.** Shipped
+      2026-09-05, both halves. **Dotfiles.** Three settings on the
+      account, deliberately the same three VS Code exposes, cloned into every
+      container on creation and applied before the devcontainer's own
+      lifecycle commands: a `postCreateCommand` may reasonably assume the
+      shell it was typed for. Best-effort like that lifecycle is, and for the
+      same reason — this is arbitrary code out of a repository the platform
+      does not control, so a broken one leaves a working container and a
+      readable log rather than a project that will not open.
+
+      Three refusals are the whole of the security argument, and each is a
+      different risk. **https only**, because an `ssh://` clone would
+      authenticate as the SERVER with whatever key the host happens to have.
+      **No credentials in the URL**, because that is a password, and it would
+      sit in a column in the clear. **Not `/home/sandbox/app`**, because that
+      is the bind mount: dotfiles cloned there land in the user's repository,
+      on the host disk, and against their quota, and would be found later as
+      an unexplained `dotfiles/` directory in a commit. A private dotfiles
+      repository therefore fails rather than working, which is the intended
+      answer — the alternative is handing a GitHub token to a clone running
+      inside a container full of somebody else's dependencies.
+
+      Two things were found by running it rather than by reading it, which is
+      §11's own closing warning holding again. `~/` expanded to
+      `/home/sandbox/`, which is not equal to the home directory and does
+      start with it, so it walked straight past the refusal of the home
+      directory; the trailing slash is now stripped before the comparisons
+      instead of after. And the installer detection was a shell function
+      called as an `if` condition — where `set -e` is suspended — so an
+      `install.sh` that FAILED read as "no installer found" and fell through
+      to the symlinking fallback as though nothing were wrong. It is an
+      if/elif chain now. Both were caught by tests; the whole script was then
+      run in a real container against a real repository, which is what proved
+      the linker skips `.git`, refuses to clobber a real `~/.bashrc`, and is
+      safe to re-run — it runs on every container creation, not once.
+
+      **Commit signing — shipped 2026-09-05.** SSH signatures rather than GPG,
+      which is what GitHub, GitLab and Gitea all accept now and what needs no
+      keyring, no agent and no daemon inside a sandbox. An ed25519 key is
+      pasted once, sealed with the same box the push tokens use, and used at
+      commit time; the public half is derived and shown so it can be pasted
+      into GitHub, without which a correctly signed commit still reads as
+      "Unverified" and looks like a failure of this feature.
+
+      Three decisions are worth the ink. The key is written to a private
+      temporary directory under `/tmp` and removed by a `trap` whether the
+      commit worked or not — under `/home/sandbox/app` it would have been in
+      the user's repository, on the host disk, and in `git status`. Nothing is
+      interpolated into that script: the key, the author and the MESSAGE all
+      arrive as environment variables, so a commit message containing a quote,
+      a newline or a `$(...)` is text rather than a command, and the key stays
+      out of `/proc` for every process not owned by the container's user —
+      the same property `pushRemote` already holds for its token. And the
+      signing identity is the COMMITTER's, not the project owner's, for the
+      same reason the attribution already is: a signature is a claim about who
+      made this commit, and signing a collaborator's commit with the owner's
+      key would be a false one.
+
+      Two refusals, both at the point of paste rather than at the first commit.
+      A passphrase-protected key is refused because `ssh-keygen -Y sign` would
+      ask for the passphrase, nothing is at the other end of a `docker exec` to
+      answer, and the commit would HANG rather than fail. And signing cannot be
+      turned on without a key, because "signing is on" with nothing to sign
+      with is a state the account screen could only describe as a bug. Reading
+      those two facts needs the OpenSSH private-key header parsed by hand:
+      Node's `createPrivateKey` throws `DECODER routines::unsupported` on a
+      perfectly good ed25519 key, so it is no help at all. The public half is
+      derived from that same header rather than asked for, and was checked byte
+      for byte against what `ssh-keygen` itself wrote.
+
+      `openssh-client` had to be added to all three sandbox images. Git's SSH
+      backend shells out to `ssh-keygen`, and without it git says
+      "cannot run ssh-keygen" and then "failed to write commit object" — two
+      messages that name a symptom two steps downstream. With a bad key it says
+      "gpg failed to sign the data", naming a tool that is not involved at all.
+      Both phrasings were seen in a real container and both are translated into
+      one sentence that says the thing a person needs: the commit was not made,
+      and the work is still staged.
+
+      Proven by running it. A real project, a real container and the real
+      service path produce a commit that `git log --show-signature` calls a
+      **Good signature**, with a multi-line message and an apostrophe intact,
+      nothing left in the workspace, the key at rest as ciphertext — and, with
+      signing switched off, an ordinary unsigned commit rather than a refusal.
+
+      What is still absent, and deliberately: nothing forwards an `ssh-agent`.
+      A key pasted here is a key this server holds. If 11.1's Route C ships an
+      agent socket, that becomes the better answer and this becomes the
+      fallback — which is the dependency this row always named.
 
 ---
 
 ### What was verified for this section
 
-Checked against the tree on 2026-09-05, in the manner §5 requires:
+Checked against the tree on 2026-09-05, in the manner §5 requires.
 
-- `apps/server/src/index.ts:83` — `createServer(app)`, `node:http`. No TLS.
-- `devcontainer.ts:88–110` — the ten refusals quoted are the actual strings.
-- `containerManager.ts:842–885` — the reaper's condition is
-  `activeAttachments === 0` and `CONTAINER_IDLE_MINUTES`, default 20
-  (`env.ts:408`), and it calls `onProjectReaped` for the database pair.
-- `searchService.ts:120` — `searchProject` is the only exported search.
+**Re-checked at the end of that day, after five of these rows shipped.** Four
+of the eight facts below stopped being true within hours of being written,
+which is not a criticism of the reading — it is what a section does when it is
+acted on the same week. Each is marked rather than silently corrected, because
+which of them changed *is* the record of what shipped.
+
+- `apps/server/src/index.ts:85` — `createServer(app)`, `node:http`. **Still no
+  TLS in this process, and that is now the answer rather than the gap**: 11.5
+  put TLS in Caddy in front of it, which is where it belongs — a Node process
+  holding a private key and an ACME client is strictly more to get wrong.
+  (Line 83 → 85.)
+- `devcontainer.ts:119–140` — the ten refusals quoted are the actual strings.
+  **Still ten, and two of them changed.** `mounts` is no longer unconditional:
+  11.2 made it a plan capability, so the same map yields a shorter refusal list
+  under the `personal` plan. And `dockerComposeFile`/`service`/`runServices` no
+  longer say *"This platform runs one container per project"* — 11.3 made that
+  sentence false, so they now refuse the devcontainer spec's compose
+  INTEGRATION and point at the project's own compose file, which is read
+  separately. (Lines 88–110 → 119–140.)
+- The idle reaper — **changed by 11.4.** It was `activeAttachments === 0` and
+  `CONTAINER_IDLE_MINUTES`, default 20 (`env.ts:408`); it now asks
+  `idleAllowanceMs(projectId)` (`containerManager.ts:1081`), which the personal
+  plan can answer with "never". It still calls `onProjectReaped` for the
+  database pair.
+- `searchService.ts` — **changed by 11.8.** `searchProject` was the only
+  exported search; `searchAcrossProjects` is now beside it at line 197, which
+  was the whole of that row.
 - `grep -ril "totp|twoFactor|mfa"` over `apps/server/src` — no hits.
-- `grep -rn "gpgsign|SSH_AUTH_SOCK|ssh-agent"` over `apps/server/src` — no hits.
-- `apps/web/public` — two SVGs, no manifest, no service worker.
+  **Changed by 11.6**, which shipped TOTP that day: `lib/totp.ts`,
+  `service/twoFactorService.ts` and a `user_two_factor` table.
+- `grep -rn "gpgsign|SSH_AUTH_SOCK|ssh-agent"` over `apps/server/src` — no
+  hits. **Half changed by 11.9**: `gpg.format=ssh` and `user.signingkey` are
+  both in `gitService.ts` now. `ssh-agent` and `SSH_AUTH_SOCK` still return
+  nothing, and that half is deliberate — a key pasted here is a key this server
+  holds, and agent forwarding is 11.1's to bring.
+- `apps/web/public` — two SVGs, no manifest, no service worker. **Changed by
+  11.7**, which added a manifest, three PNG icons, an apple-touch-icon and
+  `sw.js`.
 - `index.css:1194` — the ≤900px drawer layout exists, contrary to what a
   section about mobile would otherwise have assumed.
-- `apps/server/templates` — 13, as §10 says.
+- `apps/server/templates` — 13, as §10 says. **Still 13**: §2.41 added a
+  `scaffold_recipes` table beside them rather than more directories, which is
+  the point of that row.
 
-**Not verified, and load-bearing for 11.1:** nobody has put an sshd in a
-sandbox image and attached a real editor to it. The claim that 10.6 and 10.7
-"arrive complete" is how Remote-SSH works elsewhere, not something this
-repository has demonstrated. It is a day's spike and it should be run **before**
-11.1's paragraph is written into §10.1, because the whole argument rests on it.
+**~~Not verified, and load-bearing for 11.1~~ — run 2026-09-05, and it held.**
+This said nobody had put an sshd in a sandbox image and attached a real editor
+to it, and that the spike had to happen *before* 11.1's paragraph went into
+§10.1. It did, in that order, and the insistence earned its keep: the spike
+found three costs the argument had missed — see 11.1 and §10.1. sshd runs
+unprivileged under the full posture, the genuine VS Code server starts inside
+the container, and `ms-python.python` installs with Pylance and debugpy.
+**What remains untested** is a real VS Code client driven through Remote-SSH
+(the spike reproduced what it does server-side), and the whole thing behind the
+egress gateway rather than on the default bridge.
 
 **A caution, in the spirit of §4 and of §10's own closing note.** §10 warned
 that it had not been validated by anybody using this as their daily editor for
@@ -4060,3 +5149,219 @@ the code, and none is the kind of thing that appears on a roadmap. **The most
 likely error in this section is not a wrong row; it is that the container layer
 holds more of these, and they are found by running the thing rather than by
 writing about it.**
+
+---
+
+## 12. What a cloud machine is for
+
+Written 2026-09-05, the same day as §11 and out of the same reading. §11 asked
+what the *sandbox* assumes that stops being true at n=1 and found seven things.
+This section is what is left after that: **four capabilities that are not
+multi-tenant posture at all, and are simply absent.** They did not appear in
+§10 because §10 was written against the parity ledger — it asks what VS Code
+does that Monaco cannot — and none of these is an editor feature. They did not
+appear in §11 because §11 reads refusals and policies, and an absence has no
+refusal string to find.
+
+The organising question is narrower than §10's and §11's, and it is the one a
+person actually asks when deciding to keep a workspace on a server instead of
+on the laptop in front of them: **what can this machine do that the laptop
+cannot?** Everything below is an answer to that and nothing below is an answer
+to anything else. That is also the honest ceiling on this section — none of it
+makes the editor better, and somebody who wants a better editor should read
+§10, or §11.0, which argues the cheapest route to most of §10.
+
+**One correction, recorded because this section exists to be read later.** An
+earlier reading of the tree said container CPU and memory were deployment-wide
+constants with no notion of a personal deployment. That was wrong: `env.ts:382`
+and `env.ts:430` already read `unshared ? 2048 : 512` and `unshared ? 2 : 0.5`,
+which is §10.5's sole-tenant flag doing exactly what §10.4 said it should. The
+gap is real but a size smaller than first stated, and 12.1 is written against
+what is actually there.
+
+---
+
+- [x] **12.1 A workspace that is not the same size as every other
+      workspace.** Shipped 2026-09-05 — see §2.38. Original note follows.
+
+      The strongest row here, and the only one that is about the *reason* to
+      use a server at all.
+
+      `containerManager.ts:593–597` sizes every project container from
+      `env.CONTAINER_MEMORY_MB` and `env.CONTAINER_CPUS`. §10.5's `unshared`
+      flag already raises those to 2048 MB and 2 CPUs on a personal deployment,
+      so the multi-tenant default is not the problem. **The problem is that
+      there is one number.** Every workspace on the host is the same size, and
+      the thing a cloud machine is *for* — the Rust workspace that wants 8 GB
+      while eleven others idle at 512 MB — cannot be expressed.
+
+      **Read §6 decision 15 carefully before building this, because it is
+      nearly but not quite in the way.** Decision 15 says a plan may promise
+      more of what the platform allocates and must never promise more of what
+      the host has: a "Pro" tier claiming more memory per container than the
+      machine can give is a promise kept by an OOM kill in somebody's terminal.
+      That forbids *selling* a size. It does not forbid a workspace differing
+      from its neighbour, and the two have been treated as one question because
+      only the first was ever asked. The personal case has no tenant to
+      over-promise to; the constraint is arithmetic against one host, which is
+      a sum this server can actually do.
+
+      Which suggests the shape: a per-project size, defaulting to today's
+      constant, refused at the point of setting it if the sum of the sizes of
+      what is *currently running* would exceed what the host has — not a plan
+      entitlement, and not a promise made in advance. `MAX_CONCURRENT_CONTAINERS`
+      is the existing crude version of that sum and would become redundant.
+
+      **Second call site, and it is the one that would be missed.**
+      `containerManager.ts:1187` computes `memoryLimitBytes` for the stats
+      panel from the same global constant. A per-workspace size that did not
+      reach it would show every project a ceiling that is not its own, which is
+      worse than showing none — §2.22's argument about a limit that appears on
+      no pricing page, in a different costume.
+
+- [x] **12.2 Build before somebody is waiting.** Shipped 2026-09-05 — see
+      §2.39, which took the running-workspace half and split the rest out as
+      12.5. Original note follows.
+
+      `warmStart.ts` exists and
+      skips the redundant install on a container that already has one, which is
+      the half of this that was worth doing first. What does not exist is
+      anything that builds **ahead of** a session: the first open of a
+      workspace after a dependency change pays the full cost with a person
+      watching it.
+
+      The mechanism is mostly present rather than mostly absent, which is what
+      makes this cheap: there is a scheduler (§2.13), a run reconciler, and a
+      warm-start path that already knows what "already installed" means. What
+      is missing is a trigger and a policy — build on push, or build on a
+      schedule, or build when a `devcontainer.json` changes — and a decision
+      about what happens when a prebuild fails, which should be *nothing
+      visible*: a prebuild that announces its own failure to somebody who was
+      not waiting for it has converted a saved minute into an interruption.
+
+      **Not to be confused with §3.3's process snapshots**, which is a
+      different and genuinely blocked thing. A prebuild produces a warm
+      *image*; a snapshot resumes a running *process*. This row needs no new
+      mechanism and that one needs a mechanism nothing here resembles.
+
+- [ ] **12.5 Start a stopped workspace to build it.** Split out of 12.2 on
+      2026-09-05, the way 11.10 was split out of 11.2 — and for the same
+      reason: building it revealed which half was a line of code and which was
+      a decision nobody has taken.
+
+      12.2 prebuilds workspaces that are **already running**, which covers the
+      case it was written for (a `git pull` that adds a dependency while you
+      have the project open) and not the one its own title describes. The first
+      open of a workspace that has been stopped all week still pays the full
+      install with somebody watching.
+
+      **Three things collide here and none of them is code.** Starting a
+      container to build it spends memory the capacity gate is rationing, on
+      work nobody asked for, at a moment the host may want that memory for a
+      workspace somebody is actually opening. It fights the idle reaper, which
+      exists to stop exactly this. And on the personal plan, whose workspaces
+      never sleep (§11.4), nothing would stop it again afterwards — so a
+      prebuild would silently convert a stopped workspace into a running one,
+      which is a change to what the machine costs rather than to how fast it
+      opens.
+
+      The shape of an answer is probably: only when the host is below some
+      fraction of its budget, only for workspaces opened recently enough to be
+      likely to be opened again, and stop it afterwards unless the plan says
+      otherwise. All three of those are numbers somebody has to choose, and
+      choosing them without having watched a real host is how a background task
+      becomes the reason a machine is always busy.
+
+- [x] **12.3 Notebooks.** DONE (2026-09-05), see 2.42. Was: zero occurrences
+      of `notebook` or `ipynb` anywhere in `apps/` or `packages/`. It appears twice in this document, both times
+      inside a parenthetical list of things VS Code has, and has never been a
+      row.
+
+      Listed here rather than in §10 because it is not editor parity in the
+      sense §10 means: a notebook is a document format with an execution model
+      attached, and the execution model is a kernel process in the container —
+      which is this section's subject and not Monaco's. **Worth doing only if
+      you write Python**, and worth saying so plainly rather than carrying it
+      as a neutral gap: for somebody who does not, it is a large feature with
+      no user, and this file has enough of those.
+
+      The honest note is that the sandbox already runs Python and already has
+      an LSP for it (§6 decision 3), so the distance is a kernel protocol and a
+      renderer, not a language.
+
+- [ ] **12.4 A machine with hardware the laptop does not have.** Zero hits for
+      `gpu`, `nvidia`, `cuda` or `DeviceRequests`. Dockerode supports device
+      requests; nothing here passes any.
+
+      Ranked last deliberately, and kept because it is the *purest* form of
+      this section's question — it is the one thing on this page a laptop
+      cannot answer by being a better laptop. It is also the row most likely to
+      be somebody else's product: renting a GPU is a market with incumbents,
+      and a personal IDE that grew one would be competing on the hardware
+      rather than on the editor.
+
+      **Blocked on hardware, not on a decision**, which puts it in §3.3's class
+      rather than this one's — and it is here rather than there only because
+      §3.3 is about this platform's gaps and this is about a machine's. If the
+      host has no GPU the row is unstartable, and if it has one the work is a
+      `DeviceRequests` entry and a plan flag, which is an afternoon.
+
+---
+
+### The pattern these four share, and what it predicts
+
+None of these was found by reading the code. §11's seven came out of
+`devcontainer.ts`'s refusal list, the reaper's condition and `index.ts:83` —
+all of them things the tree says out loud. **These four came out of asking what
+is not there**, which is a question no grep answers and no test fails.
+
+That is worth recording because it is the third distinct method this document
+has used, and the three find different things:
+
+| Method | Finds | Sections |
+|---|---|---|
+| Reading two shipped features against each other | defects | §2.16, §2.20, §2.21 |
+| Reading a policy and asking who it is for | posture that expired | §10.4, §11 |
+| Asking what a category has that this does not | absences | §12 |
+
+The third is the weakest of the three and should be trusted least: it produces
+long lists cheaply, most of an ecosystem's features are not wanted by any
+particular person, and the only defence is the one applied above — say who each
+row is for, and say plainly when the answer is "possibly nobody here". Two of
+these four rows carry that caveat in their own text.
+
+### What was verified for this section
+
+Checked against the tree on 2026-09-05, in the manner §5 requires — and
+**re-checked at the end of that day**, after 12.1 and 12.2 both shipped. Three
+of the six are now the history of those two rows rather than facts about the
+tree, and they are marked rather than corrected away, because which ones
+changed is the record of what was built.
+
+- **Changed by 12.1.** It was `containerManager.ts:593–597`, where `Memory`,
+  `MemorySwap` and `NanoCpus` all read the global `env` values with no
+  per-project term. They now read `size.memoryMb` and `size.cpus`
+  (`:625`, `:628`, `:629`), resolved per project by `workspaceSizeService`.
+- **Changed by 12.1.** The second call site named in that row — the bare
+  `env.CONTAINER_MEMORY_MB` — is now the FALLBACK inside `resolveSize`
+  (`:526`), which is where a project nobody has sized still gets the
+  deployment's default. That was the point: one place decides, and the old
+  constant became its default rather than its rival.
+- `env.ts:378–382` and `:427–430` — `CONTAINER_MEMORY_MB` defaults to
+  `unshared ? 2048 : 512` and `CONTAINER_CPUS` to `unshared ? 2 : 0.5`;
+  `unshared` is `inDevelopment || soleTenant` (`env.ts:46`). **Unchanged**, and
+  still the fact that corrected 12.1 downward.
+- `grep -rniE "\bgpu\b|nvidia|DeviceRequests|cuda"` over `apps/server/src` and
+  `packages/shared/src` — **0 hits. Unchanged**; 12.4 is blocked on hardware.
+- `grep -rniE "notebook|ipynb"` over `apps/server/src`, `apps/web/src` and
+  `packages/shared/src` — **0 hits. Unchanged**; 12.3 is open.
+- **Changed by 12.2.** `warmStart.ts` existed with tests, and nothing in it was
+  triggered by anything but a session starting. `containers/prebuild.ts` now
+  is, from `index.ts` — which is exactly the gap that row named, and 12.5 is
+  the half of it that is still open.
+
+**Not verified, and it is the load-bearing one for 12.1:** nobody has run two
+containers of different sizes on this host and watched the sum. The arithmetic
+argument against decision 15 is a paragraph, not an experiment, and the failure
+mode it is reasoning about — an OOM kill in somebody's terminal — is precisely
+the kind §1 says a mock cannot be trusted about.
