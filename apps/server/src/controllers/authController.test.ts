@@ -27,6 +27,15 @@ const prismaUser = vi.hoisted(() => ({ findUnique: vi.fn(), update: vi.fn() }));
 const send = vi.hoisted(() => vi.fn());
 const hasRealMailer = vi.hoisted(() => vi.fn(() => false));
 
+/** A second factor, which `login` now asks about on every sign-in (plan.md
+ *  §11.6). False here, because every assertion in this file is about the
+ *  ordinary one-step sign-in; `twoFactorLogin.test.ts` covers the other. */
+const twoFactorService = vi.hoisted(() => ({
+  requiresSecondFactor: vi.fn(() => Promise.resolve(false)),
+  consumeSecondFactor: vi.fn(),
+}));
+vi.mock("../service/twoFactorService.js", () => twoFactorService);
+
 vi.mock("../service/authService.js", () => authService);
 vi.mock("../service/refreshTokenService.js", () => refreshTokenService);
 vi.mock("../service/userTokenService.js", () => userTokenService);

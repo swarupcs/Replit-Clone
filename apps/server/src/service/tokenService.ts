@@ -13,7 +13,7 @@ import { UnauthorizedError } from "../utils/errors.js";
  *  credential — turning a cookie handed to untrusted project code into full API
  *  access for as long as it lived.
  */
-type TokenType = "access" | "refresh" | "preview";
+type TokenType = "access" | "refresh" | "preview" | "mfa";
 
 interface BaseClaims {
   sub: string;
@@ -95,6 +95,33 @@ export function verifyRefreshToken(token: string): RefreshTokenClaims {
     "refresh",
     "refresh",
   );
+  return { sub: payload.sub as string };
+}
+
+/** Proof that the PASSWORD step passed, and nothing else. plan.md §11.6.
+ *
+ *  A separate type rather than a short-lived access token, which is exactly
+ *  the mistake the `typ` claim above exists to prevent: a half-finished
+ *  sign-in must not be a credential. `requireAuth` checks for "access", so one
+ *  of these presented as a bearer token is refused by the same check that
+ *  refuses a preview cookie.
+ *
+ *  Five minutes, because it is the gap between typing a password and reading a
+ *  code off a phone. Long enough to find the phone, short enough that a
+ *  challenge left in a closed tab is not a standing half-credential.
+ */
+const MFA_TOKEN_TTL = "5m";
+
+export function signMfaToken(userId: string): string {
+  const payload: BaseClaims = { sub: userId, typ: "mfa" };
+
+  return jwt.sign(payload, env.JWT_ACCESS_SECRET, {
+    expiresIn: MFA_TOKEN_TTL,
+  } as SignOptions);
+}
+
+export function verifyMfaToken(token: string): { sub: string } {
+  const payload = verifyTyped(token, env.JWT_ACCESS_SECRET, "mfa", "sign-in");
   return { sub: payload.sub as string };
 }
 

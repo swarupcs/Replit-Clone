@@ -19,6 +19,9 @@ vi.mock("../../controllers/authController.js", () => ({
     res.json({ ok: "login" });
     return Promise.resolve();
   }),
+  // The second half of a sign-in (plan.md §11.6). Mounted in every mode, so
+  // it has to exist in the mock or the router fails to build.
+  loginTotp: vi.fn(),
   logout: vi.fn(),
   me: vi.fn(),
   refresh: vi.fn(),
@@ -27,6 +30,17 @@ vi.mock("../../controllers/authController.js", () => ({
   resetPassword: vi.fn(),
   signup: vi.fn(),
   verifyEmail: vi.fn(),
+}));
+
+/** Two-factor management, mounted in EVERY mode including single-user -- see
+ *  the router. Stubbed only so the module loads; what these routes do is
+ *  covered in `twoFactorManage.test.ts`. */
+vi.mock("../../controllers/twoFactorController.js", () => ({
+  beginTwoFactorController: vi.fn(),
+  confirmTwoFactorController: vi.fn(),
+  disableTwoFactorController: vi.fn(),
+  regenerateRecoveryCodesController: vi.fn(),
+  twoFactorStatusController: vi.fn(),
 }));
 
 vi.mock("../../middlewares/requireAuth.js", () => ({

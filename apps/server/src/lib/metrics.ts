@@ -37,6 +37,16 @@ export type CounterName =
   // counter, "my shell is wrong" is the only signal anyone ever gets.
   | "dotfiles_applied"
   | "dotfiles_failed"
+  // Second factors. `two_factor_replays` is the one to watch: a non-zero count
+  // means a code was presented twice inside its window, which is either a
+  // double-click or somebody replaying one, and those look identical from
+  // here. `two_factor_recovery_used` climbing without an enrolment nearby is
+  // the other shape worth noticing.
+  | "two_factor_enabled"
+  | "two_factor_disabled"
+  | "two_factor_failures"
+  | "two_factor_replays"
+  | "two_factor_recovery_used"
   | "runs_failed"
   | "preview_errors"
   | "preview_upgrades_rejected"

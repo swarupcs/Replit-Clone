@@ -2,6 +2,7 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import {
   login,
+  loginTotp,
   logout,
   me,
   refresh,
@@ -19,6 +20,13 @@ import {
   githubStart,
 } from "../../controllers/oauthController.js";
 import { singleUserEnabled } from "../../service/singleUserService.js";
+import {
+  beginTwoFactorController,
+  confirmTwoFactorController,
+  disableTwoFactorController,
+  regenerateRecoveryCodesController,
+  twoFactorStatusController,
+} from "../../controllers/twoFactorController.js";
 
 const router = express.Router();
 
@@ -100,6 +108,57 @@ const refreshLimiter = rateLimit({
 // anybody who asked would be an unauthenticated server on whatever network it
 // can be reached from, which is not what "personal" means.
 router.post("/login", addressLimiter, loginAccountLimiter, asyncHandler(login));
+
+// The second half of a sign-in, when the account has a second factor.
+//
+// Its own budget, keyed on the address, and TIGHTER than the password step's:
+// a six-digit code is a million guesses, and the account limiter above cannot
+// help here because this request carries no email -- the account is named by
+// the signed challenge, which is the whole point. Ten attempts per challenge
+// window is far more than anybody mistypes and nothing like enough to search.
+const totpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: RATE_LIMITED,
+  // A correct code costs nothing, so somebody signing in repeatedly on a bad
+  // connection cannot lock themselves out of their own second factor.
+  skipSuccessfulRequests: true,
+});
+
+router.post("/login/totp", addressLimiter, totpLimiter, asyncHandler(loginTotp));
+
+// --- Managing a second factor ---------------------------------------------
+//
+// Mounted in EVERY mode, single-user included, and that is the row's argument
+// (plan.md §11.6): single-user mode is the deployment most likely to be
+// reachable from outside, so it is the last place to make the stronger option
+// unavailable. Behind `requireAuth`, because turning one on is something an
+// account does to itself.
+router.get("/2fa", requireAuth, asyncHandler(twoFactorStatusController));
+router.post("/2fa/begin", requireAuth, addressLimiter, asyncHandler(beginTwoFactorController));
+router.post(
+  "/2fa/confirm",
+  requireAuth,
+  addressLimiter,
+  asyncHandler(confirmTwoFactorController),
+);
+// The two that make an account weaker both re-check the password, in the
+// controller. Rate-limited as credential endpoints because that is what they
+// have become.
+router.post(
+  "/2fa/disable",
+  requireAuth,
+  addressLimiter,
+  asyncHandler(disableTwoFactorController),
+);
+router.post(
+  "/2fa/recovery-codes",
+  requireAuth,
+  addressLimiter,
+  asyncHandler(regenerateRecoveryCodesController),
+);
 router.post("/refresh", refreshLimiter, asyncHandler(refresh));
 router.post("/logout", asyncHandler(logout));
 router.get("/me", requireAuth, asyncHandler(me));

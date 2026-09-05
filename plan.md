@@ -104,10 +104,10 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 151 items. Open: 24 — five blocked, ten from §10 that are all
-waiting on one decision (§10.1), six from §11, which reads the sandbox
+**Done: 152 items. Open: 23 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), five from §11, which reads the sandbox
 rather than the editor, and four from §12, which reads neither and asks what a
-cloud machine is for. Five of §11's six are blocked on nothing; 11.10 is
+cloud machine is for. Four of §11's five are blocked on nothing; 11.10 is
 the one row §11 has produced that needs a decision before it needs code, and
 12.4 is blocked on hardware rather than on anybody.**
 
@@ -125,13 +125,15 @@ Open, in full, so the shape is visible without scrolling: **no defects**
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, **six in
-§11** (11.2, 11.4, 11.8 and 11.9 shipped 2026-09-05, the day after the section
-was written; 11.2 also split 11.10 out of itself, and 11.4 named the wrong
-interaction while doing it — see the rows. 11.9 shipped in two commits, its
-dotfiles half and then its signing half, and was counted open in between: a
-row is done or it is not, and half a row counted as done is how a count stops
-meaning anything), and **three in §12** (12.1 and 12.2 both shipped
+an architectural route), **ten in §10 behind that same route**, **five in
+§11** (11.2, 11.4, 11.6, 11.8 and 11.9 shipped 2026-09-05, the day after the
+section was written; 11.2 also split 11.10 out of itself, and 11.4 named the
+wrong interaction while doing it — see the rows. 11.9 shipped in two commits,
+its dotfiles half and then its signing half, and was counted open in between:
+a row is done or it is not, and half a row counted as done is how a count
+stops meaning anything. 11.6 shipped without 11.5, which is the row that gives
+it its urgency — the order is backwards and deliberately so: the protection
+should exist before the exposure, not after), and **three in §12** (12.1 and 12.2 both shipped
 2026-09-05, the day the section was written; 12.2 split 12.5 out of itself on
 the way, so the section is one row shorter and one row longer than it started;
 12.4 is unstartable without different hardware and has been set aside).
@@ -4262,20 +4264,80 @@ the per-domain challenge machinery §9.2 split out.
       real origin, and the preview origin and the deployment origin have to
       come along or half the product 404s.
 
-- [ ] **11.6 Re-read the auth surface for an editor on the open internet.**
-      §10.3's single-user mode was designed for a laptop and is honest about it,
-      and it got the central thing right — *"a server that issued one to anybody
-      who asked would be an unauthenticated server on whatever network it is
-      reachable from"*, so sign-in stays even at n=1. 11.5 is what makes that
-      sentence load-bearing rather than cautious.
+- [x] **11.6 Re-read the auth surface for an editor on the open internet.**
+      Shipped 2026-09-05. §10.3's single-user mode was designed for a laptop
+      and is honest about it, and it got the central thing right — *"a server
+      that issued one to anybody who asked would be an unauthenticated server
+      on whatever network it is reachable from"*, so sign-in stays even at n=1.
+      11.5 is what makes that sentence load-bearing rather than cautious, and
+      this is the rest of the thought: exposed, the threat model is not
+      "somebody reads my code", it is `docker exec` on the machine with the
+      source tree mounted.
 
-      What it does not have: **`grep -ril "totp\|twoFactor\|mfa" apps/server/src`
-      returns nothing.** One password, rate-limited (`auth.ts` has
-      `addressLimiter` and `refreshLimiter`, which is more than most), standing
-      between the internet and a shell on your machine with your source tree
-      mounted. On a laptop that is proportionate. Exposed, the threat model is
-      not "somebody reads my code", it is `docker exec`, and this deserves
-      re-deciding rather than inheriting.
+      TOTP, offered and **not enforced**. On a laptop the network is the
+      protection and a phone in the way, and this platform is in no position to
+      decide which of the two somebody is running. What it can do is make the
+      stronger option available and its state legible.
+
+      The algorithm is forty lines in `lib/totp.ts` rather than a dependency,
+      and the reason is proportion: the authentication path is the one place
+      where a supply-chain compromise is indistinguishable from having no
+      authentication at all. SHA-1, six digits, thirty seconds — not the
+      strongest choices but the ones every app implements, because Google
+      Authenticator ignores the `algorithm` and `digits` parameters of an
+      otpauth URL outright, so a server using SHA-256 would produce codes that
+      simply never match with nothing to say why. **Checked against all six of
+      RFC 6238's own test vectors**, which is the only test in that file that
+      could have caught a wrong implementation: everything else would pass just
+      as happily against an algorithm agreeing with itself and with nothing
+      else in the world.
+
+      Four things carry the design, and each is a way second factors usually go
+      wrong.
+
+      **An unconfirmed enrolment is not protection.** The row exists from the
+      moment somebody opens the setup screen, and treating that as a gate would
+      lock the account behind a secret nobody wrote down. `requiresSecondFactor`
+      asks for `confirmedAt`, not for the row.
+
+      **A password alone produces nothing usable.** `login` answers a
+      *challenge* — a distinct shape with no user and no token in it — and
+      writes no cookies. The challenge is a JWT with its own `typ`, so
+      presenting it as a bearer token is refused by the same check that already
+      refuses the preview cookie; that check exists because those two were once
+      interchangeable, and this is the third token to benefit from it. The
+      account is named by the signed challenge and never by the request body,
+      or the second step would be a way to trade a code for a session on
+      anybody's account.
+
+      **A code is spent when it is used.** A TOTP code is valid for a whole
+      window, so without `lastUsedStep` one read over a shoulder — or captured
+      in front of a phishing page — works again for the next thirty seconds.
+      The confirming code counts too, so the code that enabled the factor
+      cannot also be the one that signs you in.
+
+      **The two operations that make an account weaker re-check the password.**
+      Turning it off, and minting a fresh set of recovery codes — the second
+      matters more, because ten permanent bypasses leave nothing looking wrong.
+      An account with no password at all (GitHub sign-in) is refused rather
+      than waved through: "there is nothing to check" is not "the check
+      passed".
+
+      Ten recovery codes, hashed rather than sealed because they are only ever
+      compared — the same argument `user_tokens` already makes. Without them a
+      lost phone is a permanently lost account on a deployment whose whole
+      point is that there is no support desk. **And on a single-user
+      deployment they are the only way back**: `SINGLE_USER_PASSWORD` and a
+      restart rewrite the password and do nothing about this. The panel says so
+      before anybody turns it on, which is where that belongs rather than in a
+      document read afterwards.
+
+      Verified end to end against the real database: sealed at rest, an
+      unconfirmed row not treated as protection, a confirming code refused as a
+      replay, the next window's code accepted and then spent, a recovery code
+      good exactly once. What is NOT verified, and cannot be from here: that a
+      real phone agrees. The RFC vectors are the evidence for that, and they
+      are good evidence, but nobody has scanned the QR.
 
 - [ ] **11.7 The laptop lid.** No service worker, no manifest —
       `apps/web/public` is `favicon.svg` and `vite.svg`. A cloud editor is used
@@ -4436,7 +4498,9 @@ Checked against the tree on 2026-09-05, in the manner §5 requires:
   `activeAttachments === 0` and `CONTAINER_IDLE_MINUTES`, default 20
   (`env.ts:408`), and it calls `onProjectReaped` for the database pair.
 - `searchService.ts:120` — `searchProject` is the only exported search.
-- `grep -ril "totp|twoFactor|mfa"` over `apps/server/src` — no hits.
+- `grep -ril "totp|twoFactor|mfa"` over `apps/server/src` — no hits. **True
+  when written; 11.6 shipped TOTP the day after, so this line is now the row's
+  history rather than a fact about the tree.**
 - `grep -rn "gpgsign|SSH_AUTH_SOCK|ssh-agent"` over `apps/server/src` — no hits.
   **This was true when written and is now the row's own history rather than a
   fact about the tree**: 11.9 shipped SSH signing the day after, so
