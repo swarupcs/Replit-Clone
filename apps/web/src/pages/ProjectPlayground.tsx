@@ -86,6 +86,9 @@ import {
 import { installProblems } from "../lib/problems.ts";
 import { useProblemsStore } from "../store/problemsStore.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
+import { setWriteScope } from "../lib/pendingWrites.ts";
+import { ConnectionNotice } from "../components/molecules/ConnectionNotice/ConnectionNotice.tsx";
+import { RecoveredWorkNotice } from "../components/organisms/RecoveredWorkNotice/RecoveredWorkNotice.tsx";
 
 export const ProjectPlayground = () => {
   const { projectId: projectIdFromUrl } = useParams<{ projectId: string }>();
@@ -634,6 +637,10 @@ export const ProjectPlayground = () => {
     }
 
     setProjectId(projectIdFromUrl);
+    // Which project a recovered buffer belongs to. This module-level queue
+    // outlives a project change, and a buffer filed under the wrong id would
+    // be offered back in the wrong workspace. plan.md §11.7.
+    setWriteScope(projectIdFromUrl);
     // The editor draws the git bars but has no idea which project it is in,
     // and threading it down as a prop would touch four components to reach
     // the one that needs it.
@@ -851,6 +858,13 @@ export const ProjectPlayground = () => {
         </Flex>
       </Flex>
 
+
+      {/* Directly under the topbar and above everything else, because these
+          are the two messages that must not be missable: the editor cannot
+          reach its server, and work was kept from a session that ended
+          badly. plan.md §11.7. */}
+      <ConnectionNotice />
+      <RecoveredWorkNotice projectId={projectIdFromUrl} />
 
       {/* The containing block for the drawers: everything between the topbar
           and the status bar, so a drawer covers the workspace and leaves the

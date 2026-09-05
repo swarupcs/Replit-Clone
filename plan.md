@@ -141,14 +141,14 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 152 items. Open: 23 — five blocked, ten from §10 that are all
-waiting on one decision (§10.1), five from §11, which reads the sandbox
+**Done: 153 items. Open: 22 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), four from §11, which reads the sandbox
 rather than the editor, and three from §12, which reads neither and asks what
-a cloud machine is for. Four of §11's five are blocked on nothing; 11.10 is
+a cloud machine is for. Three of §11's four are blocked on nothing; 11.10 is
 the one row §11 has produced that needs a decision before it needs code, and
 12.4 is blocked on hardware rather than on anybody.**
 
-Those four numbers are 5 + 10 + 5 + 3 = 23, and they are written out because
+Those four numbers are 5 + 10 + 4 + 3 = 22, and they are written out because
 they did not add up once already — see the paragraph below.
 
 **The Done figure jumped from 123 to 148 in one edit on 2026-09-05, and that
@@ -171,9 +171,9 @@ Open, in full, so the shape is visible without scrolling: **no defects**
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, **five in
-§11** (11.2, 11.4, 11.6, 11.8 and 11.9 shipped 2026-09-05, the day after the
-section was written; 11.2 also split 11.10 out of itself, and 11.4 named the
+an architectural route), **ten in §10 behind that same route**, **four in
+§11** (11.2, 11.4, 11.6, 11.7, 11.8 and 11.9 all shipped 2026-09-05, the day
+after the section was written — six of its eight rows in one day; 11.2 also split 11.10 out of itself, and 11.4 named the
 wrong interaction while doing it — see the rows. 11.9 shipped in two commits,
 its dotfiles half and then its signing half, and was counted open in between:
 a row is done or it is not, and half a row counted as done is how a count
@@ -346,6 +346,10 @@ appeals (§8.7), a compute meter (§8.8), Stripe subscription state and webhooks
 (§8.4, minus the two calls that need real keys), dotfiles that follow you into
 every container (§11.9), and TOTP two-factor with recovery codes (§11.6).
 
+**Offline tolerance** (§11.7): an installable shell with a manifest and a
+service worker, a legible "you are offline" state, and unsaved edits kept
+across a lost connection or a reload and offered back rather than replayed.
+
 **Single-user mode** (§10.3), for a deployment with exactly one account and no
 signup.
 
@@ -371,9 +375,8 @@ into a membership question.
 
 **Simply absent, and unblocked.** A documented way in from outside with TLS
 (§11.5) — the row that gives §11.6 its urgency and shipped after it. Compose,
-so a repository with four services can run at all (§11.3). An installable,
-offline-tolerant shell (§11.7). Notebooks (§12.3). GPUs (§12.4), which need
-different hardware.
+so a repository with four services can run at all (§11.3). Notebooks (§12.3).
+GPUs (§12.4), which need different hardware.
 
 ### What is verified, and what is asserted
 
@@ -385,8 +388,10 @@ suites, container start and reap, both scaffolder paths, a signed commit
 verified by `git log --show-signature`, a dotfiles clone and its failure mode,
 and TOTP enrolment through to a spent recovery code.
 
-**Not run, and load-bearing:** nobody has put an sshd in a sandbox image and
-attached a real editor to it, which is what §11.1's whole argument rests on.
+**Not run, and load-bearing:** the service worker has never registered — no
+browser available here can — so §11.7's caching behaviour is asserted rather
+than observed. Nobody has put an sshd in a sandbox image and attached a real
+editor to it, which is what §11.1's whole argument rests on.
 Nobody has run two differently-sized containers on one host and watched the sum
 (§12.1). Nobody has scanned the two-factor QR with a real phone — the RFC 6238
 vectors are the evidence there, and they are good evidence, but they are not
@@ -4562,18 +4567,66 @@ the per-domain challenge machinery §9.2 split out.
       real phone agrees. The RFC vectors are the evidence for that, and they
       are good evidence, but nobody has scanned the QR.
 
-- [ ] **11.7 The laptop lid.** No service worker, no manifest —
-      `apps/web/public` is `favicon.svg` and `vite.svg`. A cloud editor is used
-      on trains and on hotel wifi, and today a dropped connection is a blank
-      page rather than a degraded one. Not offline editing, which is a CRDT
-      argument this document does not need: an installable shell, a legible
-      "you are offline" state, and not losing the buffer.
+- [x] **11.7 The laptop lid.** Shipped 2026-09-05 — the three things the row
+      asked for, and the third turned out to be the one that mattered.
 
-      The layout half is further along than expected and should not be
-      re-derived: `index.css` already turns the side and bottom panes into
-      overlay drawers below 900px, drops the drag dividers, and has a scrim
-      (lines 1194–1235). What is untested is Monaco itself under a touch
-      keyboard, which is the part that decides whether the iPad case is real.
+      **Not losing the buffer**, which was worse than this row knew. Writes are
+      debounced, and every flush ended at `emit?.(relPath, data)` — an optional
+      call quietly doing the work of an error handler. Be precise about what
+      that lost, because it is less than it looks and the difference is why
+      this is two mechanisms rather than one: **socket.io already buffers**, so
+      a brief drop with the editor still mounted was always survivable. What
+      was not survivable is everything outside one socket's lifetime — the
+      emitter being uninstalled on unmount (reachable by closing a tab with a
+      keystroke on the clock), the socket being rebuilt by navigating away and
+      back, reconnection attempts running out, and any reload or crash at all,
+      since that buffer is in memory. So a write with nowhere to go is now kept
+      and drained when a connection returns, and every queued buffer is
+      mirrored to storage from the moment it is typed, cleared only when the
+      SERVER confirms the save.
+
+      **Nothing is ever written back to disk on its own.** Recovered work is
+      offered, reopened into the tab marked unsaved, and saved by the ordinary
+      path the user can see. Silently replaying a local buffer over a file
+      somebody else has since edited would be a worse failure than the one
+      being fixed, and it is what "restore my work" quietly means if nobody
+      decides otherwise.
+
+      **A legible offline state.** `navigator.onLine` and the socket's own
+      state are tracked as two facts and kept apart, because the first is a
+      claim about the network interface rather than about this server: it goes
+      false in a tunnel and stays true on hotel wifi that has stopped routing.
+      Conflating them gives the wrong message in both directions. A disconnect
+      reads as "reconnecting" because socket.io retries, except when the server
+      hung up deliberately, which it does not.
+
+      **An installable shell**: a manifest, PNG icons rasterised from the
+      existing `favicon.svg` by forty lines of signed-distance maths and a
+      hand-rolled PNG encoder rather than a build dependency, and a
+      hand-written service worker. Not generated: a build-time precache
+      manifest buys a first-visit-offline guarantee this product cannot use
+      anyway, since the first visit has to reach the server to sign in. What is
+      wanted is that a RETURNING visit survives. Navigations are network-first
+      so a deploy still reaches people; `/api/`, `/preview/` and `/socket.io/`
+      are never cached, because a cached 200 for a request that should have
+      401'd is a security bug rather than a stale page.
+
+      **What is NOT verified, and it is the service worker.** Neither browser
+      available here can register one — a one-line control worker fails
+      identically to this one with "An unknown error occurred when fetching the
+      script", which is the environment rather than the code. What was checked:
+      the registration path runs and calls `register`, the script parses, the
+      manifest is valid and its declared icon sizes match the PNGs' actual
+      IHDR bytes, and all three files build and serve. The caching behaviour
+      itself has never run. **Load it in a real browser before believing this
+      row**, in the manner §5 requires.
+
+      The layout half was further along than expected and was not re-derived:
+      `index.css` already turns the side and bottom panes into overlay drawers
+      below 900px, drops the drag dividers, and has a scrim (lines 1194–1235).
+      **Monaco under a touch keyboard is still untested**, which is the part
+      that decides whether the iPad case is real, and it is not part of what
+      shipped here.
 
 ---
 
@@ -4744,8 +4797,9 @@ which of them changed *is* the record of what shipped.
   both in `gitService.ts` now. `ssh-agent` and `SSH_AUTH_SOCK` still return
   nothing, and that half is deliberate — a key pasted here is a key this server
   holds, and agent forwarding is 11.1's to bring.
-- `apps/web/public` — two SVGs, no manifest, no service worker. **Unchanged**;
-  11.7 is the row about it.
+- `apps/web/public` — two SVGs, no manifest, no service worker. **Changed by
+  11.7**, which added a manifest, three PNG icons, an apple-touch-icon and
+  `sw.js`.
 - `index.css:1194` — the ≤900px drawer layout exists, contrary to what a
   section about mobile would otherwise have assumed.
 - `apps/server/templates` — 13, as §10 says. **Still 13**: §2.41 added a
