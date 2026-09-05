@@ -49,7 +49,16 @@ const inspectDirectory = vi.hoisted(() => vi.fn());
 vi.mock("./repoImportService.js", () => ({
   inspectDirectory,
   detectTemplate: vi.fn(() => "node-express"),
-  detectStartCommand: vi.fn(() => "npm install && npm run dev"),
+  // Real rather than stubbed: it is a pure function of a file list, and a
+  // folder somebody already had is MORE likely to be pnpm or yarn than a fresh
+  // clone is, so this is the call site where getting it wrong costs most.
+  detectPackageManager: vi.fn((files: string[]) =>
+    files.includes("pnpm-lock.yaml") ? "pnpm" : "npm",
+  ),
+  detectStartCommand: vi.fn(
+    (_packageJson: unknown, manager = "npm") =>
+      `${manager} install && ${manager} run dev`,
+  ),
 }));
 
 vi.mock("../lib/logger.js", () => ({
@@ -130,6 +139,28 @@ describe("opening a folder", () => {
       }),
     );
     expect(inspectDirectory).toHaveBeenCalledWith(FOLDER);
+  });
+
+  /** A folder somebody already had is more likely to be pnpm or yarn than a
+   *  fresh clone is -- it is their real working tree, with whatever they chose
+   *  years ago. Opening one and then installing it with npm ignores the
+   *  lockfile, which is the entire point of a lockfile, and fails outright on a
+   *  `workspace:*` dependency. */
+  it("installs with the manager the folder's lockfile names", async () => {
+    inspectDirectory.mockResolvedValue({
+      files: ["package.json", "pnpm-lock.yaml"],
+      packageJson: { scripts: { dev: "vite" } },
+    });
+
+    await openLocalFolderService(OWNER, FOLDER);
+
+    expect(projectCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          startCommand: "pnpm install && pnpm run dev",
+        }),
+      }),
+    );
   });
 
   it("still counts against the project limit", async () => {
