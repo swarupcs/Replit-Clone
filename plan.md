@@ -128,7 +128,10 @@ autoscaler's cost model, a disk budget for snapshots, a backup destination, and
 an architectural route), **ten in §10 behind that same route**, **seven in
 §11** (11.2, 11.4 and 11.8 shipped 2026-09-05, the day after the section was
 written; 11.2 also split 11.10 out of itself, and 11.4 named the wrong
-interaction while doing it — see the rows), and **three in §12** (12.1 and 12.2 both shipped
+interaction while doing it — see the rows. 11.9's DOTFILES half shipped the
+same day and its signing half did not, so it is still counted open: a row is
+done or it is not, and half a row counted as done is how a count stops meaning
+anything), and **three in §12** (12.1 and 12.2 both shipped
 2026-09-05, the day the section was written; 12.2 split 12.5 out of itself on
 the way, so the section is one row shorter and one row longer than it started;
 12.4 is unstartable without different hardware and has been set aside).
@@ -4332,14 +4335,47 @@ the per-domain challenge machinery §9.2 split out.
       forget to apply.
 
 - [ ] **11.9 An identity that follows you into the container.**
-      Two halves, both absent. **Dotfiles** — every container comes up with a
-      stock `/bin/bash` and no aliases, no prompt, no `.vimrc`, no `.gitconfig`
-      beyond what the platform writes; the devcontainer ecosystem's answer is a
-      personal dotfiles repository cloned into every workspace, and at n=1 "it
-      comes up as *my* shell" is a large fraction of what personal means.
-      **Commit signing** — `grep` for `gpgsign`, `ssh-agent` and
+      Two halves. **Dotfiles — shipped 2026-09-05.** Three settings on the
+      account, deliberately the same three VS Code exposes, cloned into every
+      container on creation and applied before the devcontainer's own
+      lifecycle commands: a `postCreateCommand` may reasonably assume the
+      shell it was typed for. Best-effort like that lifecycle is, and for the
+      same reason — this is arbitrary code out of a repository the platform
+      does not control, so a broken one leaves a working container and a
+      readable log rather than a project that will not open.
+
+      Three refusals are the whole of the security argument, and each is a
+      different risk. **https only**, because an `ssh://` clone would
+      authenticate as the SERVER with whatever key the host happens to have.
+      **No credentials in the URL**, because that is a password, and it would
+      sit in a column in the clear. **Not `/home/sandbox/app`**, because that
+      is the bind mount: dotfiles cloned there land in the user's repository,
+      on the host disk, and against their quota, and would be found later as
+      an unexplained `dotfiles/` directory in a commit. A private dotfiles
+      repository therefore fails rather than working, which is the intended
+      answer — the alternative is handing a GitHub token to a clone running
+      inside a container full of somebody else's dependencies.
+
+      Two things were found by running it rather than by reading it, which is
+      §11's own closing warning holding again. `~/` expanded to
+      `/home/sandbox/`, which is not equal to the home directory and does
+      start with it, so it walked straight past the refusal of the home
+      directory; the trailing slash is now stripped before the comparisons
+      instead of after. And the installer detection was a shell function
+      called as an `if` condition — where `set -e` is suspended — so an
+      `install.sh` that FAILED read as "no installer found" and fell through
+      to the symlinking fallback as though nothing were wrong. It is an
+      if/elif chain now. Both were caught by tests; the whole script was then
+      run in a real container against a real repository, which is what proved
+      the linker skips `.git`, refuses to clobber a real `~/.bashrc`, and is
+      safe to re-run — it runs on every container creation, not once.
+
+      **Commit signing** — still absent. `grep` for `gpgsign`, `ssh-agent` and
       `SSH_AUTH_SOCK` over `apps/server/src` returns nothing, so commits made
-      here structurally cannot be signed. If 11.1's Route C ships an agent
+      here structurally cannot be signed. The table this half will use exists
+      already: the `user_personalization` migration carries `signingKey`,
+      `signingKeyPublic` and `signCommits`, unused, so that the two halves are
+      one schema change rather than two. If 11.1's Route C ships an agent
       socket, this comes most of the way with it, which is the only dependency
       between any two rows in this section.
 
@@ -4357,6 +4393,8 @@ Checked against the tree on 2026-09-05, in the manner §5 requires:
 - `searchService.ts:120` — `searchProject` is the only exported search.
 - `grep -ril "totp|twoFactor|mfa"` over `apps/server/src` — no hits.
 - `grep -rn "gpgsign|SSH_AUTH_SOCK|ssh-agent"` over `apps/server/src` — no hits.
+  Still none as of 2026-09-05: 11.9's dotfiles half shipped and its signing
+  half did not, so this line is unchanged rather than stale.
 - `apps/web/public` — two SVGs, no manifest, no service worker.
 - `index.css:1194` — the ≤900px drawer layout exists, contrary to what a
   section about mobile would otherwise have assumed.

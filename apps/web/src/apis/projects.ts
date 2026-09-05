@@ -9,6 +9,8 @@ import type {
   ApiSuccess,
   CreatedApiKey,
   MachineStatus,
+  Personalization,
+  PersonalizationUpdate,
   ModerationAction,
   ProjectVisibility,
   PublicProject,
@@ -1046,6 +1048,30 @@ export const reinstateProjectApi = async (
 export const getAccountApi = async (): Promise<AccountSummary> => {
   const response = await axios.get<ApiSuccess<AccountSummary>>(
     "/api/v1/account",
+  );
+  return response.data.data;
+};
+
+/** Dotfiles: what follows this account into every container it opens.
+ *
+ *  On /account rather than under a project, because it is a property of the
+ *  PERSON -- the same settings apply in a project somebody else owns. */
+export const getPersonalizationApi = async (): Promise<Personalization> => {
+  const response = await axios.get<ApiSuccess<Personalization>>(
+    "/api/v1/account/personalization",
+  );
+  return response.data.data;
+};
+
+/** PATCH, and the verb is the point: an absent field is left alone and an
+ *  empty one is cleared, so "stop cloning my dotfiles" and "do not touch my
+ *  dotfiles" are different requests rather than the same one. */
+export const updatePersonalizationApi = async (
+  update: PersonalizationUpdate,
+): Promise<Personalization> => {
+  const response = await axios.patch<ApiSuccess<Personalization>>(
+    "/api/v1/account/personalization",
+    update,
   );
   return response.data.data;
 };

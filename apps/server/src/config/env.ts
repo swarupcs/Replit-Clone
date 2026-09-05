@@ -305,6 +305,16 @@ const envSchema = z.object({
     .positive()
     .default(10),
 
+  /** Longest an account's dotfiles clone-and-install may run.
+   *
+   *  Its own budget rather than a share of the devcontainer's, because it is a
+   *  different person's code: the lifecycle commands come from the project's
+   *  repository and this comes from the user's, and a slow one of either must
+   *  not be able to spend the other's time. Sixty seconds is a shallow clone
+   *  and a script; anything longer is a dotfiles repository doing something a
+   *  sandbox should not wait for. */
+  DOTFILES_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(60),
+
   PROJECTS_DIR: z.string().default("projects"),
 
   /** Host directories under which a folder may be opened directly as a

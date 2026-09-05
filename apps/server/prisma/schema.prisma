@@ -141,10 +141,66 @@ model User {
   computeUsage     ComputeUsage[]
   subscription     Subscription?
 
+  /// Dotfiles and a signing key. A table of its own rather than columns here,
+  /// and the private key is the reason: a column on `users` is returned by
+  /// every `findUnique` that forgets a `select`, and this repository has
+  /// already shipped one defect that was exactly a forgotten `select` key.
+  /// A separate row cannot be loaded by accident.
+  personalization  UserPersonalization?
+
   /// "Which accounts are on this plan" is the operator's question, and the one
   /// a pricing change has to answer before it is made.
   @@index([planId])
   @@map("users")
+}
+
+/// What makes a container feel like YOUR machine rather than a machine.
+///
+/// One row per account, created on first use. Everything here is optional and
+/// the product works without it -- which is the point of the row existing at
+/// all: none of this belongs on `users`, where it would be read by every
+/// query that touches an account.
+model UserPersonalization {
+  /// The primary key IS the user id. One row per account, enforced by the
+  /// database rather than by whoever writes the next upsert.
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// A publicly clonable https:// repository of dotfiles, cloned into every
+  /// container this account opens. The devcontainer ecosystem's convention,
+  /// and the same three fields VS Code exposes.
+  ///
+  /// No credential is ever sent with the clone, so a private repository fails
+  /// rather than working -- see dotfiles.ts for why that is deliberate.
+  dotfilesRepo String?
+
+  /// Where it lands inside the container. Null means `~/dotfiles`.
+  dotfilesTarget String?
+
+  /// What to run after cloning. Null means look for install.sh, setup.sh or
+  /// bootstrap.sh, and fall back to symlinking the repository's top-level
+  /// dotfiles into the home directory -- which is what most dotfiles
+  /// repositories expect and none of them say.
+  dotfilesInstall String?
+
+  /// An OpenSSH private key, sealed with the same box the push tokens use.
+  /// Never returned by the API in any form; the public half below is what the
+  /// account screen shows.
+  signingKey String?
+
+  /// The public half, stored in the clear so it can be displayed and pasted
+  /// into GitHub's signing-keys page without the server having to derive it.
+  signingKeyPublic String?
+
+  /// Whether commits made here are signed. Separate from the key existing, so
+  /// signing can be turned off without deleting the key -- and so that adding
+  /// a key does not silently change what every future commit is.
+  signCommits Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_personalization")
 }
 
 /// A long-lived credential for something that is not a person.

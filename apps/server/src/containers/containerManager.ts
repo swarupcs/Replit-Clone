@@ -29,6 +29,7 @@ import {
 } from "./devcontainer.js";
 import { execCapture } from "./execCapture.js";
 import { resolveMounts } from "./devcontainerMounts.js";
+import { applyDotfiles } from "./dotfiles.js";
 import {
   assertFits,
   resolveSize,
@@ -651,11 +652,70 @@ async function startContainer(projectId: string): Promise<Container> {
   increment("containers_started");
   logger.info("container started", { projectId, image });
 
+  // Before the lifecycle commands, not after: a `postCreateCommand` may
+  // reasonably assume the shell it is typed for. After the container is
+  // running, because there is nothing to exec into until then.
+  await runDotfiles(projectId, container);
+
   // A container that was just created has been created, so both run -- in the
   // order the spec gives them.
   await runLifecycle(projectId, container, devcontainer, "create");
 
   return container;
+}
+
+/** Clones the OWNER's dotfiles into a container that has just been made.
+ *
+ *  The owner's, not the viewer's, and that is a decision rather than an
+ *  accident. A container is one per project and is shared by everyone with
+ *  access to it, so there is no "whose container is this" to answer per
+ *  request -- a collaborator opening a terminal would otherwise get a shell
+ *  configured by whoever happened to start it first, and cloning a second
+ *  person's dotfiles over the first person's would be worse than either.
+ *
+ *  Failure is recorded and swallowed, exactly as `runLifecycle`'s is: a
+ *  dotfiles repository is arbitrary code out of a repository the platform does
+ *  not control, and a broken one must not be able to hold a project closed.
+ */
+async function runDotfiles(
+  projectId: string,
+  container: Container,
+): Promise<void> {
+  try {
+    const { prisma } = await import("../lib/prisma.js");
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { ownerId: true },
+    });
+    if (!project) return;
+
+    const { dotfilesFor } = await import("../service/personalizationService.js");
+    const settings = await dotfilesFor(project.ownerId);
+    if (!settings) {
+      setDevcontainerStatus(projectId, { dotfilesLog: null });
+      return;
+    }
+
+    const budgetMs = env.DOTFILES_TIMEOUT_SECONDS * 1000;
+    const result = await applyDotfiles(container, settings, budgetMs);
+
+    setDevcontainerStatus(projectId, {
+      dotfilesLog: result.ok
+        ? result.log || "Dotfiles applied."
+        : `Dotfiles did not finish.
+${result.log}`,
+    });
+
+    increment(result.ok ? "dotfiles_applied" : "dotfiles_failed");
+  } catch (error) {
+    // Reaching here means the DATABASE or the exec plumbing failed rather than
+    // the user's script, so it is a server-side warning and not a user-facing
+    // log line.
+    logger.warn("dotfiles step failed", {
+      projectId,
+      error: (error as Error).message,
+    });
+  }
 }
 
 /** Runs a devcontainer's lifecycle commands.

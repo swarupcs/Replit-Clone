@@ -31,6 +31,12 @@ export type CounterName =
   // honest measure of whether "Latest" is a feature or a coin toss.
   | "scaffolds_completed"
   | "scaffolds_failed"
+  // An account's dotfiles cloned into a new container, and the ones that did
+  // not. The failures are the interesting half: a dotfiles repository breaks
+  // silently by design here -- the container still starts -- so without a
+  // counter, "my shell is wrong" is the only signal anyone ever gets.
+  | "dotfiles_applied"
+  | "dotfiles_failed"
   | "runs_failed"
   | "preview_errors"
   | "preview_upgrades_rejected"

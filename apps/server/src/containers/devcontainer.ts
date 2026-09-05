@@ -531,6 +531,16 @@ export interface DevcontainerStatus {
   lifecycleLog: string;
   /** True while those commands are running. */
   running: boolean;
+  /** What happened when the account's dotfiles were cloned into this
+   *  container, or null when nobody has set any. plan.md §11.9.
+   *
+   *  Here rather than in a channel of its own because this is already the
+   *  "what ran while this container was being made" record, and a dotfiles
+   *  repository that failed is indistinguishable from one that was never
+   *  configured unless it is reported somewhere. Kept SEPARATE from
+   *  `lifecycleLog` because they come from different files owned by different
+   *  people -- one from the project, one from the person. */
+  dotfilesLog: string | null;
 }
 
 const statuses = new Map<string, DevcontainerStatus>();
@@ -543,6 +553,7 @@ export function getDevcontainerStatus(projectId: string): DevcontainerStatus {
       refusedMounts: [],
       lifecycleLog: "",
       running: false,
+      dotfilesLog: null,
     }
   );
 }
