@@ -711,6 +711,32 @@ model Project {
   /// Environment variables injected into this project's container, as a JSON
   /// object of string values. Stored per project rather than in a file so they
   /// are not committed, exported, or visible in the file tree.
+  /// How much memory this workspace gets, in MB, or null for the deployment's
+  /// default (`CONTAINER_MEMORY_MB`).
+  ///
+  /// The whole of plan.md §12.1, and the reason it is a column rather than a
+  /// plan entitlement is §6 decision 15. That decision says a plan may promise
+  /// more of what the platform ALLOCATES and must never promise more of what
+  /// the host HAS -- so a size sold in advance is a promise kept by an OOM
+  /// kill in somebody's terminal. This is the other thing: not a promise made
+  /// when an account is created, but an allocation checked against the running
+  /// sum at the moment somebody asks for it.
+  ///
+  /// Null rather than a default so the deployment-wide number stays the one
+  /// place to change every unconfigured workspace at once. `unshared` already
+  /// makes that number 2048 on a personal deployment (env.ts:382).
+  memoryMb Int?
+
+  /// CPUs for this workspace, or null for `CONTAINER_CPUS`.
+  ///
+  /// Not rationed against a host total the way memory is, deliberately. Docker
+  /// gives CPU as a share of time rather than an exclusive reservation, so
+  /// oversubscribing makes everything slower and nothing fails; memory
+  /// oversubscription kills a process. Two different failure modes deserve two
+  /// different rules, and pretending otherwise would refuse a workspace 4 CPUs
+  /// on a 4-core box for no reason a user could act on.
+  cpus Float?
+
   envVars Json @default("{}")
 
   /// Secret in the share link, when one has been created. Null means the

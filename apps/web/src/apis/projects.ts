@@ -691,6 +691,45 @@ export const setStartCommandApi = async (
   return response.data.data;
 };
 
+/** How big this workspace is, and what the host could give it.
+ *
+ *  Both halves in one response deliberately (plan.md §12.1): "2048 MB" on its
+ *  own is not something anybody can act on, and the question somebody opens
+ *  this to answer is "can I give it more" — which needs the budget and what is
+ *  already spoken for.
+ */
+export interface WorkspaceSize {
+  memoryMb: number;
+  cpus: number;
+  custom: boolean;
+  defaultMemoryMb: number;
+  defaultCpus: number;
+  budgetMb: number;
+  committedMb: number;
+  minMemoryMb: number;
+}
+
+export const getWorkspaceSizeApi = async (
+  projectId: string,
+): Promise<WorkspaceSize> => {
+  const response = await axios.get<{ data: WorkspaceSize }>(
+    `/api/v1/projects/${projectId}/size`,
+  );
+  return response.data.data;
+};
+
+/** Null for either half means "back to the deployment's default", which is the
+ *  only way to undo a size without knowing what the default was. */
+export const setWorkspaceSizeApi = async (
+  projectId: string,
+  size: { memoryMb: number | null; cpus: number | null },
+): Promise<Pick<WorkspaceSize, "memoryMb" | "cpus" | "custom">> => {
+  const response = await axios.put<{
+    data: Pick<WorkspaceSize, "memoryMb" | "cpus" | "custom">;
+  }>(`/api/v1/projects/${projectId}/size`, size);
+  return response.data.data;
+};
+
 // --- Database (query editor) ---
 
 export interface DatabaseConnection {

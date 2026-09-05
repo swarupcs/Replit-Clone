@@ -26,6 +26,8 @@ import {
   getProjectEnvController,
   getStartCommandController,
   setStartCommandController,
+  getWorkspaceSizeController,
+  setWorkspaceSizeController,
   getProjectPorts,
   getProjectTree,
   listProjectsController,
@@ -389,6 +391,12 @@ router.delete("/:projectId/embed", asyncHandler(revokeEmbedController));
 
 router.get("/:projectId/start-command", asyncHandler(getStartCommandController));
 router.put("/:projectId/start-command", asyncHandler(setStartCommandController));
+
+// §12.1. GET is viewer -- knowing how big the box is is part of reading the
+// project; PUT is owner, because how much of the host one workspace holds is a
+// decision about every other workspace on it.
+router.get("/:projectId/size", asyncHandler(getWorkspaceSizeController));
+router.put("/:projectId/size", asyncHandler(setWorkspaceSizeController));
 
 router.get("/:projectId/github/repo", asyncHandler(githubRepoController));
 router.get("/:projectId/github/pulls", asyncHandler(githubPullsController));

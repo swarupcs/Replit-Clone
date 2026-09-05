@@ -29,7 +29,16 @@ import {
 import {
   previewablePorts,
   publishedPorts,
+  runningProjectContainers,
 } from "../containers/containerManager.js";
+import { env } from "../config/env.js";
+import {
+  budgetMb,
+  committedMb,
+  MIN_MEMORY_MB,
+  resolveSize,
+  setWorkspaceSize,
+} from "../service/workspaceSizeService.js";
 import { logger } from "../lib/logger.js";
 import { prisma } from "../lib/prisma.js";
 import { buildFileTree } from "../service/fileTreeService.js";
@@ -504,5 +513,76 @@ export async function setStartCommandController(
       command: project.startCommand,
       templateDefault: getTemplate(project.template).startCommand,
     },
+  });
+}
+
+/** What this workspace is sized at, and what the host could give it.
+ *
+ *  plan.md §12.1. Both halves in one response deliberately: a number on its own
+ *  ("2048 MB") is not something anybody can act on, and the question somebody
+ *  opens this to answer is "can I give it more", which needs the budget and
+ *  what is already committed against it.
+ */
+export async function getWorkspaceSizeController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const projectId = assertValidProjectId(req.params.projectId);
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "viewer");
+
+  const running = await runningProjectContainers();
+  const [size, budget, committed] = await Promise.all([
+    resolveSize(projectId),
+    budgetMb(),
+    committedMb(running.filter((id) => id !== projectId)),
+  ]);
+
+  res.json({
+    success: true,
+    message: "Workspace size",
+    data: {
+      ...size,
+      defaultMemoryMb: env.CONTAINER_MEMORY_MB,
+      defaultCpus: env.CONTAINER_CPUS,
+      budgetMb: budget,
+      committedMb: committed,
+      minMemoryMb: MIN_MEMORY_MB,
+    },
+  });
+}
+
+const workspaceSizeSchema = z.object({
+  /** Null means "back to the deployment's default", which is the only way to
+   *  undo a size without knowing what the default was -- the same argument the
+   *  start command's empty string makes above. */
+  memoryMb: z.number().int().nullable().optional(),
+  cpus: z.number().nullable().optional(),
+});
+
+export async function setWorkspaceSizeController(
+  req: Request<{ projectId: string }>,
+  res: Response,
+): Promise<void> {
+  const projectId = assertValidProjectId(req.params.projectId);
+  // Owner, and not editor. A collaborator with write access decides what runs
+  // in the container; how much of the host it is allowed to hold is a decision
+  // about somebody else's machine, and every other project on it.
+  await assertProjectAccess(projectId, getAuthContext(req).userId, "owner");
+
+  const request = workspaceSizeSchema.parse(req.body ?? {});
+  const size = await setWorkspaceSize(
+    projectId,
+    request,
+    await runningProjectContainers(),
+  );
+
+  res.json({
+    // Not "applied": Docker can change a running container's cgroup, but the
+    // process inside it has already read /proc/meminfo and sized its heap. A
+    // Node process told it had 512 MB does not start using 8 GB because the
+    // limit moved underneath it.
+    success: true,
+    message: "Saved. It takes effect the next time this workspace starts.",
+    data: size,
   });
 }

@@ -429,6 +429,28 @@ const envSchema = z.object({
     .positive()
     .default(unshared ? 2 : 0.5),
   CONTAINER_IDLE_MINUTES: z.coerce.number().int().positive().default(20),
+
+  /** What the host keeps back from workspaces, in MB.
+   *
+   *  plan.md §12.1. This server, Postgres, the egress gateway and the OS all
+   *  live in the same memory the sandboxes are handed out of, and a budget
+   *  that gave every byte away would see the thing doing the giving killed
+   *  first. 1024 is deliberately generous rather than measured: the failure it
+   *  prevents is an OOM in somebody's terminal, and the cost of being wrong
+   *  the other way is one workspace being told to ask for slightly less.
+   */
+  HOST_MEMORY_RESERVE_MB: z.coerce.number().int().positive().default(1024),
+
+  /** Overrides what Docker reports as the host's memory, in MB.
+   *
+   *  Unset, the daemon is asked (`docker info`), which is the right source
+   *  because it is the number the daemon enforces against — on Docker Desktop
+   *  and inside a VM that differs from `os.totalmem()`, and the daemon's is
+   *  the one that kills a container. Set it when this server shares a host
+   *  with something Docker cannot see and the budget should be smaller than
+   *  the machine.
+   */
+  HOST_MEMORY_MB: z.coerce.number().int().positive().optional(),
   /** Ceiling on a single project's working tree.
    *
    *  Containers get memory, CPU and PID limits; storage had none, and the

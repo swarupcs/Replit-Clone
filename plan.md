@@ -104,7 +104,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 148 items. Open: 26 — five blocked, ten from §10 that are all
+**Done: 149 items. Open: 25 — five blocked, ten from §10 that are all
 waiting on one decision (§10.1), seven from §11, which reads the sandbox
 rather than the editor, and four from §12, which reads neither and asks what a
 cloud machine is for. Six of §11's seven are blocked on nothing; 11.10 is
@@ -128,9 +128,8 @@ autoscaler's cost model, a disk budget for snapshots, a backup destination, and
 an architectural route), **ten in §10 behind that same route**, **seven in
 §11** (11.2, 11.4 and 11.8 shipped 2026-09-05, the day after the section was
 written; 11.2 also split 11.10 out of itself, and 11.4 named the wrong
-interaction while doing it — see the rows), and **four in §12**, of which one
-is worth starting (12.1) and one is unstartable without different hardware
-(12.4).
+interaction while doing it — see the rows), and **three in §12** (12.1 shipped 2026-09-05, the day
+it was written; 12.4 is unstartable without different hardware).
 
 **§12 was written on 2026-09-05 and adds four.** It is the residue of §10 and
 §11 rather than a third reading of the same ground: §10 asks what Monaco cannot
@@ -2003,6 +2002,84 @@ that had been quietly flattering every previous local run.
 
 Server: 2081 passing (0 failing, 9 skipped). Web: 1074 passing. Typecheck and
 lint clean, 3/3. Both apps build.
+
+### 2.38 Since (2026-09-05) — §12.1, a workspace that is not every workspace
+
+First of §12, and the only one of its four that is about the reason to keep a
+workspace on a server at all. Every project container was sized from one pair
+of numbers — `CONTAINER_MEMORY_MB` and `CONTAINER_CPUS` — so the Rust workspace
+that wants 8 GB and the eleven that idle at 512 MB were all the same size.
+
+**§6 decision 15 is what this had to be built around, and it is nearly but not
+quite in the way.** That decision says a plan may promise more of what the
+platform *allocates* and must never promise more of what the host *has*: a tier
+selling more memory per container than the machine can give is a promise kept
+by an OOM kill in somebody's terminal. It forbids *selling* a size. It does not
+forbid one workspace differing from its neighbour, and the two had been treated
+as one question because only the first was ever asked.
+
+So a size here is deliberately **not a plan entitlement**. It is an allocation,
+measured against what is running at the moment somebody asks for it — a sum
+this server can actually do, rather than a promise made in advance to somebody
+who will collect on it later. Concretely:
+
+- **The budget is the host's, asked of Docker rather than of `os.totalmem()`,**
+  because the number that matters is the one the daemon enforces against — in a
+  VM and on Docker Desktop those differ, and the daemon's is the one that kills
+  a container. Less `HOST_MEMORY_RESERVE_MB` (1024) for this server, Postgres,
+  the egress gateway and the OS, which all live in the same memory the
+  sandboxes are handed out of.
+- **Committed, not used.** A container sitting at 40 MB of its 2048 still holds
+  2048 against the next OOM. Sizing the next workspace against `docker stats`
+  would oversubscribe the host by exactly however idle everything happened to
+  be at that moment.
+- **Checked again at the start**, not only when the size is set: something else
+  may have started in between, and §6 decision 13 says the guarantee belongs
+  where it cannot be skipped. A default-sized workspace is exempt, because that
+  is what `MAX_CONCURRENT_CONTAINERS` already rations and failing it here would
+  refuse projects that worked before this existed.
+- **Owner, not editor.** A collaborator with write access decides what runs in
+  the container; how much of the host it holds is a decision about every other
+  workspace on the machine.
+- **It does not resize what is running, and says so.** Docker will move a
+  running container's cgroup, but the process inside has already read
+  `/proc/meminfo` and sized its heap — a Node process told it had 512 MB does
+  not start using 8 GB because the limit moved underneath it.
+
+**The screen shows the budget, not just the size.** A field containing "2048"
+is not something anybody can act on; the question somebody opens it to answer
+is "can I give it more", which needs what the host has and what is already
+spoken for. This is §2.22's argument — a limit you discover by hitting it —
+applied one section later.
+
+**§12.1 named the second call site and it was right to.**
+`containerManager.ts:1187` computes the stats panel's ceiling from the same
+constant, and a per-workspace size that had not reached it would show every
+project a limit that is not its own.
+
+**A defect found by the existing tests rather than by the new ones**, which is
+the §3.1 pattern exactly. `custom` was computed as `memoryMb !== null`, and
+every mock in the new suite sets those columns to an explicit `null` — so
+`undefined`, which is what a caller that selected neither column gets, was a
+state the tests never produced. `undefined !== null` is true, so every
+default-sized project read as custom and took a capacity check it was meant to
+be exempt from. Six container tests failed on a `docker.info` that was never
+supposed to be reached. Fixed with `?? null`, and both states now have a test.
+
+Five mutants, all caught: counting the project being resized against itself,
+ignoring what is committed, treating a vanished project row as free memory,
+never reporting a size as custom, and writing a size without measuring it.
+
+Server: 1916 passing, 296 skipped — no database on this machine, so the
+DB-gated suites did not run; §5 is the standing note on what that does not
+prove. Web: 1117 passing. Typecheck and lint clean, 3/3.
+
+The one red file is `localRoots.test.ts`, which cannot create a symlink
+(EPERM) on this Windows host and fails identically on a clean checkout —
+confirmed by stashing this branch and running it alone. Environmental, and
+not this work's.
+
+---
 
 ## 3. Open
 
@@ -4113,7 +4190,9 @@ what is actually there.
 
 ---
 
-- [ ] **12.1 A workspace that is not the same size as every other workspace.**
+- [x] **12.1 A workspace that is not the same size as every other
+      workspace.** Shipped 2026-09-05 — see §2.38. Original note follows.
+
       The strongest row here, and the only one that is about the *reason* to
       use a server at all.
 

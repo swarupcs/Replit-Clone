@@ -29,6 +29,11 @@ import {
 } from "./devcontainer.js";
 import { execCapture } from "./execCapture.js";
 import { resolveMounts } from "./devcontainerMounts.js";
+import {
+  assertFits,
+  resolveSize,
+  type WorkspaceSize,
+} from "../service/workspaceSizeService.js";
 
 const docker = new Docker();
 
@@ -516,7 +521,30 @@ async function startContainer(projectId: string): Promise<Container> {
     MOUNT_POINT,
   );
 
+  let size: WorkspaceSize = {
+    memoryMb: env.CONTAINER_MEMORY_MB,
+    cpus: env.CONTAINER_CPUS,
+    custom: false,
+  };
+
   const container = await withCapacityGate(async () => {
+    // Read inside the gate, with the same argument the count below has: two
+    // projects sized 8 GB each on a 12 GB host both fit when asked separately
+    // and do not when asked together.
+    size = await resolveSize(projectId);
+
+    // A size that fitted when it was set need not fit now -- something else
+    // started in the meantime. Checked here rather than only at the point of
+    // setting, because §6 decision 13 is that the guarantee lives where it
+    // cannot be skipped, and the only unskippable place is the start itself.
+    //
+    // A default-sized workspace is exempt: it is what MAX_CONCURRENT_CONTAINERS
+    // below already rations, and failing it here would refuse projects that
+    // worked before this file existed.
+    if (size.custom) {
+      await assertFits(projectId, size.memoryMb, await runningProjectContainers());
+    }
+
     // Counted and created without interruption, so two projects starting
     // together cannot both read the same figure and both pass.
     if ((await runningCount()) >= env.MAX_CONCURRENT_CONTAINERS) {
@@ -590,11 +618,14 @@ async function startContainer(projectId: string): Promise<Container> {
           // node_modules — minutes of waiting for a project that had not changed.
           `${cacheVolumeName(projectId)}:/home/sandbox/.cache`,
         ],
-        Memory: env.CONTAINER_MEMORY_MB * 1024 * 1024,
+        // This workspace's size, not the deployment's -- plan.md §12.1. Falls
+        // back to CONTAINER_MEMORY_MB / CONTAINER_CPUS for a project nobody has
+        // sized, which is every project until somebody asks.
+        Memory: size.memoryMb * 1024 * 1024,
         // Equal to Memory disables swap, so a container cannot evade its limit
         // by swapping the host to death.
-        MemorySwap: env.CONTAINER_MEMORY_MB * 1024 * 1024,
-        NanoCpus: Math.round(env.CONTAINER_CPUS * 1e9),
+        MemorySwap: size.memoryMb * 1024 * 1024,
+        NanoCpus: Math.round(size.cpus * 1e9),
         // Caps a fork bomb.
         PidsLimit: 256,
         // tini as pid 1, which reaps.
@@ -1184,7 +1215,11 @@ export async function readContainerStats(projectId: string): Promise<{
   memoryLimitBytes: number;
   cpuPercent: number;
 }> {
-  const limit = env.CONTAINER_MEMORY_MB * 1024 * 1024;
+  // This project's ceiling, not the deployment's. §12.1 names this as the
+  // call site that would be missed: a per-workspace size that did not reach
+  // here would show every project a limit that is not its own, which is worse
+  // than showing none.
+  const limit = (await resolveSize(projectId)).memoryMb * 1024 * 1024;
   const info = await findContainer(projectId);
 
   if (!info || info.State !== "running") {
