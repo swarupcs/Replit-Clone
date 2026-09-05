@@ -4,7 +4,13 @@ import type { WebSocket } from "ws";
 import { getTemplate } from "../templates/registry.js";
 import { logger } from "../lib/logger.js";
 import { watchPollingEnv } from "../config/env.js";
-import { hangUpShell, shellArgv, terminalPidFile } from "./terminalShell.js";
+import {
+  hangUpShell,
+  reclaimShells,
+  shellArgv,
+  shellNonce,
+  terminalPidFile,
+} from "./terminalShell.js";
 
 /** Docker ignores a resize sent before the exec's process has claimed its TTY,
  *  and gives no error when it does. The requested size is re-sent at each of
@@ -55,7 +61,14 @@ export const handleTerminalCreation = (
 ): void => {
   const template = getTemplate(templateId);
   const startCommand = startCommandOverride?.trim() || template.startCommand;
-  const pidFile = terminalPidFile(terminalId);
+  const pidFile = terminalPidFile(terminalId, shellNonce());
+
+  // Before this shell, not after: an earlier one under the same id may still
+  // be holding the ports this one is about to be asked to bind. Not awaited —
+  // opening a terminal must not wait on a signal to processes nobody is
+  // listening to, and the sweep skips `pidFile` by name, so it is indifferent
+  // to whether the new shell has recorded itself yet.
+  void reclaimShells(container, terminalId, pidFile);
 
   container.exec(
     {

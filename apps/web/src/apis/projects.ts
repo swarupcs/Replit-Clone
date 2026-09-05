@@ -24,6 +24,8 @@ import type {
   GitLogResponse,
   GitStatus,
   GitStatusResponse,
+  GitSyncResponse,
+  GitSyncResult,
   ListTemplatesResponse,
   LocalFolderBrowseResponse,
   LocalFolderEntry,
@@ -196,9 +198,12 @@ export const getProjectTree = async ({
   return response.data.data;
 };
 
+/** Derived from the response type rather than restated. The hand-written copy
+ *  that used to be here was a second declaration of one shape, and it drifted
+ *  the moment the server grew a field. */
 export const getProjectPorts = async (
   projectId: string,
-): Promise<{ devPort: number; ports: number[] }> => {
+): Promise<ProjectPortsResponse["data"]> => {
   const response = await axios.get<ProjectPortsResponse>(
     `/api/v1/projects/${projectId}/ports`,
   );
@@ -600,6 +605,26 @@ export const gitPushApi = async (
   const response = await axios.post<GitStatusResponse>(
     `/api/v1/projects/${projectId}/git/push`,
     { name, branch, ...(token ? { token } : {}) },
+  );
+  return response.data.data;
+};
+
+/** Fetch, fast-forward and push, in one call.
+ *
+ *  Remote and branch are optional and usually omitted: the server resolves
+ *  `origin` (or the only remote there is) and the branch HEAD is on. Passing
+ *  them is for the panel's per-remote menu, not for the button.
+ *
+ *  Unlike the three calls it replaces this answers with what it DID, not just
+ *  the resulting status — see `GitSyncResult`.
+ */
+export const gitSyncApi = async (
+  projectId: string,
+  options: { name?: string; branch?: string; token?: string } = {},
+): Promise<GitSyncResult> => {
+  const response = await axios.post<GitSyncResponse>(
+    `/api/v1/projects/${projectId}/git/sync`,
+    options,
   );
   return response.data.data;
 };

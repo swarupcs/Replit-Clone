@@ -496,6 +496,56 @@ body {
   background-color: var(--rc-accent-soft);
 }
 
+/* The activity rail — the column of view switchers down the left edge.
+ *
+ *  It shares `.rc-icon-button` with every other toolbar in the app, and that
+ *  default is tuned for a button sitting INSIDE a panel: --rc-text-subtle, at
+ *  22px, reading as secondary next to the content it acts on. On the rail that
+ *  is wrong twice over. These are the app's primary navigation with no labels
+ *  and no surrounding content to be secondary to, and they sit on
+ *  --rc-surface-sunken, the darkest ground in the theme — where #6b7192 lands
+ *  at about 4.1:1. Enough for a word; not enough for a 16px glyph drawn in
+ *  1px strokes, which is what actually reaches the eye.
+ *
+ *  So the rail steps its idle state up one tier, to --rc-text-muted: ~8.2:1 on
+ *  dark and ~6.5:1 on light. A tier and not a new colour, so
+ *  `prefers-contrast: more` keeps working — it already redefines that token,
+ *  and this inherits the step for free.
+ */
+.rc-activity-bar .rc-icon-button {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  color: var(--rc-text-muted);
+}
+
+/* 18px rather than the 16 the icons ask for in JSX. Scaled here because it is
+   one rule against twelve call sites, and because it is a property of the rail
+   rather than of any one icon. */
+.rc-activity-bar .rc-icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.rc-activity-bar .rc-icon-button:hover {
+  color: var(--rc-text);
+}
+
+/* The selected view. Colour and a soft fill were already carrying this alone,
+   which asks someone to judge a hue difference on an unlabelled glyph; the
+   marker down the edge is the same answer VS Code reaches for, and it survives
+   being looked at with peripheral vision or without colour discrimination. */
+.rc-activity-bar .rc-icon-button[data-on="true"]::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--rc-accent);
+}
+
 .rc-icon-button[data-spinning="true"] svg {
   animation: rc-spin 0.6s linear infinite;
 }
@@ -577,6 +627,30 @@ body {
 
 .rc-statusbar-save[data-dirty="true"] {
   color: var(--rc-yellow);
+}
+
+/* The published-ports indicator. A button, because clicking it copies — but it
+   has to sit in a row of plain text without announcing itself as one, so the
+   chrome comes off and only the pointer and the hover state say it is live. */
+.rc-statusbar-ports {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--rc-text-subtle);
+  cursor: pointer;
+}
+
+.rc-statusbar-ports:hover {
+  color: var(--rc-text);
+}
+
+.rc-statusbar-ports svg {
+  width: 12px;
+  height: 12px;
 }
 
 /* Preview stage: a checkerboard so a transparent or short page still reads as

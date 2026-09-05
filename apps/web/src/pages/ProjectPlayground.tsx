@@ -862,11 +862,12 @@ export const ProjectPlayground = () => {
                   and its results, and losing them on every glance at the tree
                   would make it useless. */}
               <div
+                className="rc-activity-bar"
                 style={{
                   display: "flex",
                   flexDirection: "column",
                   gap: 2,
-                  padding: "8px 4px",
+                  padding: "8px 5px",
                   borderRight: "1px solid var(--rc-border)",
                   flex: "none",
                 }}
@@ -1185,7 +1186,7 @@ export const ProjectPlayground = () => {
       {/* One bar, spanning the app, below every pane. It used to be rendered
           inside the editor, which gave a split two of them and left a project
           with no open file with none. */}
-      <StatusBar />
+      <StatusBar projectId={projectIdFromUrl} />
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
       <SymbolSearch

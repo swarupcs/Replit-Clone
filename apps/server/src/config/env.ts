@@ -504,10 +504,20 @@ const envSchema = z.object({
    *  Worth turning off on a small VM: it converts "opened a project" into "a
    *  container, an install and a dev server", which is a much larger commitment
    *  than viewing a file tree. An explicit Stop always wins over it, whatever
-   *  this is set to. */
+   *  this is set to.
+   *
+   *  **Defaults OFF.** It defaulted on, and the failure that changed it is not
+   *  the resource cost above: a dev server nobody asked for holds the port, so
+   *  running the start command yourself — in the terminal, which is where
+   *  somebody who wants to watch it build goes — fails with EADDRINUSE against
+   *  a process they did not know existed and cannot see. The Run button is one
+   *  click and says what it did; a silent start that only announces itself by
+   *  breaking the next thing you type is a worse trade than one click.
+   *
+   *  Set `AUTO_START_ON_OPEN=true` to have it back. */
   AUTO_START_ON_OPEN: z
     .enum(["true", "false"])
-    .default("true")
+    .default("false")
     .transform((value) => value === "true"),
 
   /** Force the sandboxes' file watchers to poll, or force them not to.

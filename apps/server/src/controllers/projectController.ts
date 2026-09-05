@@ -26,6 +26,10 @@ import {
   setProjectVisibility,
   ProjectVisibility,
 } from "../service/projectAccessService.js";
+import {
+  previewablePorts,
+  publishedPorts,
+} from "../containers/containerManager.js";
 import { logger } from "../lib/logger.js";
 import { prisma } from "../lib/prisma.js";
 import { buildFileTree } from "../service/fileTreeService.js";
@@ -111,12 +115,29 @@ export async function getProjectPorts(
   );
   const template = getTemplate(project.template);
 
+  // `previewablePorts` rather than the template alone: it is the same list the
+  // preview's own allowed-check uses, and it honours a devcontainer's
+  // `forwardPorts`. Building it here from the template was how a forwarded port
+  // could be published by the container and still never reach this dropdown.
+  const [ports, hostPorts] = await Promise.all([
+    previewablePorts(projectId, template),
+    publishedPorts(projectId),
+  ]);
+
   res.json({
     success: true,
     message: "Preview ports",
     data: {
       devPort: template.devPort,
-      ports: [template.devPort, ...(template.extraPorts ?? [])],
+      ports,
+      // Only the ports actually offered. The container may publish others, and
+      // an address for something the preview will refuse is an invitation to a
+      // dead end.
+      hostPorts: Object.fromEntries(
+        ports
+          .filter((port) => hostPorts[port])
+          .map((port) => [port, hostPorts[port]]),
+      ),
     },
   });
 }

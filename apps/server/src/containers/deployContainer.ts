@@ -132,6 +132,14 @@ export async function startService(spec: ServiceSpec): Promise<void> {
       MemorySwap: env.DEPLOY_MEMORY_MB * 1024 * 1024,
       NanoCpus: Math.round(env.DEPLOY_CPUS * 1e9),
       PidsLimit: 256,
+      // tini as pid 1, for the two things pid 1 is expected to do and a user's
+      // start command does not. It reaps, so a server that spawns workers does
+      // not accumulate zombies against the PidsLimit above. And it forwards
+      // signals with the default dispositions in place — a Node process running
+      // as pid 1 IGNORES SIGTERM, so `docker stop` on a deployment waited out
+      // its full timeout and then killed it, denying every published app the
+      // chance to finish the request it was serving.
+      Init: true,
       CapDrop: ["ALL"],
       SecurityOpt: ["no-new-privileges"],
       NetworkMode: SANDBOX_NETWORK,

@@ -2,6 +2,7 @@ import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
 import { useRunStore } from "../../../store/runStore.ts";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { PresenceStack } from "../PresenceStack/PresenceStack.tsx";
+import { PortsStatus } from "../PortsStatus/PortsStatus.tsx";
 import {
   selectVisibleStatus,
   useEditorStatusStore,
@@ -29,7 +30,10 @@ const RUN: Partial<Record<RunStatus, { label: string; colour: string }>> = {
  *  it survives both, and it is the place where state that belongs to the
  *  project rather than to a file — the run — has somewhere to live.
  */
-export const StatusBar = () => {
+/** `projectId` is optional because the bar is the app's, not the route's: it
+ *  renders before the route param has resolved, and everything else in it is
+ *  about the editor rather than the project. */
+export const StatusBar = ({ projectId }: { projectId?: string }) => {
   const focusedPane = useOpenTabsStore((state) => state.focusedPane);
   const status = useEditorStatusStore(selectVisibleStatus(focusedPane));
   const runStatus = useRunStore((state) => state.state.status);
@@ -112,6 +116,11 @@ export const StatusBar = () => {
             ⚠ {warnings}
           </span>
         </span>
+
+        {/* Before the run chip, so "Running" and where it is reachable read as
+            one thought. Renders nothing at all unless the server is publishing
+            to the host — see PortsStatus. */}
+        {projectId !== undefined && <PortsStatus projectId={projectId} />}
 
         {run && (
           <span

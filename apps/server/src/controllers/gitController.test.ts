@@ -33,6 +33,8 @@ const collaboratorCount = vi.hoisted(() => vi.fn());
 const projectFindUnique = vi.hoisted(() => vi.fn());
 
 const githubToken = vi.hoisted(() => vi.fn());
+/** Whether the caller has a GitHub connection to pay for a push. */
+const githubConnectionFindUnique = vi.hoisted(() => vi.fn());
 
 /** Only the credential is stubbed. `parseGithubRemote` is a pure function the
  *  controller's behaviour is defined in terms of, so replacing it would leave
@@ -49,6 +51,7 @@ vi.mock("../lib/prisma.js", () => ({
     user: { findUnique },
     projectCollaborator: { count: collaboratorCount },
     project: { findUnique: projectFindUnique },
+    githubConnection: { findUnique: githubConnectionFindUnique },
   },
 }));
 vi.mock("../service/collabService.js", () => ({ forgetProject, dropDoc }));
@@ -60,6 +63,7 @@ import {
   gitHunksController,
   gitPullController,
   gitPushController,
+  gitSyncController,
   gitRemoteController,
   gitRemotesController,
   gitBranchesController,
@@ -92,6 +96,7 @@ const app = apiApp([
   { method: "post", path: "/p/:projectId/git/fetch", handler: gitFetchController },
   { method: "post", path: "/p/:projectId/git/pull", handler: gitPullController },
   { method: "post", path: "/p/:projectId/git/push", handler: gitPushController },
+  { method: "post", path: "/p/:projectId/git/sync", handler: gitSyncController },
   {
     method: "get",
     path: "/p/:projectId/github/repo",
@@ -113,6 +118,7 @@ beforeEach(() => {
   // Sole occupant by default: no collaborators, no outstanding share link.
   collaboratorCount.mockResolvedValue(0);
   projectFindUnique.mockResolvedValue({ shareToken: null });
+  githubConnectionFindUnique.mockResolvedValue({ userId: TEST_USER.sub });
 });
 
 const auth = () => ({ Authorization: bearer() });
@@ -1043,5 +1049,259 @@ describe("which GitHub repository a project belongs to", () => {
   it("is null with no remotes at all", async () => {
     git.remotes.mockResolvedValue([]);
     expect((await get()).body.data).toBeNull();
+  });
+});
+
+describe("sync", () => {
+  /** The controller reads the status four times — before, after the fetch,
+   *  after any pull, and once more to answer with. Sequencing them is what
+   *  makes "did it decide to pull" observable at all. */
+  const statuses = (...values: Array<Record<string, unknown>>) => {
+    git.status.mockReset();
+    for (const value of values) {
+      git.status.mockResolvedValueOnce({ isRepo: true, branch: "main", ...value });
+    }
+    // Anything past the sequence is the final read.
+    git.status.mockResolvedValue({
+      isRepo: true,
+      branch: "main",
+      ahead: 0,
+      behind: 0,
+      changes: [],
+    });
+  };
+
+  const sync = (body: Record<string, unknown> = {}) =>
+    request(app).post(`/p/${TEST_PROJECT}/git/sync`).set(auth()).send(body);
+
+  /** `vi.clearAllMocks()` clears calls but NOT implementations, and an earlier
+   *  test in this file leaves `pullRemote` rejecting for good. These three are
+   *  the legs of a sync, so each one states its own success here rather than
+   *  inheriting whatever the previous describe block left behind. */
+  beforeEach(() => {
+    git.fetchRemote.mockResolvedValue(undefined);
+    git.pullRemote.mockResolvedValue(undefined);
+    git.pushRemote.mockResolvedValue(undefined);
+  });
+
+  it("fetches, fast-forwards and pushes in that order", async () => {
+    statuses(
+      { ahead: 2, behind: 0, changes: [] }, // before
+      { ahead: 2, behind: 3, changes: [] }, // after fetch: 3 to pull
+      { ahead: 2, behind: 0, changes: [] }, // after pull: 2 to push
+    );
+    githubToken.mockResolvedValue("gh-token");
+
+    const response = await sync();
+
+    expect(response.status).toBe(200);
+    expect(git.fetchRemote).toHaveBeenCalledWith(TEST_PROJECT, "origin");
+    expect(git.pullRemote).toHaveBeenCalledWith(TEST_PROJECT, "origin", "main");
+    expect(git.pushRemote).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      "origin",
+      "main",
+      "gh-token",
+    );
+    expect(response.body.data).toMatchObject({
+      remote: "origin",
+      branch: "main",
+      pulled: 3,
+      pushed: 2,
+      pushSkipped: null,
+    });
+
+    // The worktree was rewritten under any live shared document.
+    expect(forgetProject).toHaveBeenCalledWith(TEST_PROJECT);
+  });
+
+  it("does not pull or push when there is nothing to do", async () => {
+    statuses(
+      { ahead: 0, behind: 0, changes: [] },
+      { ahead: 0, behind: 0, changes: [] },
+      { ahead: 0, behind: 0, changes: [] },
+    );
+
+    const response = await sync();
+
+    expect(git.fetchRemote).toHaveBeenCalled();
+    expect(git.pullRemote).not.toHaveBeenCalled();
+    expect(git.pushRemote).not.toHaveBeenCalled();
+    expect(forgetProject).not.toHaveBeenCalled();
+    expect(response.body.data.summary).toContain("Already up to date");
+  });
+
+  /** The point of the leg-by-leg result: a pull that worked is not thrown away
+   *  because the push half was unavailable. */
+  it("keeps a successful pull when the project is shared", async () => {
+    collaboratorCount.mockResolvedValue(1);
+    statuses(
+      { ahead: 1, behind: 2, changes: [] },
+      { ahead: 1, behind: 2, changes: [] },
+      { ahead: 1, behind: 0, changes: [] },
+    );
+
+    const response = await sync();
+
+    expect(response.status).toBe(200);
+    expect(git.pullRemote).toHaveBeenCalled();
+    expect(git.pushRemote).not.toHaveBeenCalled();
+    expect(response.body.data).toMatchObject({
+      pulled: 2,
+      pushed: 0,
+      pushSkipped: "PROJECT_IS_SHARED",
+    });
+  });
+
+  /** An unredeemed share link counts as sharing, exactly as it does for push:
+   *  it can be redeemed while the push is in flight. */
+  it("treats an outstanding share link as shared", async () => {
+    projectFindUnique.mockResolvedValue({ shareToken: "live-token" });
+    statuses(
+      { ahead: 1, behind: 0, changes: [] },
+      { ahead: 1, behind: 0, changes: [] },
+      { ahead: 1, behind: 0, changes: [] },
+    );
+
+    const response = await sync();
+
+    expect(git.pushRemote).not.toHaveBeenCalled();
+    expect(response.body.data.pushSkipped).toBe("PROJECT_IS_SHARED");
+  });
+
+  it("reports a missing credential rather than failing", async () => {
+    githubConnectionFindUnique.mockResolvedValue(null);
+    statuses(
+      { ahead: 1, behind: 0, changes: [] },
+      { ahead: 1, behind: 0, changes: [] },
+      { ahead: 1, behind: 0, changes: [] },
+    );
+
+    const response = await sync();
+
+    expect(response.status).toBe(200);
+    expect(git.pushRemote).not.toHaveBeenCalled();
+    expect(response.body.data.pushSkipped).toBe("NO_CREDENTIAL");
+  });
+
+  /** The stored GitHub token must not be spent on a remote that is not GitHub
+   *  — the same rule `githubForRemote` enforces for an explicit push. */
+  it("will not spend the GitHub connection on a non-GitHub remote", async () => {
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://gitlab.com/a/b.git" },
+    ]);
+    statuses(
+      { ahead: 1, behind: 0, changes: [] },
+      { ahead: 1, behind: 0, changes: [] },
+      { ahead: 1, behind: 0, changes: [] },
+    );
+
+    const response = await sync();
+
+    expect(git.pushRemote).not.toHaveBeenCalled();
+    expect(response.body.data.pushSkipped).toBe("REMOTE_NOT_GITHUB");
+  });
+
+  /** A pasted token is a deliberate choice to give a credential to THIS
+   *  remote, so it pays for a forge this server knows nothing about. */
+  it("uses a supplied token for any remote", async () => {
+    git.remotes.mockResolvedValue([
+      { name: "origin", url: "https://gitlab.com/a/b.git" },
+    ]);
+    statuses(
+      { ahead: 1, behind: 0, changes: [] },
+      { ahead: 1, behind: 0, changes: [] },
+      { ahead: 1, behind: 0, changes: [] },
+    );
+
+    await sync({ token: "pasted" });
+
+    expect(git.pushRemote).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      "origin",
+      "main",
+      "pasted",
+    );
+    expect(githubToken).not.toHaveBeenCalled();
+  });
+
+  it("syncs the only remote when it is not called origin", async () => {
+    git.remotes.mockResolvedValue([
+      { name: "upstream", url: "https://github.com/a/b.git" },
+    ]);
+    statuses(
+      { ahead: 0, behind: 1, changes: [] },
+      { ahead: 0, behind: 1, changes: [] },
+      { ahead: 0, behind: 0, changes: [] },
+    );
+
+    const response = await sync();
+
+    expect(git.fetchRemote).toHaveBeenCalledWith(TEST_PROJECT, "upstream");
+    expect(response.body.data.remote).toBe("upstream");
+  });
+
+  it("refuses a project with no remote", async () => {
+    git.remotes.mockResolvedValue([]);
+    statuses({ ahead: 0, behind: 0, changes: [] });
+
+    const response = await sync();
+
+    expect(response.status).toBe(400);
+    expect(git.fetchRemote).not.toHaveBeenCalled();
+  });
+
+  it("refuses a branch with no commits", async () => {
+    statuses({ unborn: true, branch: undefined, changes: [] });
+
+    const response = await sync();
+
+    expect(response.status).toBe(400);
+    expect(git.fetchRemote).not.toHaveBeenCalled();
+  });
+
+  it("refuses a project that is not a repository", async () => {
+    statuses({ isRepo: false, changes: [] });
+
+    const response = await sync();
+
+    expect(response.status).toBe(400);
+    expect(git.fetchRemote).not.toHaveBeenCalled();
+  });
+
+  /** Editor, not owner: the fetch-and-pull half is a collaborator's by the
+   *  same right `/git/pull` grants it, and the push half checks ownership for
+   *  itself. */
+  it("asks for editor access", async () => {
+    statuses(
+      { ahead: 0, behind: 0, changes: [] },
+      { ahead: 0, behind: 0, changes: [] },
+      { ahead: 0, behind: 0, changes: [] },
+    );
+
+    await sync();
+
+    expect(projectAccessService.assertProjectAccess).toHaveBeenCalledWith(
+      TEST_PROJECT,
+      TEST_USER.sub,
+      "editor",
+    );
+  });
+
+  /** A dirty worktree is the pull service's refusal, not a second copy of the
+   *  rule here — so it must surface as the sync failing. */
+  it("surfaces a dirty worktree from the pull", async () => {
+    statuses(
+      { ahead: 0, behind: 1, changes: [{ path: "a.txt" }] },
+      { ahead: 0, behind: 1, changes: [{ path: "a.txt" }] },
+    );
+    git.pullRemote.mockRejectedValue(
+      new BadRequestError("Commit or discard your changes before pulling"),
+    );
+
+    const response = await sync();
+
+    expect(response.status).toBe(400);
+    expect(git.pushRemote).not.toHaveBeenCalled();
   });
 });

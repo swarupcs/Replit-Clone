@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { envSignature } from "./containerManager.js";
 
@@ -32,6 +33,25 @@ describe("envSignature", () => {
 
     expect(one).not.toBe(envSignature({ A: "1", B: "2" }));
     expect(one).not.toBe(envSignature({}));
+  });
+
+  /** The signature read only the project's inputs, so a change to how a
+   *  container is BUILT reached a project on its next cold start and not
+   *  before — and a container that lives for days would have gone on running
+   *  the old shape indefinitely. That is the same defect the signature exists
+   *  to close, arriving from the other side.
+   *
+   *  Asserted by rebuilding the hash the old way rather than against a fixed
+   *  digest: a golden value here would say what the signature IS, and what
+   *  matters is that the shape is one of its inputs. */
+  it("takes the container's own shape into account, not just the project's", () => {
+    const vars = { A: "1" };
+    const projectInputsAlone = createHash("sha256")
+      .update(JSON.stringify([["A", "1"]]))
+      .digest("hex")
+      .slice(0, 32);
+
+    expect(envSignature(vars)).not.toBe(projectInputsAlone);
   });
 
   it("tells apart a rename that keeps the value", () => {

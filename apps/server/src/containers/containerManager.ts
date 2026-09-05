@@ -68,6 +68,23 @@ export async function removeCacheVolume(projectId: string): Promise<void> {
  */
 const ENV_SIGNATURE_LABEL = "rc.env-signature";
 
+/** Bumped whenever this file changes how a container is BUILT in a way an
+ *  already-running one cannot be given.
+ *
+ *  The signature exists to rebuild a container whose shape no longer matches
+ *  what the code asks for, and it read only the project's inputs — so a change
+ *  here reached a project on its next cold start and not before. A container
+ *  that lives for days would have gone on running the old shape indefinitely,
+ *  which is exactly the class of defect the signature was added to close.
+ *
+ *  The cost of a bump is one rebuild per project, and it is cheap: the package
+ *  cache is a named volume that outlives the container, so the reinstall the
+ *  rebuild would otherwise mean does not happen.
+ *
+ *  2 — `HostConfig.Init`.
+ */
+const CONTAINER_SHAPE = "shape:2";
+
 /** A stable fingerprint of a project's variables.
  *
  *  Sorted, so the same set written in a different order is not mistaken for a
@@ -97,7 +114,7 @@ export function envSignature(
       .map((name) => [name, vars[name] ?? ""]),
   );
 
-  const hash = createHash("sha256").update(stable);
+  const hash = createHash("sha256").update(stable).update(CONTAINER_SHAPE);
 
   if (devcontainer) {
     // `source` and `unsupported` are left out on purpose: they describe how
@@ -146,6 +163,54 @@ async function devcontainerFor(
         : "The devcontainer config could not be read.";
     logger.warn("devcontainer ignored", { projectId, reason });
     setDevcontainerStatus(projectId, { config: null, error: reason });
+    return null;
+  }
+}
+
+/** Every port this project's preview may be pointed at.
+ *
+ *  The template's own, plus whatever a `devcontainer.json` forwards. One
+ *  function because this list is needed in three places — creating the
+ *  container, deciding whether a requested port is allowed, and telling the
+ *  editor what to put in its dropdown — and it used to be written out
+ *  separately in each. Two of the three had never heard of `forwardPorts`, so
+ *  a port declared there was exposed and published by the first and then
+ *  refused by the other two: forwarded to nowhere.
+ *
+ *  Deduplicated because Docker rejects a duplicate exposed port, and a
+ *  devcontainer naming the port its template already knew about is the
+ *  ordinary case rather than a mistake.
+ */
+export function declaredPorts(
+  template: { devPort: number; extraPorts?: number[] },
+  devcontainer?: DevcontainerConfig | null,
+): number[] {
+  return [
+    ...new Set([
+      template.devPort,
+      ...(template.extraPorts ?? []),
+      ...(devcontainer?.forwardPorts ?? []),
+    ]),
+  ];
+}
+
+/** The devcontainer as the READ paths need it: quietly.
+ *
+ *  `devcontainerFor` records what it found, because it runs while a container
+ *  is being built and the editor has to learn that the file is broken. This
+ *  one answers a question about a project that may not be running at all, and
+ *  is called once per preview request — reporting from here would let a page
+ *  refresh overwrite the status of a start that actually happened.
+ *
+ *  A config that cannot be read yields the template's ports alone, which is
+ *  the same fallback the build path takes.
+ */
+async function devcontainerQuietly(
+  projectId: string,
+): Promise<DevcontainerConfig | null> {
+  try {
+    return await readDevcontainer(projectId);
+  } catch {
     return null;
   }
 }
@@ -378,17 +443,7 @@ async function startContainer(projectId: string): Promise<Container> {
   // container IPs. It is never bound on 0.0.0.0, so nothing is reachable from
   // outside this machine — the browser always goes through /preview.
   const publishPort = previewTargetMode === "host-loopback";
-  // The template's ports, plus anything the devcontainer forwards. Deduplicated
-  // because Docker rejects a duplicate exposed port, and a devcontainer naming
-  // the port its template already knew about is the ordinary case rather than a
-  // mistake.
-  const previewPorts = [
-    ...new Set([
-      template.devPort,
-      ...(template.extraPorts ?? []),
-      ...(devcontainer?.forwardPorts ?? []),
-    ]),
-  ];
+  const previewPorts = declaredPorts(template, devcontainer);
 
   const exposedPorts = Object.fromEntries(
     previewPorts.map((port) => [`${String(port)}/tcp`, {}]),
@@ -471,6 +526,16 @@ async function startContainer(projectId: string): Promise<Container> {
         NanoCpus: Math.round(env.CONTAINER_CPUS * 1e9),
         // Caps a fork bomb.
         PidsLimit: 256,
+        // tini as pid 1, which reaps.
+        //
+        // `sleep infinity` was pid 1, and `sleep` does not reap. Every process
+        // whose parent died before it — a terminal shell hung up while its dev
+        // server was still running, which is the ordinary case — was reparented
+        // to `sleep` and stayed there as a zombie for the life of the
+        // container. Each one holds a pid, and `PidsLimit` above is 256: a
+        // project opened and closed enough times could not start a process at
+        // all, having spent its whole allowance on the dead.
+        Init: true,
         CapDrop: ["ALL"],
         SecurityOpt: ["no-new-privileges"],
         NetworkMode: SANDBOX_NETWORK,
@@ -611,11 +676,11 @@ export async function getPreviewTarget(
   const inspected = await docker.getContainer(info.Id).inspect();
   const template = await templateForProject(projectId);
 
-  // Any port the template declares, defaulting to its dev port. The registry
-  // used to allow exactly one, so a project serving an API beside its frontend
-  // had no way to preview the other.
+  // Any port the template declares or the devcontainer forwards, defaulting to
+  // the dev port. The registry used to allow exactly one, so a project serving
+  // an API beside its frontend had no way to preview the other.
   const wanted = port ?? template.devPort;
-  const allowed = [template.devPort, ...(template.extraPorts ?? [])];
+  const allowed = declaredPorts(template, await devcontainerQuietly(projectId));
   if (!allowed.includes(wanted)) return undefined;
 
   const portKey = `${String(wanted)}/tcp`;
@@ -660,10 +725,76 @@ export async function getRunningContainer(
   return docker.getContainer(info.Id);
 }
 
-/** Ports this project's preview may be pointed at. */
-export async function previewablePorts(projectId: string): Promise<number[]> {
-  const template = await templateForProject(projectId);
-  return [template.devPort, ...(template.extraPorts ?? [])];
+/** Where each of this project's ports is published on the host, when any is.
+ *
+ *  Only `host-loopback` mode publishes anything — a deployment reaches project
+ *  containers by IP and binds nothing to the host at all — so this is empty in
+ *  production by construction rather than by a flag somebody has to remember
+ *  to set. That is what makes it safe to hand to the editor: there is no
+ *  address to leak because there is no address.
+ *
+ *  The addresses are always on 127.0.0.1, so they mean something only on the
+ *  machine running Docker. Shown to a user on that machine they are exactly
+ *  what curl and Postman need; shown to anyone else they are inert.
+ */
+export async function publishedPorts(
+  projectId: string,
+): Promise<Record<number, string>> {
+  if (previewTargetMode !== "host-loopback") return {};
+
+  // Every failure is an empty map, never a throw. This hangs off an endpoint
+  // whose real job is to say which ports a project offers, and an unreachable
+  // Docker daemon must not take that answer down with it — the addresses are a
+  // convenience for curl, and the preview does not need them at all.
+  try {
+    const info = await findContainer(projectId);
+    if (!info || info.State !== "running") return {};
+
+    const inspected = await docker.getContainer(info.Id).inspect();
+    const bindings = inspected.NetworkSettings?.Ports ?? {};
+    const published: Record<number, string> = {};
+
+    for (const [key, hosts] of Object.entries(bindings)) {
+      const host = hosts?.[0];
+      if (!host?.HostPort) continue;
+
+      const container = Number(key.split("/")[0]);
+      if (!Number.isInteger(container)) continue;
+
+      published[container] = `${host.HostIp || "127.0.0.1"}:${host.HostPort}`;
+    }
+
+    return published;
+  } catch {
+    return {};
+  }
+}
+
+/** Ports this project's preview may be pointed at.
+ *
+ *  Reads `devcontainer.json` rather than the running container's exposed
+ *  ports, which are only recorded when the port is also PUBLISHED — that is
+ *  `host-loopback` mode alone, so in a real deployment the container has
+ *  nothing to read back. The file is the same source the container was built
+ *  from, and editing it forces a rebuild anyway (it is part of the env
+ *  signature), so the two cannot disagree for long. While they do, a port
+ *  added since the last start is listed and simply has nothing behind it yet.
+ */
+export async function previewablePorts(
+  projectId: string,
+  /** The project's template, when the caller already has it.
+   *
+   *  Without this the lookup goes back to the database for a row its caller
+   *  usually just read — and worse, could answer from a DIFFERENT row than the
+   *  one the caller's access check resolved. Two reads of one fact is how they
+   *  come to disagree.
+   */
+  template?: { devPort: number; extraPorts?: number[] },
+): Promise<number[]> {
+  return declaredPorts(
+    template ?? (await templateForProject(projectId)),
+    await devcontainerQuietly(projectId),
+  );
 }
 
 export async function stopContainer(projectId: string): Promise<void> {

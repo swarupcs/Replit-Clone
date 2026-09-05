@@ -104,15 +104,24 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 120 items. Open: 15 — five blocked, and ten from §10 that are all
-waiting on one decision (§10.1).**
+**Done: 120 items. Open: 24 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), and nine from §11, which reads the sandbox
+rather than the editor and is blocked on nothing.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
-split out**, and **five blocked** (§3.3 — a certificate's private key, an
+split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route).
+an architectural route), **ten in §10 behind that same route**, and **nine in
+§11 behind nothing at all**.
+
+**§11 was written on 2026-09-05 and adds nine.** It asks §10's question of
+the platform instead of the editor — the container's refusal list, the idle
+reaper, and the fact that this server speaks plain HTTP and is reachable only
+from the machine it runs on. None of its nine is blocked, which makes it the
+only body of unblocked work on this page; and its first row argues that §10.1,
+which blocks ten others, is **a two-item list of a three-item set**.
 
 **§10 was written on 2026-09-03 and adds fourteen**, which is why the total
 above moved for the first time in a while by something other than work getting
@@ -3627,3 +3636,301 @@ roughly twice the work that gets written down. It has not been validated by
 anybody trying to use this as their daily editor for a week, and that week would
 almost certainly reorder these rows — most likely by promoting something in
 10.14 that reads trivial here and is intolerable in practice.
+
+---
+
+## 11. The word "cloud" is doing no work yet
+
+Written 2026-09-05. §10 asked what stops one person using this instead of VS
+Code, answered it as a question about **editor parity**, and reached an
+architectural route decision (§10.1). This section is what turns up from
+reading the other half — the **sandbox and the server**, not Monaco — and none
+of it is in §10, because §10 was written against the parity ledger and §6 and
+never opened `devcontainer.ts`'s refusal list, the idle reaper, or
+`apps/server/src/index.ts` line 83.
+
+Everything below was checked against the source; the list is at the end,
+under "What was verified for this section".
+
+The theme, and it is one theme rather than seven: **§10.4 made an argument and
+then applied it in exactly one place.** Its argument is that
+`MAX_PROJECTS_PER_USER`, `USER_DISK_QUOTA_MB` and the rest are *rationing
+between tenants*, and that at n=1 there is nobody to ration against — so they
+became a `personal` plan rather than a rewrite. That argument is correct and it
+is not finished. The same sentence is true, word for word, of the sandbox's
+**capabilities**, of its **lifecycle policies**, and of the assumption that the
+person at the keyboard is sitting at the machine. §10.4 found the limits
+because they had numbers in a config file and were easy to see. The rest of the
+multi-tenant posture is spread through refusal strings, a 60-second interval
+and a default origin, and it is the same decision every time.
+
+---
+
+### 11.0 §10.1 is a false binary
+
+§10 is emphatic that ten of its rows are blocked on one choice — Monaco
+(Route B) or openvscode-server (Route A) — and that building any of them while
+undecided is waste. That is right about the two routes it names. It is a
+two-item list of a three-item set.
+
+**Route C — make the workspace attachable, and let the user bring the
+editor.** `grep -ri "sshd\|ssh-agent\|SSH_AUTH_SOCK" apps/` returns nothing:
+there is no way to reach a project's container except through this app.
+Give it one — an sshd in the sandbox image, a key the account owns, and a way
+in from outside — and the user's own VS Code, Cursor, Zed, IntelliJ or `nvim`
+attaches to the workspace directly.
+
+What that does to §10's blocked list is the point:
+
+| §10 row | Under Route C |
+|---|---|
+| 10.6 Debugging | **arrives complete.** The client is a real editor; the DAP client, breakpoint gutter, watch UI and per-language adapters are all its problem, not this repository's |
+| 10.7 Extensions — *"unreachable on Route B"* | **arrives complete,** and it is the user's actual extensions with their actual settings, which is more than Route A offers |
+| 10.8 Languages past Python and Go | mostly arrives; the sandbox image still needs the toolchain, but not `lspPolicy.ts` and not the gateway |
+| 10.9 Settings, keybindings, snippets | theirs already, on their machine |
+| 10.11 Diff editor, 10.13 the rest of git | theirs already |
+
+That is the two most expensive rows in §10 and three of the cheap ones, for one
+image change and a key store.
+
+**It is not free and it is not a substitute — be honest about both.** Route C
+concedes that the browser editor is not where the serious work happens, which
+is a strategic concession and not a technical one, and somebody has to be
+willing to make it. It does nothing on an iPad, where there is no local editor
+to attach — and the iPad is a large part of why anybody wants a cloud editor at
+all. It puts an sshd in a sandbox whose whole security posture is `CapDrop:
+["ALL"]` and `no-new-privileges`, so the key handling has to be right the first
+time. And it leaves 10.10, 10.12 and 10.14 exactly where they were.
+
+**What it changes is the stakes of §10.1, and that is worth more than the
+feature.** §10 argues Route B is defensible only if multiplayer is the point,
+because Route B can never reach 10.7. If 10.7 arrives over SSH, that sentence
+stops being true: **staying on Monaco stops costing you extensions and
+debugging**, and the browser editor is then free to be what it is already good
+at — the thing you open on a machine you do not control, to fix one file. Route
+A and Route C are also not exclusive; Codespaces ships both, which is the
+existence proof that the two-item framing was the accident and not the answer.
+
+- [ ] **11.1 Put Route C in front of the §10.1 decision before it is taken.**
+      Not a build — a paragraph in §10.1 and a re-read of its table. Doing it
+      afterwards is how a route gets chosen against a cost that was never the
+      real one.
+
+---
+
+### The sandbox refuses things for reasons that expire at n=1
+
+`devcontainer.ts` reports every key it will not honour, each with a reason
+written for the user (`UNSUPPORTED_REASON`, lines 88–110). The list is
+`dockerComposeFile`, `service`, `runServices`, `features`, `mounts`, `runArgs`,
+`privileged`, `capAdd`, `securityOpt`, `initializeCommand`.
+
+Read them as a group and they are one posture, correctly held: **this is a
+sandbox running a stranger's code, so the platform decides what the container
+is and the repository does not.** Every one of those refusals is right for §8's
+product.
+
+At n=1 the stranger is you, on your own machine, and they stop being one
+decision. Three groups:
+
+**Still right, and should stay refused however personal this gets.**
+`privileged`, `capAdd`, `securityOpt`, `runArgs`. Not because of the tenant —
+because a container that can do anything to the host is a container that can
+destroy the tree it is mounted on, and §6's confinement work exists to make
+that impossible by construction rather than by care. `initializeCommand` runs
+on the *host*: refuse it forever.
+
+**Wrong at n=1, and cheap.** `features` — "install what you need in
+postCreateCommand instead" is a fair answer to a tenant and a poor one to
+yourself, because Dev Container Features are how the ecosystem distributes
+"add the AWS CLI" and rewriting each one by hand is exactly the work the format
+exists to delete. `mounts` — "the project directory is the only thing mounted,
+deliberately" is a confinement rule about *other people's* directories; your own
+`~/.aws` is not that, and 10.2 already shipped the machinery for a root this
+server did not create.
+
+- [ ] **11.2 Re-decide the refusal list for the personal plan, one line at a
+      time.** As a plan entitlement, per §10.4's precedent, and **not** as a
+      mode flag read in `devcontainer.ts` — §6 decision 13's argument applies
+      unchanged. The output is a shorter `UNSUPPORTED_REASON` under the
+      `personal` plan and the same one under every other.
+
+**And one that is not a line on that list but the largest single gap in this
+document.**
+
+- [ ] **11.3 Compose — more than one container per project.**
+      `dockerComposeFile`, `service` and `runServices` all refuse with the same
+      sentence: *"This platform runs one container per project."* That is an
+      architecture statement, not a policy, and it is why this row is separate
+      from 11.2 and cannot be granted by an entitlement.
+
+      It matters more than its position in the format suggests. A very large
+      share of real repositories are not "an app" — they are an app, a
+      Postgres, a Redis and sometimes a worker, wired together in
+      `docker-compose.yml`, and `docker compose up` is the documented way to
+      start them. Today such a repository opens in this editor, shows a
+      `docker-compose.yml` with a Docker icon (`fileTypes.ts:209`), and cannot
+      be run at all. The database panel does not close this: it gives a project
+      *a* Postgres this platform manages (§6 decision 4 pairs it with the
+      container's lifecycle), which is a different thing from the four services
+      the repository's own file describes.
+
+      **Check the shape before starting, because three subsystems assume the
+      singular.** `containerName(projectId)` is one name per project;
+      `getPreviewTarget` and `publishedPorts` resolve ports against one
+      container; the idle reaper and `stopAllContainers` enumerate by a single
+      prefix. The honest first version is probably not general compose support
+      but **"the project's container, plus the services it declares, as one
+      lifecycle unit"** — which is precisely the relationship §6 decision 4
+      already built and argued for the database container, generalised from one
+      sidecar to several.
+
+---
+
+### The lifecycle policies also assume somebody else wants the memory
+
+- [ ] **11.4 Stop reaping a container nobody is watching.**
+      `startIdleReaper` stops any project container with no active attachments
+      after `CONTAINER_IDLE_MINUTES` (default 20), and §6 decision 4 correctly
+      takes the project's database down with it. Between tenants that is right:
+      an idle container is somebody else's RAM.
+
+      At n=1 it is the editor deciding that closing a tab means killing your
+      dev server, your watch process, your long import and your `tmux`-shaped
+      intentions — and the reaper cannot tell "I am done" from "I closed the
+      lid". §10.4 moved the *limits* to a plan and did not touch this, because
+      it is not a limit; it is a policy with the same multi-tenant premise. The
+      `personal` plan wants it off, or wants it long enough to be about the host
+      running out of memory rather than about sharing.
+
+      Note the interaction, which is why this is a row and not a config change:
+      with the reaper off, `stopAllContainers` on shutdown becomes the only
+      thing that stops anything, and **`reconcileOnBoot` then has to bring a
+      project's containers back**, or a host reboot silently ends every
+      long-running process. The reconcile machinery exists
+      (`index.ts` imports `reconcileOnBoot`, `reconcileDeployments`,
+      `restoreServices`, `reconcileJobRuns`) — deployments and jobs already come
+      back after a restart. Projects do not, because until now nothing was
+      supposed to survive.
+
+---
+
+### Reaching it from a machine that is not the host
+
+This is where the section's title comes from. **Nothing in this platform is
+reachable from anywhere except the computer it runs on**, and a personal
+*cloud* IDE whose premise is "my machine is not where I am" has not delivered
+its premise.
+
+`index.ts:83` is `createServer(app)` from `node:http` — no TLS anywhere in the
+process. `WEB_ORIGIN` defaults to `http://localhost:5273`. There is no
+`Caddyfile`, no `nginx.conf`, no tunnel client, and nothing in `docs/` that
+says how you are supposed to get to it.
+
+**§3.3's certificate row is not this row, and it would be easy to file this
+there and lose it.** That row is about ACME certificates for *user-deployed
+custom domains* — the third origin, the published sites. This is about reaching
+**the editor itself**, which needs one hostname and one certificate and none of
+the per-domain challenge machinery §9.2 split out.
+
+- [ ] **11.5 A documented way in from outside, and the smallest one that is
+      honest.** A reverse proxy terminating TLS in front of the API and web
+      origins, one name, and a written answer for how it is obtained — Caddy
+      with a DNS challenge, or a tunnel (Tailscale, Cloudflare) that sidesteps
+      certificates and inbound ports entirely and is very likely the right
+      answer for a laptop behind NAT. What makes this a row rather than a
+      README is that the *app* has opinions about it: `COOKIE_SECURE`,
+      `COOKIE_SAME_SITE` and `WEB_ORIGIN` all change meaning once there is a
+      real origin, and the preview origin and the deployment origin have to
+      come along or half the product 404s.
+
+- [ ] **11.6 Re-read the auth surface for an editor on the open internet.**
+      §10.3's single-user mode was designed for a laptop and is honest about it,
+      and it got the central thing right — *"a server that issued one to anybody
+      who asked would be an unauthenticated server on whatever network it is
+      reachable from"*, so sign-in stays even at n=1. 11.5 is what makes that
+      sentence load-bearing rather than cautious.
+
+      What it does not have: **`grep -ril "totp\|twoFactor\|mfa" apps/server/src`
+      returns nothing.** One password, rate-limited (`auth.ts` has
+      `addressLimiter` and `refreshLimiter`, which is more than most), standing
+      between the internet and a shell on your machine with your source tree
+      mounted. On a laptop that is proportionate. Exposed, the threat model is
+      not "somebody reads my code", it is `docker exec`, and this deserves
+      re-deciding rather than inheriting.
+
+- [ ] **11.7 The laptop lid.** No service worker, no manifest —
+      `apps/web/public` is `favicon.svg` and `vite.svg`. A cloud editor is used
+      on trains and on hotel wifi, and today a dropped connection is a blank
+      page rather than a degraded one. Not offline editing, which is a CRDT
+      argument this document does not need: an installable shell, a legible
+      "you are offline" state, and not losing the buffer.
+
+      The layout half is further along than expected and should not be
+      re-derived: `index.css` already turns the side and bottom panes into
+      overlay drawers below 900px, drops the drag dividers, and has a scrim
+      (lines 1194–1235). What is untested is Monaco itself under a touch
+      keyboard, which is the part that decides whether the iPad case is real.
+
+---
+
+### The two small ones, so they are not each rediscovered
+
+- [ ] **11.8 Search that knows about more than one project.**
+      `searchService.ts` exports exactly one entry point, `searchProject(projectId, …)`,
+      and the worker is handed `root: projectRoot(projectId)`. Every search in
+      this product is inside one project. With thirteen templates and a
+      personal machine's worth of repositories, "which project did I write that
+      in" has no answer, and it is the question you ask most often about code
+      you wrote yourself. Cheap: the worker already takes a root.
+
+- [ ] **11.9 An identity that follows you into the container.**
+      Two halves, both absent. **Dotfiles** — every container comes up with a
+      stock `/bin/bash` and no aliases, no prompt, no `.vimrc`, no `.gitconfig`
+      beyond what the platform writes; the devcontainer ecosystem's answer is a
+      personal dotfiles repository cloned into every workspace, and at n=1 "it
+      comes up as *my* shell" is a large fraction of what personal means.
+      **Commit signing** — `grep` for `gpgsign`, `ssh-agent` and
+      `SSH_AUTH_SOCK` over `apps/server/src` returns nothing, so commits made
+      here structurally cannot be signed. If 11.1's Route C ships an agent
+      socket, this comes most of the way with it, which is the only dependency
+      between any two rows in this section.
+
+---
+
+### What was verified for this section
+
+Checked against the tree on 2026-09-05, in the manner §5 requires:
+
+- `apps/server/src/index.ts:83` — `createServer(app)`, `node:http`. No TLS.
+- `devcontainer.ts:88–110` — the ten refusals quoted are the actual strings.
+- `containerManager.ts:842–885` — the reaper's condition is
+  `activeAttachments === 0` and `CONTAINER_IDLE_MINUTES`, default 20
+  (`env.ts:408`), and it calls `onProjectReaped` for the database pair.
+- `searchService.ts:120` — `searchProject` is the only exported search.
+- `grep -ril "totp|twoFactor|mfa"` over `apps/server/src` — no hits.
+- `grep -rn "gpgsign|SSH_AUTH_SOCK|ssh-agent"` over `apps/server/src` — no hits.
+- `apps/web/public` — two SVGs, no manifest, no service worker.
+- `index.css:1194` — the ≤900px drawer layout exists, contrary to what a
+  section about mobile would otherwise have assumed.
+- `apps/server/templates` — 13, as §10 says.
+
+**Not verified, and load-bearing for 11.1:** nobody has put an sshd in a
+sandbox image and attached a real editor to it. The claim that 10.6 and 10.7
+"arrive complete" is how Remote-SSH works elsewhere, not something this
+repository has demonstrated. It is a day's spike and it should be run **before**
+11.1's paragraph is written into §10.1, because the whole argument rests on it.
+
+**A caution, in the spirit of §4 and of §10's own closing note.** §10 warned
+that it had not been validated by anybody using this as their daily editor for
+a week. This section is the same method applied to the platform instead of the
+editor, so it carries the same warning and one more: it was written the day
+after three defects were found in the container layer that no test and no
+section of this document predicted — an orphaned shell holding a port
+(`ee09897`), a pid file that could be overwritten, and `sleep infinity` as pid 1
+reaping nothing (`3e269e0`). All three had been there for the life of the
+project, all three were found by looking at a running container rather than at
+the code, and none is the kind of thing that appears on a roadmap. **The most
+likely error in this section is not a wrong row; it is that the container layer
+holds more of these, and they are found by running the thing rather than by
+writing about it.**

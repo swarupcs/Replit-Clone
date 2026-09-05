@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import type { GitPushSkipReason } from "@replit-clone/shared";
 import { z } from "zod";
 import { getAuthContext } from "../middlewares/requireAuth.js";
 import { assertProjectAccess } from "../service/projectAccessService.js";
@@ -91,6 +92,19 @@ const pullSchema = z.object({
 /** The token is optional now: a connected GitHub account supplies one, and
  *  pasting a personal access token remains the way to push anywhere else. */
 const pushSchema = pullSchema.extend({
+  token: z.string().min(1).max(1024).optional(),
+});
+
+/** A sync: everything optional, because the point of it is not having to say.
+ *
+ *  An omitted remote means `origin`, and an omitted branch means the one HEAD
+ *  is on. Both are still validated when given, by the same rules a pull uses —
+ *  a convenience that accepted a looser name than the explicit route would be
+ *  a way around that route.
+ */
+const syncSchema = z.object({
+  name: pullSchema.shape.name.optional(),
+  branch: pullSchema.shape.branch.optional(),
   token: z.string().min(1).max(1024).optional(),
 });
 
@@ -613,4 +627,196 @@ export async function githubRepoController(
       ? { ...found, url: `https://github.com/${found.owner}/${found.repo}` }
       : null,
   });
+}
+
+/** Fetch, fast-forward, push — in that order, in one call.
+ *
+ *  Every leg of this already exists as its own route, and this deliberately
+ *  calls those same services rather than reaching for git itself: a sync that
+ *  could pull something `/git/pull` would refuse, or push where `/git/push`
+ *  would not, would be a second set of rules for the same operations and the
+ *  looser of the two would become the real one.
+ *
+ *  **The order is not arbitrary.** Pushing before pulling is how a
+ *  non-fast-forward rejection happens on the forge instead of here, and
+ *  fetching before both is what makes `ahead`/`behind` describe the remote as
+ *  it is now rather than as it was at the last fetch.
+ *
+ *  **A pull that cannot fast-forward stops the sync**, and says so. `--ff-only`
+ *  is the service's choice and this does not widen it: the alternative is
+ *  deciding on somebody's behalf between a merge commit and a rebase, in a
+ *  worktree they have open, over commits this server has not shown them.
+ *
+ *  **A push that cannot happen does not fail the sync.** Being unable to push
+ *  is a property of the project (shared) or the account (no credential), not of
+ *  this request, and throwing away a successful pull to report it would make
+ *  the button useless exactly where it is most wanted — a shared project that
+ *  still needs to receive other people's commits.
+ */
+export async function gitSyncController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  // Editor, not owner. The push leg re-checks ownership for itself below;
+  // requiring it up front would refuse a collaborator the fetch-and-pull half,
+  // which is theirs by the same right `/git/pull` grants it.
+  const projectId = await authorise(req, "editor");
+  const { userId } = getAuthContext(req);
+  const { name, branch, token } = syncSchema.parse(req.body ?? {});
+
+  const before = await git.status(projectId);
+  if (!before.isRepo) {
+    throw new BadRequestError(
+      "This project has no git repository yet.",
+      "NOT_A_REPO",
+    );
+  }
+  if (before.unborn || !before.branch) {
+    throw new BadRequestError(
+      "This branch has no commits yet, so there is nothing to sync. Commit first.",
+      "UNBORN_BRANCH",
+    );
+  }
+
+  const available = await git.remotes(projectId);
+  if (available.length === 0) {
+    throw new BadRequestError(
+      "This project has no remote. Add one, then sync.",
+      "NO_REMOTE",
+    );
+  }
+
+  // `origin` by default, but not blindly: a repository whose only remote is
+  // called something else should sync to that rather than report a remote it
+  // does not have missing.
+  const remote =
+    name ??
+    (available.find((entry) => entry.name === "origin") ?? available[0]!).name;
+
+  if (!available.some((entry) => entry.name === remote)) {
+    throw new BadRequestError(`No remote called ${remote}.`, "NO_SUCH_REMOTE");
+  }
+
+  const target = branch ?? before.branch;
+
+  await git.fetchRemote(projectId, remote);
+
+  const fetched = await git.status(projectId);
+  const behind = fetched.behind ?? 0;
+
+  if (behind > 0) {
+    // Let the service refuse a dirty worktree. Checking here as well would put
+    // the same rule in two places, and this one would be the stale copy.
+    await git.pullRemote(projectId, remote, target);
+
+    // Same reason as `/git/pull`: the worktree was rewritten underneath any
+    // live shared document, which would otherwise write its pre-pull text back
+    // over what was just merged in.
+    forgetProject(projectId);
+  }
+
+  const merged = await git.status(projectId);
+  const ahead = merged.ahead ?? 0;
+
+  let pushSkipped: GitPushSkipReason | null = null;
+  let pushed = 0;
+
+  if (ahead > 0) {
+    const reason = await pushBlocker(projectId, userId, remote, token);
+    if (reason) {
+      pushSkipped = reason;
+    } else {
+      const credential =
+        token ?? (await githubForRemote(projectId, remote, userId));
+      await git.pushRemote(projectId, remote, target, credential);
+      pushed = ahead;
+    }
+  }
+
+  const status = await git.status(projectId);
+
+  res.json({
+    success: true,
+    message: "Synced",
+    data: {
+      status,
+      remote,
+      branch: target,
+      pulled: behind,
+      pushed,
+      pushSkipped,
+      summary: describeSync(behind, pushed, pushSkipped, remote),
+    },
+  });
+}
+
+/** Why this caller cannot push here, or null when they can.
+ *
+ *  Asked BEFORE the push rather than catching its failure, because the two
+ *  refusals this reports are not failures: they are states the project is in,
+ *  and one of them (a shared container) must be decided before a credential is
+ *  fetched rather than after.
+ */
+async function pushBlocker(
+  projectId: string,
+  userId: string,
+  remote: string,
+  token: string | undefined,
+): Promise<GitPushSkipReason | null> {
+  // Ownership, checked the way the push route checks it. `assertProjectAccess`
+  // throws, and here that is an answer rather than an error.
+  try {
+    await assertProjectAccess(projectId, userId, "owner");
+  } catch {
+    return "PROJECT_IS_SHARED";
+  }
+
+  if (!(await isSoleOccupant(projectId))) return "PROJECT_IS_SHARED";
+
+  // A pasted token pays for any remote, so nothing else needs checking.
+  if (token) return null;
+
+  const entry = (await git.remotes(projectId)).find((r) => r.name === remote);
+  if (!entry || !parseGithubRemote(entry.url)) return "REMOTE_NOT_GITHUB";
+
+  const connection = await prisma.githubConnection.findUnique({
+    where: { userId },
+    select: { userId: true },
+  });
+
+  return connection ? null : "NO_CREDENTIAL";
+}
+
+/** One line saying what happened, composed here so every client says it the
+ *  same way. */
+function describeSync(
+  pulled: number,
+  pushed: number,
+  skipped: GitPushSkipReason | null,
+  remote: string,
+): string {
+  const commits = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
+  const parts: string[] = [];
+
+  if (pulled > 0) parts.push(`pulled ${commits(pulled)}`);
+  if (pushed > 0) parts.push(`pushed ${commits(pushed)}`);
+
+  if (parts.length === 0 && !skipped) {
+    return `Already up to date with ${remote}.`;
+  }
+
+  const did = parts.length > 0 ? `Synced with ${remote}: ${parts.join(", ")}.` : "";
+
+  if (!skipped) return did;
+
+  const why =
+    skipped === "PROJECT_IS_SHARED"
+      ? "Not pushed: this project is shared, so a token used here would be " +
+        "readable by everyone with access. Push from the terminal instead."
+      : skipped === "REMOTE_NOT_GITHUB"
+        ? `Not pushed: ${remote} is not a GitHub remote, so your connected ` +
+          "account cannot be used for it."
+        : "Not pushed: connect GitHub, or supply an access token.";
+
+  return did ? `${did} ${why}` : why;
 }
