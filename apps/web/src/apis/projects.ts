@@ -1,5 +1,6 @@
 import type {
   AccountAction,
+  CrossProjectSearchResult,
   AccountDetail,
   AccountRow,
   AccountSummary,
@@ -1073,6 +1074,25 @@ export const setAccountOverrideApi = async (input: {
 export const getMachineStatusApi = async (): Promise<MachineStatus> => {
   const response = await axios.get<ApiSuccess<MachineStatus>>(
     "/api/v1/admin/machine",
+  );
+  return response.data.data;
+};
+
+/** Search every project this account owns.
+ *
+ *  Not on the editor socket, which is bound to one project and is the reason
+ *  every search in this product used to be inside one. Scoped by the session
+ *  alone — there is no project id to send, and none to get wrong.
+ */
+export const searchAllProjectsApi = async (options: {
+  query: string;
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  isRegex?: boolean;
+}): Promise<CrossProjectSearchResult> => {
+  const response = await axios.get<ApiSuccess<CrossProjectSearchResult>>(
+    "/api/v1/search",
+    { params: options },
   );
   return response.data.data;
 };

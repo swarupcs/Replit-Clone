@@ -104,8 +104,8 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 121 items. Open: 23 — five blocked, ten from §10 that are all
-waiting on one decision (§10.1), and eight from §11, which reads the sandbox
+**Done: 122 items. Open: 22 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), and seven from §11, which reads the sandbox
 rather than the editor and is blocked on nothing.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
@@ -113,9 +113,10 @@ Open, in full, so the shape is visible without scrolling: **no defects**
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, and **eight in
-§11 behind nothing at all** (11.4 shipped 2026-09-05, the day after the section
-was written, and named the wrong interaction while doing it — see the row).
+an architectural route), **ten in §10 behind that same route**, and **seven in
+§11 behind nothing at all** (11.4 and 11.8 shipped 2026-09-05, the day after
+the section was written; 11.4 named the wrong interaction while doing it — see
+the row).
 
 **§11 was written on 2026-09-05 and adds nine.** It asks §10's question of
 the platform instead of the editor — the container's refusal list, the idle
@@ -3902,13 +3903,45 @@ the per-domain challenge machinery §9.2 split out.
 
 ### The two small ones, so they are not each rediscovered
 
-- [ ] **11.8 Search that knows about more than one project.**
+- [x] **11.8 Search that knows about more than one project.** Shipped
+      2026-09-05.
       `searchService.ts` exports exactly one entry point, `searchProject(projectId, …)`,
       and the worker is handed `root: projectRoot(projectId)`. Every search in
       this product is inside one project. With thirteen templates and a
       personal machine's worth of repositories, "which project did I write that
       in" has no answer, and it is the question you ask most often about code
       you wrote yourself. Cheap: the worker already takes a root.
+
+      It was cheap, and "cheap" hid three decisions worth writing down.
+
+      **Scope is owned, not accessible.** A global search box that reached into
+      projects shared WITH you would quietly widen how far one keystroke sees:
+      a collaborator invited to one file's worth of work would find their whole
+      repository in somebody else's sidebar. Reaching a shared project is what
+      opening it is for, and that path checks access per project.
+
+      **A partial answer has to say so.** Twenty-five projects, four at a time,
+      fifteen seconds, and whatever is done when that expires. A search that
+      stopped early and did not admit it makes a missing result read as proof
+      the text is nowhere — which is worse than a slow answer and much worse
+      than no feature. One project failing is skipped rather than raised, for
+      the same reason: §5 has found two rows with no working tree, and either
+      would otherwise have broken every cross-project search as "not found".
+
+      **The project is the answer, so the result has to leave the project.**
+      Grouped by project rather than by file — "src/index.ts" is in most of
+      somebody's projects — and clicking a result requests the reveal, then
+      navigates. The tab store outlives the route and the socket does not,
+      which is why `ProjectPlayground` now opens whatever a pending reveal
+      names once it has a socket. Without that the search finds the right
+      project and drops you at its front door, which is most of the way to
+      useless.
+
+      A REST route rather than the editor socket, because the socket is bound
+      to one project and is the whole reason this gap existed. Mounted at
+      `/api/v1/search` with no id in the path — the same scoping `/account`
+      and `/notifications` already use, which is the only kind nobody can
+      forget to apply.
 
 - [ ] **11.9 An identity that follows you into the container.**
       Two halves, both absent. **Dotfiles** — every container comes up with a

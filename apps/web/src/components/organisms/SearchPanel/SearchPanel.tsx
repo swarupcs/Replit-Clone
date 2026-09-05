@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, Spin, Tooltip } from "antd";
-import { VscCaseSensitive, VscRegex, VscReplaceAll, VscWholeWord } from "react-icons/vsc";
-import type { SearchMatch } from "@replit-clone/shared";
+import { useNavigate } from "react-router-dom";
+import {
+  VscCaseSensitive,
+  VscLibrary,
+  VscRegex,
+  VscReplaceAll,
+  VscWholeWord,
+} from "react-icons/vsc";
+import type { CrossProjectSearchResult, SearchMatch } from "@replit-clone/shared";
 import { fileExtension } from "@replit-clone/shared";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import { useEditorSocketStore, selectCanEdit } from "../../../store/editorSocketStore.ts";
 import { useOpenTabsStore } from "../../../store/openTabsStore.ts";
+import { searchAllProjectsApi } from "../../../apis/projects.ts";
 
 /** Wait after the last keystroke before searching. Long enough that typing a
  *  word does not scan the tree once per character. */
@@ -44,6 +52,7 @@ function groupByFile(matches: SearchMatch[]): FileGroup[] {
  *  and reading them. This is the other half.
  */
 export const SearchPanel = () => {
+  const navigate = useNavigate();
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
   const canEdit = useEditorSocketStore(selectCanEdit);
 
@@ -52,6 +61,12 @@ export const SearchPanel = () => {
   const [wholeWord, setWholeWord] = useState(false);
   const [isRegex, setIsRegex] = useState(false);
   const [replacement, setReplacement] = useState("");
+  /** Search this project, or every project the account owns. Off by default:
+   *  the common search is the one about the code in front of you, and a
+   *  default that walked twenty-five trees would make the common case slow to
+   *  answer a question nobody asked. */
+  const [allProjects, setAllProjects] = useState(false);
+  const [across, setAcross] = useState<CrossProjectSearchResult | null>(null);
 
   const [matches, setMatches] = useState<SearchMatch[]>([]);
   const [truncated, setTruncated] = useState(false);
@@ -125,8 +140,12 @@ export const SearchPanel = () => {
     pendingQuery.current = trimmed;
     setSummary(null);
 
-    if (!trimmed || !editorSocket) {
+    // The socket is bound to one project, so the wider search cannot use it —
+    // but the narrow one still should, because it is already there and already
+    // has the file tree warm.
+    if (!trimmed || (!editorSocket && !allProjects)) {
       setMatches([]);
+      setAcross(null);
       setTruncated(false);
       setSearching(false);
       setError(null);
@@ -134,17 +153,42 @@ export const SearchPanel = () => {
     }
 
     setSearching(true);
+    let abandoned = false;
+
     const timer = setTimeout(() => {
-      editorSocket.emit("search", {
-        query: trimmed,
-        caseSensitive,
-        wholeWord,
-        isRegex,
-      });
+      if (!allProjects) {
+        editorSocket?.emit("search", {
+          query: trimmed,
+          caseSensitive,
+          wholeWord,
+          isRegex,
+        });
+        return;
+      }
+
+      void searchAllProjectsApi({ query: trimmed, caseSensitive, wholeWord, isRegex })
+        .then((result) => {
+          // The same guard the socket path gets from `pendingQuery`: a slow
+          // reply for an old query must not overwrite a newer one's results.
+          if (abandoned) return;
+          setAcross(result);
+          setSearching(false);
+          setError(null);
+        })
+        .catch((reason: unknown) => {
+          if (abandoned) return;
+          setSearching(false);
+          setError(
+            reason instanceof Error ? reason.message : "That search failed",
+          );
+        });
     }, DEBOUNCE_MS);
 
-    return () => clearTimeout(timer);
-  }, [query, caseSensitive, wholeWord, isRegex, editorSocket]);
+    return () => {
+      abandoned = true;
+      clearTimeout(timer);
+    };
+  }, [query, caseSensitive, wholeWord, isRegex, editorSocket, allProjects]);
 
   const groups = useMemo(() => groupByFile(matches), [matches]);
 
@@ -155,6 +199,20 @@ export const SearchPanel = () => {
       .getState()
       .requestReveal(match.relPath, match.line, match.column);
     editorSocket?.emit("readFile", { relPath: match.relPath });
+  }
+
+  /** A result in a project that is not this one.
+   *
+   *  The reveal is requested BEFORE navigating and survives it, because the
+   *  tab store outlives the route. The socket does not, so the read is left to
+   *  the destination — see ProjectPlayground, which opens whatever a pending
+   *  reveal names once it has a socket of its own.
+   */
+  function openElsewhere(projectId: string, match: SearchMatch) {
+    useOpenTabsStore
+      .getState()
+      .requestReveal(match.relPath, match.line, match.column);
+    void navigate(`/project/${projectId}`);
   }
 
   const toggles: {
@@ -184,6 +242,13 @@ export const SearchPanel = () => {
       icon: <VscRegex size={14} />,
       on: isRegex,
       toggle: () => setIsRegex((value) => !value),
+    },
+    {
+      key: "all",
+      title: "Search every project you own",
+      icon: <VscLibrary size={14} />,
+      on: allProjects,
+      toggle: () => setAllProjects((value) => !value),
     },
   ];
 
@@ -275,6 +340,12 @@ export const SearchPanel = () => {
           <div style={{ display: "grid", placeItems: "center", padding: 24 }}>
             <Spin size="small" />
           </div>
+        ) : allProjects ? (
+          <CrossProjectResults
+            result={across}
+            query={query.trim()}
+            onOpen={openElsewhere}
+          />
         ) : query.trim() && groups.length === 0 ? (
           <div
             style={{
@@ -370,3 +441,123 @@ export const SearchPanel = () => {
     </div>
   );
 };
+
+/** Results from every project, grouped by the project they came from.
+ *
+ *  Deliberately a flat list of matches under each project rather than the
+ *  file-grouped tree the single-project view uses. The question this search
+ *  answers is "which project", so the project is the heading that matters, and
+ *  a second level of nesting inside a 300px sidebar buys folding at the cost
+ *  of ever seeing more than two results.
+ */
+function CrossProjectResults({
+  result,
+  query,
+  onOpen,
+}: {
+  result: CrossProjectSearchResult | null;
+  query: string;
+  onOpen: (projectId: string, match: SearchMatch) => void;
+}) {
+  if (!query || !result) return null;
+
+  const found = result.projects.reduce(
+    (total, project) => total + project.matches.length,
+    0,
+  );
+
+  if (found === 0) {
+    return (
+      <div
+        style={{
+          padding: "20px 14px",
+          fontSize: 12,
+          color: "var(--rc-text-subtle)",
+          textAlign: "center",
+        }}
+      >
+        No results for “{query}” in any of your projects
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div
+        style={{
+          padding: "4px 14px 8px",
+          fontSize: 11.5,
+          color: "var(--rc-text-subtle)",
+        }}
+      >
+        {found} result{found === 1 ? "" : "s"} in {result.projects.length}{" "}
+        project{result.projects.length === 1 ? "" : "s"}
+        {/* Said plainly. A search that stopped early and did not say so makes
+            a missing result look like proof the text is nowhere. */}
+        {result.truncated &&
+          ` · searched ${String(result.scanned)} of ${String(result.total)}`}
+      </div>
+
+      {result.projects.map((project) => (
+        <div key={project.projectId} style={{ marginBottom: 6 }}>
+          <div
+            className="rc-tree-row"
+            style={{ paddingLeft: 12, cursor: "default" }}
+            title={project.name}
+          >
+            <VscLibrary size={13} style={{ color: "var(--rc-text-subtle)" }} />
+            <span style={{ fontWeight: 500 }}>{project.name}</span>
+            <span
+              style={{
+                marginLeft: "auto",
+                marginRight: 10,
+                fontSize: 11,
+                color: "var(--rc-text-subtle)",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {project.matches.length}
+              {project.truncated && "+"}
+            </span>
+          </div>
+
+          {project.matches.map((match) => (
+            <button
+              key={`${match.relPath}:${String(match.line)}:${String(match.column)}`}
+              type="button"
+              className="rc-tree-row rc-row-button"
+              style={{ paddingLeft: 28 }}
+              onClick={() => onOpen(project.projectId, match)}
+              title={`${project.name} — ${match.relPath}:${String(match.line)}`}
+            >
+              <span
+                style={{
+                  color: "var(--rc-text-subtle)",
+                  fontFamily: "var(--rc-mono)",
+                  fontSize: 11,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: "45%",
+                }}
+              >
+                {match.relPath}:{match.line}
+              </span>
+              <span
+                style={{
+                  fontFamily: "var(--rc-mono)",
+                  fontSize: 11.5,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {match.preview.trim()}
+              </span>
+            </button>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}

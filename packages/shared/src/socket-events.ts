@@ -99,6 +99,38 @@ export interface SearchMatch {
   preview: string;
 }
 
+/** What one project contributed to a search that spanned several.
+ *
+ *  The project is named as well as identified because this is the only search
+ *  whose results the user cannot place from the path alone -- "src/index.ts"
+ *  is in most of their projects. */
+export interface ProjectSearchHit {
+  projectId: string;
+  name: string;
+  matches: SearchMatch[];
+  /** True when this project's own limits stopped its scan. */
+  truncated: boolean;
+}
+
+/** Searching every project the user owns.
+ *
+ *  Deliberately not the same shape as a single project's result. A flat list
+ *  of matches would lose which project each came from, and that is the only
+ *  question this search exists to answer -- "which project did I write that
+ *  in" is not a question anybody asks about a project they already have open.
+ */
+export interface CrossProjectSearchResult {
+  projects: ProjectSearchHit[];
+  /** How many projects were actually scanned, against how many exist. A search
+   *  that stopped early must say so, or a missing result reads as proof the
+   *  text is nowhere. */
+  scanned: number;
+  total: number;
+  /** True when a limit -- projects, matches or the deadline -- stopped the
+   *  scan before it had looked everywhere. */
+  truncated: boolean;
+}
+
 /** Replacing every match of a search across the project's files.
  *
  *  One shot rather than match-by-match: the client already has the matches
