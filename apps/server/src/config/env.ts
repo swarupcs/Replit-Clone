@@ -513,6 +513,45 @@ const envSchema = z.object({
    *  Development's larger default clears this bar on its own, so a language
    *  server is eligible there as soon as LSP_ENABLED is set. */
   LSP_MIN_CONTAINER_MEMORY_MB: z.coerce.number().int().positive().default(1024),
+
+  /** Whether a notebook may start a kernel inside its project's container.
+   *
+   *  plan.md §12.3. The same off-unless-single-tenant default LSP_ENABLED
+   *  carries, and for a reason that is one step stronger here. The image cost
+   *  is 81 MB on the Python image, paid on every cold start by people who
+   *  never open a notebook -- but a kernel also HOLDS whatever the user's
+   *  dataframe weighs, for as long as the tab is open, inside a container
+   *  whose memory limit the dev server is also living within.
+   *
+   *  On a single-seat deployment there is nobody else to pay for that, and
+   *  the person deciding is the person who would be running the notebook.
+   *
+   *  Set it explicitly to "false" to override; the raw value is consulted so
+   *  unset and false stay distinguishable. */
+  NOTEBOOKS_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value === undefined ? soleTenant : value === "true" || value === "1",
+    ),
+
+  /** Below this, a kernel is refused rather than started.
+   *
+   *  Higher than LSP's 1024 on purpose. A language server has a ceiling -- it
+   *  indexes a project and idles in the low hundreds of MB. A kernel has
+   *  none: it holds whatever was assigned to a variable, and the whole point
+   *  of running one on a server is that the data does not fit comfortably on
+   *  the laptop. 1536 does not make a kernel safe; it makes the FIRST cell
+   *  that reads a file unlikely to take the dev server down with it, which is
+   *  the failure the user cannot attribute.
+   *
+   *  Development's 2048 default clears this, so a kernel is eligible there as
+   *  soon as NOTEBOOKS_ENABLED is set. */
+  KERNEL_MIN_CONTAINER_MEMORY_MB: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(1536),
   CONTAINER_CPUS: z.coerce
     .number()
     .positive()

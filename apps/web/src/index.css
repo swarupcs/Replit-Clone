@@ -2921,3 +2921,301 @@ body {
   color: var(--rc-text-subtle);
   line-height: 1.45;
 }
+
+/* ── Notebooks (plan.md §12.3) ─────────────────────────────────────────────
+ *
+ * The document sits on the editor's own ground so a notebook and a .py file
+ * in the next tab read as one product. Cells are separated by rule rather
+ * than by card: a notebook is one document, and boxing each cell makes it
+ * look like a list of unrelated snippets.
+ */
+.rc-nb {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background-color: var(--rc-editor-bg);
+}
+
+.rc-nb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rc-border);
+  background-color: var(--rc-surface-raised);
+}
+
+.rc-nb-toolbar button {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--rc-border-strong);
+  background-color: var(--rc-surface);
+  color: var(--rc-text);
+  cursor: pointer;
+}
+
+.rc-nb-toolbar button:hover:not(:disabled) {
+  border-color: var(--rc-accent);
+}
+
+.rc-nb-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.rc-nb-status {
+  margin-left: auto;
+  font-size: 11px;
+  font-family: var(--rc-mono);
+  color: var(--rc-text-muted);
+}
+
+.rc-nb-status[data-state="ready"] { color: var(--rc-green); }
+.rc-nb-status[data-state="busy"] { color: var(--rc-yellow); }
+.rc-nb-status[data-state="failed"] { color: var(--rc-red); }
+
+.rc-nb-cells {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 0 40vh;
+}
+
+/* The trailing space above is deliberate: without it the last cell sits
+ * against the bottom of the pane, and a notebook is written at its end. */
+
+.rc-nb-cell {
+  display: grid;
+  /* Gutter, body, actions. The body is the only column that flexes, so the
+   * prompt numbers line up down the document however wide the pane is. */
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rc-border);
+}
+
+.rc-nb-cell[data-running] {
+  /* On the leading edge, so it is visible with the cell scrolled to either
+   * side and does not move the text. */
+  box-shadow: inset 3px 0 0 0 var(--rc-yellow);
+}
+
+.rc-nb-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.rc-nb-run {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--rc-border-strong);
+  background-color: var(--rc-surface);
+  color: var(--rc-text);
+  cursor: pointer;
+}
+
+.rc-nb-run:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rc-nb-prompt {
+  font-family: var(--rc-mono);
+  font-size: 10px;
+  color: var(--rc-text-subtle);
+  white-space: nowrap;
+}
+
+.rc-nb-body {
+  min-width: 0;
+}
+
+.rc-nb-input {
+  display: block;
+  width: 100%;
+  resize: none;
+  overflow: hidden;
+  font-family: var(--rc-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 4;
+  padding: 6px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--rc-border);
+  background-color: var(--rc-surface-sunken);
+  color: var(--rc-text);
+}
+
+.rc-nb-input:focus {
+  outline: none;
+  border-color: var(--rc-accent);
+}
+
+.rc-nb-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.rc-nb-actions button,
+.rc-nb-actions select {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--rc-border);
+  background-color: var(--rc-surface);
+  color: var(--rc-text-muted);
+  cursor: pointer;
+}
+
+.rc-nb-actions button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.rc-nb-rendered {
+  padding: 2px 8px;
+  border-radius: 5px;
+  cursor: text;
+}
+
+.rc-nb-rendered:hover {
+  background-color: var(--rc-selection);
+}
+
+.rc-nb-empty-md {
+  font-size: 12px;
+  color: var(--rc-text-subtle);
+  font-style: italic;
+}
+
+.rc-nb-markdown {
+  color: var(--rc-text);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.rc-nb-markdown h1,
+.rc-nb-markdown h2,
+.rc-nb-markdown h3,
+.rc-nb-markdown h4,
+.rc-nb-markdown h5,
+.rc-nb-markdown h6 {
+  margin: 0.6em 0 0.35em;
+  line-height: 1.3;
+}
+
+.rc-nb-markdown h1 { font-size: 1.6em; }
+.rc-nb-markdown h2 { font-size: 1.35em; }
+.rc-nb-markdown h3 { font-size: 1.15em; }
+
+.rc-nb-markdown p,
+.rc-nb-markdown ul,
+.rc-nb-markdown ol {
+  margin: 0.4em 0;
+}
+
+.rc-nb-markdown a {
+  color: var(--rc-accent);
+}
+
+.rc-nb-inline-code,
+.rc-nb-md-code code {
+  font-family: var(--rc-mono);
+  font-size: 0.9em;
+}
+
+.rc-nb-inline-code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background-color: var(--rc-surface-sunken);
+}
+
+.rc-nb-md-code {
+  margin: 0.5em 0;
+  padding: 8px 10px;
+  border-radius: 5px;
+  overflow-x: auto;
+  background-color: var(--rc-surface-sunken);
+}
+
+.rc-nb-outputs {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rc-nb-output-text {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-family: var(--rc-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  /* Wrapped, not scrolled. A stack trace in a horizontally scrolling box
+   * hides the half of each line that names the file. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 22em;
+  overflow-y: auto;
+  background-color: var(--rc-surface-sunken);
+  color: var(--rc-text);
+}
+
+/* Tinted, not flagged. Warnings and progress bars live on stderr, and a cell
+ * that ran fine must not look like it failed. */
+.rc-nb-output-text[data-stream="stderr"] {
+  color: var(--rc-yellow);
+}
+
+.rc-nb-output-error {
+  border-left: 3px solid var(--rc-red);
+  padding-left: 8px;
+}
+
+.rc-nb-error-headline {
+  font-family: var(--rc-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rc-red);
+  margin-bottom: 4px;
+}
+
+.rc-nb-output-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  /* Plots are authored on white and are mostly transparent PNGs, so on the
+   * dark ground they would be a black figure on black. */
+  background-color: #ffffff;
+  padding: 4px;
+}
+
+.rc-nb-output-unsupported {
+  font-size: 12px;
+  color: var(--rc-text-subtle);
+  font-style: italic;
+}
+
+.rc-nb-broken {
+  padding: 24px;
+  max-width: 60ch;
+  color: var(--rc-text);
+}
+
+.rc-nb-broken-note {
+  font-size: 12px;
+  color: var(--rc-text-muted);
+}

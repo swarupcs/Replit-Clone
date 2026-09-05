@@ -54,6 +54,11 @@ export type CounterName =
   // signal is somebody's app failing to connect to a database.
   | "compose_services_started"
   | "compose_services_failed"
+  // Notebook kernels. A kernel that fails to start is a notebook whose Run
+  // button does nothing, and the gateway refuses before this point for every
+  // reason it can name -- so anything counted here is a reason it could not.
+  | "kernels_started"
+  | "kernels_failed"
   | "runs_failed"
   | "preview_errors"
   | "preview_upgrades_rejected"

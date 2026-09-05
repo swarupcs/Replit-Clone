@@ -8,7 +8,7 @@ import type { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { Flex, Tooltip, Typography } from "antd";
 import { VscDiff, VscSparkle } from "react-icons/vsc";
-import { MAX_FILE_BYTES } from "@replit-clone/shared";
+import { MAX_FILE_BYTES, isNotebookPath } from "@replit-clone/shared";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import {
   selectCanEdit,
@@ -38,6 +38,7 @@ import { extensionToFileType } from "../../../utils/extensionToFileType.ts";
 import { useLanguageServer } from "../../../hooks/useLanguageServer.ts";
 import { useViewportSync } from "../../../hooks/useViewportSync.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
+import { NotebookEditor } from "../../organisms/NotebookEditor/NotebookEditor.tsx";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
 import {
   buildDiffOptions,
@@ -432,6 +433,9 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
    *  and publish the same markers twice; the markers are set on the model, so
    *  the second pane displays them regardless of which pane asked. */
   const lspProjectId = useTreeStructureStore((state) => state.projectId);
+  /** The same id, named for its other reader. A kernel needs the project's
+   *  container exactly as a language server does. */
+  const notebookProjectId = lspProjectId;
   useLanguageServer({
     monaco: pane === "primary" ? monacoRef.current : null,
     editor: pane === "primary" ? editorRef.current : null,
@@ -906,6 +910,21 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const segments = activeTab.relPath.split("/");
   const language = extensionToFileType(activeTab.extension, activeTab.name);
 
+  /** A `.ipynb` is JSON on disk and a document on screen.
+   *
+   *  Branched here rather than in the playground so a notebook keeps the tab
+   *  strip, the breadcrumb and the write queue every other file has -- the
+   *  only thing that differs is what fills the pane. The Monaco effects above
+   *  all bail on a null `monacoRef`, and nothing mounts Monaco on this path,
+   *  so no model is created for a file it would render as raw JSON.
+   *
+   *  Diff and review are Monaco's, so they stay with it: a notebook diffed as
+   *  its own JSON is exactly the unreadable thing this component exists to
+   *  avoid. plan.md §12.3 -- and the honest note is that "review a proposal
+   *  against a notebook" is therefore not available, rather than broken.
+   */
+  const isNotebook = isNotebookPath(activeTab.relPath);
+
   // `collabTick` is what makes this re-read after a sync; the value lives
   // outside React so nothing else would.
   void collabTick;
@@ -1025,6 +1044,21 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         </div>
       )}
 
+      {isNotebook ? (
+        <NotebookEditor
+          projectId={notebookProjectId ?? ""}
+          value={activeTab.value}
+          canEdit={canEdit}
+          onChange={(text) => {
+            // The same two steps a Monaco change takes, so a notebook is
+            // dirty-marked, size-checked, debounced and flushed on blur by
+            // the machinery that already does it for every other file.
+            markDirty(activeTab.relPath, true);
+            queueIfAllowed(activeTab.relPath, text, WRITE_DEBOUNCE_MS);
+          }}
+        />
+      ) : (
+        <>
       <div style={{ flex: 1, minHeight: 0, display: reviewing ? "block" : "none" }}>
         <DiffEditor
           height="100%"
@@ -1113,6 +1147,8 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
           onMount={handleMount}
         />
       </div>
+        </>
+      )}
     </div>
   );
 };

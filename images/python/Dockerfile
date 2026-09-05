@@ -48,6 +48,27 @@ RUN useradd --create-home --shell /bin/bash --uid 1001 --gid 0 sandbox \
 # as a dependency and is what completion and hover come from.
 RUN pip install --no-cache-dir     "python-lsp-server==1.12.0"     "pyflakes==3.2.0"     "pycodestyle==2.12.1"
 
+# The notebook kernel, and the driver that speaks to it. plan.md §12.3.
+#
+# Here for the same three reasons pylsp is: a `pip install` at start-up would
+# be paid on every cold container, would need egress on a network that may be
+# filtered, and would race the first cell somebody runs. Measured: this adds
+# 81 MB to the image (348 MB -> 429 MB), most of it IPython, pyzmq and the
+# libzmq pyzmq bundles.
+#
+# `ipykernel` brings the kernel itself and IPython; `jupyter_client` is what
+# starts and talks to it, and is what rc-kernel.py imports. Nothing here
+# installs `notebook` or `jupyterlab` -- there is no second web UI inside the
+# container, and no second HTTP server to authenticate. The kernel is a
+# subprocess of an `exec`, and the only thing that can reach it is the pipe
+# the gateway holds.
+RUN pip install --no-cache-dir     "ipykernel==6.29.5"     "jupyter_client==8.6.3"     && python -m ipykernel install --name python3 --display-name "Python 3" --prefix /usr/local
+
+# On PATH and executable by any uid, the same way `pylsp` is -- a bind mount
+# decides which uid this container runs as, so nothing may depend on 1001.
+COPY rc-kernel.py /usr/local/bin/rc-kernel
+RUN chmod 0755 /usr/local/bin/rc-kernel
+
 USER 1001:0
 ENV HOME=/home/sandbox \
     PIP_CACHE_DIR=/home/sandbox/.cache/pip

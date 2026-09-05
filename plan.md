@@ -141,9 +141,9 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 156 items. Open: 19 — five blocked, ten from §10 that are all
+**Done: 157 items. Open: 18 — five blocked, ten from §10 that are all
 waiting on one decision (§10.1), one from §11, which reads the sandbox
-rather than the editor, and three from §12, which reads neither and asks what
+rather than the editor, and two from §12, which reads neither and asks what
 a cloud machine is for. §11's last row is 11.10, which needs a decision before
 it needs code, and 12.4 is blocked on hardware rather than on anybody, so nothing
 outside §12 is both open and unblocked.**
@@ -2504,6 +2504,93 @@ but the guarantee is narrower than the sentence sounds, and the recipes are the
 only thing standing between a user and a project that is quietly not what they
 asked for. That is an argument for the recipe table being seeded and not
 user-writable, which it is.
+
+---
+
+### 2.42 Since (2026-09-05) — a notebook, rather than the JSON it is stored in
+
+§12.3, and the row said what it was worth before it said what it was: **worth
+doing only if you write Python.** Opening a `.ipynb` here gave you the file — a
+wall of JSON with a base64 PNG somewhere in the middle of it.
+
+The distance really was a kernel protocol and a renderer, as the row guessed.
+The sandbox already ran Python and already had an LSP for it, so nothing here
+is a new language; it is a process, a wire format and a document view.
+
+**The kernel starts on Run, not on open.** A language server connects as soon
+as a Python file is on screen, which is right for something that only reads. A
+kernel is a process holding whatever the user assigned to a variable, inside a
+container whose memory limit the dev server is also living within — so opening
+a notebook to read it costs nothing, and `KernelClient` connects on the first
+send and queues until the socket opens. Without that queue the click that
+starts the kernel is the one click that gets lost.
+
+**Nothing renders `text/html`, and that is the decision in the renderer.** A
+pandas DataFrame's nice output is HTML, and rendering it means markup from a
+cloned repository running on this app's origin with this app's session. Every
+`text/html` that matters carries a `text/plain` beside it, so the fallback is
+the ASCII table rather than nothing. `image/svg+xml` is out for the same reason
+wearing a less obvious costume. The markdown renderer follows
+`notebookMarkdown.ts`'s existing stance: it produces nodes, never an HTML
+string, so there is nowhere a `dangerouslySetInnerHTML` could be added.
+
+**Cell editors are textareas, and that is a trade rather than a shortcut.** A
+notebook has as many editors as it has cells, and a hundred Monaco instances in
+one document is tens of megabytes of models. What it gives up is syntax
+highlighting and the language server the row itself points at — worth
+revisiting if notebooks turn out to be used for anything longer than a page.
+
+**Outputs stream without saving; `done` saves once.** A cell printing in a loop
+produces hundreds of messages, and a write per message is hundreds of
+whole-file writes for one execution. And the file is written the way
+`nbformat.write` writes it — one-space indent, sorted keys, source as an array
+of lines — so the first save from this editor is not a diff touching every
+line of somebody's notebook.
+
+**The defect the real run found, which no test here would have.** The gateway
+forwards the driver's messages verbatim, and the driver emits nbformat. nbformat
+spells a stream output's text `text`; the in-memory type calls it `source`, and
+that translation lived inside `parseNotebook`, so it applied only to text read
+from a **file**. Every `print()` in a live notebook therefore rendered as an
+empty box.
+
+Nothing failed. Typecheck was clean because `KernelServerMessage` declared
+`output: NotebookOutput` — an assertion about JSON off a socket that the type
+system has no way to check and the wire had no obligation to honour. **And
+every test agreed with the bug**, because each built its fixtures from the
+in-memory type rather than from what the kernel sends. The wire type now says
+`unknown`, `parseOutput` is exported so the live path and the file path go
+through one reader, and the fixtures are the bytes `rc-kernel` actually
+produced.
+
+That is the second time in two sections that a type declaring what it wished
+for hid a defect from a clean build — the first was `Project.scaffoldStatus`
+being optional in 2.41. Both were found by running the thing.
+
+Six mutants, all caught: rendering `text/html` after all, leaving the escapes in
+a traceback, trusting a bad link scheme, carrying on past a failed cell in Run
+All, leaving the last run's outputs under a cell running again, and trusting the
+wire's declared shape. Three of those were written after a first pass survived,
+which is the mutation testing doing its job rather than confirming a result.
+
+**Verified against a real kernel on 2026-09-05.** `sandbox-python` builds at
+**429 MB**, matching the figure the image comment claims; `rc-kernel` runs in
+it, and driving it by hand returned `ready`, a `count`, stdout `42
+`, an
+`error` with a real `ZeroDivisionError` traceback, and `done` with `ok` false —
+which is how the wire defect above was found. `execute_result` and
+`display_data` matched the shared type exactly; only `stream` did not.
+
+Server: 2263 passing, 296 skipped. Web: 1311 passing, up 84. Typecheck and lint
+clean, 3/3. `localRoots.test.ts` stays red on this Windows host over symlink
+EPERM, identically on a clean checkout.
+
+**Not verified, and worth saying rather than implying otherwise.** Nobody has
+opened a notebook in the browser: that needs an account, and creating one is not
+something this session does. The gateway, the policy and the driver have been
+exercised directly; the path from a click in the file tree to a rendered cell
+has not. `NOTEBOOKS_ENABLED` also defaults to a single-tenant deployment only,
+so on a shared one the whole feature is off until somebody sets it.
 
 ---
 
@@ -5185,8 +5272,8 @@ what is actually there.
       choosing them without having watched a real host is how a background task
       becomes the reason a machine is always busy.
 
-- [ ] **12.3 Notebooks.** Zero occurrences of `notebook` or `ipynb` anywhere in
-      `apps/` or `packages/`. It appears twice in this document, both times
+- [x] **12.3 Notebooks.** DONE (2026-09-05), see 2.42. Was: zero occurrences
+      of `notebook` or `ipynb` anywhere in `apps/` or `packages/`. It appears twice in this document, both times
       inside a parenthetical list of things VS Code has, and has never been a
       row.
 
