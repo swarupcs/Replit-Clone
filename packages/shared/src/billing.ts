@@ -80,6 +80,18 @@ export interface EntitlementLimits {
   /** How many of this account's projects may be running at once. Bounded in
    *  turn by the machine's own cap, which no plan can raise. */
   maxContainersPerUser: number;
+  /** How long a project's container may sit with nobody attached before it is
+   *  stopped. Unlimited — zero — means idleness alone is never a reason.
+   *
+   *  This is rationing, not housekeeping, which is why it is a plan's to set:
+   *  an idle container is somebody else's memory, and where there is nobody
+   *  else the editor should not be deciding that closing a tab means killing
+   *  the dev server behind it. It does NOT promise the container will live
+   *  forever — the machine still reclaims the least recently used one when it
+   *  is out of room, which is decision 15's line exactly: the plan says
+   *  whether idleness is a reason, the host still says when it is out of
+   *  space. */
+  idleMinutes: number;
 
   /** Features, as opposed to amounts. Each is already a working capability
    *  behind a deployment-wide flag; a plan decides who gets it. */

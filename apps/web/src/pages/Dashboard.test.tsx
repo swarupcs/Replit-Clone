@@ -59,6 +59,7 @@ const api = vi.hoisted(() => ({
       projectDiskQuotaMb: 512,
       aiRequestsPerHour: 60,
       maxContainersPerUser: 2,
+      idleMinutes: 20,
       managedDatabases: true,
       customDomains: true,
       scheduledJobs: true,

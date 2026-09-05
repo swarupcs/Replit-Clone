@@ -104,8 +104,8 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 120 items. Open: 24 — five blocked, ten from §10 that are all
-waiting on one decision (§10.1), and nine from §11, which reads the sandbox
+**Done: 121 items. Open: 23 — five blocked, ten from §10 that are all
+waiting on one decision (§10.1), and eight from §11, which reads the sandbox
 rather than the editor and is blocked on nothing.**
 
 Open, in full, so the shape is visible without scrolling: **no defects**
@@ -113,8 +113,9 @@ Open, in full, so the shape is visible without scrolling: **no defects**
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
 split out**, **five blocked** (§3.3 — a certificate's private key, an
 autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, and **nine in
-§11 behind nothing at all**.
+an architectural route), **ten in §10 behind that same route**, and **eight in
+§11 behind nothing at all** (11.4 shipped 2026-09-05, the day after the section
+was written, and named the wrong interaction while doing it — see the row).
 
 **§11 was written on 2026-09-05 and adds nine.** It asks §10's question of
 the platform instead of the editor — the container's refusal list, the idle
@@ -3789,7 +3790,8 @@ document.**
 
 ### The lifecycle policies also assume somebody else wants the memory
 
-- [ ] **11.4 Stop reaping a container nobody is watching.**
+- [x] **11.4 Stop reaping a container nobody is watching.** Shipped
+      2026-09-05.
       `startIdleReaper` stops any project container with no active attachments
       after `CONTAINER_IDLE_MINUTES` (default 20), and §6 decision 4 correctly
       takes the project's database down with it. Between tenants that is right:
@@ -3803,15 +3805,39 @@ document.**
       `personal` plan wants it off, or wants it long enough to be about the host
       running out of memory rather than about sharing.
 
-      Note the interaction, which is why this is a row and not a config change:
-      with the reaper off, `stopAllContainers` on shutdown becomes the only
-      thing that stops anything, and **`reconcileOnBoot` then has to bring a
-      project's containers back**, or a host reboot silently ends every
-      long-running process. The reconcile machinery exists
-      (`index.ts` imports `reconcileOnBoot`, `reconcileDeployments`,
-      `restoreServices`, `reconcileJobRuns`) — deployments and jobs already come
-      back after a restart. Projects do not, because until now nothing was
-      supposed to survive.
+      **This row named the wrong interaction, and building it found the right
+      one.** It said that with the reaper off, `reconcileOnBoot` would have to
+      bring a project's containers back or a host reboot would silently end
+      every long-running process. That is not a consequence of this change: a
+      reboot ends the processes either way, and restarting the container does
+      not restart what was running inside it. Resuming a process across a
+      restart is §3.3's process-snapshots row, which is blocked on a mechanism
+      nothing here resembles, and it stayed exactly where it was.
+
+      The real interaction is the opposite one, and it is load-bearing rather
+      than a note. **The reaper is what frees slots against
+      `MAX_CONCURRENT_CONTAINERS`.** Turn it off and nothing ever gives a slot
+      back, so the third project a user opened would be the last one they could
+      open until they restarted the server. Shipping the plan half alone would
+      not have given anybody a long-lived container; it would have traded "your
+      dev server was killed" for "you cannot open a fourth project", which is
+      not an improvement.
+
+      So it shipped as two halves. `idleMinutes` on the plan (0 = never, the
+      `UNLIMITED` sentinel), read per project by the reaper from the owner's
+      entitlements and falling back to `CONTAINER_IDLE_MINUTES` on any failure —
+      because a reaper that stopped reclaiming during a database blip would
+      turn that blip into the memory exhaustion it exists to prevent. And
+      `reclaimForCapacity`, which on a full machine stops the least recently
+      used container nobody is attached to rather than refusing. Attachments
+      are never overridden: when everything is being watched it still refuses,
+      because taking one person's running work to give another a slot is worse
+      than an honest 503.
+
+      That is decision 15's line landing exactly where it should. **The plan
+      decides whether idleness alone is a reason to stop something; the host
+      still decides when it is out of room.** The plan card says "Never sleeps"
+      rather than "runs forever" for the same reason.
 
 ---
 

@@ -465,12 +465,24 @@ async function startContainer(projectId: string): Promise<Container> {
     // Counted and created without interruption, so two projects starting
     // together cannot both read the same figure and both pass.
     if ((await runningCount()) >= env.MAX_CONCURRENT_CONTAINERS) {
-      increment("containers_capacity_rejected");
-      throw new AppError(
-        503,
-        "CAPACITY",
-        "The server is at capacity. Close another project and try again.",
-      );
+      // The machine is full. Before refusing, take back a container nobody is
+      // looking at -- which is what the idle reaper would have done on its own
+      // schedule, done now because somebody is waiting.
+      //
+      // Load-bearing for the personal plan rather than an optimisation. That
+      // plan sets `idleMinutes` to never, so nothing is reaped on a timer and
+      // without this the third project a user opens would be the last one they
+      // could open until they restarted the server. Decision 15's line is
+      // exactly here: the PLAN decides whether idleness alone is a reason to
+      // stop something, and the HOST still decides when it is out of room.
+      if (!(await reclaimForCapacity(projectId))) {
+        increment("containers_capacity_rejected");
+        throw new AppError(
+          503,
+          "CAPACITY",
+          "The server is at capacity. Close another project and try again.",
+        );
+      }
     }
 
     await assertUserContainerBudget(projectId);
@@ -839,8 +851,106 @@ export function setOnProjectReaped(
   onProjectReaped = handler;
 }
 
+/** Stops the least recently used container nobody is attached to, so the
+ *  project being opened has somewhere to run. Returns whether it found one.
+ *
+ *  "Least recently used" and not "first found": the containers competing for
+ *  the last slot are all somebody's work, and the one touched longest ago is
+ *  the one whose owner is least likely to be in the middle of something. The
+ *  reaper's own `lastActiveAt` is the same clock, so the two agree about what
+ *  idle means and only disagree about when it matters.
+ *
+ *  Attachments are the hard rule and are never overridden. A container with a
+ *  terminal or an editor open is being watched by somebody right now, and
+ *  stopping it to make room for a different project would take one user's
+ *  running work to give another user a slot. When everything is attached this
+ *  returns false and the caller refuses, which is the honest answer: the
+ *  machine really is full.
+ *
+ *  Deliberately not `await`ing the database pair's stop separately -- reaping
+ *  one project takes its database with it through the same `onProjectReaped`
+ *  the timer uses, so a slot freed here frees the same amount as one freed
+ *  there.
+ */
+async function reclaimForCapacity(forProjectId: string): Promise<boolean> {
+  try {
+    const containers = await docker.listContainers({
+      filters: { name: [CONTAINER_PREFIX] },
+    });
+
+    let oldest: { id: string; projectId: string; at: number } | undefined;
+
+    for (const info of containers) {
+      const projectId = projectIdFromNames(info.Names);
+      if (!projectId) continue;
+      // Not the one being opened, which has no container yet in the ordinary
+      // case but does when this is a rebuild for a changed signature.
+      if (projectId === forProjectId) continue;
+      if ((activeAttachments.get(projectId) ?? 0) > 0) continue;
+
+      const at = lastActiveAt.get(projectId) ?? info.Created * 1000;
+      if (!oldest || at < oldest.at) oldest = { id: info.Id, projectId, at };
+    }
+
+    if (!oldest) return false;
+
+    logger.info("reclaiming a container to make room", {
+      projectId: oldest.projectId,
+      for: forProjectId,
+      idleForMs: Date.now() - oldest.at,
+    });
+    increment("containers_reclaimed");
+
+    await docker.getContainer(oldest.id).stop({ t: 5 }).catch(() => {});
+    await onProjectReaped?.(oldest.projectId);
+
+    return true;
+  } catch (error) {
+    // The caller refuses with CAPACITY, which is what it would have done
+    // before this existed.
+    logger.warn("could not reclaim a container", {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/** How long this project's owner may leave a container unattached, in ms, or
+ *  `null` for never.
+ *
+ *  A plan's, not the deployment's. Reclaiming an idle container is rationing
+ *  between tenants — it is somebody else's memory — and where there is no
+ *  second tenant the editor should not be deciding that closing a tab means
+ *  killing the dev server behind it. See EntitlementLimits.idleMinutes.
+ *
+ *  Falls back to the deployment default on any failure. A reaper that stopped
+ *  reclaiming because Postgres was briefly unreachable would turn a database
+ *  blip into the memory exhaustion this exists to prevent, so the safe
+ *  direction here is to reap.
+ */
+async function idleAllowanceMs(projectId: string): Promise<number | null> {
+  const fallback = env.CONTAINER_IDLE_MINUTES * 60 * 1000;
+
+  try {
+    const { prisma } = await import("../lib/prisma.js");
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { ownerId: true },
+    });
+    if (!project) return fallback;
+
+    const { resolveEntitlements } = await import(
+      "../service/entitlementService.js"
+    );
+    const { idleMinutes } = await resolveEntitlements(project.ownerId);
+
+    return isUnlimited(idleMinutes) ? null : idleMinutes * 60 * 1000;
+  } catch {
+    return fallback;
+  }
+}
+
 export function startIdleReaper(): void {
-  const idleMs = env.CONTAINER_IDLE_MINUTES * 60 * 1000;
 
   reaperTimer = setInterval(() => {
     void (async () => {
@@ -860,8 +970,14 @@ export function startIdleReaper(): void {
 
           if ((activeAttachments.get(name) ?? 0) > 0) continue;
 
+          const allowance = await idleAllowanceMs(name);
+          // Never, on this plan. The machine can still reclaim it when it is
+          // out of room -- see `reclaimForCapacity` -- so this is "idleness is
+          // not a reason", not "this container is permanent".
+          if (allowance === null) continue;
+
           const idleSince = lastActiveAt.get(name) ?? info.Created * 1000;
-          if (Date.now() - idleSince < idleMs) continue;
+          if (Date.now() - idleSince < allowance) continue;
 
           logger.info("reaping idle container", { projectId: name });
           increment("containers_reaped");
