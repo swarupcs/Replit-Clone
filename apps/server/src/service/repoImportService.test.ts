@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   detectPackageManager,
   detectStartCommand,
+  previewFlagsFor,
+  canSetPreviewBase,
+  devScriptOf,
   detectTemplate,
 } from "./repoImportService.js";
 
@@ -204,5 +207,146 @@ describe("the start command each manager gets", () => {
 
   it("still defaults to npm when nobody said otherwise", () => {
     expect(detectStartCommand(scripts)).toBe("npm install && npm run dev");
+  });
+});
+
+describe("making somebody else's dev server reachable through the proxy", () => {
+  /** The scaffold path answers this by writing our config into the project.
+   *  That answer is wrong for a repository somebody actually wrote, so nothing
+   *  here touches a file -- everything is a flag on the command this platform
+   *  already owns. */
+  const BASE = "/preview/11111111-1111-4111-8111-111111111111/";
+
+  it("binds a Vite dev server and puts it under the preview path", () => {
+    expect(previewFlagsFor("vite", BASE)).toEqual([
+      "--host",
+      "0.0.0.0",
+      "--base",
+      BASE,
+    ]);
+  });
+
+  /** Null is a real answer, not an absence: the proxy strips the prefix for
+   *  this template, so serving at the root is correct and a base would be
+   *  applied twice. */
+  it("binds it without a base when the proxy strips the prefix", () => {
+    expect(previewFlagsFor("vite", null)).toEqual(["--host", "0.0.0.0"]);
+  });
+
+  it("keeps the repository's own flags and adds to them", () => {
+    expect(previewFlagsFor("vite --port 4000", null)).toEqual([
+      "--host",
+      "0.0.0.0",
+    ]);
+  });
+
+  /** Next has no flag for `basePath` -- it is config-only -- so this states
+   *  the half it can and leaves the half it cannot. */
+  it("binds Next, and does not pretend it can set its base", () => {
+    expect(previewFlagsFor("next dev", BASE)).toEqual(["--hostname", "0.0.0.0"]);
+  });
+
+  /** THE one that matters. A script that merely mentions vite would receive
+   *  the flags itself, and a dev server that will not start is worse than one
+   *  the preview cannot reach. */
+  it("says nothing for a script that only mentions the tool", () => {
+    expect(previewFlagsFor(`concurrently "vite" "node api"`, BASE)).toEqual([]);
+  });
+
+  it("says nothing for a tool it does not know", () => {
+    expect(previewFlagsFor("node server.js", BASE)).toEqual([]);
+    expect(previewFlagsFor("react-scripts start", BASE)).toEqual([]);
+    expect(previewFlagsFor("", BASE)).toEqual([]);
+  });
+
+  /** `vitest` starts with the same five letters and is not a dev server. */
+  it("is not fooled by a longer name that starts the same way", () => {
+    expect(previewFlagsFor("vitest --watch", BASE)).toEqual([]);
+  });
+});
+
+describe("the flags reaching the start command", () => {
+  const BASE = "/preview/11111111-1111-4111-8111-111111111111/";
+  const VITE = { scripts: { dev: "vite" } };
+
+  /** npm consumes flags itself unless they follow a bare `--`. Getting this
+   *  wrong does not misconfigure the dev server, it stops it starting. */
+  it("passes them through npm's separator", () => {
+    expect(detectStartCommand(VITE, "npm", BASE)).toBe(
+      `npm install && npm run dev -- --host 0.0.0.0 --base ${BASE}`,
+    );
+  });
+
+  /** The other three forward what follows the script name, and pnpm warns
+   *  about a `--` it does not need. */
+  it("passes them straight through for pnpm, yarn and bun", () => {
+    expect(detectStartCommand(VITE, "pnpm", BASE)).toBe(
+      `pnpm install && pnpm run dev --host 0.0.0.0 --base ${BASE}`,
+    );
+    expect(detectStartCommand(VITE, "yarn", BASE)).toBe(
+      `yarn install && yarn dev --host 0.0.0.0 --base ${BASE}`,
+    );
+    expect(detectStartCommand(VITE, "bun", BASE)).toBe(
+      `bun install && bun run dev --host 0.0.0.0 --base ${BASE}`,
+    );
+  });
+
+  /** `undefined` means "do not touch the command", which is not the same as
+   *  `null`. The scaffold path passes nothing, because the config it wrote
+   *  already carries the base and would otherwise be given it twice. */
+  it("leaves the command alone for a caller that did not ask", () => {
+    expect(detectStartCommand(VITE, "npm")).toBe("npm install && npm run dev");
+  });
+
+  it("adds nothing when the script's tool is not one it knows", () => {
+    expect(
+      detectStartCommand({ scripts: { dev: "node server.js" } }, "npm", BASE),
+    ).toBe("npm install && npm run dev");
+  });
+});
+
+describe("whether the base can be delivered as a flag at all", () => {
+  /** Vite can be told; Next cannot -- `basePath` is config-only. That single
+   *  difference is why an imported Next app needs the proxy to strip the
+   *  prefix while an imported Vite app does not. */
+  it("says yes for Vite", () => {
+    expect(canSetPreviewBase("vite")).toBe(true);
+    expect(canSetPreviewBase("vite --port 4000")).toBe(true);
+  });
+
+  it("says no for Next, which has no flag for it", () => {
+    expect(canSetPreviewBase("next dev")).toBe(false);
+    expect(canSetPreviewBase("next dev --turbo")).toBe(false);
+  });
+
+  /** "Change nothing" is the safer default: an unknown dev server is more
+   *  likely a plain server serving relative paths than a bundler, and the
+   *  template's own answer is a better guess than one made here. */
+  it("changes nothing for a tool it does not know", () => {
+    expect(canSetPreviewBase("node server.js")).toBe(true);
+    expect(canSetPreviewBase("")).toBe(true);
+  });
+
+  it("is not fooled by a script that merely mentions next", () => {
+    expect(canSetPreviewBase(`concurrently "next dev" "node api"`)).toBe(true);
+  });
+});
+
+describe("the dev script a project would be started with", () => {
+  /** Exported so `canSetPreviewBase` asks about the SAME script the start
+   *  command runs. Deriving the choice twice is how the two disagree. */
+  it("picks a dev server ahead of start, which usually means production", () => {
+    expect(devScriptOf({ scripts: { start: "next start", dev: "next dev" } })).toBe(
+      "next dev",
+    );
+  });
+
+  it("falls back through develop and serve", () => {
+    expect(devScriptOf({ scripts: { serve: "vite preview" } })).toBe("vite preview");
+  });
+
+  it("is null when there is nothing to run", () => {
+    expect(devScriptOf(null)).toBeNull();
+    expect(devScriptOf({ scripts: {} })).toBeNull();
   });
 });

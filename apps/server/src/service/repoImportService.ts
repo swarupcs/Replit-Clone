@@ -4,6 +4,7 @@ import type { Project } from "../generated/prisma/client.js";
 import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
+import { previewBaseFor } from "./previewContract.js";
 import { ensureContainer, removeContainer } from "../containers/containerManager.js";
 import { execCapture } from "../containers/execCapture.js";
 import { claimForSandbox, projectRoot } from "../utils/projectPaths.js";
@@ -125,18 +126,148 @@ export function detectPackageManager(files: string[]): PackageManager {
  *  this wrong produces a command that fails with a usage message rather than
  *  anything a person can act on.
  */
-const COMMANDS: Record<PackageManager, { install: string; run: (script: string) => string }> = {
-  npm: { install: "npm install", run: (script) => `npm run ${script}` },
-  pnpm: { install: "pnpm install", run: (script) => `pnpm run ${script}` },
+const COMMANDS: Record<
+  PackageManager,
+  {
+    install: string;
+    run: (script: string) => string;
+    /** How this manager hands extra arguments to the script it runs.
+     *
+     *  npm is the odd one and the reason this exists: it consumes flags itself
+     *  unless they follow a bare `--`. The other three forward whatever comes
+     *  after the script name, and pnpm in particular warns about a `--` it does
+     *  not need. Getting this wrong does not misconfigure the dev server, it
+     *  stops it starting. */
+    forward: (args: string) => string;
+  }
+> = {
+  npm: {
+    install: "npm install",
+    run: (script) => `npm run ${script}`,
+    forward: (args) => `-- ${args}`,
+  },
+  pnpm: {
+    install: "pnpm install",
+    run: (script) => `pnpm run ${script}`,
+    forward: (args) => args,
+  },
   // `yarn install` covers both Classic and Berry; `yarn <script>` is the form
   // both understand.
-  yarn: { install: "yarn install", run: (script) => `yarn ${script}` },
-  bun: { install: "bun install", run: (script) => `bun run ${script}` },
+  yarn: {
+    install: "yarn install",
+    run: (script) => `yarn ${script}`,
+    forward: (args) => args,
+  },
+  bun: {
+    install: "bun install",
+    run: (script) => `bun run ${script}`,
+    forward: (args) => args,
+  },
 };
+
+/** Flags that make somebody else's dev server reachable through the preview
+ *  proxy. plan.md §2.43's other half.
+ *
+ *  **The scaffold path solves this by writing our config into the project. That
+ *  answer is wrong here**, and the difference is the whole reason this is a
+ *  separate mechanism: a scaffolded project's config is thirty seconds old and
+ *  contains a framework plugin, while an imported repository's config is
+ *  somebody's actual work and may carry aliases, proxies and build settings
+ *  that this platform has no business replacing. So nothing here writes to a
+ *  file. Everything is a flag on the command that this platform already owns.
+ *
+ *  What that costs, and it is worth saying rather than discovering: these
+ *  arrive through the **stored start command**, so they apply when the project
+ *  is started by Run. A dev server started by typing `npm run dev` in the
+ *  terminal is the repository's own command and is not reachable by the
+ *  preview. There is no way to fix that without editing their files, which is
+ *  the thing this deliberately does not do.
+ *
+ *  Matched on the START of the script rather than anywhere in it. A script like
+ *  `concurrently "vite" "node api"` mentions vite and would receive the flags
+ *  itself, which is how a dev server stops starting at all.
+ */
+const PREVIEW_FLAGS: {
+  matches: RegExp;
+  flags: (base: string | null) => string[];
+}[] = [
+  {
+    matches: /^vite(\s|$)/,
+    // Vite takes both as flags, which is what makes an imported Vite app
+    // fixable at all without touching its config. Ours come last, so they win
+    // over anything the repository's own script set.
+    flags: (base) => [
+      "--host",
+      "0.0.0.0",
+      ...(base === null ? [] : ["--base", base]),
+    ],
+  },
+  {
+    // Next binds every interface by default on recent versions; stating it
+    // costs nothing and covers the ones that did not.
+    //
+    // `basePath` is deliberately absent, because Next has no flag for it -- it
+    // is config-only. An imported Next app whose template expects the preview
+    // base therefore still serves its assets from the wrong place, and that is
+    // a real gap rather than an oversight.
+    matches: /^next\s+dev(\s|$)/,
+    flags: () => ["--hostname", "0.0.0.0"],
+  },
+];
+
+/** Whether this dev script's tool can be told the preview base on the command
+ *  line at all.
+ *
+ *  Vite can (`--base`). Next cannot -- `basePath` is config-only -- so an
+ *  imported Next app cannot be made to serve under the prefix without editing
+ *  a file this path deliberately does not touch. The answer for those is the
+ *  other direction: record `expectsPreviewBase: false` on the project so the
+ *  proxy strips the prefix instead, and let `previewAssetGuard` catch the
+ *  absolute asset URLs that then land at the origin root.
+ *
+ *  A tool this does not recognise returns true, which means "change nothing".
+ *  An unknown dev server is more likely to be a plain server serving relative
+ *  paths than a bundler, and its template's own answer is a better guess than
+ *  one made here.
+ */
+export function canSetPreviewBase(script: string): boolean {
+  return !/^next\s+dev(\s|$)/.test(script.trim());
+}
+
+/** The flags for one dev script, or none when its tool is not one we know.
+ *
+ *  Exported for its tests: the interesting cases are the ones where it must
+ *  stay silent, and those are hard to see through `detectStartCommand`.
+ */
+export function previewFlagsFor(script: string, base: string | null): string[] {
+  const trimmed = script.trim();
+  const rule = PREVIEW_FLAGS.find((entry) => entry.matches.test(trimmed));
+  return rule ? rule.flags(base) : [];
+}
+
+/** The dev script a project would be started with, by the same rules
+ *  `detectStartCommand` uses. Exported so a caller can ask about the script
+ *  itself -- `canSetPreviewBase` needs it -- without re-deriving the choice
+ *  and risking the two disagreeing. */
+export function devScriptOf(
+  packageJson: { scripts?: Record<string, string> } | null,
+): string | null {
+  const scripts = packageJson?.scripts;
+  if (!scripts) return null;
+  const chosen = ["dev", "develop", "start", "serve"].find(
+    (name) => typeof scripts[name] === "string" && scripts[name].trim(),
+  );
+  return chosen ? (scripts[chosen] ?? null) : null;
+}
 
 export function detectStartCommand(
   packageJson: { scripts?: Record<string, string> } | null,
   manager: PackageManager = "npm",
+  /** Where the preview proxy serves this project, when its template expects
+   *  the app to know. Null for a template the proxy strips the prefix for, and
+   *  omitted entirely by the scaffold path -- whose config carries the base
+   *  already, and would otherwise be given it twice. */
+  previewBase?: string | null,
 ): string | null {
   const scripts = packageJson?.scripts;
   if (!scripts) return null;
@@ -154,7 +285,20 @@ export function detectStartCommand(
   // every one of these, so an imported pnpm project takes the warm-start path
   // from here on -- which it never could while this always said npm.
   const commands = COMMANDS[manager];
-  return `${commands.install} && ${commands.run(chosen)}`;
+  const run = commands.run(chosen);
+
+  // Only for a caller that asked. `undefined` means "do not touch the command",
+  // which is not the same as `null` -- that means "reachable, but the proxy
+  // strips the prefix, so no base".
+  if (previewBase === undefined) return `${commands.install} && ${run}`;
+
+  // `?? ""` only to satisfy the index signature: `chosen` came from a find
+  // that already established this is a non-empty string.
+  const flags = previewFlagsFor(scripts[chosen] ?? "", previewBase);
+  const withFlags =
+    flags.length > 0 ? `${run} ${commands.forward(flags.join(" "))}` : run;
+
+  return `${commands.install} && ${withFlags}`;
 }
 
 /** Reads a directory's top level, for `detectTemplate`.
@@ -329,14 +473,33 @@ export async function importRepository(
     const template = detectTemplate(files, packageJson);
     // The lockfile that was just cloned decides how this project installs.
     const manager = detectPackageManager(files);
-    const startCommand = detectStartCommand(packageJson, manager);
+    // The repository's own command, plus whatever it takes to make its dev
+    // server reachable through the proxy. Nothing is written to the clone --
+    // see `previewFlagsFor` for why this path answers differently from the
+    // scaffold path.
+    const startCommand = detectStartCommand(
+      packageJson,
+      manager,
+      previewBaseFor(template, project.id),
+    );
 
-    if (template !== IMPORT_TEMPLATE || startCommand) {
+    // False only where the flags above could not deliver the base, which
+    // today means Next: the proxy strips the prefix instead, and
+    // `previewAssetGuard` catches the absolute asset URLs that then arrive at
+    // the origin root. Left null otherwise, so the template keeps answering.
+    const expectsPreviewBase =
+      previewBaseFor(template, project.id) !== null &&
+      !canSetPreviewBase(devScriptOf(packageJson) ?? "")
+        ? false
+        : null;
+
+    if (template !== IMPORT_TEMPLATE || startCommand || expectsPreviewBase !== null) {
       await prisma.project.update({
         where: { id: project.id },
         data: {
           template,
           ...(startCommand ? { startCommand } : {}),
+          ...(expectsPreviewBase === null ? {} : { expectsPreviewBase }),
         },
       });
     }
