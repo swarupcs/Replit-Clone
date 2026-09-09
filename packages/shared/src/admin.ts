@@ -73,9 +73,32 @@ export interface AccountDetail {
  *  product with no client, which is defensible for a scrape target and leaves
  *  the counters visible only to somebody who curls the port.
  */
+/** Whether anything on this host is copied anywhere else. plan.md §3.3.
+ *
+ *  On the machine panel rather than anywhere else, because "is this machine
+ *  full" and "is this machine backed up" are the same operator at the same
+ *  screen — and because a backup subsystem with no readout is one nobody
+ *  checks, which is indistinguishable from not having one.
+ *
+ *  `lastRunAt` null with `enabled` true is the state worth reading carefully:
+ *  it means configured and not yet run, which after an uptime longer than the
+ *  interval means it is not running at all.
+ */
+export interface BackupStatus {
+  enabled: boolean;
+  /** Where they go. Null when off. */
+  destination: string | null;
+  lastRunAt: number | null;
+  lastRunOk: boolean | null;
+  lastError: string | null;
+  /** Projects copied in the last sweep. */
+  backedUp: number | null;
+}
+
 export interface MachineStatus {
   containersRunning: number;
   containerLimit: number;
+  backup: BackupStatus;
   /** Scheduled runs sitting in `RUNNING`. A number that only goes up is the
    *  signature of §3.1's restart wedge, which is otherwise silent. */
   runningJobRuns: number;

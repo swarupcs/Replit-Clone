@@ -394,6 +394,45 @@ const envSchema = z.object({
    *  sandbox should not wait for. */
   DOTFILES_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(60),
 
+  /** Where backups are written. Empty -- the default -- turns them off.
+   *
+   *  plan.md §3.3 filed backup-and-restore as blocked on a deployment
+   *  decision: object storage off this VM, a second disk, or a documented
+   *  acceptance that this platform loses data when its host does. §9's method
+   *  says to ask which half of a blocked row needs a person and which half is
+   *  only code nobody wrote, and this is the answer: **the destination is the
+   *  person's half, and it is configuration.** This server writes files to a
+   *  directory. Whether that directory is a second disk, an NFS or SMB mount,
+   *  an rclone mount in front of a bucket, or a path somebody rsyncs off the
+   *  host afterwards is a decision it deliberately does not make -- and could
+   *  not make well, since it has no idea what else the host has.
+   *
+   *  What it DOES refuse is a destination inside PROJECTS_DIR, because a
+   *  backup on the same disk as the thing it backs up answers "I deleted the
+   *  wrong project" (which the trash already answers, §9.1) and not "the host
+   *  died", which is the only question this row exists for.
+   *
+   *  The archives contain project source, sealed environment variables and
+   *  password hashes. Whatever this points at is as sensitive as the database.
+   */
+  BACKUP_DIR: z.string().default(""),
+
+  /** How often the backup sweep runs, in hours.
+   *
+   *  Daily, because the loss this bounds is "a day's work" and anything more
+   *  frequent spends IO re-archiving trees that have not changed -- the sweep
+   *  skips those, but it still has to walk them to find out.
+   */
+  BACKUP_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
+
+  /** How many backups of one project are kept before the oldest is pruned.
+   *
+   *  Seven is a week of dailies. The number that matters is not this one but
+   *  what it multiplies: a project is archived without its dependencies or
+   *  build output, so a copy is usually a small fraction of the working tree.
+   */
+  BACKUP_KEEP: z.coerce.number().int().positive().default(7),
+
   PROJECTS_DIR: z.string().default("projects"),
 
   /** Host directories under which a folder may be opened directly as a

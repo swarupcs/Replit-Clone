@@ -62,6 +62,12 @@ export type CounterName =
   | "runs_failed"
   | "preview_errors"
   | "preview_upgrades_rejected"
+  // Backups (plan.md §3.3, §14.2). `backups_failed` climbing is the whole
+  // point of counting them: a backup system nobody checks is a backup system
+  // that stopped working some months ago, and this is the number that says so
+  // without anybody having to look at the destination.
+  | "backups_completed"
+  | "backups_failed"
   | "terminal_sessions"
   // Terminals whose socket went and whose shell was kept (plan.md §13.7).
   // `terminal_reattached` against `terminal_detached` is the only measure of

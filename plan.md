@@ -146,7 +146,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 158 items. Open: 28 — five blocked, ten from §10 that are all
+**Done: 159 items. Open: 27 — four blocked, ten from §10 that are all
 waiting on one decision (§10.1), one from §11, which reads the sandbox
 rather than the editor, two from §12, which reads neither and asks what
 a cloud machine is for, and ten from §13, which names the two products this
@@ -154,8 +154,15 @@ most resembles and diffs against them. §11's last row is 11.10, which needs a
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 5 + 10 + 1 + 2 + 10 = 28, and they are written out
+Those five numbers are 4 + 10 + 1 + 2 + 10 = 27, and they are written out
 because they did not add up once already — see the paragraph below.
+
+**§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
+unblocked**, after backups shipped (§2.47) — and the split was the same one
+§9 made twice and §2.12 and §2.13 made before that. "Where do backups live"
+read as infrastructure and was one question; asked the way §9 asks, the answer
+was that this server does not answer it, and what was left was code nobody had
+written. Before concluding a row is blocked, check whether it is one thing.
 
 **Two corrections were made to this paragraph on 2026-09-09**, both by §13,
 which is the commit that last invalidated it and therefore owns it under §7.
@@ -197,9 +204,9 @@ is the cheapest thing that would have caught either of them.
 Open, in full, so the shape is visible without scrolling: **no defects**
 (§3.1 is empty again, and read the paragraph at the top of it before believing
 that), **no unblocked work in §3.2**, **nothing left of the four halves §9
-split out**, **five blocked** (§3.3 — a certificate's private key, an
-autoscaler's cost model, a disk budget for snapshots, a backup destination, and
-an architectural route), **ten in §10 behind that same route**, **one in
+split out**, **four blocked** (§3.3 — a certificate's private key, an
+autoscaler's cost model, a disk budget for snapshots, and an architectural
+route; the backup destination came off on 2026-09-09, §2.47), **ten in §10 behind that same route**, **one in
 §11** (11.1 through 11.9 all shipped 2026-09-05, the day after the section was
 written — nine of its ten rows in one day, and 11.10 is the tenth; 11.2 also split 11.10 out of itself, and 11.4 named the
 wrong interaction while doing it — see the rows. 11.9 shipped in two commits,
@@ -427,9 +434,12 @@ of these by hand before the decision is waste, and that is the whole argument
 of §10.
 
 **Blocked on something outside this repository** (§3.3): a certificate's
-private key, an autoscaler's cost model, a disk budget for snapshots, a backup
-destination — and note that *nothing* backs up a project today, which is the
-one entry on this page that loses data rather than failing to add a feature.
+private key, an autoscaler's cost model, a disk budget for snapshots. ~~And
+note that *nothing* backs up a project today, which is the one entry on this
+page that loses data rather than failing to add a feature.~~ **Backups shipped
+2026-09-09 (§2.47)**: a nightly sweep to a directory the operator names, off
+until one is, with a restore command and `docs/BACKUP.md`. What has not
+happened is a host being rebuilt from one.
 
 **Blocked on a decision nobody has taken.** Dev Container Features (§11.10) is
 a question with three answers, none obviously right. Prebuilding a *stopped*
@@ -2990,6 +3000,126 @@ and no section of this document predicted, all found by looking at a running
 container — so the honest reading is that this needs an afternoon with a real
 one before anybody calls it done.
 
+
+### 2.47 Since (2026-09-09) — §3.3, the row that lost data
+
+The second row off §14, and the one that section puts ahead of everything that
+adds a feature: **the only open item in this file whose absence loses work
+rather than failing to add something.** Before this, everything a user had lived
+in exactly one place — the tree under `PROJECTS_DIR` and the rows in one
+Postgres — and nothing copied either anywhere else, ever.
+
+**The blocked half was one question, and it took a sentence.** §3.3 filed this
+as blocked on a deployment decision with a cost attached: object storage off the
+VM, a second disk, or a documented acceptance that this platform loses data when
+its host does. §9's method is to ask which half needs a person and which half is
+only code nobody wrote, and asked that way the answer is that **this server does
+not choose.** `BACKUP_DIR` names a directory; whether that is a second disk, an
+NFS or SMB mount, an `rclone mount` over a bucket, or a path something else
+rsyncs off the host is a decision it has no information to make well. Empty is
+off, like every other optional subsystem here.
+
+**What it does decide is the one thing it can.** It refuses to start when
+`BACKUP_DIR` shares a tree with `PROJECTS_DIR`, in either direction. That is the
+whole class of mistake this feature invites: a backup on the same disk as the
+thing it backs up answers "I deleted the wrong project" — which the trash
+already answers (§9.1) — and not "the host died", which is the only question
+this row exists for. It is also a mistake that *works*, every night, until the
+day it does not, so it is fatal at boot rather than a warning.
+
+**What a backup is.** Per project, under `<BACKUP_DIR>/<projectId>/<ms>/`: the
+tree as a `tar.gz`, the project row and its collaborators, scheduled jobs and
+database connections as JSON, and a manifest carrying a format version, the
+archive's sha256 and the project's `updatedAt` at the moment it was copied. The
+manifest is written **last** and is the completion marker — a directory without
+one is ignored by everything, so a sweep killed halfway through leaves nothing
+that could be restored from.
+
+**Three deliberate departures from what a copy does**, each of which somebody
+would otherwise "fix" by reusing the shared constant:
+
+1. **`.git` is included.** `EXCLUDED_DIRECTORIES` drops it, correctly, for
+   duplicates and exports. A backup is the opposite case: the history *is* the
+   work, and a restore handing back a tree with no commits has lost most of what
+   was there.
+2. **A folder somebody opened (§10.2) has its row backed up and not its tree.**
+   That tree is somewhere the operator already manages, and copying arbitrary
+   host paths into a backup destination is a surprise nobody asked for. The
+   manifest records the path and the reason, so a restore says what it did not
+   restore rather than quietly producing an empty project.
+3. **Trashed projects are backed up.** They are restorable until they are purged
+   (§9.1), so skipping them would make the trash the place work goes to become
+   unrecoverable.
+
+**The restore is the half that makes the other half real**, and it is a script
+rather than an endpoint because the case it exists for is a *new host*: no
+session to authorise a request with, no dashboard to press a button on. It is
+built around one rule — **never destroy anything to restore something** — since
+a restore is reached for at the worst moment, usually by somebody guessing:
+
+- `--list`, `--verify` and `--plan` change nothing, and `--plan` prints exactly
+  what would happen before anybody consents to it.
+- An existing tree is **refused** without `--force`, and with `--force` it is
+  **moved aside rather than deleted**. If it was the wrong backup, what was
+  replaced is still there.
+- An archive that fails its digest is refused. That digest is the reason the
+  manifest carries one: a truncated archive — a disk that filled mid-sweep, a
+  mount that dropped — is otherwise discovered by restoring it, which is the
+  worst possible moment and usually destroys the evidence.
+- A row whose owner is not on this server is **not** written. The files are
+  restored and it says so, rather than failing on a foreign key three frames
+  down.
+
+**Three defects found while building it, all by running it rather than reading
+it** — which is §1's standing lesson arriving on schedule:
+
+1. **The skip check compared a project's `updatedAt` to the wall-clock time the
+   last sweep ran.** Semantically defensible and quietly fatal: a server whose
+   clock steps forward — an NTP correction, a restored VM, a container with a
+   skewed clock — sees every project as unchanged and **silently stops backing
+   anything up**, which is this feature's worst failure and the one nothing
+   would report. The manifest now records the source's own `updatedAt` and the
+   comparison is between two values of the same column, which cannot skew. Found
+   by a test that could not make a second backup happen.
+2. **File modes were lost on unpack.** `fs.open(path, "w")` takes the process
+   umask, so a restored `./deploy.sh` came back without its execute bit — a
+   project subtly broken in a way that looks like the script being wrong.
+3. **A restored tree belonged to whoever ran the command**, which on a fresh
+   host is root. The sandbox runs as uid 1001 and bind-mounts that tree, so the
+   project would open, list its files, and fail every write with `EACCES` — a
+   restore that looks like it worked. `claimProjectForSandbox` now runs after
+   the unpack, and says so in the warnings when it cannot.
+
+**Visibility, because a backup system nobody checks is one that stopped working
+some months ago.** `backups_completed` and `backups_failed` are counters; the
+operator console's machine panel carries the last sweep's outcome; and the boot
+log says which state it is in **in both directions** — "backups are OFF" at
+warn, rather than leaving it to be inferred from silence. Two states are kept
+apart deliberately on that panel: "on and never run" is rendered as a warning
+and not as a tick, because a subsystem that is switched on and silent is the
+exact shape of one that is broken. A sweep in which anything failed is reported
+as failed, not as mostly-fine.
+
+`docs/BACKUP.md` is the runbook, and its last section is what this does **not**
+do: no global restore-everything command (on purpose — the first restore
+anybody performs should be one they can read a plan for), no user accounts in
+the backup, and nothing automated about moving the files off the machine.
+
+Server: 2420 passing, 269 skipped. Web: 1325 passing. Typecheck and lint clean,
+3/3. No migration: a backup is files on a disk and rows read out of the one that
+already exists. One new direct dependency, `tar-stream`, which was already
+present transitively under `archiver` — depending on that by accident is how an
+unrelated upgrade removes your restore path.
+
+**Not verified, and it is the load-bearing one.** Nobody has rebuilt a host from
+this. What is tested is a real archive written to a real directory and unpacked
+back out again — `.git` present, `node_modules` absent, contents byte-identical,
+a truncated archive refused, an existing tree moved aside rather than replaced —
+and that is genuine evidence for the mechanism. It is not evidence for the
+runbook. The row is closed because the mechanism exists and is reachable; the
+drill has not been done, and `docs/BACKUP.md` says so in its own text rather
+than leaving somebody to find out on the day.
+
 ---
 
 ## 3. Open
@@ -3385,7 +3515,23 @@ Each is named with what blocks it, so none reads as ready to start.
       here and stays blocked; what it is blocked on is now §10.1, which is a
       decision somebody can take in an afternoon rather than an absence.
 
-- [ ] **Backup and restore.** **Split by §9.1**, which takes the recoverable
+- [x] **Backup and restore.** Shipped 2026-09-09 — see §2.47, and note what
+      that entry does NOT claim: nobody has rebuilt a host from it. The row is
+      closed because the mechanism exists, is tested through a real archive
+      and a real unpack, and is reachable by a command with a runbook — not
+      because the drill has been done.
+
+      **The blocked half went the way §9 says blocked halves go.** "Where do
+      backups live" was never a project; it was one question, and the answer is
+      that this server does not answer it. `BACKUP_DIR` names a directory and
+      the operator decides whether that is a second disk, an NFS mount, an
+      rclone mount over a bucket, or a path something else rsyncs away. What
+      the code DOES decide is the one thing it has the information to decide:
+      it refuses to start when that directory shares a tree with
+      `PROJECTS_DIR`, because a backup there works perfectly every night until
+      the day it is needed. Original note follows.
+
+      **Split by §9.1**, which takes the recoverable
       delete and deliberately leaves this row open: a trash answers "I meant
       the other project" and a backup answers "the host died", and only the
       second needs a destination. Do not read §9.1 as closing this.
@@ -4643,11 +4789,15 @@ feature. Route A does not deliver any of them.
       trash.
 
       **And one row on this page becomes more important rather than less.**
-      §3.3's backup-and-restore is filed as blocked on a deployment decision
-      about where backups go. At n=1 there is no operations team behind it and
+      ~~§3.3's backup-and-restore is filed as blocked~~ — **shipped 2026-09-09,
+      §2.47**, and this paragraph is why it was taken first. Original note
+      follows. §3.3's backup-and-restore is filed as blocked on a deployment
+      decision about where backups go. At n=1 there is no operations team behind it and
       the host is somebody's laptop, so "this platform loses data when its host
       does" stops being an acceptable written trade-off. §9.1 shipped the trash;
-      the backup half is still open and it moves up.
+      the backup half is still open and it moves up. **It moved up and it
+      shipped — 2026-09-09, §2.47, taken first for exactly the reason this
+      paragraph gives.**
 
 ---
 
@@ -6313,6 +6463,15 @@ the whole of Phase 3.
 The phase that delivers the primary target. Everything in it is unblocked once
 Phase 0 is settled, and two of the four are unblocked regardless.
 
+**1a. ~~Settle where a backup goes, then build it (§3.3).~~ Shipped 2026-09-09
+— §2.47.** The prediction below held exactly: the person-half was one question
+answered in a sentence (the server does not choose the destination; it refuses
+one on the same disk), and the code half was a job, a walk and a dump — plus a
+restore, which turned out to be the larger half and the one that makes the
+other real. Three defects found by running it, none of which any list
+predicted. **What is still not done is the drill:** nobody has rebuilt a host
+from it. Original note follows.
+
 **1a. Settle where a backup goes, then build it (§3.3).** First, and ahead of
 anything in this file that adds a feature, because it is **the only open row
 that loses data rather than failing to add something**. §10.5 already argued it
@@ -6369,7 +6528,8 @@ back to the server, and both are secrets in a sandbox.
 **What Phase 1 delivers:** one person opens a folder that is already on the
 disk, attaches their own VS Code with their own extensions and a debugger,
 gets their own secrets and their own git credentials in every workspace, and
-does not lose it when the host dies.
+does not lose it when the host dies — the last of which is done (§2.47), and
+the rest of which is 1b to 1d.
 
 ---
 
@@ -6531,9 +6691,9 @@ Everything that is *not* a straight line, so nothing below is discovered by
 starting it in the wrong order:
 
 - **Phase 0 gates** all of Phase 3, 1b, and 1d's answer. Nothing else.
-- **1a (backup) gates nothing**, which is the argument for doing it first: it
-  is the only row whose absence is measured in lost work rather than missing
-  work.
+- **1a (backup) gated nothing**, which was the argument for doing it first: it
+  was the only row whose absence was measured in lost work rather than missing
+  work. Done 2026-09-09 (§2.47), so Phase 1 now starts at 1b.
 - **1b's volume for `~/.vscode-server` must land with 1b**, not after it. It is
   one line and the spike found it the expensive way.
 - **2a before 10.9**, or the browser session and the settings file will
