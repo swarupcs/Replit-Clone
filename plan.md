@@ -141,20 +141,37 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 157 items. Open: 18 — five blocked, ten from §10 that are all
+**Done: 157 items. Open: 29 — five blocked, ten from §10 that are all
 waiting on one decision (§10.1), one from §11, which reads the sandbox
-rather than the editor, and two from §12, which reads neither and asks what
-a cloud machine is for. §11's last row is 11.10, which needs a decision before
-it needs code, and 12.4 is blocked on hardware rather than on anybody, so nothing
-outside §12 is both open and unblocked.**
+rather than the editor, two from §12, which reads neither and asks what
+a cloud machine is for, and eleven from §13, which names the two products this
+most resembles and diffs against them. §11's last row is 11.10, which needs a
+decision before it needs code, and 12.4 is blocked on hardware rather than on
+anybody.**
 
-Those four numbers are 5 + 10 + 1 + 3 = 19, and they are written out because
-they did not add up once already — see the paragraph below.
+Those five numbers are 5 + 10 + 1 + 2 + 11 = 29, and they are written out
+because they did not add up once already — see the paragraph below.
 
-**§10.1 is now the whole of the critical path.** Ten of the nineteen open
-items are behind it, it is a decision rather than work, and as of 2026-09-05 it
-has a third option costed against a real spike rather than an argument. It is
-the single most valuable thing anybody could spend an hour on.
+**Two corrections were made to this paragraph on 2026-09-09**, both by §13,
+which is the commit that last invalidated it and therefore owns it under §7.
+The first is the sum: it read `5 + 10 + 1 + 3 = 19` beside an Open figure of
+18, and the arithmetic written out specifically to stop that had itself been
+left stale when 12.2 split 12.5 out — §12 has two open rows, not three, and 18
+was the figure that was right. The second is the sentence that followed it:
+**"nothing outside §12 is both open and unblocked" is no longer true**, and
+§13's own text argues it was a fact about where this document had been looking
+rather than about the tree. Six of §13's eleven rows are unblocked under every
+route, because none of them is in the editor.
+
+**§10.1 is still the whole of the critical path for the editor, and it is no
+longer the whole of the critical path.** Ten of the twenty-nine open items are
+behind it, it is a decision rather than work, and as of 2026-09-05 it has a
+third option costed against a real spike rather than an argument. It is still
+the single most valuable thing anybody could spend an hour on. What changed on
+2026-09-09 is that it is no longer the only thing anybody could spend an hour
+on: §13.7 — a terminal that is killed by its own WebSocket closing — is
+unblocked, half-written already, and the one row in this file where this
+platform is worse than the laptop it proposes to replace.
 
 **The Done figure jumped from 123 to 148 in one edit on 2026-09-05, and that
 was a correction rather than a day's work.** By the same count §1 has always
@@ -188,7 +205,21 @@ should exist before the exposure, not after, and 11.5's own document now asks
 for the second factor to be turned on before the name exists), and **three in §12** (12.1 and 12.2 both shipped
 2026-09-05, the day the section was written; 12.2 split 12.5 out of itself on
 the way, so the section is one row shorter and one row longer than it started;
-12.4 is unstartable without different hardware and has been set aside).
+12.4 is unstartable without different hardware and has been set aside), and
+**eleven in §13**, of which six are unblocked under every route — the first
+unblocked work this page has carried since 2026-09-05, and the reason the
+sentence claiming there was none has been struck above.
+
+**§13 was written on 2026-09-09 and adds eleven.** It is the fourth method
+this file has used and a sharpened form of the weakest one: name the two
+products this most resembles — CodeSandbox, and a personal VS Code on a server
+— and diff against each. It deliberately repeats nothing from §10, §11 or §12,
+and it says in its own opening which rows it is not re-opening. Six of its
+eleven are unblocked by §10.1 because none of them is in the editor; its first
+row is a terminal that its own socket closing kills, which is a defect wearing
+a feature's clothes and was found the way §1 says the real ones are found — by
+reading §11.7's dropped-connection handling against the container fix of
+2026-09-04.
 
 **§12 was written on 2026-09-05 and adds four.** It is the residue of §10 and
 §11 rather than a third reading of the same ground: §10 asks what Monaco cannot
@@ -399,6 +430,20 @@ into a membership question.
 
 **Simply absent, and unblocked.** Notebooks (§12.3). GPUs (§12.4), which need
 different hardware.
+
+**Absent against the two products this most resembles** (§13, added
+2026-09-09). Nothing here is in the editor, so none of it waits on §10.1. For
+a *CodeSandbox*: there is no cheap project — every path into a working tree
+ends at a container, so there is no anonymous sandbox (§13.1), no
+container-free preview (§13.2), no URL per pull request (§13.3), no second
+checkout of one repository (§13.4), no devtools for the previewed app (§13.5),
+and no pairing link for somebody without an account (§13.6). For a *personal
+cloud editor*: a terminal is killed when its WebSocket closes, so closing the
+laptop kills the build (§13.7); secrets belong to a project rather than to the
+account (§13.8); no credential inside the sandbox can clone a private
+repository (§13.9); the editor has one mobile breakpoint and nothing else
+(§13.10); and the session — tabs, splits, settings — lives in `localStorage`
+rather than on the server it is connected to (§13.11).
 
 ### What is verified, and what is asserted
 
@@ -5581,3 +5626,399 @@ containers of different sizes on this host and watched the sum. The arithmetic
 argument against decision 15 is a paragraph, not an experiment, and the failure
 mode it is reasoning about — an OOM kill in somebody's terminal — is precisely
 the kind §1 says a mock cannot be trusted about.
+
+---
+
+## 13. The two products this is not yet
+
+Written 2026-09-09, from a reading of the whole tree against a question the
+previous four sections do not ask: **name the two products this most resembles,
+and diff against them.** CodeSandbox, and a personal VS Code that happens to
+live on a server.
+
+**This is the fourth method this document has used, and it is a variant of the
+weakest one.** §12's closing table names three — reading two shipped features
+against each other (finds defects), reading a policy and asking who it is for
+(finds expired posture), and asking what a category has that this does not
+(finds absences). This section is the third, sharpened by naming the category
+instead of leaving it implicit, and it inherits the third's whole weakness:
+**asking what a competitor has produces long lists cheaply, and most of any
+ecosystem's features are not wanted by any particular person.** The defence is
+§12's: every row below says who it is for, and the rows whose honest answer is
+"possibly nobody here" say so in their own text rather than in a footnote.
+
+**What this section is not.** It is not a second §10. §10 asks what VS Code
+does that Monaco cannot and finds ten rows behind one route decision; §11 asks
+which of the sandbox's refusals expired at n=1; §12 asks what a machine in a
+datacentre does that a laptop does not. Every row those three already carry is
+**deliberately absent here**, and where a row below touches one it says which
+and why it is not the same thing. In particular this section does **not**
+re-open: debugging or extensions (§10.6, §10.7 — behind §10.1), settings as
+files (§10.9), tasks (§10.10), the diff editor (§10.11), local history
+(§10.12), stash and blame (§10.13), multi-root and markdown preview (§10.14),
+process snapshots (§3.3), backup (§3.3), teams (§8.5), autoscale (§3.3),
+a CLI or GitLab (§3.3, out of scope), or GPUs (§12.4).
+
+**And one thing this section changes about §10.1 without touching it.** Six of
+the eleven rows below are unblocked under every route, because none of them is
+in the editor: a terminal that outlives its socket, a secret that outlives its
+project, a URL per pull request. §10.1 blocks ten rows and it blocks none of
+these. That matters because §1 has said "nothing outside §12 is both open and
+unblocked" since 2026-09-05, and this section says that is a fact about where
+this document has been looking rather than about the tree.
+
+---
+
+### 13A. CodeSandbox — the part that happens in a stranger's browser
+
+The organising observation, and it orders all six rows: **this platform has no
+cheap project.** Every path into a working tree — twelve templates, "Latest",
+a GitHub import, a fork, an opened folder — ends at a Postgres row, a directory
+on the host, and a 512 MB container with an `npm install` in front of it. That
+is the right shape for the thing somebody works in all day, and it is the wrong
+shape, by two orders of magnitude of cost, for the thing CodeSandbox actually
+sells: a URL you paste into an issue that renders a running React app in a
+second, for a reader who has no account and will never come back.
+
+The two anonymous surfaces that exist are careful and deliberately small.
+`pub.ts` serves a gallery of public projects; the embed serves a project's
+source beside its **published deployment**, and §2.x is explicit that framing a
+container instead was refused on purpose — "an anonymous page view must not be
+able to start one on the owner's behalf". That refusal is right and every row
+below is written to respect it rather than to argue with it.
+
+- [ ] **13.1 A sandbox a stranger can open, run and fork with no account.**
+      The defining act of the product this section names, and the one thing
+      here that is a product decision before it is code.
+
+      Today: `assertProjectAccess` is in front of every project route, share
+      links redeem into a `ProjectCollaborator` row that needs a `userId`
+      (`projectAccessService.ts:457`), and the two surfaces with no session
+      behind them are read-only by construction. So the shortest path from
+      "somebody sent me a link" to "I changed a line and ran it" is: sign up,
+      verify an email, fork.
+
+      **For:** anybody who wants a bug reproduction other people can poke at.
+      Against: it is the single largest change to the security posture in this
+      file — an unauthenticated visitor who can start a container is an
+      unauthenticated visitor spending this host's memory, which is exactly
+      what §6 decision 13 and the embed's design refused. Do not build it
+      before 13.2, which is the version of it that costs nothing.
+
+- [ ] **13.2 A preview that does not need a container at all.**
+      `grep -riE "sandpack|webcontainer|esbuild-wasm"` over `apps/` and
+      `packages/` returns **0 hits**. Every preview in this product is a
+      reverse proxy to a dev server inside Docker.
+
+      What is missing is the other half of CodeSandbox's architecture: a
+      browser-side bundler that resolves dependencies from a registry, builds
+      in a worker, and renders in an iframe with no server-side process at all.
+      It boots in about a second, survives being embedded ten thousand times on
+      one page, and costs this host nothing — which is why CodeSandbox's embeds
+      work at a scale this one's cannot.
+
+      **Say plainly what it does not cover**, because this is the row most
+      likely to be over-sold: it serves front-end projects with no server.
+      `python-flask`, `python-fastapi`, `go-http`, `node-express` and every
+      compose project (§11.3) are outside it forever. That is roughly half the
+      template registry, and the half that is left is exactly the half people
+      paste into issues.
+
+      **Not the same as §3.3's process snapshots**, which resumes a *running
+      container* and is blocked on a disk budget. This one replaces the
+      container for a class of project, and is blocked on nothing.
+
+      **For:** the reader of a shared link and the reader of an embed. If
+      neither of those is a person this deployment has, this row has no user,
+      and 13.1 has no cheap version — which is the honest reading of both.
+
+- [ ] **13.3 Every pull request gets a URL.**
+      The most valuable row in 13A for anybody working with other people, and
+      the one whose mechanism is most nearly already here.
+
+      Today `githubService.ts` and the `GithubConnection` model cover OAuth,
+      listing repositories, import, and push with a token that
+      `redactToken` keeps out of the output. There is no App, no webhook
+      receiver, no per-branch workspace, and nothing that writes back to a pull
+      request. `grep -rn "webhook"` in the GitHub path returns nothing
+      (the only webhook in the tree is Stripe's, §8.4).
+
+      What it needs: a GitHub App with `pull_request` and `push` events, a
+      workspace created per head ref, the existing deploy path pointed at it,
+      a comment posted back with the link, and teardown on merge or close.
+      Four of those five exist — `repoImportService`, `deployService`,
+      `releaseService` and the trash (§9.1) — and the fifth is a route.
+
+      **It also supplies the trigger §12.2 says it is missing.** That row
+      shipped prebuilds and states in its own text that what it lacks is a
+      policy for *when*: "build on push, or build on a schedule, or build when
+      a `devcontainer.json` changes". A pull-request event is the first of
+      those three, arriving with a reason attached.
+
+- [ ] **13.4 One repository, more than one workspace.**
+      A `Project` is one directory and one row, and `switchBranch` changes the
+      branch **in place** (`gitService.ts:475`). So reviewing a colleague's
+      branch means stashing what you are doing (and §10.13 records that stash
+      does not exist), or importing the repository a second time as an
+      unrelated project with its own container, its own env vars and its own
+      history.
+
+      Adjacent to §10.14's multi-root and not the same: multi-root is several
+      roots in one editor window, this is several checkouts of one repository
+      that know they are related — sharing the account's credentials, the
+      project's env vars, and one entry on the dashboard.
+
+      **For:** anybody who reviews code. Cheap only if 13.3 exists, since the
+      two want the same object.
+
+- [ ] **13.5 Devtools for the thing being previewed.**
+      The preview is an iframe pointed at a proxy, and that is all it is. A
+      runtime `TypeError` in the previewed app appears in the *real* browser's
+      console — which the embed's reader does not have open, and which on a
+      tablet does not exist. There is no console capture, no network log, no
+      error overlay, and no device-size frame.
+
+      The problems panel is already built (`problems.ts`, `ProblemsPanel`) and
+      §10.10 records that it is fed **only by the language server**, with the
+      matcher half unbuilt. A runtime console is the third feed for that same
+      panel, and unlike §10.10's problem matchers it needs no `tasks.json`
+      first: it is a `postMessage` bridge injected into the preview document
+      and a tab.
+
+      **For:** everybody, and most sharply the person the preview is shared
+      with, who cannot open devtools on somebody else's page and would not know
+      to.
+
+- [ ] **13.6 A pairing link for somebody with no account.**
+      The collaborative layer is real and finished — Yjs per file, awareness,
+      remote cursors, presence, follow mode — and reaching it requires being a
+      row in `ProjectCollaborator`. An EDITOR share link exists
+      (`shareRole`, `sharingController.ts:27`) and is still "a named grant":
+      redeeming it creates the collaborator row against a `userId`, so the
+      person on the other end signs up first.
+
+      That is the correct default for a platform and the wrong one for ten
+      minutes of pairing, which is the case the multiplayer layer is most
+      obviously *for*. What it needs is a token that mints a scoped, expiring
+      identity rather than an account — which is a thing this codebase already
+      knows how to do twice (preview tokens and embed tokens are both typed,
+      short-lived and checked on verify).
+
+      **For:** the one use of the collaborative layer that does not require the
+      other person to already be a user of this deployment. Note that §10.5
+      lists the whole multiplayer layer as having no user at n=1 — if this
+      deployment is one person, this row and everything it reaches is dead
+      weight, and that is a reason to read §10.5 before starting rather than an
+      argument with it.
+
+---
+
+### 13B. A personal VS Code that lives on a server
+
+§10 answered "what stops one person using this instead of VS Code" as a
+question about the editor and reached a route decision. §11 answered it about
+the sandbox's posture. What is left after both is small, and it is not editor
+parity: **it is the difference between a program on your laptop and a program
+on a machine you are connected to.** A local editor never has to survive the
+network, and every row below is something that only becomes a question because
+the machine is somewhere else.
+
+- [ ] **13.7 A terminal that survives the laptop closing.**
+      The sharpest row in this section, found the way §1 says the real ones are
+      found — by reading two shipped things against each other — and the one
+      that is most clearly a defect wearing a feature's clothes.
+
+      `handleTerminalCreation.ts:166–176` registers `cleanup` on `ws.on("close")`
+      and `ws.on("error")`, and `cleanup` calls `hangUpShell`, which SIGHUPs the
+      shell by the pid in its pid file. So **closing the lid kills the build.**
+      A dropped WebSocket, a train tunnel, a browser tab discarded by the OS,
+      or a laptop asleep for thirty seconds ends `npm run build`, a migration,
+      a long test run, or a `docker compose` pull, with no record and nothing
+      to reattach to.
+
+      **This code is right about the problem it was written for.** The comment
+      above it is explicit: the stream "was previously never cleaned up on
+      disconnect — and closing it turned out not to be enough on its own",
+      because Docker keeps the pty open and the shell outlives its terminal.
+      That is one of the three container defects found on 2026-09-04 by looking
+      at a running container: an orphaned shell holding port 3000, and every
+      closed terminal leaking a process against a `PidsLimit` of 256. The fix
+      is load-bearing and must not be reverted.
+
+      **And §11.7 gave the editor the exact opposite treatment**, in the same
+      week: unsaved edits are kept across a lost connection and offered back
+      rather than replayed, on the stated grounds that a dropped connection is
+      an ordinary event and not a decision by the user. Two correct decisions,
+      composing into a product where your **text** survives the tunnel and your
+      **build** does not.
+
+      The shape of an answer, and it is not "stop hanging up": a shell belongs
+      to a *session* keyed by terminal id rather than to a socket, a
+      disconnect detaches instead of hanging up, a reconnect within some window
+      reattaches to the same pty with its scrollback, and the reaper hangs up
+      on a **timer** — so the leak the 2026-09-04 fix closed stays closed, an
+      hour later instead of instantly. `reclaimShells` already exists and
+      already hangs up shells left over from earlier connections to a terminal
+      id, which is half of this written for a different reason.
+
+      **For:** anybody whose connection to this machine is a network, which at
+      n=1 is the entire point of the machine. This is the row where "cloud"
+      currently does less than a laptop, not more.
+
+- [ ] **13.8 A secret that belongs to the account, not to each project.**
+      `envVars` is a `Json` column on `Project` (`schema.prisma:877`), sealed
+      by `secretBox` and injected into the container by `runEnv`. There is no
+      other scope. One person with one `ANTHROPIC_API_KEY`, one `NPM_TOKEN`
+      and one database URL types all three into every workspace they create,
+      and rotating any of them means editing every project by hand.
+
+      Cheap in a way few rows here are: the sealing, the injection path, the
+      account screen and the audit trail all exist. What is missing is a second
+      table, a merge order (project overrides account, and say so on the
+      screen), and a decision about whether a *collaborator* on somebody's
+      project gets the owner's account secrets — for which the answer is
+      almost certainly no, and which is the only part of this that needs
+      thinking about.
+
+      **For:** every user of a personal deployment, from their second project
+      onwards.
+
+- [ ] **13.9 A credential the sandbox itself can clone and push with.**
+      Blocked on a decision, and named so the decision gets made rather than
+      arrived at.
+
+      Three things in the tree look like this and none of them is: §11.9's
+      `signingKey` is a *signing* key and is never offered for authentication;
+      dotfiles are cloned with **no credential on purpose**, so a private
+      dotfiles repository fails rather than working
+      (`schema.prisma:179–180`); and `pushRemote` authenticates server-side
+      with a token the sandbox never sees, which is why `redactToken` exists.
+
+      Each of those is right. Together they mean `git clone
+      git@github.com:me/private` typed into the terminal — the most ordinary
+      thing a developer does on a new machine — fails, and so does `npm
+      install` from a private registry, and so does anything a `Makefile` does
+      over SSH.
+
+      **The decision, stated once so it is not rediscovered:** any credential
+      reachable from inside the sandbox is reachable by code running in the
+      sandbox, which is untrusted by construction. The honest options are
+      agent forwarding over the Route C SSH channel §11.1 spiked (the
+      credential stays on the user's machine), a per-workspace deploy key with
+      access to one repository, or a git credential helper that calls back to
+      the server and is refused for anything but the project's own remote. The
+      first is the only one that is not a secret sitting in a container, and it
+      exists only if §10.1 goes to Route C.
+
+- [ ] **13.10 The editor on a device that is not a laptop.**
+      `useMediaQuery("(max-width: 900px)")` in `ProjectPlayground.tsx:255` is
+      the whole of the mobile story: one breakpoint that collapses the layout.
+      Monaco on a touch keyboard, a terminal with no `Ctrl`, and a file tree
+      built for a mouse are all untested by anybody.
+
+      **Kept because it is the only row in this section that Route C cannot
+      reach** — §11.0 concedes in its own text that attaching your own editor
+      "does nothing on an iPad", and a browser IDE's remaining advantage over
+      SSH is precisely the device you cannot install VS Code on.
+
+      **And it may well have no user here.** If nobody is going to edit code on
+      a phone, this is a large piece of work for a device nobody uses, and §12's
+      warning about this method applies to this row harder than to any other on
+      the page. Listed, ranked last in 13B, and not recommended.
+
+- [ ] **13.11 A session that follows the person rather than the browser.**
+      `editorSettingsStore` (sixteen preferences), `keybindingStore` (chord
+      overrides), `openTabsStore`, `treeStructureStore` and the pane sizes all
+      persist to `localStorage`. Open the same workspace from a second machine
+      — which is the *reason* the workspace is on a server — and it is a blank
+      editor with default settings and no open files.
+
+      **Named separately from §10.9 on purpose**, because the two are one
+      sentence apart and blocked on different things. §10.9 wants settings in
+      *files*: committable, diffable, per-workspace, importable from a real VS
+      Code profile — and it is behind §10.1, because under Route A it arrives
+      free. This row wants the *session* — which tabs were open, where the
+      splits were, what the tree had expanded — to live on the server against
+      the account, and it is behind nothing at all: it is the same stores
+      writing through an endpoint instead of to `localStorage`.
+
+      **For:** anybody who uses this deployment from more than one machine,
+      which is the population §10 was written for.
+
+---
+
+### Order, and what to do first if only one thing gets done
+
+**13.7, and it is not close.** It is a defect in everything but name, its cost
+is measured in somebody's lost build rather than in a missing feature, half its
+mechanism (`reclaimShells`, the pid files) is already written, and it is the
+one row on this page where this platform is currently *worse* than the laptop
+it is asking to replace. Nothing here is blocked on §10.1 and this is blocked
+on nothing.
+
+Then, and the split is by which question the deployment is answering:
+
+**If other people use it** — 13.3 (a URL per pull request, which also gives
+§12.2 the trigger it says it lacks) → 13.5 (preview devtools, cheap, feeds a
+panel that exists) → 13.2 (the container-free preview) → 13.1 (which 13.2 makes
+affordable) → 13.6 → 13.4.
+
+**If one person uses it** — 13.8 (account secrets, the cheapest real row here)
+→ 13.11 (session on the server) → 13.9 (credentials, once §10.1 is settled,
+since Route C changes the answer) → and stop. 13.1 through 13.6 have no user
+at n=1 for the reasons §10.5 already set out, and 13.10 probably has none
+either.
+
+**And one row already on this page moves up rather than in.** §3.3's backup and
+restore is the only entry in this document that loses data rather than failing
+to add a feature, and §10.5 already argued it stops being an acceptable written
+trade-off at n=1. Nothing in §13 is more important than it. It is not repeated
+as a row here because it is not a gap against either of these two products —
+it is a gap against not losing your work.
+
+### What was verified for this section
+
+Checked against the tree on 2026-09-09, in the manner §5 requires. Every claim
+below was run, not remembered.
+
+- `grep -riE "sandpack|webcontainer|esbuild-wasm"` over `apps/` and
+  `packages/` — **0 hits** (13.2).
+- `grep -riE "launch\.json|tasks\.json|settings\.json|snippet|blame|stash|
+  cherry-pick|createDiffEditor|timeline|multi-root|code-workspace|openvsx"`
+  over the same, excluding `plan.md` — 0 hits for all of them, which is what
+  §10.6–10.14 already say and is recorded here only because this section had
+  to establish it was not repeating them.
+- `handleTerminalCreation.ts:166–176` — `cleanup` is declared at `:166` and
+  registered on `ws.on("close")` (`:175`) and `ws.on("error")` (`:176`); it
+  calls `hangUpShell(container, pidFile)` at `:172`.
+  `terminalShell.ts:137–146` SIGHUPs by the pid in that file, and
+  `:149–159`'s `reclaimShells` already hangs up shells from earlier connections
+  to the same terminal id (13.7).
+- `schema.prisma:877` — `envVars Json @default("{}")` on `Project`, and no
+  other env-var column anywhere in the schema; `projectEnvService.ts` exports
+  `getEnvVars`, `setEnvVars` and `backfillSealedEnvVars`, all keyed by
+  `projectId` (13.8).
+- `schema.prisma:169–209` — `UserPersonalization` holds `dotfilesRepo`,
+  `signingKey`, `signingKeyPublic` and `signCommits`, and `:179–180` says no
+  credential is sent with the dotfiles clone "so a private repository fails
+  rather than working" (13.9).
+- `projectAccessService.ts:428–460` — `redeemShareToken` upserts a
+  `ProjectCollaborator` row against a `userId`; `sharingController.ts:27`
+  offers `VIEWER` or `EDITOR` and the comment above it says an EDITOR link "is
+  still a named grant" (13.1, 13.6).
+- `gitService.ts:475` — `switchBranch` operates on the project's single working
+  tree (13.4).
+- `ProjectPlayground.tsx:255` — one `useMediaQuery("(max-width: 900px)")`, and
+  no other breakpoint or touch handling in the tree (13.10).
+- `editorSettingsStore`, `keybindingStore`, `openTabsStore` and
+  `treeStructureStore` all persist to `localStorage`; no endpoint reads or
+  writes any of them (13.11).
+- The GitHub path (`githubService.ts`, `githubController.ts`, `routes/v1/
+  github.ts`) has no webhook receiver; the only webhook in the server is
+  Stripe's, in `routes/v1/billing.ts` (13.3).
+
+**Not verified, and it is the load-bearing one for 13.7:** nobody has closed a
+laptop mid-build and watched what happens. The code path is unambiguous and the
+comment above it says what it does, which is strong evidence and not the same
+thing as having seen it — and §1's standing lesson is that the container layer
+in particular has produced three defects nobody predicted from reading it.
