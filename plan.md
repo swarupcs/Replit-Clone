@@ -56,7 +56,7 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2770 passing**, 9 skipped. Green 2026-09-09 against all **41** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| the same, with `TEST_DATABASE_URL` set | **2791 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
 | `pnpm --filter web test` | **1369 passing** (107 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
@@ -146,7 +146,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 165 items. Open: 21 — four blocked, seven from §10, one from §11, which
+**Done: 166 items. Open: 20 — four blocked, seven from §10, one from §11, which
 reads the sandbox rather than the editor, two from §12, which reads neither and
 asks what a cloud machine is for, and seven from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
@@ -156,7 +156,7 @@ seven that remain are merely open rather than blocked. §11's last row is 11.10,
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 7 + 1 + 2 + 7 = 21, and they are written out
+Those five numbers are 4 + 7 + 1 + 1 + 7 = 20, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3406,6 +3406,52 @@ agent/TCP distinction checked by turning the switch off and asserting TCP
 forwarding stayed shut. **Not verified:** no Docker daemon here, so no agent has
 been forwarded through a real connection.
 
+### 2.52 Since (2026-09-09) — §12.5, building a workspace nobody has open
+
+§14.3's Phase 2b. §2.39 shipped the half where the container is already
+running; this is the first open of a workspace that has been stopped all week,
+which is the case 12.2's own title described and did not cover.
+
+**The row was never blocked on code. It was blocked on three numbers**, and it
+says twice that choosing them without having watched a real host is how a
+background task becomes the reason a machine is always busy. They are chosen —
+under the standing instruction to decide rather than ask — and the honest thing
+available was not to pretend they are measured: each is an env var whose default
+is documented in `env.ts` **as a guess**, and the feature is off by default. An
+operator who watches this misbehave retunes it without a deploy, and the number
+that eventually proves right ends up written down.
+
+**Each collision the row named, and its answer.** Memory is measured against the
+same budget `assertFits` uses, not against a count of containers — a count says
+nothing about a host running one large workspace. The sweep stops what it
+started and only what it started, so a workspace somebody opens mid-sweep is
+left alone. And it re-checks headroom *between* workspaces, because a sweep that
+found the host quiet ten minutes ago is not evidence about the host now.
+
+**Why it always stops what it started, even on a plan whose workspaces never
+sleep.** That was the row's sharpest objection and the answer is not "the plan
+allows it": a prebuilt container left running is indistinguishable, an hour
+later, from one the user opened. It changes what the machine costs rather than
+how fast it opens, and it corrupts the only signal the idle reaper has.
+
+**What building it found that the row had not.** Deciding whether a *stopped*
+workspace needs building was itself the problem. `warmStart`'s stamp lives in
+the container's writable layer, so reading it means starting the container —
+the exact cost this exists to avoid. So a prebuild now also records its
+fingerprint against the project row, host-side, where the dependency files are
+already readable because the tree is bind-mounted. A hint rather than a source
+of truth: when it is stale the cost is one wasted start, and the container's own
+stamp still decides what actually runs.
+
+**Verified.** 19 tests on the gates, 2 more on the fingerprint, three guards
+checked by deleting them. Server 2791 passing / 9 skipped, web 1369, typecheck
+and lint clean 3/3. Migration **run**: all 42 applied, `prebuiltFingerprint
+text` read back out of `\d projects`.
+
+**Not verified:** no Docker daemon here, so nothing has actually started a
+container, built it and stopped it. And the three numbers remain guesses — that
+is the row's own warning and shipping does not answer it.
+
 ---
 
 ## 3. Open
@@ -6159,7 +6205,29 @@ what is actually there.
       *image*; a snapshot resumes a running *process*. This row needs no new
       mechanism and that one needs a mechanism nothing here resembles.
 
-- [ ] **12.5 Start a stopped workspace to build it.** Split out of 12.2 on
+- [x] **12.5 Start a stopped workspace to build it.** **Shipped 2026-09-09 —
+      §2.52**, with the three numbers chosen rather than measured, and that
+      distinction is carried into the code: `PREBUILD_MAX_COMMITTED` (0.6),
+      `PREBUILD_RECENT_DAYS` (7) and `PREBUILD_STOP_AFTER` (true) are env vars
+      whose defaults are documented **as guesses**, and the feature itself is
+      off by default (`PREBUILD_STOPPED`). This row's warning is not resolved
+      by shipping it — it is preserved in the one form that lets the first
+      operator to see it misbehave retune it without a deploy.
+
+      All three collisions it named have an answer: headroom is measured in
+      MEMORY against the same budget `assertFits` uses, not in a count of
+      containers; the sweep stops what it started and only what it started; and
+      it re-checks headroom between workspaces rather than once at the start.
+
+      **One thing this row did not foresee, found by building it.** Deciding
+      whether a *stopped* workspace needs building was itself the hard part:
+      `warmStart`'s stamp lives in the container's writable layer, so the only
+      way to read it is to start the container — which is the cost the feature
+      exists to avoid. A host-side copy of the fingerprint on the project row
+      fixes it, and is a hint rather than a source of truth: stale in the safe
+      direction, with the container's own stamp still deciding what runs.
+
+      Original note follows. Split out of 12.2 on
       2026-09-05, the way 11.10 was split out of 11.2 — and for the same
       reason: building it revealed which half was a line of code and which was
       a decision nobody has taken.
@@ -6957,7 +7025,10 @@ what happens when the pull and the person disagree — three rules, each with a
 test that fails without it. Explicitly not §10.9, which wants settings in
 *files* and is Phase 3.
 
-**2b. Prebuild a stopped workspace (§12.5).** §2.39 shipped the running-
+~~**2b. Prebuild a stopped workspace (§12.5).**~~ **Done 2026-09-09 — §2.52.**
+The three numbers were chosen rather than measured, and are env vars documented
+as guesses with the feature off by default — which is this phase's caution kept
+rather than overridden. Original note follows. §2.39 shipped the running-
 workspace half; this is the first open of a workspace that has been stopped all
 week. Blocked on **three numbers somebody has to choose by watching a real
 host** — how much headroom before a prebuild may run, how recently a workspace

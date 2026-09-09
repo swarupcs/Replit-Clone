@@ -23,6 +23,11 @@ export type CounterName =
   // A prebuild that exited non-zero, or threw. Deliberately not notified --
   // nobody asked for the work -- so this counter is the only place it shows.
   | "prebuilds_failed"
+  // A workspace this STARTED in order to build it -- plan.md §12.5. Counted
+  // separately from `prebuilds_completed`, because the number an operator
+  // deciding whether to leave PREBUILD_STOPPED on wants is how often the
+  // machine was woken, not how often an install was saved.
+  | "prebuilds_cold_started"
   // Gave up after the install timeout. The stamp is untouched, so the next
   // real start installs exactly as it would have.
   | "prebuilds_abandoned"

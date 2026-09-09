@@ -791,6 +791,51 @@ const envSchema = z.object({
    *  thing to do by accident, so it is spelled out rather than inferred. */
   SANDBOX_SSH_BIND: z.string().default("127.0.0.1"),
 
+  /** Prebuild a workspace that is STOPPED, not only one already running.
+   *  plan.md §12.5.
+   *
+   *  Off by default, and that is the honest setting for a feature whose three
+   *  gates below are guesses: it starts a container nobody asked for, on a
+   *  machine that may want the memory for a workspace somebody IS opening.
+   *  On is a choice an operator makes after watching their host. */
+  PREBUILD_STOPPED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true" || value === "1"),
+
+  /** How much of the memory budget may already be committed before a cold
+   *  prebuild is skipped, as a fraction.
+   *
+   *  0.6 is a GUESS. Nobody has watched a real host, and §12.5 says so twice:
+   *  choosing these numbers from a chair is how a background task becomes the
+   *  reason a machine is always busy. It is an env var precisely so the first
+   *  operator to see it misbehave can retune it without a deploy, and so the
+   *  number that eventually proves right is recorded somewhere rather than
+   *  compiled in. */
+  PREBUILD_MAX_COMMITTED: z.coerce.number().min(0).max(1).default(0.6),
+
+  /** How recently a workspace must have been opened to be worth prebuilding,
+   *  in days. Zero means any.
+   *
+   *  7 is a GUESS, on the reasoning that a workspace nobody has opened in a
+   *  week is one whose next open is not imminent -- and the whole value of a
+   *  prebuild is that it is spent shortly before somebody arrives. */
+  PREBUILD_RECENT_DAYS: z.coerce.number().int().min(0).default(7),
+
+  /** Stop a workspace this feature started, once it is built.
+   *
+   *  True, and it is the answer to §12.5's sharpest objection rather than a
+   *  preference: on a plan whose workspaces never sleep, leaving a prebuilt
+   *  container running would silently turn a stopped workspace into a running
+   *  one. That changes what the machine COSTS, not how fast it opens -- and it
+   *  would be indistinguishable, afterwards, from the user having opened it.
+   *  Only ever stops what this started; a workspace somebody opened mid-build
+   *  is left alone. */
+  PREBUILD_STOP_AFTER: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false" && value !== "0"),
+
   /** Let an attached session use the SSH agent on the user's own machine.
    *
    *  On by default when SSH is, because it is this platform's answer to a real

@@ -1002,7 +1002,23 @@ model Project {
   /// Only ever queried for the handful that are not READY -- the dashboard
   /// poll and the boot reconcile both ask which of these is unfinished.
   @@index([scaffoldStatus])
+  /// The dependency fingerprint a prebuild last completed for. plan.md §12.5.
+  ///
+  /// A host-side copy of the stamp `warmStart` keeps INSIDE the container.
+  /// That one is right where it is -- it describes the container's own
+  /// node_modules -- and it is unreadable for the question the cold sweep
+  /// asks, which is about a workspace that is not running and therefore has no
+  /// container to read anything from. Without this, deciding whether a stopped
+  /// workspace needs building would mean starting it to find out, which is the
+  /// cost the whole feature exists to avoid.
+  ///
+  /// A hint, not a source of truth: stale in the safe direction (a wasted
+  /// start that finds nothing to do), and the container's own stamp still
+  /// decides what actually runs.
+  prebuiltFingerprint String?
+
   @@map("projects")
+
 }
 
 enum ProjectVisibility {

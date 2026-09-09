@@ -196,6 +196,20 @@ async function attempt(projectId: string): Promise<boolean> {
     }
 
     await writeStamp(container, fingerprint);
+
+    // And host-side -- plan.md §12.5. The stamp above lives in the container's
+    // writable layer, which is exactly right for `warmStart` and useless to
+    // anything asking about a workspace that is NOT running: there is no
+    // container to read it from. A copy against the project row is what lets
+    // the cold sweep decide whether starting one is worth it, instead of
+    // starting every workspace to find out.
+    //
+    // Never fatal: this is a hint, and a prebuild that ran is not undone by
+    // failing to record that it ran.
+    await prisma.project
+      .update({ where: { id: projectId }, data: { prebuiltFingerprint: fingerprint } })
+      .catch(() => {});
+
     increment("prebuilds_completed");
     return true;
   } catch (error) {
