@@ -12,6 +12,12 @@ RUN apt-get update \
         # this is here to keep the three sandbox images saying the same thing
         # rather than depending on that. plan.md §11.9.
         openssh-client \
+        # sshd, so somebody can attach their own VS Code, Cursor, Zed or nvim
+        # to this workspace -- plan.md §10.1 Route C. 7 MB on a ~500 MB image,
+        # measured. It runs as uid 1001 with no capabilities and no privilege
+        # separation, because the user it authenticates is the user it already
+        # runs as; see remoteAccess.ts for the config and why that is safe.
+        openssh-server \
         procps \
     && rm -rf /var/lib/apt/lists/*
 

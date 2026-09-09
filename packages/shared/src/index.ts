@@ -21,4 +21,5 @@ export * from "./pagination.js";
 export * from "./subscriptions.js";
 export * from "./editorSession.js";
 export * from "./personalization.js";
+export * from "./remoteAccess.js";
 export * from "./notebook.js";

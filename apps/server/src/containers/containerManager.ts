@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
 import Docker from "dockerode";
+import type Dockerode from "dockerode";
 import type { Container, ContainerInfo, ContainerStats as DockerStats } from "dockerode";
 import { env, previewTargetMode } from "../config/env.js";
 import {
@@ -13,6 +14,13 @@ import { isUnlimited } from "@replit-clone/shared";
 import { AppError } from "../utils/errors.js";
 import { getTemplate } from "../templates/registry.js";
 import { logger } from "../lib/logger.js";
+import {
+  SSH_PORT,
+  remoteBinds,
+  startSshd,
+  vscodeVolumeName,
+} from "./remoteAccess.js";
+import { accountSshKeys } from "../service/accountSshKeyService.js";
 import { getEnvVars, toDockerEnv } from "../service/projectEnvService.js";
 import { endProjectSessions } from "../terminal/terminalSessions.js";
 import { SANDBOX_NETWORK } from "./sandboxNetwork.js";
@@ -62,15 +70,25 @@ function cacheVolumeName(projectId: string): string {
   return `${CACHE_VOLUME_PREFIX}${assertValidProjectId(projectId)}`;
 }
 
-/** Removes a project's cache volume. Only for deletion — a restart must keep
- *  it, since keeping it is the entire point. */
+/** Removes a project's named volumes. Only for deletion — a restart must keep
+ *  them, since keeping them is the entire point.
+ *
+ *  Both of them: the package cache, and `~/.vscode-server` if Route C ever put
+ *  one there. The second is the larger by an order of magnitude — the §10.1
+ *  spike measured 1.3 GB after one extension pack — so a deleted project that
+ *  left it behind would be the biggest single leak on the host. Removed
+ *  unconditionally rather than under `SANDBOX_SSH_ENABLED`, because a
+ *  deployment that turned the feature off still has the volumes it made while
+ *  it was on. */
 export async function removeCacheVolume(projectId: string): Promise<void> {
-  await docker
-    .getVolume(cacheVolumeName(projectId))
-    .remove({ force: true })
-    .catch(() => {
-      // Never created, or already gone.
-    });
+  for (const name of [cacheVolumeName(projectId), vscodeVolumeName(projectId)]) {
+    await docker
+      .getVolume(name)
+      .remove({ force: true })
+      .catch(() => {
+        // Never created, or already gone.
+      });
+  }
 }
 
 /** Label recording which environment a container was built with.
@@ -510,15 +528,33 @@ async function startContainer(projectId: string): Promise<Container> {
   const publishPort = previewTargetMode === "host-loopback";
   const previewPorts = declaredPorts(template, devcontainer);
 
-  const exposedPorts = Object.fromEntries(
-    previewPorts.map((port) => [`${String(port)}/tcp`, {}]),
-  );
-  const portBindings = Object.fromEntries(
-    previewPorts.map((port) => [
-      `${String(port)}/tcp`,
-      [{ HostIp: "127.0.0.1", HostPort: "0" }],
-    ]),
-  );
+  // Route C -- plan.md §10.1. Published independently of the preview's mode,
+  // because an SSH client is not the preview proxy: it dials the host directly,
+  // so there has to be a host port whether or not previews need one. Bound to
+  // SANDBOX_SSH_BIND, which is loopback unless an operator widened it.
+  const publishSsh = env.SANDBOX_SSH_ENABLED;
+
+  const exposedPorts = Object.fromEntries([
+    ...previewPorts.map((port) => [`${String(port)}/tcp`, {}] as const),
+    ...(publishSsh ? [[`${String(SSH_PORT)}/tcp`, {}] as const] : []),
+  ]);
+  const portBindings = Object.fromEntries([
+    ...previewPorts.map(
+      (port) =>
+        [
+          `${String(port)}/tcp`,
+          [{ HostIp: "127.0.0.1", HostPort: "0" }],
+        ] as const,
+    ),
+    ...(publishSsh
+      ? [
+          [
+            `${String(SSH_PORT)}/tcp`,
+            [{ HostIp: env.SANDBOX_SSH_BIND, HostPort: "0" }],
+          ] as const,
+        ]
+      : []),
+  ]);
 
   // Before the container, because a refusal is something the editor should be
   // able to show beside the config that asked for it -- and because a mount
@@ -616,11 +652,11 @@ async function startContainer(projectId: string): Promise<Container> {
       ],
       // What the reuse check above compares against.
       Labels: { [ENV_SIGNATURE_LABEL]: signature },
-      ...(publishPort ? { ExposedPorts: exposedPorts } : {}),
+      ...(publishPort || publishSsh ? { ExposedPorts: exposedPorts } : {}),
       // Idle process; terminals attach with `docker exec`.
       Cmd: ["sleep", "infinity"],
       HostConfig: {
-        ...(publishPort ? { PortBindings: portBindings } : {}),
+        ...(publishPort || publishSsh ? { PortBindings: portBindings } : {}),
         Binds: [
           `${projectRoot(projectId)}:${MOUNT_POINT}`,
           // Extra host directories the devcontainer asked for, and that both
@@ -632,6 +668,10 @@ async function startContainer(projectId: string): Promise<Container> {
           // restart, so without this every cold start re-downloaded the whole of
           // node_modules — minutes of waiting for a project that had not changed.
           `${cacheVolumeName(projectId)}:/home/sandbox/.cache`,
+          // `~/.vscode-server`, for the same reason and at a larger scale --
+          // the spike measured 1.3 GB after one extension pack, in the
+          // writable layer that every rebuild throws away. plan.md §10.1.
+          ...remoteBinds(projectId),
         ],
         // This workspace's size, not the deployment's -- plan.md §12.1. Falls
         // back to CONTAINER_MEMORY_MB / CONTAINER_CPUS for a project nobody has
@@ -678,6 +718,19 @@ async function startContainer(projectId: string): Promise<Container> {
   // reasonably assume the shell it is typed for. After the container is
   // running, because there is nothing to exec into until then.
   await runDotfiles(projectId, container);
+
+  // Make it attachable -- plan.md §10.1 Route C. After dotfiles, because a
+  // person who attaches an editor lands in the shell dotfiles configured, and
+  // before nothing in particular: it never throws, and a workspace that cannot
+  // run sshd still opens in the browser.
+  if (env.SANDBOX_SSH_ENABLED) {
+    void startSshd(container, projectId, await accountSshKeys(projectId)).catch(
+      () => {
+        // startSshd already logs. Swallowed here so an addition to a workspace
+        // cannot become the reason one fails to open.
+      },
+    );
+  }
 
   // A container that was just created has been created, so both run -- in the
   // order the spec gives them.
@@ -921,6 +974,29 @@ export async function getRunningContainer(
  *  machine running Docker. Shown to a user on that machine they are exactly
  *  what curl and Postman need; shown to anyone else they are inert.
  */
+/** One project's container as Docker sees it, or null.
+ *
+ *  Separate from `publishedPorts` above rather than reusing it, because that
+ *  one answers only in `host-loopback` preview mode -- and SSH is published
+ *  whatever the preview does, since an SSH client dials the host directly and
+ *  never goes through the preview proxy.
+ *
+ *  Every failure is null, never a throw: this hangs off an endpoint whose
+ *  answer is "here is how to attach", and an unreachable daemon should make
+ *  that "not right now", not a 500.
+ */
+export async function inspectProjectContainer(
+  projectId: string,
+): Promise<Dockerode.ContainerInspectInfo | null> {
+  try {
+    const info = await findContainer(projectId);
+    if (!info) return null;
+    return await docker.getContainer(info.Id).inspect();
+  } catch {
+    return null;
+  }
+}
+
 export async function publishedPorts(
   projectId: string,
 ): Promise<Record<number, string>> {

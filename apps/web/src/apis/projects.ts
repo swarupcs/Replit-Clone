@@ -10,6 +10,8 @@ import type {
   CreatedApiKey,
   MachineStatus,
   AccountSecrets,
+  AccountSshKeys,
+  RemoteAccess,
   EditorSessionState,
   EditorSessionUpdate,
   Personalization,
@@ -1107,6 +1109,37 @@ export const setEditorSessionApi = async (
   const response = await axios.put<ApiSuccess<EditorSessionState>>(
     "/api/v1/account/session",
     { entries },
+  );
+  return response.data.data;
+};
+
+/** Public keys for attaching your own editor. plan.md §10.1 Route C. */
+export const getSshKeysApi = async (): Promise<AccountSshKeys> => {
+  const response = await axios.get<ApiSuccess<AccountSshKeys>>(
+    "/api/v1/account/ssh-keys",
+  );
+  return response.data.data;
+};
+
+/** The whole set, for the same reason account secrets are: removing a key that
+ *  should no longer open your workspaces is the operation somebody most needs
+ *  to be sure of. */
+export const setSshKeysApi = async (
+  lines: string[],
+): Promise<AccountSshKeys> => {
+  const response = await axios.put<ApiSuccess<AccountSshKeys>>(
+    "/api/v1/account/ssh-keys",
+    { lines },
+  );
+  return response.data.data;
+};
+
+/** How to reach one workspace with your own editor. */
+export const getRemoteAccessApi = async (
+  projectId: string,
+): Promise<RemoteAccess> => {
+  const response = await axios.get<ApiSuccess<RemoteAccess>>(
+    `/api/v1/projects/${projectId}/remote`,
   );
   return response.data.data;
 };

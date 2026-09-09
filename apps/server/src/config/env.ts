@@ -765,6 +765,41 @@ const envSchema = z.object({
         .filter((port) => Number.isInteger(port) && port > 0),
     ),
 
+  /** Make a workspace attachable over SSH, so somebody can open it with their
+   *  own VS Code, Cursor, Zed or nvim. plan.md §10.1 Route C.
+   *
+   *  Off by default, and the default is the decision rather than caution: this
+   *  publishes a port per running container on the host, and an operator who
+   *  did not ask for that should not get it because they upgraded. The image
+   *  also needs `openssh-server`, which only the images in this repository
+   *  carry -- a deployment on a custom image would open a port to a daemon
+   *  that is not there. */
+  // Explicit rather than z.coerce.boolean(), which reads the string "false"
+  // as true -- the trap line 328 already records.
+  SANDBOX_SSH_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true" || value === "1"),
+
+  /** Which host interface the per-container SSH port is published on.
+   *
+   *  127.0.0.1 by default, which means a client on the SERVER can reach it and
+   *  nothing else can. That is the safe half of the useful cases -- a personal
+   *  deployment on the machine you are sitting at, or anybody willing to run
+   *  `ssh -L`. Widening it to 0.0.0.0 exposes every open workspace's sshd to
+   *  the network, which is defensible on a host behind a firewall and is not a
+   *  thing to do by accident, so it is spelled out rather than inferred. */
+  SANDBOX_SSH_BIND: z.string().default("127.0.0.1"),
+
+  /** The hostname to put in the `ssh` command shown to the user.
+   *
+   *  A server cannot know its own public name: behind a reverse proxy its own
+   *  idea of it is the proxy's. Unset, the API answers with the hostname the
+   *  browser itself used, which is right far more often than any constant --
+   *  set this when that is wrong, which is every deployment where the browser
+   *  and the SSH client take different routes in. */
+  SANDBOX_SSH_HOST: z.string().optional(),
+
   /** Start a project's dev server as soon as somebody opens it, instead of
    *  waiting for the Run button.
    *

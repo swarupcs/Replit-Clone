@@ -57,6 +57,7 @@ import {
   openLocalFolderController,
 } from "../../controllers/localFolderController.js";
 import { capabilities } from "../../config/deploymentMode.js";
+import { getRemoteAccessController } from "../../controllers/sshKeyController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import {
@@ -197,6 +198,10 @@ router.get("/local/browse", asyncHandler(browseLocalFoldersController));
 router.post("/local", createLimiter, asyncHandler(openLocalFolderController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
 router.get("/:projectId/ports", asyncHandler(getProjectPorts));
+
+// How to attach your own editor to this workspace -- plan.md §10.1 Route C.
+// Owner-only; the controller says why.
+router.get("/:projectId/remote", asyncHandler(getRemoteAccessController));
 
 // Source control. Every one of these runs git INSIDE the project's container,
 // so the repository is handled by the sandbox rather than by the host.

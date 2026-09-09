@@ -56,8 +56,8 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2712 passing**, 9 skipped. Green 2026-09-09 against all **40** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1355 passing** (105 files), re-run 2026-09-09 |
+| the same, with `TEST_DATABASE_URL` set | **2766 passing**, 9 skipped. Green 2026-09-09 against all **41** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1367 passing** (107 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,15 +146,16 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 161 items. Open: 25 — four blocked, ten from §10 that are all
-waiting on one decision (§10.1), one from §11, which reads the sandbox
-rather than the editor, two from §12, which reads neither and asks what
-a cloud machine is for, and eight from §13, which names the two products this
-most resembles and diffs against them. §11's last row is 11.10, which needs a
+**Done: 162 items. Open: 24 — four blocked, nine from §10, one from §11, which
+reads the sandbox rather than the editor, two from §12, which reads neither and
+asks what a cloud machine is for, and eight from §13, which names the two
+products this most resembles and diffs against them. **§10.1 was decided on
+2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, so the ten
+§10 rows that were "waiting on one decision" are nine that are merely open. §11's last row is 11.10, which needs a
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 10 + 1 + 2 + 8 = 25, and they are written out
+Those five numbers are 4 + 9 + 1 + 2 + 8 = 24, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3302,6 +3303,71 @@ Postgres 16, and `\d user_editor_state` read back — composite primary key on
 move between them. Every rule above is tested at the seam, which is good
 evidence and is not the same thing.
 
+### 2.50 Since (2026-09-09) — §10.1 decided, and Route C built
+
+**The decision first, because everything below follows from it.** §10.1 had sat
+open since the section was written: Monaco, openvscode-server, or make the
+workspace attachable and let somebody bring their own editor. It is now **B +
+C** — Monaco stays, and the workspace is attachable over SSH. Taken by the
+repository owner's standing instruction to resolve every open decision rather
+than ask; recorded in §10.1 itself with its reasoning and its costs.
+
+**Why the third route wins the argument the first two were having.** §10 said
+Route B was defensible only if multiplayer was the point, *because Route B can
+never reach 10.7*. The §11.1 spike falsified that sentence — the real VS Code
+server and `ms-python.python`, with Pylance and debugpy, run inside the sandbox
+image over SSH. So the expensive half of Route A arrives for 7 MB of image and
+one volume, without rebuilding run control and preview as extensions, and
+without dropping the collaborative layer that is this product's actual
+difference from the thing it is a clone of.
+
+**What shipped.** `openssh-server` in all three sandbox images; an sshd started
+per container as uid 1001 under the same `CapDrop: ["ALL"]` and
+`no-new-privileges` every sandbox already has; public keys on the account, not
+on a project; `GET`/`PUT /api/v1/account/ssh-keys`, `GET
+/api/v1/projects/:id/remote`; an SSH keys panel beside Secrets, and a dialog
+behind a command-palette entry that hands over the `ssh` command and a
+`vscode://` link.
+
+**The two things the spike found the expensive way, both handled.**
+`~/.vscode-server` gets a named volume — it reached 1.3 GB after one extension
+pack, in the writable layer that every environment-signature change throws
+away, so without it an attach re-downloaded 229 MB per rebuild. And that
+download is the first thing an egress-filtered sandbox refuses, so the dialog
+and `SSH_EGRESS_NOTE` both say which hosts to allow rather than leaving somebody
+to debug a silent hang in a client whose logs they cannot see.
+
+**A defect this row nearly shipped, found by reasoning rather than by running.**
+The sshd config first said `UsePrivilegeSeparation no` and
+`ChallengeResponseAuthentication no`. Both read as exactly the right thing to
+say — this daemon runs as the user it authenticates, so there is no privilege to
+separate. **Both are removed options in the OpenSSH 9.2 that Debian bookworm
+ships**, and 9.2 treats an unknown option as fatal: saying the true thing would
+have stopped the daemon starting on every attach, and there is no Docker daemon
+here to have caught it. There is now a test whose only job is to assert those
+two strings are absent, because that is the only place the mistake is visible.
+
+**Choices worth naming.** SSH is **off by default** (`SANDBOX_SSH_ENABLED`) —
+it publishes a host port per running container, and an operator who did not ask
+for that should not get it by upgrading. The port binds to **127.0.0.1** unless
+`SANDBOX_SSH_BIND` widens it. Only the **owner's** keys are installed: a
+collaborator already has a browser terminal, but a key outlives a session and a
+revocation, and handing one over should be its own row with its own decision
+rather than a quiet `OR`. And no forwarding of any kind — with the egress
+gateway on, `AllowTcpForwarding` would be a hole straight through it.
+
+**Verified.** Server 2766 passing / 9 skipped, web 1367 passing, typecheck and
+lint clean 3/3. Migration **run**: all 41 applied, `sshKeys jsonb not null
+default '[]'` read back out of `\d user_personalization`. Three guards checked
+by deleting them and watching the expected test go red.
+
+**Not verified, and it is the load-bearing gap:** no Docker daemon exists in
+this environment, so nothing here has authenticated a real SSH connection. The
+config, the script, the port mapping and the refusals are tested at their seams;
+the daemon has never started. The §11.1 spike did run a real sshd and a real VS
+Code server, which is why this is strong evidence rather than a guess — but the
+first person to turn `SANDBOX_SSH_ENABLED` on is the first person to run this.
+
 ---
 
 ## 3. Open
@@ -4810,10 +4876,42 @@ those four is about the platform underneath.
 
 ### 10.1 The route — the one decision this section is blocked on
 
-- [ ] **Settle Monaco versus openvscode-server for the single-seat target.**
-      Not a code change and not a research task: the arguments are all written
-      down already, in §6 decision 1 and in the table above. What is missing is
-      somebody choosing, and the choice is between two honest positions:
+- [x] **Settle Monaco versus openvscode-server for the single-seat target.**
+      **DECIDED 2026-09-09: B + C.** Monaco stays as the browser editor, and
+      the workspace becomes attachable over SSH so somebody can bring their own
+      VS Code, Cursor, Zed or `nvim`. Route A — replacing the editor with
+      openvscode-server — is not taken.
+
+      **Who decided, and on what authority.** The repository owner, who had
+      this row put to them three times, instructed that the plan be completed
+      without further questions and that every open decision be resolved on
+      their behalf. This is that decision, recorded here rather than left
+      implicit, and it takes the recommendation §14.1 already carried.
+
+      **Why B + C rather than A.** The spike below is the whole argument. §10
+      said Route B was defensible only if multiplayer was the point, *because
+      Route B can never reach 10.7* — and the spike falsified that sentence:
+      extensions and debugging both arrive over SSH, at a cost of 7 MB of image
+      and one volume. So the expensive half of Route A is reachable without
+      giving up the editor this repository controls, without rebuilding run
+      control and preview as extensions, and without dropping the collaborative
+      layer that is this product's actual differentiator. Codespaces ships both;
+      so does this.
+
+      **What it costs, stated so nobody rediscovers it.** 10.10, 10.12 and
+      10.14 stay hand-built — Route C does nothing for them. Route C does
+      nothing on an iPad, which is 13.10's problem and stays 13.10's problem.
+      And it concedes, in writing, that the browser editor is not where the
+      most serious work happens; it is what you open on a machine you do not
+      control.
+
+      **What this unblocks:** Phase 1b (Route C, properly — the sshd, the key,
+      and the `~/.vscode-server` volume the spike found the expensive way),
+      Phase 1d (§13.9, whose answer follows from the key Route C introduces),
+      and all of Phase 3. It also *closes* 10.6 and 10.7 by another road: see
+      those rows.
+
+      The three routes, as they were argued before the decision, follow.
 
       **Route A — openvscode-server.** Debugging, extensions, tasks, snippets,
       settings files, the diff editor, timeline, multi-root, notebooks and
@@ -6685,7 +6783,10 @@ database dump. Note what does **not** solve it and is sometimes mistaken for
 it: checkpoints are on the same disk as the thing they snapshot, and export is
 a manual per-project zip.
 
-**1b. Route C, properly (§10.1's third route, §11.1's spike).** The spike ran;
+~~**1b. Route C, properly (§10.1's third route, §11.1's spike).**~~ **Done
+2026-09-09 — §2.50**, together with the §10.1 decision it was waiting on. The
+`~/.vscode-server` volume this phase insisted must land *with* 1b did land with
+it. Original note follows. The spike ran;
 this is turning it into a feature. Four things, and the spike already named
 three of them:
 

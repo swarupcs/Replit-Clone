@@ -46,6 +46,7 @@ import {
 import { useAuthStore } from "../store/authStore.ts";
 import { useRunStore } from "../store/runStore.ts";
 import { useWorkspaceStore } from "../store/workspaceStore.ts";
+import { RemoteAccessDialog } from "../components/organisms/RemoteAccessDialog/RemoteAccessDialog.tsx";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
 import { QuickOpen } from "../components/organisms/QuickOpen/QuickOpen.tsx";
@@ -152,6 +153,7 @@ export const ProjectPlayground = () => {
   const [quickOpen, setQuickOpen] = useState(false);
   /** Go-to-symbol, and zen mode. Both are pure layout over what exists. */
   const [symbolSearchOpen, setSymbolSearchOpen] = useState(false);
+  const [remoteOpen, setRemoteOpen] = useState(false);
   const [zen, setZen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
@@ -488,6 +490,14 @@ export const ProjectPlayground = () => {
         run: () => {
           setSidebarView("packages");
           openView("sidebar");
+        },
+      },
+      {
+        id: "workspace.remote",
+        category: "Workspace",
+        title: "Attach your own editor over SSH",
+        run: () => {
+          setRemoteOpen(true);
         },
       },
       {
@@ -1229,6 +1239,15 @@ export const ProjectPlayground = () => {
       <StatusBar projectId={projectIdFromUrl} />
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
+      {projectIdFromUrl && (
+        <RemoteAccessDialog
+          projectId={projectIdFromUrl}
+          open={remoteOpen}
+          onClose={() => {
+            setRemoteOpen(false);
+          }}
+        />
+      )}
       <SymbolSearch
         open={symbolSearchOpen}
         onClose={() => setSymbolSearchOpen(false)}
