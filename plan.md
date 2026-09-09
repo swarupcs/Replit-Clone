@@ -56,8 +56,8 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2698 passing**, 9 skipped. Green 2026-09-09 against all **39** migrations, on a Postgres 16 initialised by hand — see §2.48. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1166 passing** (91 files) |
+| the same, with `TEST_DATABASE_URL` set | **2712 passing**, 9 skipped. Green 2026-09-09 against all **40** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1355 passing** (105 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,15 +146,15 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 160 items. Open: 26 — four blocked, ten from §10 that are all
+**Done: 161 items. Open: 25 — four blocked, ten from §10 that are all
 waiting on one decision (§10.1), one from §11, which reads the sandbox
 rather than the editor, two from §12, which reads neither and asks what
-a cloud machine is for, and nine from §13, which names the two products this
+a cloud machine is for, and eight from §13, which names the two products this
 most resembles and diffs against them. §11's last row is 11.10, which needs a
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 10 + 1 + 2 + 9 = 26, and they are written out
+Those five numbers are 4 + 10 + 1 + 2 + 8 = 25, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3197,6 +3197,110 @@ and lint clean, 3/3.
 up with it. The merge is tested at the seam `getEnvVars` returns, which is what
 `envSignature` and `runEnv` both consume, and that is good evidence — it is not
 the same as reading the variable out of a running shell.
+
+### 2.49 Since (2026-09-09) — §13.11, a session that follows the person
+
+§14.3's Phase 2a, and the fourth thing off §14's plan. Four stores —
+`editorSettingsStore` (sixteen preferences), `keybindingStore` (chord
+overrides), `workspaceStore` (open tabs, expanded folders, pane sizes per
+project) and `themeStore` — persisted to `localStorage`, which is per browser.
+Open the same workspace from a second machine, **which is the reason the
+workspace is on a server**, and it was a blank editor with default settings and
+none of the keybindings somebody had spent a month building.
+
+**What it is.** `user_editor_state`: a row per (account, store key), holding
+whatever that store persisted, verbatim, plus a revision. `GET`/`PUT
+/api/v1/account/session` on the account router beside dotfiles and secrets,
+because a session belongs to the person. On the client, `lib/sessionSync.ts`
+pulls once at sign-in and pushes a debounced patch when a store changes.
+
+**`localStorage` is still there, and that is the design rather than an
+oversight.** It stays the local cache and stays authoritative for first paint.
+Making the endpoint the storage would mean an async `persist`, so the editor
+renders with defaults for a frame and then jumps — and it would mean a
+signed-out or offline browser having no settings at all, which is worse than
+what we started with. So: `localStorage` for what this *browser* had, the
+endpoint for what this *person* had, reconciled once at sign-in.
+
+**Three rules, each with a test that fails without it** (verified by deleting
+each guard and watching exactly the expected test go red):
+
+1. A key changed on this machine since the page loaded is never overwritten by
+   the pull. Without it, somebody who drags a divider in the second before a
+   slow pull returns watches it snap back, which reads as the app fighting them
+   — and they would be right.
+2. Applying a pulled value must not look like a local change. The store's own
+   subscriber fires while the value is being written in, and without a guard
+   accepting the server's value would push it straight back — one request per
+   machine per sign-in, forever.
+3. A revision this browser has already applied is skipped, and the revisions
+   are forgotten when the account changes. They are per account; a browser
+   carrying the previous account's numbers would decide the new account's
+   session was one it had already seen, and never pull it.
+
+**The conflict rule, said out loud because there is one.** A row per key, so
+two machines changing different things never touch the same row. Within one key
+it is last write wins. That is not a merge and does not pretend to be: merging
+two sets of open tabs produces an arrangement neither person asked for, and
+"the thing I did most recently is what I see" is what somebody expects of their
+own settings. `rev` exists so a client can tell its own write from somebody
+else's, not to reject a write.
+
+**A race was found while writing it and closed.** `useWorkspaceSession` reads
+the remembered arrangement **once, at first render**, before the pull can have
+landed. On a machine that has never opened this project there is nothing in
+`localStorage`, so whether the second machine came back to your tabs depended
+on which of two round trips won — that is, on nothing. The reopen now awaits
+`whenSessionSettled()` (bounded, and a no-op when nothing is syncing, so an
+offline browser still opens the project on time) and re-reads the store. Pane
+`defaultSize` still comes from the render-time value, so on that very first
+open the *splits* are default while the *tabs* are right; recorded rather than
+hidden.
+
+**The value is opaque to the server on purpose.** The shape belongs to the
+client that wrote it; a server validating today's shape would reject a client
+one version ahead of it, and the failure would be a browser that silently stops
+saving. What the server does enforce is its own business: an allowlist of four
+keys, so this cannot become a key/value store any browser writes anything into,
+and 128 KB per value.
+
+**Two more things a shared laptop forced.** Neither was in the row and both
+are the kind of thing only writing it finds:
+
+- **The first machine never uploaded.** It signs in, changes nothing, so
+  nothing is ever pushed — and the second machine finds an empty account and
+  concludes the person has no settings. After a pull, anything this browser has
+  that the account has *nothing at all* for is adopted. Only where the account
+  is empty for that key, so it can never overwrite what another machine stored.
+- **Two people share a laptop more often than anybody designing this would
+  like.** A `rc-session-account` marker holds whose session is in this browser.
+  Sign in as somebody else and the four stores are reset and their storage
+  removed first — reset *before* the removal, because `persist` writes on every
+  `setState` and clearing first only writes the defaults straight back, which
+  would then have been adopted into the second person's empty account. Without
+  the marker the second person would see the first person's tabs for every key
+  their own account had nothing for, and would upload them.
+
+**One piece of copy was wrong the moment this shipped and was fixed with it.**
+The editor settings dialog said changes "are remembered on this device". They
+are not, any more.
+
+**Deliberately not §10.9.** That row wants settings in *files* — committable,
+diffable, per-workspace, importable from a real VS Code profile — and it is
+behind §10.1. This is the *session*. §14.9 wanted this one first precisely so
+that the file-backed one arrives into a world that already has an answer to
+"where does a setting live", rather than the two racing to be the source of
+truth.
+
+**Verified.** Server 2712 passing / 9 skipped with `TEST_DATABASE_URL` (the 9
+need a Docker daemon), web 1355 passing, typecheck and lint clean 3/3. The
+migration was **run, not written**: all 40 applied against the hand-initialised
+Postgres 16, and `\d user_editor_state` read back — composite primary key on
+(`userId`, `key`), `rev` defaulting to 1, and the cascade to `users`.
+
+**Not verified:** nobody has signed into two browsers and watched a tab layout
+move between them. Every rule above is tested at the seam, which is good
+evidence and is not the same thing.
 
 ---
 
@@ -6307,7 +6411,16 @@ the machine is somewhere else.
       warning about this method applies to this row harder than to any other on
       the page. Listed, ranked last in 13B, and not recommended.
 
-- [ ] **13.11 A session that follows the person rather than the browser.**
+- [x] **13.11 A session that follows the person rather than the browser.**
+      **Shipped 2026-09-09 — §2.49.** Four stores against the account through
+      `GET`/`PUT /api/v1/account/session`, with `localStorage` kept as the local
+      cache so first paint does not jump and a signed-out browser still has its
+      settings. The row's own note below turned out to be right about where the
+      work was — it is the same stores writing through an endpoint — and wrong
+      about it being only that: the interesting part was the three rules that
+      keep a pull from fighting the person using the machine, and a race in
+      `useWorkspaceSession` that made the second-machine case depend on which
+      of two round trips won. Original note follows.
       `editorSettingsStore` (sixteen preferences), `keybindingStore` (chord
       overrides), `openTabsStore`, `treeStructureStore` and the pane sizes all
       persist to `localStorage`. Open the same workspace from a second machine
@@ -6341,8 +6454,11 @@ was written — §2.46.** The reasoning below held, including about where the wo
 was: half the mechanism really was already written, and the half that was not
 turned out to be the four things that end a session rather than the detach
 itself. **Next, now that it is done:** ~~13.8 on a personal deployment~~ — also done
-(§2.48) — so 13.11 on a personal deployment, 13.3 on a shared one. Original
-note follows.
+(§2.48) — ~~so 13.11 on a personal deployment~~ — done too (§2.49) — so **13.3
+on either**, which is the shared track's Phase 5a and the first row in this
+section that a second person has to exist for. On a personal deployment the
+next unblocked thing is not in §13 at all: it is §12.5, and it wants three
+numbers somebody has to choose by watching a real host. Original note follows.
 
 **13.7, and it is not close.** It is a defect in everything but name, its cost
 is measured in somebody's lost build rather than in a missing feature, half its
@@ -6359,7 +6475,7 @@ panel that exists) → 13.2 (the container-free preview) → 13.1 (which 13.2 ma
 affordable) → 13.6 → 13.4.
 
 **If one person uses it** — ~~13.7~~ (done) → ~~13.8~~ (done)
-→ 13.11 (session on the server) → 13.9 (credentials, once §10.1 is settled,
+→ ~~13.11~~ (done, §2.49) → 13.9 (credentials, once §10.1 is settled,
 since Route C changes the answer) → and stop. 13.1 through 13.6 have no user
 at n=1 for the reasons §10.5 already set out, and 13.10 probably has none
 either.
@@ -6407,7 +6523,10 @@ below was run, not remembered.
   no other breakpoint or touch handling in the tree (13.10).
 - `editorSettingsStore`, `keybindingStore`, `openTabsStore` and
   `treeStructureStore` all persist to `localStorage`; no endpoint reads or
-  writes any of them (13.11).
+  writes any of them (13.11). **No longer true as of §2.49** — and the detail
+  this got slightly wrong is worth keeping: `openTabsStore` and
+  `treeStructureStore` never persisted themselves, `workspaceStore` persisted
+  on their behalf, which is why the fix is four stores rather than five.
 - The GitHub path (`githubService.ts`, `githubController.ts`, `routes/v1/
   github.ts`) has no webhook receiver; the only webhook in the server is
   Stripe's, in `routes/v1/billing.ts` (13.3).
@@ -6622,11 +6741,12 @@ the rest of which is 1b to 1d.
 
 Small, unblocked, and each one closes a gap somebody hits in the first week.
 
-**2a. A session that follows the person (§13.11).** Tabs, splits, settings and
-keybindings live in `localStorage`, so opening the same workspace from a second
-machine — the *reason* it is on a server — gives a blank editor. The same
-stores writing through an endpoint. Explicitly not §10.9, which wants settings
-in *files* and is Phase 3.
+~~**2a. A session that follows the person (§13.11).**~~ **Done 2026-09-09 —
+§2.49.** It was the same stores writing through an endpoint, as this said. What
+this did not say, and what took the time, is that a sync layer has to decide
+what happens when the pull and the person disagree — three rules, each with a
+test that fails without it. Explicitly not §10.9, which wants settings in
+*files* and is Phase 3.
 
 **2b. Prebuild a stopped workspace (§12.5).** §2.39 shipped the running-
 workspace half; this is the first open of a workspace that has been stopped all
@@ -6782,7 +6902,11 @@ starting it in the wrong order:
 - **1b's volume for `~/.vscode-server` must land with 1b**, not after it. It is
   one line and the spike found it the expensive way.
 - **2a before 10.9**, or the browser session and the settings file will
-  disagree about which one is the source of truth.
+  disagree about which one is the source of truth. **2a landed 2026-09-09
+  (§2.49)**, so 10.9 now arrives into a world that already answers "where does
+  a setting live" — the account, through `/api/v1/account/session`, with
+  `localStorage` as a cache under it. 10.9's job is to say how a *file* relates
+  to that, not to invent a second answer.
 - **4a before 4b.** Anonymous container starts are the thing that was refused
   on purpose; 4a is what makes the row affordable without reopening that.
 - **5a beside 2b.** 5a produces the prebuild trigger 2b needs and 2b says it
@@ -6842,7 +6966,9 @@ tree on 2026-09-09.
   is no second scope.
 - **13.11.** `editorSettingsStore`, `keybindingStore`, `workspaceStore` and
   `aiChatStore` all persist to `localStorage`; no endpoint reads or writes any
-  of them.
+  of them. **Fixed 2026-09-09 (§2.49)** for the first three plus `themeStore`;
+  `aiChatStore` is deliberately still local, being a conversation rather than a
+  layout.
 
 **Not verified, and it is the load-bearing one for the whole section:** the
 ordering. Nobody has used this as a daily editor for a week, and §10 said when

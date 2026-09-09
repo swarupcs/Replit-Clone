@@ -10,6 +10,8 @@ import type {
   CreatedApiKey,
   MachineStatus,
   AccountSecrets,
+  EditorSessionState,
+  EditorSessionUpdate,
   Personalization,
   PersonalizationUpdate,
   ModerationAction,
@@ -1085,6 +1087,26 @@ export const setAccountSecretsApi = async (
   const response = await axios.put<ApiSuccess<AccountSecrets>>(
     "/api/v1/account/secrets",
     { vars },
+  );
+  return response.data.data;
+};
+
+/** Where the editor was left, against the account. plan.md §13.11. */
+export const getEditorSessionApi = async (): Promise<EditorSessionState> => {
+  const response = await axios.get<ApiSuccess<EditorSessionState>>(
+    "/api/v1/account/session",
+  );
+  return response.data.data;
+};
+
+/** Only the stores that changed. An absent key is left alone, which is what
+ *  makes it safe for two machines editing different things to both be right. */
+export const setEditorSessionApi = async (
+  entries: EditorSessionUpdate["entries"],
+): Promise<EditorSessionState> => {
+  const response = await axios.put<ApiSuccess<EditorSessionState>>(
+    "/api/v1/account/session",
+    { entries },
   );
   return response.data.data;
 };

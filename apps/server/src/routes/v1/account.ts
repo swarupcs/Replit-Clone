@@ -14,6 +14,10 @@ import {
   getAccountSecretsController,
   setAccountSecretsController,
 } from "../../controllers/accountSecretController.js";
+import {
+  getEditorSessionController,
+  setEditorSessionController,
+} from "../../controllers/editorSessionController.js";
 
 /** Somebody's own account: what they are using, and what they are allowed.
  *
@@ -45,5 +49,13 @@ router.patch("/personalization", asyncHandler(updatePersonalizationController));
 // the account has.
 router.get("/secrets", asyncHandler(getAccountSecretsController));
 router.put("/secrets", asyncHandler(setAccountSecretsController));
+
+// Where the editor was left -- plan.md §13.11. On this router because the
+// session belongs to the PERSON: it is the same account opening the same
+// workspace from a second machine, which is the reason the workspace is on a
+// server at all. Not under a project, because settings and keybindings are not
+// one project's, and the per-project half is a map inside one of the values.
+router.get("/session", asyncHandler(getEditorSessionController));
+router.put("/session", asyncHandler(setEditorSessionController));
 
 export default router;

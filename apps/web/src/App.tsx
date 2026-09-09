@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { Router } from "./Router.tsx";
 import { useSessionBootstrap } from "./hooks/useSessionBootstrap.ts";
+import { useSessionSync } from "./hooks/useSessionSync.ts";
 import { watchNetwork } from "./store/connectionStore.ts";
 import { registerServiceWorker } from "./lib/serviceWorker.ts";
 
@@ -16,6 +17,12 @@ function App() {
   const isEmbed = useLocation().pathname.startsWith("/embed/");
 
   useSessionBootstrap(!isEmbed);
+
+  // Settings, keybindings and layout against the account rather than this
+  // browser -- plan.md §13.11. Off in an embed for the same reason the
+  // bootstrap is: nothing on that page has a session, and it is somebody
+  // else's article rather than this reader's editor.
+  useSessionSync(!isEmbed);
 
   // One pair of window listeners for the whole app. Two would be two updates
   // for one change. plan.md §11.7.
