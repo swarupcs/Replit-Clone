@@ -5,6 +5,7 @@ import {
   useWorkspaceStore,
   type WorkspaceSession,
 } from "../store/workspaceStore.ts";
+import { whenSessionSettled } from "../lib/sessionSync.ts";
 import type { EditorSocket } from "../store/editorSocketStore.ts";
 
 /** Remembers and restores a project's arrangement across reloads.
@@ -18,6 +19,33 @@ import type { EditorSocket } from "../store/editorSocketStore.ts";
  *  the restored buffer matches what is actually on disk rather than a stale
  *  copy from before someone else's edit.
  */
+/** Reopens what was open.
+ *
+ *  Restoring an arrangement is a convenience; opening the project is not. This
+ *  is called from an effect belonging to ProjectPlayground, which sits ABOVE
+ *  every panel-level error boundary, so anything thrown here used to take the
+ *  whole page down to "Something broke" -- one unreadable value in localStorage
+ *  and the IDE would not open at all. Failing quietly costs the user their tab
+ *  layout and nothing else.
+ */
+function restore(session: WorkspaceSession, socket: EditorSocket): void {
+  try {
+    useTreeStructureStore.getState().setExpandedPaths(session.expandedPaths);
+
+    // The active file last, so it ends up focused after the others.
+    const ordered = [
+      ...session.openPaths.filter((path) => path !== session.activeRelPath),
+      ...(session.activeRelPath ? [session.activeRelPath] : []),
+    ];
+
+    for (const relPath of ordered) {
+      socket.emit("readFile", { relPath });
+    }
+  } catch (error) {
+    console.warn("could not restore the workspace session", error);
+  }
+}
+
 export function useWorkspaceSession(
   projectId: string | undefined,
   socket: EditorSocket | null,
@@ -48,33 +76,35 @@ export function useWorkspaceSession(
   const reopenedRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    const session = restoredRef.current;
-    if (!projectId || !socket || !session) return;
+    if (!projectId || !socket) return;
     if (reopenedRef.current === projectId) return;
 
     reopenedRef.current = projectId;
+    let cancelled = false;
 
-    // Restoring an arrangement is a convenience; opening the project is not.
-    // This runs in an effect belonging to ProjectPlayground, which sits ABOVE
-    // every panel-level error boundary, so anything thrown here used to take
-    // the whole page down to "Something broke" — one unreadable value in
-    // localStorage and the IDE would not open at all. Failing quietly costs
-    // the user their tab layout and nothing else.
-    try {
-      useTreeStructureStore.getState().setExpandedPaths(session.expandedPaths);
+    void (async () => {
+      // The account's session may still be in flight -- plan.md §13.11. On a
+      // machine that has never opened this project there is nothing in
+      // localStorage to restore, so without this whether the second machine
+      // comes back to your tabs depends on which of two round trips wins.
+      // Bounded, and a no-op when nothing is syncing: an offline browser has
+      // to open the project on time regardless.
+      await whenSessionSettled();
+      if (cancelled) return;
 
-      // The active file last, so it ends up focused after the others.
-      const ordered = [
-        ...session.openPaths.filter((path) => path !== session.activeRelPath),
-        ...(session.activeRelPath ? [session.activeRelPath] : []),
-      ];
+      // Re-read rather than reuse the value captured at first render, for the
+      // same reason: on that machine the render happened before there was
+      // anything to read. A session that WAS there at render is unchanged by
+      // this, because a pull never overwrites a key changed on this machine.
+      const session = restoredRef.current ?? useWorkspaceStore.getState().get(projectId);
+      if (!session) return;
 
-      for (const relPath of ordered) {
-        socket.emit("readFile", { relPath });
-      }
-    } catch (error) {
-      console.warn("could not restore the workspace session", error);
-    }
+      restore(session, socket);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, socket]);
 
   // Record what is open as it changes. Subscribed rather than polled, and

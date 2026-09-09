@@ -78,7 +78,8 @@ export const EditorSettingsDialog = ({ open, onClose }: EditorSettingsDialogProp
       destroyOnHidden
     >
       <Typography.Paragraph style={{ color: "var(--rc-text-subtle)", fontSize: 13 }}>
-        Changes apply immediately and are remembered on this device.
+        Changes apply immediately and follow your account, so the next machine
+        you sign in on opens with them.
       </Typography.Paragraph>
 
       <Row

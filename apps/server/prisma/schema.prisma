@@ -154,6 +154,10 @@ model User {
   /// A separate row cannot be loaded by accident.
   personalization  UserPersonalization?
 
+  /// Where the editor was left: which tabs, which splits, which settings.
+  /// plan.md §13.11.
+  editorState      UserEditorState[]
+
   /// "Which accounts are on this plan" is the operator's question, and the one
   /// a pricing change has to answer before it is made.
   @@index([planId])
@@ -166,6 +170,49 @@ model User {
 /// the product works without it -- which is the point of the row existing at
 /// all: none of this belongs on `users`, where it would be read by every
 /// query that touches an account.
+/// Where the editor was left, against the account rather than the browser.
+/// plan.md §13.11.
+///
+/// The stores that hold this already existed and already persisted -- to
+/// `localStorage`, which is per browser. Opening the same workspace from a
+/// second machine is the REASON the workspace is on a server, and it gave a
+/// blank editor with default settings. This is those same stores writing
+/// through an endpoint.
+///
+/// A row per key rather than one blob per account, and the granularity is the
+/// point: two machines that change different things do not overwrite each
+/// other, because they are not writing the same row. Within one key the rule
+/// is last write wins, which is what a person expects of their own settings.
+///
+/// Deliberately NOT the place for anything §10.9 wants. That row is about
+/// settings living in FILES -- committable, diffable, per-workspace. This is
+/// the session: which tabs were open, where the splits were. The two are one
+/// sentence apart and are not the same thing.
+model UserEditorState {
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The store's persist name, e.g. `rc-editor-settings`. Validated against an
+  /// allowlist on the way in, so this table cannot become a general-purpose
+  /// key/value store that anybody's browser can write anything into.
+  key String
+
+  /// Whatever the store persisted, verbatim. The server does not read inside
+  /// it: the shape belongs to the client that wrote it, and a server that
+  /// validated today's shape would reject a client one version ahead of it.
+  value Json
+
+  /// Bumped on every write. The client keeps the revision it last saw, so a
+  /// pull that would replace a value with the one it already has can be
+  /// skipped rather than fed back through the store.
+  rev Int @default(1)
+
+  updatedAt DateTime @updatedAt
+
+  @@id([userId, key])
+  @@map("user_editor_state")
+}
+
 model UserPersonalization {
   /// The primary key IS the user id. One row per account, enforced by the
   /// database rather than by whoever writes the next upsert.
