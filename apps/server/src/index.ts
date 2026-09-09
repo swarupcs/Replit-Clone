@@ -80,6 +80,11 @@ import { recheckDomains } from "./service/customDomainService.js";
 import { backfillSealedEnvVars } from "./service/projectEnvService.js";
 import { reconcileJobRuns, runDueJobs } from "./service/scheduleService.js";
 import { purgeExpiredTrash } from "./service/projectService.js";
+import {
+  assertBackupDestination,
+  backupsEnabled,
+  runBackupSweep,
+} from "./service/backupService.js";
 import { loadLocalFolders } from "./service/localFolderService.js";
 import { ensureSingleUser } from "./service/singleUserService.js";
 import { startComputeMeter } from "./service/computeMeterService.js";
@@ -388,6 +393,43 @@ function startPrebuildSweep(): void {
   setInterval(sweep, 15 * 60 * 1000).unref();
 }
 
+/** Copies every changed project somewhere that is not this disk.
+ *
+ *  plan.md §3.3, and §14.2 puts it ahead of every feature in the file: it is
+ *  the only row whose absence loses work rather than failing to add something.
+ *
+ *  Off unless `BACKUP_DIR` is set, like every other optional subsystem here —
+ *  and it says so at boot in both directions. A deployment that thinks it has
+ *  backups and does not is the failure this is for, so "backups are OFF" is
+ *  logged at warn rather than left to be inferred from silence.
+ */
+function startBackupSweep(): void {
+  if (!backupsEnabled()) {
+    logger.warn(
+      "backups are OFF — nothing on this host is copied anywhere else. " +
+        "Set BACKUP_DIR to a path on another disk or mount to turn them on.",
+    );
+    return;
+  }
+
+  logger.info("backups are on", {
+    destination: env.BACKUP_DIR,
+    everyHours: env.BACKUP_INTERVAL_HOURS,
+    keep: env.BACKUP_KEEP,
+  });
+
+  const sweep = (): void => {
+    void runBackupSweep().catch((error: unknown) => {
+      logger.error("backup sweep failed", error);
+    });
+  };
+
+  // Not on boot. A restart is the moment the host is busiest and the moment a
+  // crash-loop would archive every tree on every restart; the first sweep is
+  // one interval away.
+  setInterval(sweep, env.BACKUP_INTERVAL_HOURS * 60 * 60 * 1000).unref();
+}
+
 function startTrashSweep(): void {
   const sweep = (): void => {
     void purgeExpiredTrash().catch((error: unknown) => {
@@ -543,6 +585,20 @@ async function start(): Promise<void> {
     process.exit(1);
   }
 
+  // The same class of check, for the same reason: a backup destination on the
+  // same disk as PROJECTS_DIR answers "I deleted the wrong project" — which
+  // the trash already answers — and not "the host died", which is the only
+  // question backups exist for. Fatal rather than a warning, because the
+  // failure it prevents is discovered on the day the disk goes and not before.
+  try {
+    assertBackupDestination();
+  } catch (error) {
+    logger.error("refusing to start", undefined, {
+      detail: error instanceof Error ? error.message : String(error),
+    });
+    process.exit(1);
+  }
+
   // The one account, when this deployment has one. Before the listener, so
   // that a first boot with SINGLE_USER_PASSWORD set is signable-in the moment
   // the port opens rather than on whatever request happens to race it.
@@ -647,6 +703,7 @@ async function start(): Promise<void> {
   startTokenPrune();
   startTrashSweep();
   startPrebuildSweep();
+  startBackupSweep();
   startGraceSweep();
   startDomainRecheck();
   startJobSweeper();

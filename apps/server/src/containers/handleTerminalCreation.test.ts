@@ -6,12 +6,27 @@ import type { WebSocket } from "ws";
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
-vi.mock("../config/env.js", () => ({ watchPollingEnv: [] }));
+vi.mock("../config/env.js", () => ({
+  watchPollingEnv: [],
+  env: {
+    TERMINAL_SCROLLBACK_BYTES: 64 * 1024,
+    TERMINAL_DETACH_GRACE_SECONDS: 1800,
+    TERMINAL_MAX_SESSIONS_PER_PROJECT: 8,
+  },
+}));
 vi.mock("../templates/registry.js", () => ({
   getTemplate: () => ({ devPort: 3000, startCommand: "npm run dev" }),
 }));
 
-import { handleTerminalCreation } from "./handleTerminalCreation.js";
+import {
+  bindSocketToSession,
+  handleTerminalCreation,
+} from "./handleTerminalCreation.js";
+import {
+  endSession,
+  findSession,
+  resetSessionsForTest,
+} from "../terminal/terminalSessions.js";
 
 const TERMINAL_ID = 7;
 
@@ -138,12 +153,35 @@ function reclaims(docker: ReturnType<typeof fakeContainer>): ExecCall[] {
   );
 }
 
+/** A terminal the client did not name, which is what an older web build and a
+ *  browser that cannot store a key both send. Nothing can ever ask for its
+ *  shell again, so it keeps the pre-§13.7 lifecycle exactly. */
 function start(docker: ReturnType<typeof fakeContainer>, ws: WebSocket): void {
   handleTerminalCreation(docker.container, ws, "node", attachInput, TERMINAL_ID);
 }
 
+/** A terminal the client named, which is the one a reconnect can come back to.
+ *  plan.md §13.7. */
+function startSession(
+  docker: ReturnType<typeof fakeContainer>,
+  ws: WebSocket,
+  id = "user-1:project-1:key-abcdefgh",
+  release: () => void = () => undefined,
+): void {
+  handleTerminalCreation(
+    docker.container,
+    ws,
+    "node",
+    attachInput,
+    TERMINAL_ID,
+    undefined,
+    { id, projectId: "project-1", release },
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  resetSessionsForTest();
 });
 
 describe("handleTerminalCreation", () => {
@@ -172,8 +210,13 @@ describe("handleTerminalCreation", () => {
 
   /** Closing the stream does NOT end the exec — measured against a real
    *  container. Without a hangup, every closed terminal left a `/bin/bash`
-   *  inside the project's container for as long as the container lived. */
-  it("hangs the shell up when the client disconnects", () => {
+   *  inside the project's container for as long as the container lived.
+   *
+   *  §13.7 moved this for terminals the client NAMES; a terminal it does not
+   *  name is unreachable the moment its socket goes, so holding it would be
+   *  holding a shell for a reconnect that cannot happen. Unchanged on purpose,
+   *  and asserted so it stays that way. */
+  it("hangs an unnamed shell up when the client disconnects", () => {
     const { ws, closeFromClient } = fakeSocket();
     const docker = fakeContainer();
 
@@ -188,7 +231,7 @@ describe("handleTerminalCreation", () => {
   /** `ws` emits both, and a shell must not be hung up twice — the second call
    *  would land on a pid file that has been removed, or worse, on a pid the
    *  container has since reused. */
-  it("hangs the shell up once, not once per close event", () => {
+  it("hangs an unnamed shell up once, not once per close event", () => {
     const { ws, raw, closeFromClient } = fakeSocket();
     const docker = fakeContainer();
 
@@ -296,6 +339,171 @@ describe("handleTerminalCreation", () => {
   });
 });
 
+
+/** plan.md §13.7. The behaviour this section is about is a single word in
+ *  `bindSocketToSession` — `detachSocket` rather than `hangUpShell` — and
+ *  everything below is about what that word does and does not change. */
+describe("a terminal the client can come back to", () => {
+  it("keeps the shell when the socket goes", () => {
+    const { ws, closeFromClient } = fakeSocket();
+    const docker = fakeContainer();
+
+    startSession(docker, ws);
+    docker.create();
+    docker.start();
+    closeFromClient();
+
+    // The whole point: closing a laptop no longer kills the build.
+    expect(hangUps(docker)).toHaveLength(0);
+    expect(docker.stream.destroyed).toBe(false);
+  });
+
+  it("holds the container's attachment while it is detached", () => {
+    const { ws, closeFromClient } = fakeSocket();
+    const docker = fakeContainer();
+    const release = vi.fn();
+
+    startSession(docker, ws, "user-1:project-1:key-abcdefgh", release);
+    docker.create();
+    docker.start();
+    closeFromClient();
+
+    // A detached session running a build is a real use of that container, and
+    // the idle reaper skips projects with attachments — so releasing here
+    // would let the reaper stop the container out from under it.
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("is findable by the id the client will ask for", () => {
+    const { ws } = fakeSocket();
+    const docker = fakeContainer();
+
+    startSession(docker, ws, "user-1:project-1:key-abcdefgh");
+    docker.create();
+    docker.start();
+
+    expect(findSession("user-1:project-1:key-abcdefgh")).toBeDefined();
+  });
+
+  it("holds output produced while nobody is attached", () => {
+    const { ws, closeFromClient } = fakeSocket();
+    const docker = fakeContainer();
+
+    startSession(docker, ws);
+    docker.create();
+    docker.start();
+    closeFromClient();
+
+    docker.stream.write(Buffer.from("build finished\n"));
+
+    const session = findSession("user-1:project-1:key-abcdefgh");
+    expect(session?.scrollback.size).toBeGreaterThan(0);
+  });
+
+  it("hands that output back to the socket that reconnects", () => {
+    const first = fakeSocket();
+    const docker = fakeContainer();
+
+    startSession(docker, first.ws);
+    docker.create();
+    docker.start();
+    first.closeFromClient();
+
+    docker.stream.write(Buffer.from("build finished\n"));
+
+    const second = fakeSocket();
+    const session = findSession("user-1:project-1:key-abcdefgh");
+    expect(session).toBeDefined();
+    bindSocketToSession(session!, second.ws, attachInput);
+
+    // Reattaching to a live pty with a blank pane, and no way to know whether
+    // the build finished, would be barely better than a new shell.
+    expect(second.raw.send).toHaveBeenCalledWith(
+      expect.objectContaining({ length: "build finished\n".length }),
+    );
+  });
+
+  it("starts no second shell for a reconnect", () => {
+    const first = fakeSocket();
+    const docker = fakeContainer();
+
+    startSession(docker, first.ws);
+    docker.create();
+    docker.start();
+    first.closeFromClient();
+
+    const shellsBefore = docker.calls.filter((call) =>
+      call.cmd.includes("/bin/bash"),
+    ).length;
+
+    const second = fakeSocket();
+    bindSocketToSession(findSession("user-1:project-1:key-abcdefgh")!, second.ws, attachInput);
+
+    expect(
+      docker.calls.filter((call) => call.cmd.includes("/bin/bash")),
+    ).toHaveLength(shellsBefore);
+  });
+
+  it("ends the session when the shell itself exits", async () => {
+    const { ws } = fakeSocket();
+    const docker = fakeContainer();
+    const release = vi.fn();
+
+    startSession(docker, ws, "user-1:project-1:key-abcdefgh", release);
+    docker.create();
+    docker.start();
+
+    // The user typed `exit`. There is no pty left to reconnect to, so holding
+    // the container for a grace window would be holding it for nothing.
+    docker.stream.end();
+    // `end` on a stream is emitted after the readable side drains, which is a
+    // tick away and not synchronous with `.end()`.
+    await vi.waitFor(() =>
+      expect(findSession("user-1:project-1:key-abcdefgh")).toBeUndefined(),
+    );
+
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the attachment exactly once when it ends", () => {
+    const { ws } = fakeSocket();
+    const docker = fakeContainer();
+    const release = vi.fn();
+
+    startSession(docker, ws, "user-1:project-1:key-abcdefgh", release);
+    docker.create();
+    docker.start();
+
+    const session = findSession("user-1:project-1:key-abcdefgh")!;
+    endSession(session, "grace-expired");
+    endSession(session, "shutdown");
+
+    // Four different things end a session and two can arrive together — a
+    // shell that exits while the grace timer is firing. Releasing twice would
+    // decrement an attachment belonging to somebody else's editor socket.
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(hangUps(docker)).toHaveLength(1);
+  });
+
+  it("hangs the shell up when the grace window expires", () => {
+    const { ws, closeFromClient } = fakeSocket();
+    const docker = fakeContainer();
+
+    startSession(docker, ws);
+    docker.create();
+    docker.start();
+    closeFromClient();
+
+    expect(hangUps(docker)).toHaveLength(0);
+
+    // The leak the 2026-09-04 fix closed stays closed. It closes later, not
+    // never.
+    const session = findSession("user-1:project-1:key-abcdefgh")!;
+    endSession(session, "grace-expired");
+
+    expect(hangUps(docker)).toHaveLength(1);
+  });
+});
 
 describe("the run command a shell is told about", () => {
   /** `$START_COMMAND` is a hint the shell prints. A hint naming a command the

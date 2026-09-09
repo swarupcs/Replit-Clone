@@ -394,6 +394,45 @@ const envSchema = z.object({
    *  sandbox should not wait for. */
   DOTFILES_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(60),
 
+  /** Where backups are written. Empty -- the default -- turns them off.
+   *
+   *  plan.md §3.3 filed backup-and-restore as blocked on a deployment
+   *  decision: object storage off this VM, a second disk, or a documented
+   *  acceptance that this platform loses data when its host does. §9's method
+   *  says to ask which half of a blocked row needs a person and which half is
+   *  only code nobody wrote, and this is the answer: **the destination is the
+   *  person's half, and it is configuration.** This server writes files to a
+   *  directory. Whether that directory is a second disk, an NFS or SMB mount,
+   *  an rclone mount in front of a bucket, or a path somebody rsyncs off the
+   *  host afterwards is a decision it deliberately does not make -- and could
+   *  not make well, since it has no idea what else the host has.
+   *
+   *  What it DOES refuse is a destination inside PROJECTS_DIR, because a
+   *  backup on the same disk as the thing it backs up answers "I deleted the
+   *  wrong project" (which the trash already answers, §9.1) and not "the host
+   *  died", which is the only question this row exists for.
+   *
+   *  The archives contain project source, sealed environment variables and
+   *  password hashes. Whatever this points at is as sensitive as the database.
+   */
+  BACKUP_DIR: z.string().default(""),
+
+  /** How often the backup sweep runs, in hours.
+   *
+   *  Daily, because the loss this bounds is "a day's work" and anything more
+   *  frequent spends IO re-archiving trees that have not changed -- the sweep
+   *  skips those, but it still has to walk them to find out.
+   */
+  BACKUP_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
+
+  /** How many backups of one project are kept before the oldest is pruned.
+   *
+   *  Seven is a week of dailies. The number that matters is not this one but
+   *  what it multiplies: a project is archived without its dependencies or
+   *  build output, so a copy is usually a small fraction of the working tree.
+   */
+  BACKUP_KEEP: z.coerce.number().int().positive().default(7),
+
   PROJECTS_DIR: z.string().default("projects"),
 
   /** Host directories under which a folder may be opened directly as a
@@ -557,6 +596,65 @@ const envSchema = z.object({
     .positive()
     .default(unshared ? 2 : 0.5),
   CONTAINER_IDLE_MINUTES: z.coerce.number().int().positive().default(20),
+
+  /** How long a terminal whose socket went keeps its shell. plan.md §13.7.
+   *
+   *  Zero restores the behaviour this replaced -- the shell is hung up the
+   *  instant the WebSocket closes -- and is offered because a deployment that
+   *  would rather pay nothing for a dropped connection should not have to
+   *  patch the code to say so.
+   *
+   *  Thirty minutes is chosen against what it is for and what it costs. What
+   *  it is for: a commute, a meeting, a lid closed between two buildings, a
+   *  browser tab the OS discarded -- all of which are minutes, not hours. What
+   *  it costs: a detached session holds an attachment, so the idle reaper
+   *  cannot stop that container while the window runs, and a forgotten tab
+   *  therefore pins a workspace for this long plus CONTAINER_IDLE_MINUTES.
+   *  Both halves are bounded and neither is free, which is why this is a
+   *  number somebody can change rather than a constant.
+   *
+   *  It is deliberately NOT the answer to "my build takes an hour". A shell is
+   *  hung up with its jobs, so a command that must outlive its terminal
+   *  belongs to the Run button, which tracks its own process group and is not
+   *  swept -- the bargain `reclaimScript` already describes.
+   */
+  TERMINAL_DETACH_GRACE_SECONDS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(30 * 60),
+
+  /** How much output a detached terminal holds for the client that left.
+   *
+   *  Replayed on reattach, and it is the half of §13.7 anybody sees: coming
+   *  back to a live pty showing a blank pane, with no way to know whether the
+   *  build finished, is barely better than coming back to a new shell. 256 KB
+   *  is a long install or a stack trace and several screens either side of it.
+   *
+   *  Bounded because a detached client applies no backpressure: nothing else
+   *  stands between a process writing into a session nobody is reading and
+   *  this server's heap.
+   */
+  TERMINAL_SCROLLBACK_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(256 * 1024),
+
+  /** How many terminal sessions one project may hold at once.
+   *
+   *  A session that outlives its socket is a session a client can accumulate,
+   *  and each is a `/bin/bash` against the container's `PidsLimit` of 256 as
+   *  well as a scrollback budget here. Reached by opening terminals rather
+   *  than by anything adversarial, so the cap gives up detached sessions
+   *  oldest-first rather than refusing -- and only refuses when every one of
+   *  them has somebody attached and looking at it.
+   */
+  TERMINAL_MAX_SESSIONS_PER_PROJECT: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(8),
 
   /** What the host keeps back from workspaces, in MB.
    *

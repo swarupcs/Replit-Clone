@@ -16,6 +16,14 @@ function status(over: Partial<MachineStatus> = {}): MachineStatus {
   return {
     containersRunning: 1,
     containerLimit: 3,
+    backup: {
+      enabled: true,
+      destination: "/backups",
+      lastRunAt: Date.UTC(2026, 8, 9, 3, 0),
+      lastRunOk: true,
+      lastError: null,
+      backedUp: 4,
+    },
     runningJobRuns: 0,
     uptimeSeconds: 7200,
     memoryBytes: 180 * 1024 * 1024,
@@ -105,5 +113,81 @@ describe("the counters", () => {
     expect(
       await screen.findByText(/could not load the machine's status/i),
     ).toBeTruthy();
+  });
+});
+
+/** plan.md §3.3. The panel's job here is narrower than it looks: an operator
+ *  glancing at this screen has to be able to tell "backed up" from "switched
+ *  on and silent", and those two look identical everywhere else. */
+describe("the backup readout", () => {
+  it("warns, rather than reporting a number, when backups are off", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        backup: {
+          enabled: false,
+          destination: null,
+          lastRunAt: null,
+          lastRunOk: null,
+          lastError: null,
+          backedUp: null,
+        },
+      }),
+    );
+
+    show();
+
+    // Not a statistic. It is the single fact about this machine most likely to
+    // matter and least likely to be noticed.
+    expect(await screen.findByText("Backups are off")).toBeTruthy();
+  });
+
+  it("says how many projects the last sweep copied, and where", async () => {
+    show();
+
+    expect(await screen.findByText(/Backed up 4 projects/)).toBeTruthy();
+    expect(screen.getByText(/\/backups/)).toBeTruthy();
+  });
+
+  it("does not report a green tick for a run that has never happened", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        backup: {
+          enabled: true,
+          destination: "/backups",
+          lastRunAt: null,
+          lastRunOk: null,
+          lastError: null,
+          backedUp: null,
+        },
+      }),
+    );
+
+    show();
+
+    // Configured and silent is the exact shape of broken, and a tick would
+    // hide it.
+    expect(
+      await screen.findByText(/have not run yet in this process/),
+    ).toBeTruthy();
+  });
+
+  it("surfaces the reason when a sweep had failures", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        backup: {
+          enabled: true,
+          destination: "/backups",
+          lastRunAt: Date.UTC(2026, 8, 9, 3, 0),
+          lastRunOk: false,
+          lastError: "2 project(s) could not be backed up",
+          backedUp: 2,
+        },
+      }),
+    );
+
+    show();
+
+    expect(await screen.findByText(/Last backup had failures/)).toBeTruthy();
+    expect(screen.getByText(/could not be backed up/)).toBeTruthy();
   });
 });

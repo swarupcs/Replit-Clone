@@ -14,6 +14,7 @@ import { AppError } from "../utils/errors.js";
 import { getTemplate } from "../templates/registry.js";
 import { logger } from "../lib/logger.js";
 import { getEnvVars, toDockerEnv } from "../service/projectEnvService.js";
+import { endProjectSessions } from "../terminal/terminalSessions.js";
 import { SANDBOX_NETWORK } from "./sandboxNetwork.js";
 import { proxyEnv } from "./egressGateway.js";
 import { increment, registerGauge } from "../lib/metrics.js";
@@ -486,6 +487,13 @@ async function startContainer(projectId: string): Promise<Container> {
     // way for them to take effect is to build it again. Files live in the bind
     // mount and package caches in a named volume, so neither is lost.
     logger.info("rebuilding container for changed environment", { projectId });
+
+    // Terminal sessions belong to the container being removed, not to the one
+    // about to be built (plan.md §13.7). A detached session left behind would
+    // hold an attachment for a pty inside a container that no longer exists,
+    // and the reaper would then never reclaim the new one.
+    endProjectSessions(projectId, "shutdown");
+
     await docker.getContainer(existing.Id).remove({ force: true }).catch(() => {});
   }
 
@@ -977,6 +985,11 @@ export async function stopContainer(projectId: string): Promise<void> {
   const info = await findContainer(projectId);
   if (!info) return;
 
+  // Before the stop, so a session's shell is hung up while there is still a
+  // container to hang it up in, and its attachment is released rather than
+  // held against a container that has gone (plan.md §13.7).
+  endProjectSessions(projectId, "shutdown");
+
   const container = docker.getContainer(info.Id);
   await container.stop({ t: 5 }).catch(() => {});
 
@@ -989,6 +1002,8 @@ export async function stopContainer(projectId: string): Promise<void> {
 export async function removeContainer(projectId: string): Promise<void> {
   const info = await findContainer(projectId);
   if (!info) return;
+
+  endProjectSessions(projectId, "shutdown");
 
   const container = docker.getContainer(info.Id);
   // Stop before remove: `remove({ force })` on a running container with an

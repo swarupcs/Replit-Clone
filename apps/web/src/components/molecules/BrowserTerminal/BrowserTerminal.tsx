@@ -7,10 +7,18 @@ import { refreshAccessToken } from "../../../config/axiosConfig.ts";
 import { VscClearAll, VscDebugRestart } from "react-icons/vsc";
 import { useThemeMode } from "../../../hooks/useThemeMode.ts";
 import { TERMINAL_THEME } from "../../../lib/terminalTheme.ts";
+import {
+  hasTerminalSession,
+  terminalSessionKey,
+} from "../../../lib/terminalSessionKeys.ts";
 import "@xterm/xterm/css/xterm.css";
 
 interface BrowserTerminalProps {
   projectId: string;
+  /** Which terminal tab this is, from `BottomPanel`. Names the session the
+   *  server holds for it across a disconnect (plan.md §13.7), so terminal 2
+   *  reconnects to terminal 2's shell and not to terminal 1's. */
+  tabId: number;
 }
 
 type ConnectionState = "connecting" | "open" | "closed";
@@ -27,11 +35,18 @@ const STATUS_COPY: Record<ConnectionState, { label: string; color: string }> = {
  *  which could never work once the backend moved off the viewer's machine. The
  *  terminal now shares the main server's port.
  */
-function terminalWsUrl(projectId: string): string {
+function terminalWsUrl(projectId: string, sessionKey: string): string {
   const backend = new URL(import.meta.env.VITE_BACKEND_URL);
   const protocol = backend.protocol === "https:" ? "wss:" : "ws:";
 
-  return `${protocol}//${backend.host}/terminal?projectId=${encodeURIComponent(projectId)}`;
+  // `session` is what makes a reconnect a reconnect. The server treats a
+  // missing or malformed one as "just give me a terminal", which is what every
+  // client did before this existed.
+  return (
+    `${protocol}//${backend.host}/terminal` +
+    `?projectId=${encodeURIComponent(projectId)}` +
+    `&session=${encodeURIComponent(sessionKey)}`
+  );
 }
 
 /** Owns its WebSocket rather than reading one from a store.
@@ -42,7 +57,7 @@ function terminalWsUrl(projectId: string): string {
  *  simply lost and the terminal rendered blank. Creating the socket here
  *  attaches the listener in the same tick.
  */
-export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
+export const BrowserTerminal = ({ projectId, tabId }: BrowserTerminalProps) => {
   const mode = useThemeMode();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -86,6 +101,10 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
     // deferred start below and every handler it registers.
     let disposed = false;
 
+    // Minted once per tab and reused by every socket this pane opens, so a
+    // reconnect asks for the shell it already had rather than a new one.
+    const sessionKey = terminalSessionKey(projectId, tabId);
+
     /** Builds the terminal and its socket, and returns their teardown. */
     const connect = (host: HTMLDivElement, token: string): (() => void) => {
       const term = new Terminal({
@@ -117,7 +136,10 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
       // connection, and the two want different recovery.
       let opened = false;
 
-      const socket = new WebSocket(terminalWsUrl(projectId), ["auth", token]);
+      const socket = new WebSocket(terminalWsUrl(projectId, sessionKey), [
+        "auth",
+        token,
+      ]);
       socket.binaryType = "arraybuffer";
 
       /** fit() reads renderer cell dimensions that do not exist until the
@@ -159,10 +181,12 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
         setStatus("open");
         syncSize();
         term.focus();
-        // The shell prints its prompt the moment the exec starts, which can
-        // land before this socket is attached. A bare newline makes bash
-        // redraw it, so the terminal is never left looking dead.
-        socket.send(String.fromCharCode(10));
+        // A bare newline used to be sent here to make bash redraw a prompt
+        // that had been printed before this socket attached. It is no longer
+        // needed and is now actively wrong: the server holds output produced
+        // while nobody is attached and replays it on connect (plan.md §13.7),
+        // so nothing is missed — and on a RECONNECT that newline would be a
+        // keystroke pressed into whatever command is running.
       });
 
       socket.addEventListener("message", (event: MessageEvent<unknown>) => {
@@ -219,6 +243,21 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
       return () => {
         resizeObserver.disconnect();
         keyInput.dispose();
+
+        // Telling a deliberate close from a lost one, which is the whole
+        // distinction §13.7 rests on and which only this side knows. A pane
+        // the user closed has had its key forgotten by `BottomPanel` already,
+        // and says so before going, so the server ends the shell now instead
+        // of holding it for a grace window nobody is coming back for.
+        // Everything else — navigating away, a reconnect, an unmount — leaves
+        // the key in place and the shell running.
+        if (
+          socket.readyState === WebSocket.OPEN &&
+          !hasTerminalSession(projectId, tabId)
+        ) {
+          socket.send(JSON.stringify({ type: "end" }));
+        }
+
         socket.close();
         term.dispose();
         termRef.current = null;
@@ -253,7 +292,7 @@ export const BrowserTerminal = ({ projectId }: BrowserTerminalProps) => {
     // terminal AND its socket, which would drop the PTY and the scrollback
     // with it — switching theme must not cost anyone their shell. The effect
     // below repaints the terminal that already exists instead.
-  }, [projectId, hasSession, reconnectNonce]);
+  }, [projectId, tabId, hasSession, reconnectNonce]);
 
   // Repaints a live terminal when the theme changes. xterm takes a whole
   // palette at once and redraws from it, so there is nothing to reconnect.

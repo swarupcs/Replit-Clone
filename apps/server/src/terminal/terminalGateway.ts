@@ -7,7 +7,10 @@ import {
   detach,
   ensureContainer,
 } from "../containers/containerManager.js";
-import { handleTerminalCreation } from "../containers/handleTerminalCreation.js";
+import {
+  bindSocketToSession,
+  handleTerminalCreation,
+} from "../containers/handleTerminalCreation.js";
 import type { AttachInput } from "../containers/handleTerminalCreation.js";
 import { assertProjectAccess, touchProject } from "../service/projectService.js";
 import { verifyAccessToken } from "../service/tokenService.js";
@@ -16,6 +19,13 @@ import { logger } from "../lib/logger.js";
 import { watchAccess } from "../service/accessWatch.js";
 import { increment } from "../lib/metrics.js";
 import { AppError } from "../utils/errors.js";
+import {
+  endUserSessions,
+  findSession,
+  isValidClientKey,
+  makeRoomForSession,
+  sessionId,
+} from "./terminalSessions.js";
 
 /** Decodes a client frame to text.
  *
@@ -54,14 +64,33 @@ function tokenFromRequest(req: IncomingMessage): string | undefined {
  *  own copy of the middleware and no npm script to start it. One process, one
  *  port, one place where auth is enforced.
  */
-/** Distinguishes one terminal from another in the access watch. A WebSocket
- *  has no id of its own, and two shells on one project must be watched — and
- *  released — separately. */
+/** Distinguishes one terminal from another. It names the file the shell
+ *  records its pid in, and is stable for the life of a session however many
+ *  sockets render it. */
 let terminalCounter = 0;
 
 function nextTerminalId(): number {
   terminalCounter += 1;
   return terminalCounter;
+}
+
+/** Names one CONNECTION's access watch, which is not the same thing as naming
+ *  a terminal.
+ *
+ *  It used to be `terminal:<terminalId>`, and that was right while a terminal
+ *  had exactly one socket for its whole life. Since §13.7 it can have several:
+ *  a reconnect, or a second window taking one over. `watchAccess` is a map
+ *  keyed by this string and its release deletes that key, so two sockets
+ *  sharing an id means the departing one deletes the watch belonging to the
+ *  one that replaced it — and the terminal that is left running is the one
+ *  nothing is checking any more. Exactly the hole `watchAccess` was written to
+ *  close, reopened by giving a shell more than one socket.
+ */
+let watchCounter = 0;
+
+function nextWatchId(): string {
+  watchCounter += 1;
+  return `terminal-connection:${String(watchCounter)}`;
 }
 
 export function installTerminalGateway(server: Server): void {
@@ -84,6 +113,14 @@ export function installTerminalGateway(server: Server): void {
         const projectId = assertValidProjectId(
           url.searchParams.get("projectId") ?? "",
         );
+
+        // What the client calls this terminal, so a reconnect can ask for the
+        // shell it already had rather than a new one (plan.md §13.7). Absent
+        // or malformed means "just give me a terminal", which is what every
+        // client did before this existed — so an old client still works and
+        // simply does not survive a disconnect.
+        const clientKey = url.searchParams.get("session") ?? "";
+        const wantsSession = isValidClientKey(clientKey);
 
         // A terminal is a shell inside the project's container, so it needs the
         // same ownership check as any other project operation.
@@ -110,31 +147,39 @@ export function installTerminalGateway(server: Server): void {
             for (const buffered of inbox.splice(0)) handler(buffered);
           };
 
-          // One id per terminal, used both to tell watches apart and to name
-          // the file the shell records its pid in.
+          const id = wantsSession
+            ? sessionId(claims.sub, projectId, clientKey)
+            : undefined;
+
+          // The reconnect path, and it is deliberately short: a session that
+          // is still here already has a container, an attachment, an exec and
+          // a pty, so none of that is done again. `ensureContainer` in
+          // particular is skipped — the session is holding the container up.
+          const existing = id ? findSession(id) : undefined;
+
+          if (existing) {
+            increment("terminal_reattached");
+
+            // Somebody is working in this project again, which is what
+            // `touchProject` records — the reconnect path skips
+            // `startTerminal`, so without this a workspace somebody used all
+            // day through one reconnecting terminal would report the time of
+            // its first connection as its last activity. Not awaited: a
+            // reattach must not wait on a write nobody reads back here.
+            void touchProject(projectId).catch(() => {
+              // Best effort. A missed touch is a wrong timestamp, not a
+              // broken terminal.
+            });
+
+            watchTerminalAccess(ws, claims.sub, projectId);
+            bindSocketToSession(existing, ws, attachInput);
+            return;
+          }
+
+          // One id per terminal, naming the file its shell records its pid
+          // in. Not the watch id — see `nextWatchId`.
           const terminalId = nextTerminalId();
-
-          // A shell is the most privileged thing on offer here, and its
-          // authorisation was checked once at the upgrade and never again.
-          // Someone removed from a project kept a working shell inside its
-          // container until they closed the tab.
-          const releaseAccessWatch = watchAccess(`terminal:${String(terminalId)}`, {
-            userId: claims.sub,
-            projectId,
-            level: "editor",
-            onRevoked: () => {
-              ws.close(4403, "Your access to this project was removed");
-            },
-            // A demotion to viewer is the same thing for a terminal: read-only
-            // access does not include a shell that can write the whole tree.
-            onChanged: (level) => {
-              if (level === "viewer") {
-                ws.close(4403, "You no longer have write access to this project");
-              }
-            },
-          });
-
-          ws.on("close", releaseAccessWatch);
+          watchTerminalAccess(ws, claims.sub, projectId);
 
           void startTerminal(
             ws,
@@ -143,6 +188,7 @@ export function installTerminalGateway(server: Server): void {
             attachInput,
             terminalId,
             project.startCommand ?? undefined,
+            id,
           );
         });
       } catch (error) {
@@ -156,6 +202,48 @@ export function installTerminalGateway(server: Server): void {
   });
 }
 
+/** Keeps one terminal's authorisation live for as long as its socket is.
+ *
+ *  A shell is the most privileged thing on offer here, and its authorisation
+ *  was checked once at the upgrade and never again. Someone removed from a
+ *  project kept a working shell inside its container until they closed the tab.
+ *
+ *  **And revocation now has to end the session, not just the socket.** Before
+ *  §13.7 closing the socket WAS ending the shell. It is not any more: a
+ *  detached session goes on running for its grace window, so a revocation that
+ *  only closed the socket would leave a shell inside somebody's container
+ *  belonging to a person who has just lost access to it — and would hand it
+ *  back to them if they reconnected inside the window.
+ */
+function watchTerminalAccess(
+  ws: WebSocket,
+  userId: string,
+  projectId: string,
+): void {
+  const cutOff = (code: number, message: string): void => {
+    endUserSessions(userId, projectId, "access-revoked");
+    ws.close(code, message);
+  };
+
+  const releaseAccessWatch = watchAccess(nextWatchId(), {
+    userId,
+    projectId,
+    level: "editor",
+    onRevoked: () => {
+      cutOff(4403, "Your access to this project was removed");
+    },
+    // A demotion to viewer is the same thing for a terminal: read-only
+    // access does not include a shell that can write the whole tree.
+    onChanged: (level) => {
+      if (level === "viewer") {
+        cutOff(4403, "You no longer have write access to this project");
+      }
+    },
+  });
+
+  ws.on("close", releaseAccessWatch);
+}
+
 async function startTerminal(
   ws: WebSocket,
   projectId: string,
@@ -163,6 +251,8 @@ async function startTerminal(
   attachInput: AttachInput,
   terminalId: number,
   startCommand?: string,
+  /** The session to register this shell under, when the client named one. */
+  id?: string,
 ): Promise<void> {
   attach(projectId);
 
@@ -178,7 +268,10 @@ async function startTerminal(
     detach(projectId);
   };
 
-  ws.on("close", releaseAttachment);
+  // Without a session the socket owns the attachment, exactly as before. With
+  // one, ownership moves to the session below — a detached terminal running a
+  // build is using this container, and the reaper must not stop it.
+  if (!id) ws.on("close", releaseAttachment);
 
   try {
     await touchProject(projectId);
@@ -195,6 +288,16 @@ async function startTerminal(
       return;
     }
 
+    // Room for one more shell against the container's pid limit, given that a
+    // shell now outlives its socket. Detached sessions are given up to make
+    // it; only a project whose every terminal has somebody watching it is
+    // refused, and then the reason says so rather than the socket just closing.
+    if (id && !makeRoomForSession(projectId)) {
+      releaseAttachment();
+      ws.close(4004, "Too many terminals open on this project");
+      return;
+    }
+
     // Counted here rather than on arrival, so the metric means "shells opened"
     // and not "sockets seen". It read 11 for a project that never had more
     // than a couple of shells in it.
@@ -206,6 +309,7 @@ async function startTerminal(
       attachInput,
       terminalId,
       startCommand,
+      id ? { id, projectId, release: releaseAttachment } : undefined,
     );
   } catch (error) {
     logger.error("could not start terminal", error, { projectId });

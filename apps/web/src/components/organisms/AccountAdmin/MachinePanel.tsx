@@ -14,6 +14,30 @@ function mb(bytes: number): string {
   return `${Math.round(bytes / 1024 / 1024)} MB`;
 }
 
+/** How a backup run reads at a glance.
+ *
+ *  "Configured and never run" is deliberately its own state rather than being
+ *  folded into "ok". A subsystem that is switched on and silent is the exact
+ *  shape of one that is broken, and it is the shape a green tick would hide.
+ */
+function backupTone(backup: MachineStatus["backup"]): "success" | "warning" {
+  if (backup.lastRunAt === null) return "warning";
+  return backup.lastRunOk ? "success" : "warning";
+}
+
+function backupHeadline(backup: MachineStatus["backup"]): string {
+  if (backup.lastRunAt === null) {
+    return "Backups are on, and have not run yet in this process";
+  }
+
+  const when = new Date(backup.lastRunAt).toLocaleString();
+
+  if (!backup.lastRunOk) return `Last backup had failures — ${when}`;
+
+  const count = backup.backedUp ?? 0;
+  return `Backed up ${String(count)} project${count === 1 ? "" : "s"} — ${when}`;
+}
+
 function duration(seconds: number): string {
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
   if (seconds < 86_400) return `${Math.round(seconds / 3600)}h`;
@@ -72,6 +96,35 @@ export const MachinePanel = () => {
           Up {duration(data.uptimeSeconds)}, {mb(data.memoryBytes)} resident.
         </Typography.Text>
       </div>
+
+      {/* Backups (plan.md §3.3). Rendered before the counters and, when they
+          are off, as a warning rather than a row — because "nothing on this
+          host is copied anywhere else" is not a statistic, it is the single
+          fact about this machine most likely to matter and least likely to be
+          noticed. An operator who never opens this screen still has the boot
+          log saying it; one who does opens it here. */}
+      {!data.backup.enabled ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="Backups are off"
+          description="Nothing on this host is copied anywhere else. If this disk goes, every project on it goes with it. Set BACKUP_DIR to a path on another disk or mount."
+        />
+      ) : (
+        <Alert
+          type={backupTone(data.backup)}
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={backupHeadline(data.backup)}
+          description={
+            <>
+              {data.backup.destination}
+              {data.backup.lastError ? ` — ${data.backup.lastError}` : ""}
+            </>
+          }
+        />
+      )}
 
       {/* This one is not a gauge but a defect report. A scheduled run should
           leave RUNNING; a count that only climbs is the signature of a

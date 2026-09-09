@@ -15,6 +15,7 @@ import {
 import { DeleteOutlined, LinkOutlined } from "@ant-design/icons";
 import {
   createShareLinkApi,
+  getAccountSecretsApi,
   getSharingApi,
   removeCollaboratorApi,
   revokeShareLinkApi,
@@ -67,6 +68,18 @@ export const ShareDialog = ({
 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<ProjectRole>("VIEWER");
+
+  /** How many account-wide secrets this person has, so the invite form can say
+   *  what an editor would be able to read (plan.md §13.8). Never blocks the
+   *  dialog: a failure here means one fewer sentence, not a share nobody can
+   *  perform. */
+  const { data: secrets } = useQuery({
+    queryKey: ["accountSecrets"],
+    queryFn: getAccountSecretsApi,
+    enabled: open,
+    retry: false,
+  });
+  const accountSecretCount = Object.keys(secrets?.vars ?? {}).length;
   /** What a link created from here grants. Kept separate from the email
    *  invite's role so changing one never silently changes the other. */
   const [linkRole, setLinkRole] = useState<ProjectRole>("VIEWER");
@@ -251,6 +264,24 @@ export const ShareDialog = ({
                 They need an account here already. A viewer can read files and
                 watch the preview but cannot edit, run, or open a terminal.
               </Typography.Text>
+
+              {/* plan.md §13.8, and the placement is the point: it is said at
+                  the moment somebody is deciding, not on a settings screen
+                  they visited weeks ago. Only when they actually have account
+                  secrets — a standing warning about a thing that does not
+                  apply is one people learn to skip, and this has to still be
+                  readable on the day it matters. */}
+              {accountSecretCount > 0 && role === "EDITOR" && (
+                <Typography.Text
+                  type="warning"
+                  style={{ fontSize: 12, display: "block", marginTop: 6 }}
+                >
+                  An editor can read this container&apos;s environment, which
+                  includes the {accountSecretCount} account-wide{" "}
+                  {accountSecretCount === 1 ? "secret" : "secrets"} you have
+                  set.
+                </Typography.Text>
+              )}
             </div>
 
             {data.collaborators.length > 0 && (

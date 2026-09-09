@@ -44,3 +44,39 @@ export interface PersonalizationUpdate {
   signingKey?: string | null;
   signCommits?: boolean;
 }
+
+/** Variables that belong to the account rather than to one project.
+ *  plan.md §13.8.
+ *
+ *  The same shape as a project's, deliberately: one validator, one set of
+ *  limits, one answer to "is this encrypted at rest". What differs is the
+ *  SCOPE and, because of it, what somebody needs to be told — which is why
+ *  `sharedProjects` is on the response and is not on a project's.
+ */
+export interface AccountSecrets {
+  /** Names to values, decrypted. Only ever returned to their owner. */
+  vars: Record<string, string>;
+
+  /** Whether this server can seal them at all. Said out loud rather than
+   *  implied, because a panel that looks identical either way is a panel that
+   *  lies on one of the two servers. */
+  encryptedAtRest: boolean;
+
+  /** How many of this account's projects somebody else can reach.
+   *
+   *  These variables go into every container of every project the account
+   *  owns, and an editor on a shared project can read a container's
+   *  environment. That is what an editor already is; what is new is that one
+   *  mistake now reaches every project instead of one. A count is enough to
+   *  make the sentence concrete without turning this endpoint into a project
+   *  list.
+   */
+  sharedProjects: number;
+}
+
+/** What a client sends to replace them. The whole set, not a patch: a partial
+ *  update has no way to express "delete this one", and these are secrets —
+ *  the operation somebody most needs to be sure of is removal. */
+export interface AccountSecretsUpdate {
+  vars: Record<string, string>;
+}

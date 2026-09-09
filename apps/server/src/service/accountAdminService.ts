@@ -10,6 +10,7 @@ import {
 } from "@replit-clone/shared";
 import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
+import { backupStatus } from "./backupService.js";
 import { logger } from "../lib/logger.js";
 import { increment, snapshot } from "../lib/metrics.js";
 import { runningContainerCount } from "../containers/containerManager.js";
@@ -368,6 +369,7 @@ export async function getMachineStatus(): Promise<MachineStatus> {
   return {
     containersRunning,
     containerLimit: env.MAX_CONCURRENT_CONTAINERS,
+    backup: backupStatus(),
     runningJobRuns,
     uptimeSeconds: Math.round(process.uptime()),
     memoryBytes: process.memoryUsage().rss,
