@@ -146,16 +146,17 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 162 items. Open: 24 — four blocked, nine from §10, one from §11, which
+**Done: 164 items. Open: 22 — four blocked, seven from §10, one from §11, which
 reads the sandbox rather than the editor, two from §12, which reads neither and
 asks what a cloud machine is for, and eight from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
-2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, so the ten
-§10 rows that were "waiting on one decision" are nine that are merely open. §11's last row is 11.10, which needs a
+2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, which closed
+three §10 rows at once: 10.1 itself, and 10.6 and 10.7 by another road. The
+seven that remain are merely open rather than blocked. §11's last row is 11.10, which needs a
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 9 + 1 + 2 + 8 = 24, and they are written out
+Those five numbers are 4 + 7 + 1 + 2 + 8 = 22, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -5086,7 +5087,27 @@ feature. Route A does not deliver any of them.
 Each row says what it costs on Route B, because that is the number the route
 decision needs. Under Route A the cost of every one of them is zero.
 
-- [ ] **10.6 Debugging.** No breakpoints, no stepping, no watch, no call stack,
+- [x] **10.6 Debugging.** **Closed 2026-09-09 by §10.1's decision and §2.50's
+      code, not by building it.** Route C ships debugging as the user's own
+      editor doing what it already does: the §11.1 spike installed
+      `ms-python.python` into the sandbox over SSH and it brought **debugpy**
+      with it. Breakpoints, stepping, watch, call stack and `launch.json` are
+      the client's problem, and the client is a real VS Code.
+
+      **What is still true, and is not a footnote.** There is no debugging in
+      the BROWSER editor and this row does not deliver one. Somebody on an iPad,
+      or on a machine where they cannot install an editor, still cannot set a
+      breakpoint — that is 13.10's territory and it stays open. What this row
+      claimed was that the *platform* had no debugging at all, and that is what
+      is no longer true.
+
+      **What it would have cost to do the other way**, kept because it is why
+      this trade is worth making: a hand-written DAP client, a breakpoint gutter
+      and decoration layer, a variables/watch/call-stack UI, a per-language
+      adapter in every sandbox image, and a stdio bridge through `docker exec`.
+      Original note follows.
+
+      No breakpoints, no stepping, no watch, no call stack,
       no `launch.json` — `grep` for `launch.json` or `DAP` over `apps/` returns
       nothing. Route B means a hand-written Debug Adapter Protocol client, a
       breakpoint gutter and decoration layer, a variables/watch/call-stack UI, a
@@ -5095,7 +5116,23 @@ decision needs. Under Route A the cost of every one of them is zero.
       against `monaco-languageclient` applies to twice over. This is the single
       largest item in this section and the one Route A most obviously wins.
 
-- [ ] **10.7 Extensions.** **Unreachable on Route B.** Not "expensive" —
+- [x] **10.7 Extensions.** **Closed 2026-09-09 by §10.1's decision and §2.50's
+      code.** This row's whole claim was that Monaco cannot run VS Code
+      extensions and no amount of work changes that — which remains true, and is
+      now beside the point: over SSH it is the user's own editor running the
+      user's own extensions with the user's own settings. That is *more* than
+      Route A would have given, which is a marketplace inside somebody else's
+      profile.
+
+      The §11.1 spike installed `ms-python.python` from the marketplace into the
+      sandbox and got Pylance with it, so this is measured rather than argued.
+
+      **Still true:** no extensions in the browser editor, ever. A personal IDE
+      is largely defined by the six extensions its owner cannot work without,
+      and they now have them — in the window they attached, not in this one.
+      Original note follows.
+
+      **Unreachable on Route B.** Not "expensive" —
       decision 1's closing sentence is that Monaco cannot reach it at all, and
       §3.3 already lists "the user's own VS Code extensions" as out of scope for
       that reason. Worth stating as a row anyway, because a personal IDE is
