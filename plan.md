@@ -56,8 +56,8 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2766 passing**, 9 skipped. Green 2026-09-09 against all **41** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1367 passing** (107 files), re-run 2026-09-09 |
+| the same, with `TEST_DATABASE_URL` set | **2770 passing**, 9 skipped. Green 2026-09-09 against all **41** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1369 passing** (107 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,9 +146,9 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 164 items. Open: 22 — four blocked, seven from §10, one from §11, which
+**Done: 165 items. Open: 21 — four blocked, seven from §10, one from §11, which
 reads the sandbox rather than the editor, two from §12, which reads neither and
-asks what a cloud machine is for, and eight from §13, which names the two
+asks what a cloud machine is for, and seven from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
 2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, which closed
 three §10 rows at once: 10.1 itself, and 10.6 and 10.7 by another road. The
@@ -156,7 +156,7 @@ seven that remain are merely open rather than blocked. §11's last row is 11.10,
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 7 + 1 + 2 + 8 = 22, and they are written out
+Those five numbers are 4 + 7 + 1 + 2 + 7 = 21, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3369,6 +3369,43 @@ the daemon has never started. The §11.1 spike did run a real sshd and a real VS
 Code server, which is why this is strong evidence rather than a guess — but the
 first person to turn `SANDBOX_SSH_ENABLED` on is the first person to run this.
 
+### 2.51 Since (2026-09-09) — §13.9, the credential that stays on your machine
+
+§14.2's Phase 1d, and it took one line of sshd config because the row had
+already done the thinking. `git clone git@github.com:me/private` — the most
+ordinary thing anybody does on a new machine — failed in a sandbox, because
+every credential this platform holds is deliberately unreachable from inside
+one: the signing key is only ever offered for signing, dotfiles are cloned with
+no credential on purpose, and `pushRemote` authenticates server-side with a
+token the sandbox never sees.
+
+**The decision, from the three the row named:** agent forwarding. It is the only
+one that is not a secret sitting in a container that runs untrusted code, and it
+became possible the same day, because §10.1 went to Route C.
+
+**The line that matters is that this is not the forwarding that was refused.**
+`AllowTcpForwarding` stays `no` — `ssh -L` out of a sandbox reaches whatever the
+sandbox reaches, which is the one thing the egress gateway exists to control.
+`AllowAgentForwarding` carries no tunnel: a unix socket over which the sandbox
+may ask the user's own agent to sign a challenge. The key never leaves their
+machine. Three tests hold that distinction, including one whose only job is to
+check that turning agent forwarding off does not reopen TCP forwarding.
+
+**Cost, stated where somebody will read it:** while connected, code in the
+sandbox can use the agent for any repository that key opens. The dialog says so
+in those words rather than in a link, and `SANDBOX_SSH_AGENT_FORWARDING=false`
+is there for anybody who would rather type a token.
+
+**And the half this does not fix.** The browser terminal is `docker exec`; it
+has no agent and still cannot clone a private repository. Fixing that needs one
+of the two options this row rejected. Chosen, not missed — and §13's inventory
+now says so.
+
+**Verified.** 28 tests on the config and the connection details, with the
+agent/TCP distinction checked by turning the switch off and asserting TCP
+forwarding stayed shut. **Not verified:** no Docker daemon here, so no agent has
+been forwarded through a real connection.
+
 ---
 
 ## 3. Open
@@ -6503,7 +6540,39 @@ the machine is somewhere else.
       **For:** every user of a personal deployment, from their second project
       onwards.
 
-- [ ] **13.9 A credential the sandbox itself can clone and push with.**
+- [x] **13.9 A credential the sandbox itself can clone and push with.**
+      **DECIDED and shipped 2026-09-09 — §2.51.** The decision is the first of
+      the three options this row named: **agent forwarding over the Route C SSH
+      channel**, which exists because §10.1 went to B + C the same day. The row
+      predicted this: "the first is the only one that is not a secret sitting in
+      a container, and it exists only if §10.1 goes to Route C."
+
+      `AllowAgentForwarding yes`, and `AllowTcpForwarding` stays **no** — they
+      are separate lines and the difference is the whole safety argument. TCP
+      forwarding would be a tunnel out of a sandbox, straight through the egress
+      gateway. Agent forwarding carries a socket the sandbox may ask to SIGN
+      something; the private key never leaves the user's machine and cannot be
+      read out of the socket. The `ssh` command the dialog hands over says `-A`,
+      and says what it costs.
+
+      **What it costs, in the row rather than in a footnote:** while somebody is
+      connected, code running in the sandbox can USE their agent — for any
+      repository that key opens, not only this one. That is true of agent
+      forwarding everywhere it is used, it lasts exactly as long as the
+      connection, and `SANDBOX_SSH_AGENT_FORWARDING=false` turns it off for
+      anybody who would rather type a token.
+
+      **What this deliberately does NOT fix, which is half of the row's own
+      complaint.** The BROWSER terminal is `docker exec` and has no agent, so
+      `git clone git@github.com:me/private` typed there still fails. The other
+      two options would have fixed it and both are, in this row's own words, a
+      secret sitting in a container that runs untrusted code — so the answer is
+      "attach your editor, or use the server-side push that already exists",
+      not a credential in the sandbox. Recorded as a limit that was chosen, not
+      one that was missed.
+
+      Original note follows.
+
       Blocked on a decision, and named so the decision gets made rather than
       arrived at.
 
@@ -6859,7 +6928,9 @@ account, and the screen says so), and one decision — whether a *collaborator*
 on somebody's project sees the owner's account secrets, for which the answer is
 almost certainly no.
 
-**1d. A credential the sandbox can clone and push with (§13.9).** Blocked on a
+~~**1d. A credential the sandbox can clone and push with (§13.9).**~~ **Done
+2026-09-09 — §2.51**, and it took one config line: Phase 0 chose Route C, and
+Route C is what makes agent forwarding exist. Original note follows. Blocked on a
 decision, and **Phase 0 changes the answer**, which is why it is here and not
 earlier: if the route includes C, agent forwarding over that SSH channel is
 available and is the only option where the credential never sits inside a

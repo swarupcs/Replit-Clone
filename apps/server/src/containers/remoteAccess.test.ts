@@ -5,6 +5,7 @@ const envMock = vi.hoisted(() => ({
     SANDBOX_SSH_ENABLED: true,
     SANDBOX_SSH_BIND: "127.0.0.1",
     SANDBOX_SSH_HOST: undefined as string | undefined,
+    SANDBOX_SSH_AGENT_FORWARDING: true,
   },
 }));
 vi.mock("../config/env.js", () => envMock);
@@ -47,6 +48,7 @@ beforeEach(() => {
   envMock.env.SANDBOX_SSH_ENABLED = true;
   envMock.env.SANDBOX_SSH_BIND = "127.0.0.1";
   envMock.env.SANDBOX_SSH_HOST = undefined;
+  envMock.env.SANDBOX_SSH_AGENT_FORWARDING = true;
 });
 
 describe("the daemon's configuration", () => {
@@ -58,18 +60,37 @@ describe("the daemon's configuration", () => {
     expect(config()).toContain("PermitEmptyPasswords no");
   });
 
-  it("refuses every kind of forwarding", () => {
-    // A workspace is not a jump host, and with the egress gateway on,
-    // forwarding would be a hole straight through it.
+  it("refuses every kind of TCP forwarding", () => {
+    // A workspace is not a jump host, and with the egress gateway on, `ssh -L`
+    // out of a sandbox is a hole straight through it.
     for (const line of [
       "AllowTcpForwarding no",
-      "AllowAgentForwarding no",
       "X11Forwarding no",
       "PermitTunnel no",
       "GatewayPorts no",
     ]) {
       expect(config()).toContain(line);
     }
+  });
+
+  it("allows agent forwarding, which is a different thing -- plan.md §13.9", () => {
+    // It carries no tunnel: a socket the sandbox may ask to SIGN something.
+    // The key never leaves the user's machine, which is why §13.9 calls this
+    // "the only one that is not a secret sitting in a container".
+    expect(config()).toContain("AllowAgentForwarding yes");
+  });
+
+  it("turns agent forwarding off when an operator says to", () => {
+    // Defensible: while somebody is connected, code in the sandbox can USE
+    // their agent for any repository that key opens.
+    envMock.env.SANDBOX_SSH_AGENT_FORWARDING = false;
+    expect(config()).toContain("AllowAgentForwarding no");
+  });
+
+  it("does not let that switch reopen TCP forwarding", () => {
+    // The two are separate lines for a reason and must not become one.
+    envMock.env.SANDBOX_SSH_AGENT_FORWARDING = false;
+    expect(config()).toContain("AllowTcpForwarding no");
   });
 
   it("does not name an option OpenSSH has removed", () => {
@@ -164,7 +185,9 @@ describe("what somebody is told", () => {
 
   it("hands back a command and a URI that open the workspace", () => {
     const access = remoteAccessFor({ ...base, requestHost: "box.example" });
-    expect(access.command).toBe("ssh -p 49155 sandbox@box.example");
+    // `-A`, because that is what makes cloning a private repository work
+    // inside the sandbox -- plan.md §13.9.
+    expect(access.command).toBe("ssh -A -p 49155 sandbox@box.example");
     // The folder, not a prompt: somebody attaching an editor wants the project.
     expect(access.vscodeUri).toContain("/home/sandbox/app");
     expect(access.vscodeUri).toContain("ssh-remote+sandbox@box.example:49155");
@@ -176,6 +199,13 @@ describe("what somebody is told", () => {
     expect(remoteAccessFor({ ...base, requestHost: "internal" }).host).toBe(
       "dev.example.com",
     );
+  });
+
+  it("drops -A when the workspace would ignore it", () => {
+    // Offering a flag that is silently ignored teaches somebody the feature is
+    // broken rather than off.
+    envMock.env.SANDBOX_SSH_AGENT_FORWARDING = false;
+    expect(remoteAccessFor(base).command).toBe("ssh -p 49155 sandbox@localhost");
   });
 
   it("says which of the four reasons it is unavailable", () => {

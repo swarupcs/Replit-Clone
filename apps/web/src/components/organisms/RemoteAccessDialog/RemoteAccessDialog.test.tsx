@@ -28,7 +28,8 @@ const AVAILABLE: RemoteAccess = {
   port: 49155,
   user: "sandbox",
   folder: "/home/sandbox/app",
-  command: "ssh -p 49155 sandbox@box.example",
+  agentForwarding: true,
+  command: "ssh -A -p 49155 sandbox@box.example",
   vscodeUri: "vscode://vscode-remote/ssh-remote+sandbox@box.example:49155/home/sandbox/app",
 };
 
@@ -43,7 +44,7 @@ afterEach(() => {
 describe("attaching your own editor", () => {
   it("shows the command to paste", async () => {
     show();
-    expect(await screen.findByText("ssh -p 49155 sandbox@box.example")).toBeTruthy();
+    expect(await screen.findByText("ssh -A -p 49155 sandbox@box.example")).toBeTruthy();
   });
 
   it("offers to open VS Code at the folder", async () => {
@@ -75,6 +76,25 @@ describe("attaching your own editor", () => {
 
     expect(await screen.findByText("This workspace is not running")).toBeTruthy();
     expect(screen.queryByText(/^ssh -p/)).toBeNull();
+  });
+
+  it("explains what -A does, and what it costs", async () => {
+    // A private clone failing inside the sandbox looks exactly like a
+    // permissions problem with the repository, so this is said up front.
+    show();
+    expect(await screen.findByText(/forwards your SSH agent/)).toBeTruthy();
+    expect(screen.getByText(/ask\s+your agent to authenticate/)).toBeTruthy();
+  });
+
+  it("says when agent forwarding is off, so a failed clone is not a mystery", async () => {
+    getRemote.mockResolvedValue({
+      ...AVAILABLE,
+      agentForwarding: false,
+      command: "ssh -p 49155 sandbox@box.example",
+    });
+    show();
+
+    expect(await screen.findByText(/will need a token/)).toBeTruthy();
   });
 
   it("warns about the first-connect download and the egress it needs", async () => {

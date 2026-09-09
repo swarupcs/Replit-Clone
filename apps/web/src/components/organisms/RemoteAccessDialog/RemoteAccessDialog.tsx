@@ -133,6 +133,28 @@ export function RemoteAccessDialog({
             </Button>
           </div>
 
+          {/* plan.md §13.9. Said here rather than left to be discovered,
+              because a private clone failing inside the sandbox looks exactly
+              like a permissions problem with the repository. */}
+          {data.agentForwarding ? (
+            <Typography.Paragraph
+              style={{ color: "var(--rc-text-subtle)", fontSize: 12, marginBottom: 0 }}
+            >
+              <code>-A</code> forwards your SSH agent, so <code>git clone</code>{" "}
+              and <code>git push</code> over SSH work inside the workspace using
+              the key on your own machine. The key itself never goes in — but
+              while you are connected, anything running in the workspace can ask
+              your agent to authenticate.
+            </Typography.Paragraph>
+          ) : (
+            <Typography.Paragraph
+              style={{ color: "var(--rc-text-subtle)", fontSize: 12, marginBottom: 0 }}
+            >
+              Agent forwarding is off on this server, so a private{" "}
+              <code>git clone</code> inside the workspace will need a token.
+            </Typography.Paragraph>
+          )}
+
           <Typography.Paragraph
             style={{ color: "var(--rc-text-subtle)", fontSize: 12, marginBottom: 0 }}
           >

@@ -68,4 +68,12 @@ export interface RemoteAccess {
   /** Where the workspace is inside the container, so a client that wants to
    *  open the folder rather than a shell knows what to ask for. */
   folder?: string;
+
+  /** Whether the workspace will accept a forwarded SSH agent — plan.md §13.9.
+   *
+   *  On the response because it changes the command somebody should run: `-A`
+   *  is what makes `git clone git@github.com:me/private` work inside the
+   *  sandbox, and a command without it fails in a way that looks like a
+   *  permissions problem with the repository. */
+  agentForwarding?: boolean;
 }

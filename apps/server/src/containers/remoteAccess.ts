@@ -105,10 +105,27 @@ export function sshdConfig(): string {
     // option is a fatal error -- so the deprecated spelling would not be a
     // harmless duplicate, it would stop the daemon starting at all.
     "UsePAM no",
-    // A workspace is not a jump host. With the egress gateway on, forwarding
-    // would be a hole straight through it.
+    // A workspace is not a jump host. With the egress gateway on, TCP
+    // forwarding would be a hole straight through it -- `ssh -L` from a
+    // sandbox reaches whatever the sandbox can reach, which is the one thing
+    // the network policy exists to control.
     "AllowTcpForwarding no",
-    "AllowAgentForwarding no",
+    // Agent forwarding is a DIFFERENT thing and is this platform's answer to
+    // §13.9, so it is allowed by default when SSH is on. It carries no TCP: it
+    // forwards a unix socket over which the sandbox may ask the user's own
+    // agent to SIGN something. The private key never leaves their machine and
+    // cannot be copied out of the socket, which is why §13.9 calls it "the
+    // only one that is not a secret sitting in a container".
+    //
+    // The residual risk, stated rather than buried: while somebody is
+    // connected, code running in the sandbox can USE their agent -- to push to
+    // any repository that key opens, not only this one. That is the accepted
+    // cost of agent forwarding everywhere it is used, it lasts exactly as long
+    // as the connection, and `SANDBOX_SSH_AGENT_FORWARDING=false` turns it off
+    // for somebody who would rather type a token.
+    env.SANDBOX_SSH_AGENT_FORWARDING
+      ? "AllowAgentForwarding yes"
+      : "AllowAgentForwarding no",
     "X11Forwarding no",
     "PermitTunnel no",
     "GatewayPorts no",
@@ -257,6 +274,7 @@ export function remoteAccessFor(options: {
 
   const host = env.SANDBOX_SSH_HOST ?? options.requestHost ?? "localhost";
   const port = options.port;
+  const agent = env.SANDBOX_SSH_AGENT_FORWARDING;
 
   return {
     available: true,
@@ -264,7 +282,14 @@ export function remoteAccessFor(options: {
     port,
     user: SSH_USER,
     folder: REMOTE_FOLDER,
-    command: `ssh -p ${String(port)} ${SSH_USER}@${host}`,
+    agentForwarding: agent,
+    // `-A` when the workspace will take a forwarded agent, because that is
+    // what makes cloning a private repository work inside the sandbox --
+    // plan.md §13.9. Left out when it would not, rather than offered and
+    // silently ignored.
+    command: agent
+      ? `ssh -A -p ${String(port)} ${SSH_USER}@${host}`
+      : `ssh -p ${String(port)} ${SSH_USER}@${host}`,
     // The URI VS Code's Remote-SSH extension registers. Opening the folder
     // rather than a shell, because a person attaching an editor wants the
     // project, not a prompt.

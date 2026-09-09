@@ -791,6 +791,26 @@ const envSchema = z.object({
    *  thing to do by accident, so it is spelled out rather than inferred. */
   SANDBOX_SSH_BIND: z.string().default("127.0.0.1"),
 
+  /** Let an attached session use the SSH agent on the user's own machine.
+   *
+   *  On by default when SSH is, because it is this platform's answer to a real
+   *  gap -- plan.md §13.9. `git clone git@github.com:me/private`, the most
+   *  ordinary thing anybody does on a new machine, fails in a sandbox with no
+   *  credential, and every other way of fixing it puts a secret inside a
+   *  container that runs untrusted code.
+   *
+   *  Not TCP forwarding, which stays off: this carries a socket the sandbox can
+   *  ask to SIGN something, not a tunnel. The key never leaves the user's
+   *  machine and cannot be read out of the socket.
+   *
+   *  What it does cost, and why this is a knob rather than a constant: while
+   *  somebody is connected, code in the sandbox can USE their agent for any
+   *  repository that key opens. Off is defensible; it means typing a token. */
+  SANDBOX_SSH_AGENT_FORWARDING: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false" && value !== "0"),
+
   /** The hostname to put in the `ssh` command shown to the user.
    *
    *  A server cannot know its own public name: behind a reverse proxy its own
