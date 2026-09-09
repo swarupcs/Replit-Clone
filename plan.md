@@ -39,7 +39,12 @@ than left in history where nobody would look for them.
 
 **Looking for what this actually does today rather than how the suite is
 doing? §1a.** This section is the health of the tree; that one is the
-inventory.
+inventory. **Looking for what to build next? §14**, added 2026-09-09 — it is
+the one place that sequences the open rows of §3, §8, §10, §11, §12 and §13
+against each other instead of each against its own siblings, and it starts by
+saying that this is two products and asking which one is primary. It adds no
+rows: every item in it is an existing checkbox, referenced by number, so the
+totals below stay the totals.
 
 Verified by running it rather than reading about it. **The numbers are as of
 2026-09-05**, and every row below was re-run that day — including the one that
@@ -3434,6 +3439,15 @@ whoever owns the data, not to a cleanup script.
 
 ## 4. Recommended order
 
+**This section is the per-item order, and it is now mostly history.** It runs
+item by item through work that is almost entirely struck through, and its most
+useful part is the commentary underneath about how the work was found rather
+than the list itself. **For what to build next, read §14**, which is the
+programme-level plan across every open section; this one is kept because the
+twenty-three entries below record *why* each thing was taken in the order it
+was, and several of those reasons turned out to be the lesson rather than the
+line.
+
 1. ~~**§3.1's first three defects.**~~ Done 2026-08-29.
 2. ~~**§3.2 E2E in CI**, with the `monacoSetup` debt folded in.~~ Done
    2026-08-29.
@@ -4722,6 +4736,10 @@ decision needs. Under Route A the cost of every one of them is zero.
 ---
 
 ### Order
+
+**Read §14.1 with this**, which recommends an answer to 10.1 (B + C) and says
+what each of the three routes does to the ten rows behind it. What follows is
+this section's own ordering, which stands whichever way that goes.
 
 **10.1 first, and nothing from 10.6–10.14 before it.** That is the whole point
 of the section: nine rows of hand-built parity are the wrong answer if the
@@ -6083,6 +6101,12 @@ the machine is somewhere else.
 
 ### Order, and what to do first if only one thing gets done
 
+**Superseded for sequencing by §14**, which places these ten rows against §3,
+§10, §11 and §12 rather than only against each other — and which splits them
+between the two products they serve, since most of 13A has no user on a
+personal deployment. What follows is this section's own order, kept because it
+says *why* each row sits where it does.
+
 ~~**13.7, and it is not close.**~~ **Shipped 2026-09-09, the day this section
 was written — §2.46.** The reasoning below held, including about where the work
 was: half the mechanism really was already written, and the half that was not
@@ -6164,3 +6188,421 @@ laptop mid-build and watched what happens. The code path is unambiguous and the
 comment above it says what it does, which is strong evidence and not the same
 thing as having seen it — and §1's standing lesson is that the container layer
 in particular has produced three defects nobody predicted from reading it.
+
+---
+
+## 14. The build plan
+
+Written 2026-09-09, after §13.7 shipped, because the file had reached a state
+it has not been in before: **twenty-eight open rows spread across six sections,
+each written from a different angle, with no document saying what to build
+next.** §4 is a per-item order and is now almost entirely struck through; §8
+through §13 each end with an "Order" block that sequences *their own* rows
+against each other and cannot see the others. Somebody arriving with "I want
+this to be a personal cloud VS Code and a CodeSandbox" has to read six sections
+and merge them by hand.
+
+**This section adds no rows.** Every item below is an existing checkbox
+somewhere above, referenced by its number. That is deliberate and it is the
+first thing to check if this section ever seems to disagree with §1: a plan
+that invented rows would double-count the work and §1's total would drift,
+which is the exact failure §7's second paragraph exists to stop. §1 says 28
+open; this section sequences those 28 and introduces nothing.
+
+---
+
+### 14.0 The observation that orders everything else
+
+**These are two products, and the plan has to say so out loud.**
+
+§13 already diffed against both and found they disagree about almost
+everything. Put the two target definitions side by side and the disagreement
+is not a matter of emphasis:
+
+| | **Personal cloud VS Code** | **CodeSandbox** |
+|---|---|---|
+| Who opens it | one person, signed in, every day | a stranger, from a link, once |
+| What a project costs | a container that can be warm all day | must be ~free, or the model does not work |
+| What "fast" means | the editor keeps up with typing | the *first* paint, on a cold link |
+| What the editor must do | debugging, extensions, tasks — VS Code | edit one file convincingly |
+| Multiplayer | **no user** (§10.5) | the point |
+| Auth | one account, or none | anonymous by default |
+
+The rows that serve one mostly do nothing for the other. §10.5 already made
+this argument in one direction and it holds in both: at n=1 the entire
+CodeSandbox surface — the gallery, embeds, sharing, reports, moderation,
+pairing — has no second person to serve. And a stranger following a link does
+not want your dotfiles, your SSH key or your `settings.json`.
+
+**So: pick a primary.** Not "eventually both" as a way of not choosing —
+§10.1 is the standing lesson on what that costs, and it has held ten rows for
+six days. The recommendation, and the reasoning is short:
+
+> **Primary: the personal cloud VS Code. Secondary, and only after Phase 3:
+> CodeSandbox.**
+
+Because the distance is not comparable. For the personal target the platform is
+**almost entirely built** — open a folder (§2.33), single-user mode (§2.34),
+machine-sized limits (§2.35), per-workspace sizes (§2.38), devcontainers,
+compose, dotfiles, 2FA, exposure, offline, notebooks, and as of today a
+terminal that survives a dropped connection (§2.46). What is missing is one
+architectural decision and a handful of days.
+
+For the CodeSandbox target the missing thing is **an execution model this
+repository does not have** (§13.2): every path into a working tree ends at a
+Docker container, and a product whose embeds are pasted into a thousand pages
+cannot start a container for each. That is not a feature, it is a second
+runtime beside the first — and it is the right thing to build *second*, when
+there is something to be second to.
+
+If the answer is the other way round — if this is a product for other people
+first — then Phases 4 to 6 move to the front and Phase 1 becomes optional. The
+phases below are written so that reordering them that way is legible rather
+than a rewrite.
+
+---
+
+### 14.1 Phase 0 — the decision, and it is still one afternoon
+
+**§10.1, and nothing in Phases 1 or 3 should start before it.**
+
+Ten of the twenty-eight open rows are behind this and it is not research: §6
+decision 1, §10.0's recount, §11.0's argument and §11.1's spike have already
+written down everything anybody needs. What is missing is somebody choosing.
+
+**Recommendation: B + C — keep Monaco, and add Route C.** Not A. The argument,
+compressed from §10.1 and §11.1:
+
+- **Route B alone cannot be the answer.** Decision 1's closing sentence is that
+  Monaco cannot run VS Code extensions at all, and a personal editor is largely
+  defined by the six extensions its owner cannot work without. 10.7 is
+  unreachable on B and no amount of work changes that.
+- **Route A is now the expensive way to get there.** It delivers 10.6–10.14 at
+  once, and charges the multiplayer layer, the run control and the preview as
+  rewrites. §10.0 recounts that at n=1 and two of the four evaporate — but the
+  two that survive are real work, and the multiplayer layer is the thing that
+  makes this *not* just a VS Code you have to host yourself.
+- **Route C reaches the two most expensive rows for 7 MB.** §11.1's spike is
+  the strongest evidence in this file: the genuine VS Code server runs inside a
+  sandbox under the full security posture, and `ms-python.python` installs from
+  the marketplace bringing Pylance and debugpy with it. That is **10.6 and 10.7
+  arriving as working software**, without giving up the editor this repository
+  controls.
+- **A and C are not exclusive, and neither are B and C.** Codespaces ships a
+  browser editor and Remote-SSH. The browser editor stops having to be VS Code
+  and gets to be what it is already good at — the thing you open on a machine
+  you do not control, with multiplayer, the assistant, the run control and the
+  preview in it.
+
+**What choosing B + C does to the ten blocked rows.** 10.6 and 10.7 close by
+being reachable over SSH rather than by being built. 10.8 through 10.14 stop
+being blockers and become **browser-editor quality work** — still worth doing,
+per Phase 3, but no longer the difference between usable and not. §3.3's
+Debugging row closes with 10.6; note that it and 10.6 are **the same work
+counted twice**, which is worth knowing when reading §1's total.
+
+**If the answer is A instead**, Phase 1 becomes an openvscode-server migration,
+Phase 3 disappears entirely, and Phases 4 to 6 are unaffected — they are
+platform, not editor. Nothing below assumes B + C except Phase 1's shape and
+the whole of Phase 3.
+
+---
+
+### 14.2 Phase 1 — one person can use this instead of VS Code
+
+The phase that delivers the primary target. Everything in it is unblocked once
+Phase 0 is settled, and two of the four are unblocked regardless.
+
+**1a. Settle where a backup goes, then build it (§3.3).** First, and ahead of
+anything in this file that adds a feature, because it is **the only open row
+that loses data rather than failing to add something**. §10.5 already argued it
+stops being an acceptable written trade-off at n=1 and moves up; this is that
+promotion being acted on.
+
+Filed as blocked, and §9's method applies exactly: *which half needs a person
+and which half is only code nobody wrote?* The person-half is one question —
+a second disk, a bucket, or a documented acceptance — and for a personal
+deployment it is a ten-minute answer, not an infrastructure programme. The
+code half is a periodic job (the scheduler exists, §2.13), a tree walk and a
+database dump. Note what does **not** solve it and is sometimes mistaken for
+it: checkpoints are on the same disk as the thing they snapshot, and export is
+a manual per-project zip.
+
+**1b. Route C, properly (§10.1's third route, §11.1's spike).** The spike ran;
+this is turning it into a feature. Four things, and the spike already named
+three of them:
+
+- `openssh-server` in the sandbox images and an authorised key the account
+  owns — which is `UserPersonalization` extended, beside the signing key that
+  is already there (§11.9).
+- **A volume for `~/.vscode-server`.** Non-negotiable and the spike's sharpest
+  finding: it reached 1.3 GB in the container's *writable layer*, which every
+  environment-signature change and every `reconcileOnBoot` throws away. Without
+  this, attaching re-downloads 229 MB and reinstalls every extension on each
+  rebuild. One line, exactly as the package cache already does — but it has to
+  be in the plan, not discovered afterwards.
+- **Egress.** The spike ran on the default bridge with a published port, not
+  behind the egress gateway, and that 229 MB marketplace download is the first
+  thing a filtered sandbox refuses. Untested and load-bearing.
+- **Drive a real client through it.** Nobody has run VS Code's Remote-SSH into
+  this. The spike reproduced what that client does server-side, which is strong
+  evidence and not the same thing.
+
+**1c. Account-scoped secrets (§13.8).** The cheapest real row in the file with
+a user on the other end. `envVars` is a Json column on `Project` and there is
+no other scope, so one person with one `ANTHROPIC_API_KEY` types it into every
+workspace and rotating it means editing each by hand. The sealing
+(`secretBox`), the injection path, the account screen and the audit trail all
+exist; what is missing is a second scope, a merge order (project overrides
+account, and the screen says so), and one decision — whether a *collaborator*
+on somebody's project sees the owner's account secrets, for which the answer is
+almost certainly no.
+
+**1d. A credential the sandbox can clone and push with (§13.9).** Blocked on a
+decision, and **Phase 0 changes the answer**, which is why it is here and not
+earlier: if the route includes C, agent forwarding over that SSH channel is
+available and is the only option where the credential never sits inside a
+container untrusted code is running in. Take it. If the route excludes C, the
+choice narrows to a per-workspace deploy key or a credential helper that calls
+back to the server, and both are secrets in a sandbox.
+
+**What Phase 1 delivers:** one person opens a folder that is already on the
+disk, attaches their own VS Code with their own extensions and a debugger,
+gets their own secrets and their own git credentials in every workspace, and
+does not lose it when the host dies.
+
+---
+
+### 14.3 Phase 2 — the machine stops surprising you
+
+Small, unblocked, and each one closes a gap somebody hits in the first week.
+
+**2a. A session that follows the person (§13.11).** Tabs, splits, settings and
+keybindings live in `localStorage`, so opening the same workspace from a second
+machine — the *reason* it is on a server — gives a blank editor. The same
+stores writing through an endpoint. Explicitly not §10.9, which wants settings
+in *files* and is Phase 3.
+
+**2b. Prebuild a stopped workspace (§12.5).** §2.39 shipped the running-
+workspace half; this is the first open of a workspace that has been stopped all
+week. Blocked on **three numbers somebody has to choose by watching a real
+host** — how much headroom before a prebuild may run, how recently a workspace
+must have been opened to be worth prebuilding, and whether to stop it
+afterwards. Choosing them without having watched a host is how a background
+task becomes the reason a machine is always busy, so this belongs *after*
+Phase 1 has produced a host somebody is actually using.
+
+**2c. Dev Container Features (§11.10).** A question with three answers, none
+obviously right. Cheap to answer once somebody is living in a devcontainer
+daily, which Phase 1 produces and nothing before it does.
+
+---
+
+### 14.4 Phase 3 — the browser editor stops being the second-class one
+
+Only under B + C. Under Route A this phase does not exist — every row closes as
+part of the migration.
+
+The reframing Phase 0 buys: with debugging and extensions reachable over SSH,
+none of these is the difference between usable and not. They are the difference
+between a browser editor somebody tolerates and one they reach for. Ordered by
+what a personal user notices soonest, which is §10's own recommended order with
+10.6 and 10.7 struck out:
+
+1. **10.9 — settings, keybindings and snippets in files.** §10 calls this the
+   row that most decides whether the thing *feels* like a personal editor, and
+   the cheapest of the nine. It also subsumes 2a's follow-the-person question
+   for the settings half specifically, so do it after 2a rather than before, or
+   the two will disagree about which is the source of truth.
+2. **10.13 — the rest of git.** Stash and blame are the two a personal user
+   notices in the first week; amend, revert, tags, cherry-pick and a graph
+   after.
+3. **10.11 — a real diff editor.** `createDiffEditor` is unused. Compare with
+   saved, compare two files, compare against a branch, and edit inside the
+   diff.
+4. **10.10 — tasks**, whose problem-matcher half has somewhere to go: the
+   problems panel exists and is fed only by the language server. Sequence it
+   with 13.5, which is the third feed for the same panel.
+5. **10.12 — local history and a timeline.** Checkpoints are the wrong
+   granularity for the question this answers.
+6. **10.8 — languages past Python and Go.** One policy entry and one image per
+   language. Note decision 2's revisit trigger fires here: the moment somebody
+   wants rename or code actions, `lspClient.ts` is the seam that has to grow.
+7. **10.14 — the small ones.** §10's own caution applies hardest here: a week
+   of daily use would probably promote one of these and it would be a surprise
+   which.
+
+---
+
+### 14.5 Phase 4 — the cheap project, and the second product starts
+
+**This is where the CodeSandbox target begins, and it begins with an
+architectural addition rather than a feature.**
+
+**4a. A preview that needs no container (§13.2).** A browser-side bundler that
+resolves dependencies, builds in a worker and renders in an iframe with no
+server-side process. It boots in about a second, survives being embedded on a
+thousand pages, and costs this host nothing — which is why CodeSandbox's embeds
+work at a scale this one's cannot.
+
+Say plainly what it does not cover, because this is the row most likely to be
+over-sold: it serves front-end projects with no server. `python-flask`,
+`python-fastapi`, `go-http`, `node-express` and every compose project are
+outside it permanently. That is about half the template registry, and it is the
+half people paste into issues.
+
+**4b. A sandbox a stranger can open, run and fork (§13.1).** Only after 4a,
+which is what makes it affordable. Doing it first would mean an unauthenticated
+visitor who can start a container — spending this host's memory with no account
+behind it, which is exactly what §6 decision 13 and the embed's design refused
+on purpose. With 4a there is a version that costs nothing and the refusal
+stands.
+
+This pair is the largest single body of work in the plan and it should be
+costed as such before it is started.
+
+---
+
+### 14.6 Phase 5 — the git workflow other people can see
+
+**5a. A URL per pull request (§13.3).** The most valuable row in §13 for
+anybody working with other people, and four fifths of the mechanism exists —
+`repoImportService`, `deployService`, `releaseService` and the trash. What is
+missing is a GitHub App with `pull_request` and `push` events, a workspace per
+head ref, a comment posted back, and teardown on merge. The GitHub path has no
+webhook receiver today; the only webhook in the server is Stripe's.
+
+**It also supplies the trigger §12.2 says in its own text that it lacks** — so
+sequence it beside 2b rather than far from it, and the prebuild policy gets a
+reason to fire instead of a schedule somebody guessed.
+
+**5b. One repository, more than one workspace (§13.4).** `switchBranch` changes
+the branch in place, so reviewing a colleague's branch means stashing (which
+10.13 has only just added) or importing the repository twice as unrelated
+projects. Cheap only once 5a exists, because the two want the same object.
+
+---
+
+### 14.7 Phase 6 — the preview, and the people
+
+**6a. Devtools for the previewed app (§13.5).** Console capture, network log,
+an error overlay, a device-size frame. A runtime `TypeError` appears only in
+the real browser's console today — which the reader of an embed does not have
+open and which on a tablet does not exist. A `postMessage` bridge and a tab,
+feeding the problems panel that already exists.
+
+**6b. A pairing link for somebody with no account (§13.6).** The multiplayer
+layer is finished and reaching it requires being a row in
+`ProjectCollaborator`. A token that mints a scoped, expiring identity rather
+than an account — a thing this codebase already knows how to do twice, in
+preview tokens and embed tokens.
+
+**6c. Teams (§8.5).** Blocked on a pricing decision, and it turns every
+`ownerId === userId` into a membership question. It belongs at the end of the
+CodeSandbox track and nowhere in the personal one.
+
+---
+
+### 14.8 Not in the plan, and why
+
+Recorded so nobody reads their absence as an oversight.
+
+- **13.10 — the editor on a phone.** Ranked last in §13B, and §13B's own text
+  says it may have no user. Large work for a device nobody here has been
+  observed using. If somebody starts editing on a tablet, promote it; do not
+  build it on the theory that they might.
+- **12.4 — GPUs.** Blocked on hardware, not on anybody. An afternoon of
+  `DeviceRequests` if the host has one and unstartable if it does not.
+- **§3.3 autoscale.** A different product with a different cost model. §9.3's
+  compute meter shipped the input its cost model was missing, which moves it
+  closer without making it work anybody should start.
+- **§3.3 process snapshots.** Genuinely blocked, on a disk budget and on a
+  mechanism nothing here resembles. Not to be confused with 4a, which replaces
+  the container for a class of project, or with 12.5, which produces a warm
+  image.
+- **§3.3 ACME for custom domains.** A deployment decision about where a private
+  key lives. It gates HTTPS on verified custom domains and nothing else.
+
+---
+
+### 14.9 The dependencies, in one place
+
+Everything that is *not* a straight line, so nothing below is discovered by
+starting it in the wrong order:
+
+- **Phase 0 gates** all of Phase 3, 1b, and 1d's answer. Nothing else.
+- **1a (backup) gates nothing**, which is the argument for doing it first: it
+  is the only row whose absence is measured in lost work rather than missing
+  work.
+- **1b's volume for `~/.vscode-server` must land with 1b**, not after it. It is
+  one line and the spike found it the expensive way.
+- **2a before 10.9**, or the browser session and the settings file will
+  disagree about which one is the source of truth.
+- **4a before 4b.** Anonymous container starts are the thing that was refused
+  on purpose; 4a is what makes the row affordable without reopening that.
+- **5a beside 2b.** 5a produces the prebuild trigger 2b needs and 2b says it
+  lacks.
+- **5a before 5b.** Both want the same object — a workspace bound to a ref.
+- **10.13 (stash) before 5b is comfortable**, since the workaround for one
+  repository and two branches is the thing stash exists for.
+- **6a with 10.10**, because they are the second and third feeds of one panel
+  and the panel's shape should be decided once.
+
+---
+
+### 14.10 What this plan is not, and the standing caution
+
+**It is not an estimate.** Nothing here carries a number of days, because this
+file has no track record of estimating and inventing one would be the same
+false precision §1 keeps stripping out of its own counts. What it carries is
+*order* and *dependency*, which are the parts that are wrong in a way somebody
+can notice.
+
+**It is not a promise that these are the right rows.** §12's closing table
+ranks the three methods this file has used and says the third — asking what a
+category has — is the weakest and produces long lists cheaply. Ten of the
+twenty-eight rows below came from it. The two things that would most change
+this plan are both cheap and neither has been done: **use it as a daily editor
+for a week** (§10 warned about this and it remains the largest untested claim
+in the file), and **watch a real host under real use** (which 2b needs before
+it can be started at all).
+
+**And §4's lesson applies to this section too.** That section is a per-item
+order, mostly struck through, and its most useful paragraph is the one saying
+the work found by looking is roughly twice the work written down. A plan is a
+statement about the work that is known. It has never once been the whole of it.
+
+### What was verified for this section
+
+A plan is mostly references to rows that were verified where they were written,
+so this list is short by design — it covers only the claims §14 makes for the
+first time or restates as a reason to sequence something. Checked against the
+tree on 2026-09-09.
+
+- **The row count.** `grep -c '^- \[ \]'` over this file returns **28**, and
+  `grep -c '^- \[x\]'` returns **158**, both unchanged by this section — which
+  is the property §14.0 claims and the one most likely to rot.
+- **§3.3's Debugging and 10.6 are the same work in two rows.** §3.3's own text
+  says "Revisit the route, not the row" and names §10.1 as what it is blocked
+  on. Recorded rather than merged: a row belongs to its section, and §1's total
+  should be read knowing it.
+- **13.3.** `grep -rl webhook` over `routes/` and `controllers/` returns
+  `billing.ts` and its test, and nothing else. The GitHub path has no receiver.
+- **10.11.** `grep -rn createDiffEditor apps/web/src` — **0 hits**. Monaco's
+  own side-by-side diff is unused.
+- **10.13.** `grep -n 'stash\|blame' gitService.ts` — **0 hits**.
+- **13.4.** `gitService.ts:475` — `switchBranch` operates on the project's
+  single working tree.
+- **13.8.** `envVars` appears **once** in the whole schema, on `Project`. There
+  is no second scope.
+- **13.11.** `editorSettingsStore`, `keybindingStore`, `workspaceStore` and
+  `aiChatStore` all persist to `localStorage`; no endpoint reads or writes any
+  of them.
+
+**Not verified, and it is the load-bearing one for the whole section:** the
+ordering. Nobody has used this as a daily editor for a week, and §10 said when
+it was written that such a week "would almost certainly reorder these rows —
+most likely by promoting something in 10.14 that reads trivial here and is
+intolerable in practice". That warning now applies to fourteen phases rather
+than nine rows, and it is the single cheapest thing anybody could do to
+falsify this plan.
