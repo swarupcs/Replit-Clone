@@ -1,4 +1,5 @@
 import http from "node:http";
+import { PassThrough } from "node:stream";
 import type { AddressInfo } from "node:net";
 import WebSocket from "ws";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +22,10 @@ const handleTerminalCreation = vi.hoisted(() =>
   >(),
 );
 
+/** The reconnect path, which starts no exec at all — it binds a new socket to
+ *  a session that is already running. plan.md §13.7. */
+const bindSocketToSession = vi.hoisted(() => vi.fn());
+
 const projectService = vi.hoisted(() => ({
   assertProjectAccess: vi.fn<() => Promise<{ id: string; template: string }>>(
     () => Promise.resolve({ id: "p", template: "node" }),
@@ -34,16 +39,17 @@ interface WatchedConnection {
 }
 
 const watchAccess = vi.hoisted(() =>
-  vi.fn<
-    (id: string, connection: WatchedConnection) => () => void
-  >(() => () => {
-    // release, by default a no-op
-  }),
+  vi.fn<(id: string, connection: WatchedConnection) => () => void>(
+    () => () => {
+      // release, by default a no-op
+    },
+  ),
 );
 
 vi.mock("../containers/containerManager.js", () => containerManager);
 vi.mock("../containers/handleTerminalCreation.js", () => ({
   handleTerminalCreation,
+  bindSocketToSession,
 }));
 vi.mock("../service/projectService.js", () => projectService);
 vi.mock("../service/accessWatch.js", () => ({ watchAccess }));
@@ -56,9 +62,35 @@ vi.mock("../lib/logger.js", () => ({
 
 import { installTerminalGateway } from "./terminalGateway.js";
 import { signAccessToken } from "../service/tokenService.js";
+import {
+  Scrollback,
+  findSession,
+  registerSession,
+  resetSessionsForTest,
+} from "./terminalSessions.js";
+import type { TerminalSession } from "./terminalSessions.js";
 
 const PROJECT = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const USER = { sub: "11111111-1111-4111-8111-111111111111", email: "a@example.com" };
+
+/** A session already running, as the reconnect path would find one. Only the
+ *  fields the gateway reads are real; the exec and the stream behind a live
+ *  one are `handleTerminalCreation`'s business and are tested there. */
+function fakeSession(id: string, projectId: string): TerminalSession {
+  return {
+    id,
+    projectId,
+    terminalId: 1,
+    ws: null,
+    detachedAt: Date.now(),
+    graceTimer: null,
+    ended: false,
+    reattachable: true,
+    release: () => undefined,
+    scrollback: new Scrollback(1024),
+    stream: new PassThrough(),
+  } as unknown as TerminalSession;
+}
 
 /** The terminal reads the token from the WebSocket subprotocol list, after the
  *  literal "auth" marker — nothing else may carry it. */
@@ -97,11 +129,16 @@ afterEach(async () => {
 function openSocket(
   protocols: string[] = authProtocols(),
   projectId: string | null = PROJECT,
+  /** What the client calls this terminal, so a reconnect can ask for the shell
+   *  it already had. Absent by default, which is the pre-§13.7 client. */
+  sessionKey?: string,
 ): Promise<{ ws: WebSocket; outcome: "open" | "rejected"; code?: number; reason?: string }> {
-  const ws = new WebSocket(
-    projectId === null ? url : `${url}?projectId=${projectId}`,
-    protocols,
-  );
+  const query =
+    projectId === null
+      ? ""
+      : `?projectId=${projectId}${sessionKey ? `&session=${sessionKey}` : ""}`;
+
+  const ws = new WebSocket(projectId === null ? url : `${url}${query}`, protocols);
   sockets.add(ws);
 
   return new Promise((resolve) => {
@@ -134,6 +171,9 @@ describe("installTerminalGateway", () => {
         expect.any(Number),
         // The project's own run command, so a shell's $START_COMMAND names the
         // same thing the Run button runs. Undefined when it has none.
+        undefined,
+        // No session, because this socket named none: an unnamed terminal
+        // keeps the lifecycle it had before §13.7.
         undefined,
       ),
     );
@@ -289,5 +329,143 @@ describe("installTerminalGateway", () => {
 
     expect(containerManager.attach).toHaveBeenCalledTimes(1);
     expect(containerManager.detach).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** plan.md §13.7. The gateway's half of a terminal that survives a
+ *  disconnect: deciding whether a socket is a new terminal or one coming
+ *  back, and refusing to let one person's key reach another person's shell. */
+describe("a socket that names its terminal", () => {
+  const KEY = "abcdefgh-1234";
+
+  afterEach(() => {
+    resetSessionsForTest();
+  });
+
+  it("passes the session on so the shell can outlive this socket", async () => {
+    const { outcome } = await openSocket(authProtocols(), PROJECT, KEY);
+
+    expect(outcome).toBe("open");
+    await vi.waitFor(() =>
+      expect(handleTerminalCreation).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        "node",
+        expect.any(Function),
+        expect.any(Number),
+        undefined,
+        expect.objectContaining({
+          id: `${USER.sub}:${PROJECT}:${KEY}`,
+          projectId: PROJECT,
+        }),
+      ),
+    );
+  });
+
+  it("reattaches to a running session instead of starting a second shell", async () => {
+    registerSession(fakeSession(`${USER.sub}:${PROJECT}:${KEY}`, PROJECT));
+
+    const { outcome } = await openSocket(authProtocols(), PROJECT, KEY);
+
+    expect(outcome).toBe("open");
+    await vi.waitFor(() => expect(bindSocketToSession).toHaveBeenCalled());
+
+    // The point of the reconnect path: no exec, and — just as important — no
+    // `ensureContainer`, because the session is what is holding that container
+    // up in the first place.
+    expect(handleTerminalCreation).not.toHaveBeenCalled();
+    expect(containerManager.ensureContainer).not.toHaveBeenCalled();
+  });
+
+  it("does not let one person's key reach another person's shell", async () => {
+    // Registered under a DIFFERENT user, with the same project and the same
+    // client key. The user id is part of the session id rather than something
+    // compared afterwards, so this cannot resolve — it looks up nothing.
+    registerSession(
+      fakeSession(`22222222-2222-4222-8222-222222222222:${PROJECT}:${KEY}`, PROJECT),
+    );
+
+    const { outcome } = await openSocket(authProtocols(), PROJECT, KEY);
+
+    expect(outcome).toBe("open");
+    await vi.waitFor(() => expect(handleTerminalCreation).toHaveBeenCalled());
+    expect(bindSocketToSession).not.toHaveBeenCalled();
+  });
+
+  it("treats a malformed key as no key at all", async () => {
+    // An old client, a browser that could not store one, or somebody probing.
+    // Refusing would break a client that works; this gives it a terminal that
+    // simply does not survive a disconnect.
+    const { outcome } = await openSocket(authProtocols(), PROJECT, "short");
+
+    expect(outcome).toBe("open");
+    await vi.waitFor(() =>
+      expect(handleTerminalCreation).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        "node",
+        expect.any(Function),
+        expect.any(Number),
+        undefined,
+        undefined,
+      ),
+    );
+  });
+
+  it("gives each socket its own access watch, not one per terminal", async () => {
+    const released: string[] = [];
+    const registered: string[] = [];
+    watchAccess.mockImplementation((id) => {
+      registered.push(id);
+      return () => released.push(id);
+    });
+
+    const id = `${USER.sub}:${PROJECT}:${KEY}`;
+    registerSession(fakeSession(id, PROJECT));
+
+    const first = await openSocket(authProtocols(), PROJECT, KEY);
+    await vi.waitFor(() => expect(registered).toHaveLength(1));
+
+    const second = await openSocket(authProtocols(), PROJECT, KEY);
+    await vi.waitFor(() => expect(registered).toHaveLength(2));
+
+    // The watch used to be keyed `terminal:<terminalId>`, which was right
+    // while a terminal had one socket for its whole life. A reconnect gives it
+    // two, and `watchAccess` is a map whose release deletes the key — so the
+    // departing socket deleted the watch belonging to the one that replaced
+    // it, leaving a live shell nothing was checking.
+    expect(new Set(registered).size).toBe(2);
+
+    first.ws.close();
+    await vi.waitFor(() => expect(released).toHaveLength(1));
+    expect(released[0]).toBe(registered[0]);
+    expect(released).not.toContain(registered[1]);
+
+    second.ws.close();
+  });
+
+  it("ends the session when access is revoked, not just the socket", async () => {
+    let revoked: (() => void) | undefined;
+    watchAccess.mockImplementation((_id, connection) => {
+      revoked = connection.onRevoked;
+      return () => undefined;
+    });
+
+    const id = `${USER.sub}:${PROJECT}:${KEY}`;
+    registerSession(fakeSession(id, PROJECT));
+
+    const { ws, outcome } = await openSocket(authProtocols(), PROJECT, KEY);
+    expect(outcome).toBe("open");
+    await vi.waitFor(() => expect(revoked).toBeDefined());
+
+    const closed = nextClose(ws);
+    revoked?.();
+    expect((await closed).code).toBe(4403);
+
+    // Closing the socket WAS ending the shell before §13.7. It is not any
+    // more, so a revocation that only closed the socket would leave a shell
+    // inside a container belonging to somebody who has just lost access to it
+    // — and hand it back if they reconnected inside the grace window.
+    expect(findSession(id)).toBeUndefined();
   });
 });

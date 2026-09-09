@@ -141,15 +141,15 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 157 items. Open: 29 — five blocked, ten from §10 that are all
+**Done: 158 items. Open: 28 — five blocked, ten from §10 that are all
 waiting on one decision (§10.1), one from §11, which reads the sandbox
 rather than the editor, two from §12, which reads neither and asks what
-a cloud machine is for, and eleven from §13, which names the two products this
+a cloud machine is for, and ten from §13, which names the two products this
 most resembles and diffs against them. §11's last row is 11.10, which needs a
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 5 + 10 + 1 + 2 + 11 = 29, and they are written out
+Those five numbers are 5 + 10 + 1 + 2 + 10 = 28, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **Two corrections were made to this paragraph on 2026-09-09**, both by §13,
@@ -164,14 +164,15 @@ rather than about the tree. Six of §13's eleven rows are unblocked under every
 route, because none of them is in the editor.
 
 **§10.1 is still the whole of the critical path for the editor, and it is no
-longer the whole of the critical path.** Ten of the twenty-nine open items are
+longer the whole of the critical path.** Ten of the twenty-eight open items are
 behind it, it is a decision rather than work, and as of 2026-09-05 it has a
 third option costed against a real spike rather than an argument. It is still
 the single most valuable thing anybody could spend an hour on. What changed on
 2026-09-09 is that it is no longer the only thing anybody could spend an hour
-on: §13.7 — a terminal that is killed by its own WebSocket closing — is
-unblocked, half-written already, and the one row in this file where this
-platform is worse than the laptop it proposes to replace.
+on — and §13.7, the row that made that point, **shipped the same day it was
+written** (§2.46), which is the second time a §13 claim about where this
+document had been looking was settled by building something rather than by
+arguing.
 
 **The Done figure jumped from 123 to 148 in one edit on 2026-09-05, and that
 was a correction rather than a day's work.** By the same count §1 has always
@@ -206,11 +207,13 @@ for the second factor to be turned on before the name exists), and **three in §
 2026-09-05, the day the section was written; 12.2 split 12.5 out of itself on
 the way, so the section is one row shorter and one row longer than it started;
 12.4 is unstartable without different hardware and has been set aside), and
-**eleven in §13**, of which six are unblocked under every route — the first
+**ten in §13**, of which five are unblocked under every route — the first
 unblocked work this page has carried since 2026-09-05, and the reason the
-sentence claiming there was none has been struck above.
+sentence claiming there was none has been struck above. The sixth was 13.7,
+which shipped on 2026-09-09, the day the section was written.
 
-**§13 was written on 2026-09-09 and adds eleven.** It is the fourth method
+**§13 was written on 2026-09-09 and adds eleven, one of which shipped the same
+day.** It is the fourth method
 this file has used and a sharpened form of the weakest one: name the two
 products this most resembles — CodeSandbox, and a personal VS Code on a server
 — and diff against each. It deliberately repeats nothing from §10, §11 or §12,
@@ -219,7 +222,8 @@ eleven are unblocked by §10.1 because none of them is in the editor; its first
 row is a terminal that its own socket closing kills, which is a defect wearing
 a feature's clothes and was found the way §1 says the real ones are found — by
 reading §11.7's dropped-connection handling against the container fix of
-2026-09-04.
+2026-09-04. It shipped that day (§2.46), and finding two further defects on the
+way is the same method paying out twice more.
 
 **§12 was written on 2026-09-05 and adds four.** It is the residue of §10 and
 §11 rather than a third reading of the same ground: §10 asks what Monaco cannot
@@ -438,9 +442,9 @@ ends at a container, so there is no anonymous sandbox (§13.1), no
 container-free preview (§13.2), no URL per pull request (§13.3), no second
 checkout of one repository (§13.4), no devtools for the previewed app (§13.5),
 and no pairing link for somebody without an account (§13.6). For a *personal
-cloud editor*: a terminal is killed when its WebSocket closes, so closing the
-laptop kills the build (§13.7); secrets belong to a project rather than to the
-account (§13.8); no credential inside the sandbox can clone a private
+cloud editor*: ~~a terminal is killed when its WebSocket closes, so closing the
+laptop kills the build (§13.7)~~ — fixed 2026-09-09, §2.46; secrets belong to
+a project rather than to the account (§13.8); no credential inside the sandbox can clone a private
 repository (§13.9); the editor has one mobile breakpoint and nothing else
 (§13.10); and the session — tabs, splits, settings — lives in `localStorage`
 rather than on the server it is connected to (§13.11).
@@ -2852,6 +2856,134 @@ is applied — 38 now, `migrate status` clean.
 and the migration is real, but nobody has imported a Next repository and loaded
 its preview. That needs a GitHub import, and it is the same one-step-further
 gap 2.43 was written about.
+
+
+### 2.46 Since (2026-09-09) — §13.7, the shell that a socket's close was killing
+
+The first row off §13, and the one that section named as the thing to do if
+only one thing got done. It is also the clearest case yet of the pattern §1
+keeps stating: **it was found by reading two shipped things against each
+other**, not by asking what a competitor has, even though it is written down
+in a section built by asking exactly that.
+
+**What was wrong.** `handleTerminalCreation` registered its teardown on
+`ws.on("close")` and `ws.on("error")`, and that teardown called `hangUpShell`,
+which SIGHUPs the shell's process group. So the WebSocket closing ended the
+shell **and everything it had started**. Closing a laptop, a train tunnel, a
+tab the OS discarded under memory pressure, a browser put to sleep, or fifteen
+seconds of bad wifi killed a running `npm run build`, a migration, a `docker
+compose pull` or a test run — with no record anywhere and nothing to come back
+to. On the product whose whole proposition is that the work lives on a machine
+you reach over a network, that made the network the one thing the work could
+not survive.
+
+**Why the code was like that, and why none of it could be reverted.** The
+hangup is not incidental and it is not wrong. It closes a real leak, found on
+2026-09-04 by looking at a running container — one of the three defects §3.1
+records as having been predicted by nothing in this document. Docker keeps the
+pty open when the stream goes, so before the hangup existed every closed
+terminal left a `/bin/bash` behind: a dev server holding port 3000 that nothing
+could see, `npm start` answering EADDRINUSE in a terminal that looked empty,
+and zombies accumulating against a `PidsLimit` of 256. **The bug was never that
+the shell is hung up. It is *when*.**
+
+**And §11.7 had already decided this exact question the other way, the same
+week.** A dropped connection is an ordinary event and not a decision by the
+user, so unsaved edits are kept across one and offered back rather than
+replayed. Two correct decisions, composing into a product where your *text*
+survived the tunnel and your *build* did not. Neither decision was wrong on its
+own, and nothing in either of them could see the other — which is the whole
+argument for the method that found it.
+
+**What shipped.** A shell now belongs to a **session**, not to a socket.
+
+- `terminal/terminalSessions.ts`, new: a registry keyed by
+  `userId:projectId:clientKey`. The user id is *in* the key rather than
+  compared afterwards, so a valid key presented by the wrong person resolves to
+  nothing rather than failing a check somebody could later forget to write.
+- A disconnect **detaches** and starts a timer. A reconnect inside the window
+  re-binds to the same pty. Only the timer hangs up, through the same
+  `hangUpShell` on the same pid file — the leak stays closed, half an hour
+  later instead of instantly.
+- **A scrollback**, replayed on reattach, because reconnecting to a live pty
+  with a blank pane and no way to know whether the build finished is barely
+  better than a new shell. Bounded, oldest dropped first: a detached client
+  applies no backpressure, so that cap is the only thing between a `yes` loop
+  and this server's heap.
+- **The session owns the container attachment**, not the socket. A detached
+  session running a build is a real use of that container, and the idle reaper
+  skips projects with attachments — so this is what stops the reaper stopping
+  the container out from under the very thing this row exists to protect. It is
+  also what bounds the cost: a forgotten tab pins a workspace for the grace
+  window plus `CONTAINER_IDLE_MINUTES`, and no longer.
+- `TERMINAL_DETACH_GRACE_SECONDS` (default 30 minutes), and **0 restores the
+  old behaviour exactly**, without patching code. The default is chosen against
+  what the window is for — a commute, a meeting, a lid closed between two
+  buildings, all of which are minutes — rather than against "my build takes an
+  hour", which is what the Run button is for and says so.
+
+**Four things end a session, and naming them was most of the design.** The
+grace window expiring; the shell exiting (`exit`, or the container going), in
+which case there is no pty to come back to and holding the container would be
+holding it for nothing; the container being stopped, removed, or rebuilt for a
+changed environment signature — three call sites in `containerManager`,
+because a session outliving its container holds an attachment against a
+container that no longer exists and the reaper would then never reclaim the new
+one; and **the client saying so**.
+
+That last one is the half only the client knows. A socket that drops looks
+identical from the server whether the user closed the pane on purpose or walked
+into a tunnel, and closing a pane deliberately should hold nothing. So
+`BottomPanel.closeTerminal` forgets the terminal's key and `BrowserTerminal`'s
+teardown reads its absence as intent — no registry, no extra prop, and the
+right answer for every other way a pane can unmount (navigating away, a
+reconnect, a re-render), all of which leave the key in place.
+
+**Two defects found in this work, and both are the kind this file says to
+expect.**
+
+1. **The access watch was keyed per terminal, and a terminal now has more than
+   one socket.** `watchAccess` is a `Map` whose release deletes its key, and
+   both sockets of a reconnect registered `terminal:<terminalId>` — so the
+   departing socket deleted the watch belonging to the socket that replaced it,
+   leaving a live shell that nothing was rechecking. That is precisely the hole
+   `watchAccess` was written to close, reopened by giving a shell a second
+   socket. Reliable rather than racy on the takeover path, where `attachSocket`
+   closes the previous socket itself. Now keyed per connection. The test for it
+   was checked by reintroducing the old key and watching it fail.
+2. **Revocation stopped ending the shell.** Closing the socket *was* ending the
+   shell before this, so `onRevoked` needed nothing else. It does now:
+   `endUserSessions` runs before the close, or a person removed from a project
+   would keep a shell running inside its container — and get it back if they
+   reconnected inside the window.
+
+**One thing got simpler rather than more complicated.** The client used to send
+a bare newline on every connect, to make bash redraw a prompt printed before
+the socket attached. Output produced while nobody is attached is now held and
+replayed, so nothing is missed and the newline is not only unnecessary but
+wrong: on a reconnect it is a keystroke pressed into whatever is running.
+Deleted.
+
+**Also guarded, because a shell outliving its socket is a shell a client can
+accumulate:** `TERMINAL_MAX_SESSIONS_PER_PROJECT` (8), which gives up detached
+sessions oldest-first and only refuses when every terminal on the project has
+somebody attached and looking at it — and then says so, rather than closing the
+socket with no reason.
+
+Server: 2382 passing, 269 skipped — no database configured here, so read that
+against §1's no-database row and not against its DB-gated one. Web: 1321
+passing. Typecheck and lint clean, 3/3. No migration: sessions are process
+state, and deliberately so — a restart has no pty to restore, and the shells a
+crash leaves behind are what `reclaimShells` was already written to sweep.
+
+**Not verified, and it is the load-bearing one.** Nobody has closed a laptop
+mid-build and watched this work. §13.7 said that when it was written and it is
+still true: what is tested is every branch of the session lifecycle against a
+fake container, and what is not tested is the thing the row is about. The
+container layer is also exactly where §3.1 records three defects that no test
+and no section of this document predicted, all found by looking at a running
+container — so the honest reading is that this needs an afternoon with a real
+one before anybody calls it done.
 
 ---
 
@@ -5823,7 +5955,9 @@ on a machine you are connected to.** A local editor never has to survive the
 network, and every row below is something that only becomes a question because
 the machine is somewhere else.
 
-- [ ] **13.7 A terminal that survives the laptop closing.**
+- [x] **13.7 A terminal that survives the laptop closing.** Shipped
+      2026-09-09 — see §2.46. Original note follows.
+
       The sharpest row in this section, found the way §1 says the real ones are
       found — by reading two shipped things against each other — and the one
       that is most clearly a defect wearing a feature's clothes.
@@ -5949,6 +6083,13 @@ the machine is somewhere else.
 
 ### Order, and what to do first if only one thing gets done
 
+~~**13.7, and it is not close.**~~ **Shipped 2026-09-09, the day this section
+was written — §2.46.** The reasoning below held, including about where the work
+was: half the mechanism really was already written, and the half that was not
+turned out to be the four things that end a session rather than the detach
+itself. **Next, now that it is done:** 13.8 on a personal deployment, 13.3 on a
+shared one. Original note follows.
+
 **13.7, and it is not close.** It is a defect in everything but name, its cost
 is measured in somebody's lost build rather than in a missing feature, half its
 mechanism (`reclaimShells`, the pid files) is already written, and it is the
@@ -5963,7 +6104,8 @@ Then, and the split is by which question the deployment is answering:
 panel that exists) → 13.2 (the container-free preview) → 13.1 (which 13.2 makes
 affordable) → 13.6 → 13.4.
 
-**If one person uses it** — 13.8 (account secrets, the cheapest real row here)
+**If one person uses it** — ~~13.7~~ (done) → 13.8 (account secrets, the
+cheapest real row here)
 → 13.11 (session on the server) → 13.9 (credentials, once §10.1 is settled,
 since Route C changes the answer) → and stop. 13.1 through 13.6 have no user
 at n=1 for the reasons §10.5 already set out, and 13.10 probably has none

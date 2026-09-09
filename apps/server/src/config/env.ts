@@ -558,6 +558,65 @@ const envSchema = z.object({
     .default(unshared ? 2 : 0.5),
   CONTAINER_IDLE_MINUTES: z.coerce.number().int().positive().default(20),
 
+  /** How long a terminal whose socket went keeps its shell. plan.md §13.7.
+   *
+   *  Zero restores the behaviour this replaced -- the shell is hung up the
+   *  instant the WebSocket closes -- and is offered because a deployment that
+   *  would rather pay nothing for a dropped connection should not have to
+   *  patch the code to say so.
+   *
+   *  Thirty minutes is chosen against what it is for and what it costs. What
+   *  it is for: a commute, a meeting, a lid closed between two buildings, a
+   *  browser tab the OS discarded -- all of which are minutes, not hours. What
+   *  it costs: a detached session holds an attachment, so the idle reaper
+   *  cannot stop that container while the window runs, and a forgotten tab
+   *  therefore pins a workspace for this long plus CONTAINER_IDLE_MINUTES.
+   *  Both halves are bounded and neither is free, which is why this is a
+   *  number somebody can change rather than a constant.
+   *
+   *  It is deliberately NOT the answer to "my build takes an hour". A shell is
+   *  hung up with its jobs, so a command that must outlive its terminal
+   *  belongs to the Run button, which tracks its own process group and is not
+   *  swept -- the bargain `reclaimScript` already describes.
+   */
+  TERMINAL_DETACH_GRACE_SECONDS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(30 * 60),
+
+  /** How much output a detached terminal holds for the client that left.
+   *
+   *  Replayed on reattach, and it is the half of §13.7 anybody sees: coming
+   *  back to a live pty showing a blank pane, with no way to know whether the
+   *  build finished, is barely better than coming back to a new shell. 256 KB
+   *  is a long install or a stack trace and several screens either side of it.
+   *
+   *  Bounded because a detached client applies no backpressure: nothing else
+   *  stands between a process writing into a session nobody is reading and
+   *  this server's heap.
+   */
+  TERMINAL_SCROLLBACK_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(256 * 1024),
+
+  /** How many terminal sessions one project may hold at once.
+   *
+   *  A session that outlives its socket is a session a client can accumulate,
+   *  and each is a `/bin/bash` against the container's `PidsLimit` of 256 as
+   *  well as a scrollback budget here. Reached by opening terminals rather
+   *  than by anything adversarial, so the cap gives up detached sessions
+   *  oldest-first rather than refusing -- and only refuses when every one of
+   *  them has somebody attached and looking at it.
+   */
+  TERMINAL_MAX_SESSIONS_PER_PROJECT: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(8),
+
   /** What the host keeps back from workspaces, in MB.
    *
    *  plan.md §12.1. This server, Postgres, the egress gateway and the OS all

@@ -9,6 +9,7 @@ import {
   VscWarning,
 } from "react-icons/vsc";
 import { BrowserTerminal } from "../../molecules/BrowserTerminal/BrowserTerminal.tsx";
+import { forgetTerminalSession } from "../../../lib/terminalSessionKeys.ts";
 import { RunOutput } from "../../molecules/RunOutput/RunOutput.tsx";
 import { ProblemsPanel } from "../ProblemsPanel/ProblemsPanel.tsx";
 import {
@@ -70,6 +71,13 @@ export const BottomPanel = ({ projectId }: BottomPanelProps) => {
   }
 
   function closeTerminal(id: number) {
+    // The user closing a terminal is the one case where its shell should end
+    // at once rather than be held for a reconnect (plan.md §13.7). Forgetting
+    // the key is how that intent reaches `BrowserTerminal`, whose teardown
+    // cannot otherwise tell this apart from navigating away or a lost socket
+    // — every one of those unmounts the same pane the same way.
+    forgetTerminalSession(projectId, id);
+
     setTerminals((current) => {
       const remaining = current.filter((entry) => entry !== id);
 
@@ -298,7 +306,7 @@ export const BottomPanel = ({ projectId }: BottomPanelProps) => {
       {canEdit ? (
         terminals.map((id) => (
           <Pane key={id} visible={active.kind === "terminal" && active.id === id}>
-            <BrowserTerminal projectId={projectId} />
+            <BrowserTerminal projectId={projectId} tabId={id} />
           </Pane>
         ))
       ) : (

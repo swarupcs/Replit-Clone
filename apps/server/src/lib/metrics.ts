@@ -63,6 +63,14 @@ export type CounterName =
   | "preview_errors"
   | "preview_upgrades_rejected"
   | "terminal_sessions"
+  // Terminals whose socket went and whose shell was kept (plan.md §13.7).
+  // `terminal_reattached` against `terminal_detached` is the only measure of
+  // whether the grace window is set to anything useful: detaches that are
+  // never reattached are shells held for nobody, and the ratio is what says
+  // whether TERMINAL_DETACH_GRACE_SECONDS is too long or too short.
+  | "terminal_detached"
+  | "terminal_reattached"
+  | "terminal_sessions_ended"
   | "quota_rejections"
   | "search_timeouts"
   | "auth_failures"
