@@ -9,6 +9,7 @@ import type {
   ApiSuccess,
   CreatedApiKey,
   MachineStatus,
+  AccountSecrets,
   Personalization,
   PersonalizationUpdate,
   ModerationAction,
@@ -1067,6 +1068,27 @@ export const getAccountApi = async (): Promise<AccountSummary> => {
  *
  *  On /account rather than under a project, because it is a property of the
  *  PERSON -- the same settings apply in a project somebody else owns. */
+/** Account-wide environment variables. plan.md §13.8. */
+export const getAccountSecretsApi = async (): Promise<AccountSecrets> => {
+  const response = await axios.get<ApiSuccess<AccountSecrets>>(
+    "/api/v1/account/secrets",
+  );
+  return response.data.data;
+};
+
+/** The whole set replaces the whole set -- a patch cannot express "delete this
+ *  one", and deletion is the operation somebody most needs to be sure of when
+ *  what they are deleting is a live credential. */
+export const setAccountSecretsApi = async (
+  vars: Record<string, string>,
+): Promise<AccountSecrets> => {
+  const response = await axios.put<ApiSuccess<AccountSecrets>>(
+    "/api/v1/account/secrets",
+    { vars },
+  );
+  return response.data.data;
+};
+
 export const getPersonalizationApi = async (): Promise<Personalization> => {
   const response = await axios.get<ApiSuccess<Personalization>>(
     "/api/v1/account/personalization",

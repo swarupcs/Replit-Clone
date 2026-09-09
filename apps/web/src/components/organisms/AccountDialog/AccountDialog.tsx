@@ -11,6 +11,7 @@ import {
 import { getAccountApi } from "../../../apis/projects.ts";
 import { ApiKeys } from "./ApiKeys.tsx";
 import { Identity } from "./Identity.tsx";
+import { Secrets } from "./Secrets.tsx";
 import { Security } from "./Security.tsx";
 import { TrashPanel } from "../TrashPanel/TrashPanel.tsx";
 import { useDeployment } from "../../../hooks/useDeployment.ts";
@@ -225,7 +226,7 @@ function hours(seconds: number): string {
 
 export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
   const [tab, setTab] = useState<
-    "usage" | "keys" | "trash" | "identity" | "security"
+    "usage" | "keys" | "trash" | "identity" | "secrets" | "security"
   >("usage");
 
   const { data, isLoading, error } = useQuery<AccountSummary>({
@@ -261,6 +262,10 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
           // not of any one project: the same dotfiles follow you into a
           // project somebody else owns.
           { label: "Identity", value: "identity" },
+          // plan.md §13.8. Beside Identity and not inside it, for the split
+          // that panel already makes: Identity is what makes a container LOOK
+          // like your machine, and this is what it can REACH.
+          { label: "Secrets", value: "secrets" },
           // plan.md §11.6. Beside Identity rather than inside it: that panel
           // is about what follows you into a container, and this is about who
           // is allowed to open one.
@@ -268,7 +273,15 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
         ]}
         value={tab}
         onChange={(value) => {
-          setTab(value as "usage" | "keys" | "trash" | "identity" | "security");
+          setTab(
+            value as
+              | "usage"
+              | "keys"
+              | "trash"
+              | "identity"
+              | "secrets"
+              | "security",
+          );
         }}
         style={{ marginBottom: 16 }}
       />
@@ -277,6 +290,8 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
         <ApiKeys />
       ) : tab === "identity" ? (
         <Identity />
+      ) : tab === "secrets" ? (
+        <Secrets />
       ) : tab === "security" ? (
         <Security />
       ) : tab === "trash" ? (

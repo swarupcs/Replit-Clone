@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { databaseEnv } from "./managedDatabaseService.js";
+import { accountEnvVars } from "./accountSecretService.js";
 import { BadRequestError } from "../utils/errors.js";
 import { isSecretBoxConfigured, looksSealed, open, seal } from "../lib/secretBox.js";
 import { logger } from "../lib/logger.js";
@@ -51,9 +52,19 @@ const MAX_VARIABLES = 100;
 const MAX_VALUE_LENGTH = 4096;
 
 export const envVarsSchema = z
+  // The key schema is deliberately permissive and the NAME rule is a refine
+  // below. `z.record` reports a bad KEY as "Invalid key in record" and drops
+  // the message attached to the key schema, so a user who typed `MY VAR` was
+  // told nothing about what was wrong with it. Found while building §13.8,
+  // which reuses this validator: the same unhelpful string would have been the
+  // account panel's only feedback.
   .record(
-    z.string().regex(NAME_PATTERN, "Names must look like MY_VARIABLE"),
+    z.string(),
     z.string().max(MAX_VALUE_LENGTH, "Value is too long"),
+  )
+  .refine(
+    (value) => Object.keys(value).every((name) => NAME_PATTERN.test(name)),
+    "Names must look like MY_VARIABLE",
   )
   .refine(
     (value) => Object.keys(value).length <= MAX_VARIABLES,
@@ -134,8 +145,13 @@ export function parseEnvVars(raw: unknown): EnvVars {
   return result;
 }
 
-/** The stored form of a set of variables: names as they are, values sealed. */
-function sealAll(vars: EnvVars): Record<string, string> {
+/** The stored form of a set of variables: names as they are, values sealed.
+ *
+ *  Exported since §13.8, which stores the same shape against an ACCOUNT. Two
+ *  copies of this would be two answers to "is this column encrypted", and the
+ *  one that drifted would be the one nobody was looking at.
+ */
+export function sealEnvVars(vars: EnvVars): Record<string, string> {
   if (!canSeal()) return { ...vars };
 
   return Object.fromEntries(
@@ -146,10 +162,25 @@ function sealAll(vars: EnvVars): Record<string, string> {
 export async function getEnvVars(projectId: string): Promise<EnvVars> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { envVars: true },
+    select: { envVars: true, ownerId: true },
   });
 
   const own = parseEnvVars(project?.envVars);
+
+  // The owner's account-wide variables, underneath everything (§13.8). One
+  // person with one ANTHROPIC_API_KEY should not have to type it into every
+  // workspace, and rotating it should not mean editing each by hand.
+  //
+  // Weakest of the three on purpose: an account value is the least specific
+  // thing anybody said. It is also why this is read here rather than at
+  // container start — `envSignature` is computed from what this returns, so
+  // changing an account secret changes the signature of every project that
+  // owner has, and each is rebuilt on its next start rather than keeping the
+  // old value for the rest of its life. Exactly the reasoning the managed
+  // database's URL is placed here for.
+  const account = project
+    ? await accountEnvVars(project.ownerId).catch(() => ({}))
+    : {};
 
   // A managed database's URL joins here rather than being added at container
   // start, and that placement is the point: `envSignature` is computed from
@@ -162,7 +193,7 @@ export async function getEnvVars(projectId: string): Promise<EnvVars> {
   // said which database they mean, and silently overriding it would be the
   // platform arguing with them.
   const managed = await databaseEnv(projectId).catch(() => ({}));
-  return { ...managed, ...own };
+  return { ...account, ...managed, ...own };
 }
 
 export async function setEnvVars(
@@ -180,7 +211,7 @@ export async function setEnvVars(
 
   await prisma.project.update({
     where: { id: projectId },
-    data: { envVars: sealAll(parsed.data) },
+    data: { envVars: sealEnvVars(parsed.data) },
   });
 
   // The plaintext the caller sent, not a re-read: they are entitled to it,

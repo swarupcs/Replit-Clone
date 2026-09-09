@@ -56,7 +56,7 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2384 passing**, 36 skipped. Green 2026-09-05 against all **37** migrations |
+| the same, with `TEST_DATABASE_URL` set | **2698 passing**, 9 skipped. Green 2026-09-09 against all **39** migrations, on a Postgres 16 initialised by hand — see §2.48. The 9 need a Docker daemon, not a database |
 | `pnpm --filter web test` | **1166 passing** (91 files) |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
@@ -146,15 +146,15 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 159 items. Open: 27 — four blocked, ten from §10 that are all
+**Done: 160 items. Open: 26 — four blocked, ten from §10 that are all
 waiting on one decision (§10.1), one from §11, which reads the sandbox
 rather than the editor, two from §12, which reads neither and asks what
-a cloud machine is for, and ten from §13, which names the two products this
+a cloud machine is for, and nine from §13, which names the two products this
 most resembles and diffs against them. §11's last row is 11.10, which needs a
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 10 + 1 + 2 + 10 = 27, and they are written out
+Those five numbers are 4 + 10 + 1 + 2 + 9 = 26, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -219,10 +219,10 @@ for the second factor to be turned on before the name exists), and **three in §
 2026-09-05, the day the section was written; 12.2 split 12.5 out of itself on
 the way, so the section is one row shorter and one row longer than it started;
 12.4 is unstartable without different hardware and has been set aside), and
-**ten in §13**, of which five are unblocked under every route — the first
+**nine in §13**, of which four are unblocked under every route — the first
 unblocked work this page has carried since 2026-09-05, and the reason the
-sentence claiming there was none has been struck above. The sixth was 13.7,
-which shipped on 2026-09-09, the day the section was written.
+sentence claiming there was none has been struck above. Two shipped on 2026-09-09, the
+day the section was written: 13.7 (§2.46) and 13.8 (§2.48).
 
 **§13 was written on 2026-09-09 and adds eleven, one of which shipped the same
 day.** It is the fourth method
@@ -458,8 +458,8 @@ container-free preview (§13.2), no URL per pull request (§13.3), no second
 checkout of one repository (§13.4), no devtools for the previewed app (§13.5),
 and no pairing link for somebody without an account (§13.6). For a *personal
 cloud editor*: ~~a terminal is killed when its WebSocket closes, so closing the
-laptop kills the build (§13.7)~~ — fixed 2026-09-09, §2.46; secrets belong to
-a project rather than to the account (§13.8); no credential inside the sandbox can clone a private
+laptop kills the build (§13.7)~~ — fixed 2026-09-09, §2.46; ~~secrets belong to
+a project rather than to the account (§13.8)~~ — fixed 2026-09-09, §2.48; no credential inside the sandbox can clone a private
 repository (§13.9); the editor has one mobile breakpoint and nothing else
 (§13.10); and the session — tabs, splits, settings — lives in `localStorage`
 rather than on the server it is connected to (§13.11).
@@ -3119,6 +3119,84 @@ and that is genuine evidence for the mechanism. It is not evidence for the
 runbook. The row is closed because the mechanism exists and is reachable; the
 drill has not been done, and `docs/BACKUP.md` says so in its own text rather
 than leaving somebody to find out on the day.
+
+
+### 2.48 Since (2026-09-09) — §13.8, one key, typed once
+
+The cheapest real row in §13 and the third thing off §14's plan. `envVars`
+appeared **exactly once** in the schema, on `projects`, so one person with one
+`ANTHROPIC_API_KEY`, one `NPM_TOKEN` and one database URL typed all three into
+every workspace they made — and rotating any of them meant editing every
+project by hand, which is the version of "rotate a key" that does not happen.
+
+**Almost none of this is new code, and that was the argument for taking it
+first.** The sealing, the validator, the reserved-name list, the length limits
+and the "is this encrypted at rest" answer are all `projectEnvService`'s, and
+this reuses every one of them rather than restating any: `sealAll` became
+`sealEnvVars` and is now exported, because two copies of that function would be
+two answers to "is this column encrypted" and the one that drifted would be the
+one nobody was looking at. The column is on `user_personalization`, which is
+already the table answering "what follows this person into every container" —
+dotfiles and a signing key are there for the same reason.
+
+**The merge order is the only genuinely new decision, and it is by
+specificity**: account, then the managed database's URL, then the project's
+own. An account value is the least specific thing anybody said; a database
+provisioned *for this project* is not; a project variable is somebody choosing
+for this project, and it wins. It is read inside `getEnvVars` rather than at
+container start for the reason the managed database's URL is — `envSignature`
+is computed from what that function returns, so changing an account secret
+changes the signature of every project that owner has and each is rebuilt on
+its next start, instead of keeping the old value for the rest of its life.
+
+**The decision that actually mattered was about who can read a container.**
+These go into every container of every project the account owns, *including
+shared ones*, and an editor on a shared project can run `env`. That is not a
+leak this introduces — it is what an editor already is, which is why
+`getProjectEnvController` requires editor and says so — but the blast radius of
+one mistake grew from one project to all of them. Two alternatives were weighed
+and are recorded in the service so they are not re-proposed as fixes:
+withholding account secrets from shared projects would mean **adding a
+collaborator silently changes what a running container has**, breaking it at a
+moment nobody would connect to the cause; and per-project opt-in lists are
+GitHub's answer and a materially larger feature than the row asked for.
+
+What shipped instead is that it is **said where the decision is made**. The
+account panel names the number of the owner's projects that somebody else can
+reach — and only when that number is not zero, because a standing warning about
+a case that does not apply is one people learn to skip. The share dialog says
+it again, next to the role selector, and only when there are secrets to leak
+and the role being granted is editor. A share link that nobody has redeemed
+counts toward that number: it is still a way in.
+
+**One defect found on the way, in code this only borrows.** `envVarsSchema`
+attached "Names must look like MY_VARIABLE" to the record's KEY schema, and
+`z.record` reports a bad key as `Invalid key in record` and drops that message.
+So anybody who typed `MY VAR` into a project's environment panel — for as long
+as that panel has existed — was told nothing about what was wrong with it. The
+name rule is now a refine and the message is the one that was always intended.
+Found by writing a test that asserted on the message this feature would show.
+
+**And the migration was run rather than written.** §5's sharpest entry is two
+migrations that shipped green and had never been executed, because they wrote
+`ALTER TABLE "Project"` where the table is `projects` — nothing in typecheck,
+lint or the suite reads `migration.sql`, only Postgres does. There is no Docker
+in this environment, but there are Postgres 16 binaries, so one was initialised
+by hand and **all 39 migrations were applied from an empty database**. The
+column is `envVars jsonb not null default '{}'` on `user_personalization`, read
+back out of `\d` rather than out of the schema file.
+
+That also made the DB-gated row runnable for the first time in this
+environment: **2698 passing, 9 skipped** with `TEST_DATABASE_URL` set, against
+all 39 migrations. The 9 are `egressProxy` and `serviceDeploy.e2e`, both of
+which need a Docker daemon that is not here — so unlike previous runs of this
+row, nothing is skipped for want of a database. Web: 1333 passing. Typecheck
+and lint clean, 3/3.
+
+**Not verified:** nobody has set an account secret and watched a container come
+up with it. The merge is tested at the seam `getEnvVars` returns, which is what
+`envSignature` and `runEnv` both consume, and that is good evidence — it is not
+the same as reading the variable out of a running shell.
 
 ---
 
@@ -6167,7 +6245,8 @@ the machine is somewhere else.
       n=1 is the entire point of the machine. This is the row where "cloud"
       currently does less than a laptop, not more.
 
-- [ ] **13.8 A secret that belongs to the account, not to each project.**
+- [x] **13.8 A secret that belongs to the account, not to each project.**
+      Shipped 2026-09-09 — see §2.48. Original note follows.
       `envVars` is a `Json` column on `Project` (`schema.prisma:877`), sealed
       by `secretBox` and injected into the container by `runEnv`. There is no
       other scope. One person with one `ANTHROPIC_API_KEY`, one `NPM_TOKEN`
@@ -6261,8 +6340,9 @@ says *why* each row sits where it does.
 was written — §2.46.** The reasoning below held, including about where the work
 was: half the mechanism really was already written, and the half that was not
 turned out to be the four things that end a session rather than the detach
-itself. **Next, now that it is done:** 13.8 on a personal deployment, 13.3 on a
-shared one. Original note follows.
+itself. **Next, now that it is done:** ~~13.8 on a personal deployment~~ — also done
+(§2.48) — so 13.11 on a personal deployment, 13.3 on a shared one. Original
+note follows.
 
 **13.7, and it is not close.** It is a defect in everything but name, its cost
 is measured in somebody's lost build rather than in a missing feature, half its
@@ -6278,8 +6358,7 @@ Then, and the split is by which question the deployment is answering:
 panel that exists) → 13.2 (the container-free preview) → 13.1 (which 13.2 makes
 affordable) → 13.6 → 13.4.
 
-**If one person uses it** — ~~13.7~~ (done) → 13.8 (account secrets, the
-cheapest real row here)
+**If one person uses it** — ~~13.7~~ (done) → ~~13.8~~ (done)
 → 13.11 (session on the server) → 13.9 (credentials, once §10.1 is settled,
 since Route C changes the answer) → and stop. 13.1 through 13.6 have no user
 at n=1 for the reasons §10.5 already set out, and 13.10 probably has none
@@ -6506,6 +6585,12 @@ three of them:
 - **Drive a real client through it.** Nobody has run VS Code's Remote-SSH into
   this. The spike reproduced what that client does server-side, which is strong
   evidence and not the same thing.
+
+**1c. ~~Account-scoped secrets (§13.8).~~ Shipped 2026-09-09 — §2.48.** The
+estimate held: almost none of it was new code, and the one decision that had to
+be taken — whether a collaborator sees the owner's account secrets — was
+settled by saying it where the decision is made rather than by building
+per-project opt-in lists. Original note follows.
 
 **1c. Account-scoped secrets (§13.8).** The cheapest real row in the file with
 a user on the other end. `envVars` is a Json column on `Project` and there is

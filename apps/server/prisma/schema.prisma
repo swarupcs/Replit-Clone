@@ -203,6 +203,24 @@ model UserPersonalization {
   /// a key does not silently change what every future commit is.
   signCommits Boolean @default(false)
 
+  /// Environment variables injected into every container of every project this
+  /// account OWNS. plan.md §13.8.
+  ///
+  /// Same shape and same sealing as `projects.envVars`: names in the clear,
+  /// values sealed one at a time under SECRET_ENCRYPTION_KEY. The project's
+  /// own value wins where both set a name, because the more specific setting
+  /// is the one somebody chose for this project.
+  ///
+  /// It is on THIS table rather than its own for the reason the table exists:
+  /// dotfiles and a signing key are already here because they follow the
+  /// person into every container, and so does this.
+  ///
+  /// Read back by its owner, unlike `signingKey` -- these are variables
+  /// somebody has to be able to check and edit, exactly as project variables
+  /// are. `toPersonalization` still never names it, so it cannot leak through
+  /// that projection; `accountSecretService` is the only reader.
+  envVars Json @default("{}")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

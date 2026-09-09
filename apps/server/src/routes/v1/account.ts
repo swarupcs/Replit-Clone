@@ -10,6 +10,10 @@ import {
   getPersonalizationController,
   updatePersonalizationController,
 } from "../../controllers/personalizationController.js";
+import {
+  getAccountSecretsController,
+  setAccountSecretsController,
+} from "../../controllers/accountSecretController.js";
 
 /** Somebody's own account: what they are using, and what they are allowed.
  *
@@ -34,5 +38,12 @@ router.delete("/keys/:keyId", asyncHandler(revokeApiKeyController));
 // every container they open, including ones they do not own.
 router.get("/personalization", asyncHandler(getPersonalizationController));
 router.patch("/personalization", asyncHandler(updatePersonalizationController));
+
+// Account-wide environment variables -- plan.md §13.8. On this router for the
+// same reason dotfiles are, and session-only for a sharper one: a key that
+// could read these would be one credential handing over every other credential
+// the account has.
+router.get("/secrets", asyncHandler(getAccountSecretsController));
+router.put("/secrets", asyncHandler(setAccountSecretsController));
 
 export default router;
