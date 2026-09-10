@@ -46,6 +46,7 @@ import {
 import { useAuthStore } from "../store/authStore.ts";
 import { useRunStore } from "../store/runStore.ts";
 import { useWorkspaceStore } from "../store/workspaceStore.ts";
+import { useWorkspaceConfig } from "../hooks/useWorkspaceConfig.ts";
 import { RemoteAccessDialog } from "../components/organisms/RemoteAccessDialog/RemoteAccessDialog.tsx";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
@@ -132,6 +133,10 @@ export const ProjectPlayground = () => {
     },
   });
   const { restored, remember } = useWorkspaceSession(projectIdFromUrl, editorSocket);
+
+  // What this repository says about the editor -- plan.md §10.9. Settings,
+  // keybindings and snippets from `.vscode/`, applied over the person's own.
+  useWorkspaceConfig(projectIdFromUrl);
 
   // Seeded from the remembered arrangement, so a reload comes back to the
   // layout the user left rather than the defaults.

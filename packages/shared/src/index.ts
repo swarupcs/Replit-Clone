@@ -19,6 +19,7 @@ export * from "./apiKeys.js";
 export * from "./admin.js";
 export * from "./pagination.js";
 export * from "./subscriptions.js";
+export * from "./editorConfig.js";
 export * from "./editorSession.js";
 export * from "./personalization.js";
 export * from "./remoteAccess.js";

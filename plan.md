@@ -56,8 +56,8 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2833 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1369 passing** (107 files), re-run 2026-09-09 |
+| the same, with `TEST_DATABASE_URL` set | **2864 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1376 passing** (109 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,7 +146,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 167 items. Open: 19 — four blocked, seven from §10, none from §11, whose
+**Done: 168 items. Open: 18 — four blocked, six from §10, none from §11, whose
 last row closed on 2026-09-10, two from §12, which reads neither and
 asks what a cloud machine is for, and seven from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
@@ -156,7 +156,7 @@ seven that remain are merely open rather than blocked. §11's last row is 11.10,
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 7 + 0 + 1 + 7 = 19, and they are written out
+Those five numbers are 4 + 6 + 0 + 1 + 7 = 18, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3512,6 +3512,72 @@ registry reachable here, so nothing has fetched a real Feature, run an install
 script, or committed an image. The parsing, ordering, option mapping, image
 keying, script generation and archive safety are tested; the build is not.
 
+### 2.54 Since (2026-09-10) — §10.9, settings you can commit
+
+§14.4's first Phase 3 row, and §10 called it "the row that most decides whether
+the thing *feels* like a personal editor". `.vscode/settings.json`,
+`.vscode/keybindings.json` and `.vscode/*.code-snippets` are now read from the
+repository. Snippets did not exist at all before this.
+
+**The names are VS Code's, and that is the feature.** `editor.fontSize`, not
+`fontSize`. A `settings.json` somebody already has does something when pasted
+in; one written here is not nonsense in a real VS Code. The mapping is a table
+rather than a convention, so a setting VS Code has and this editor does not is
+**reported** instead of silently dropped — and a section this editor has no
+opinion about (`files.*`, `terminal.*`, an extension's namespace) is skipped in
+silence, because reporting every line of somebody's real profile would bury the
+one line that is a problem.
+
+**Two settings differ in kind, not just in name**, and the table absorbs it:
+VS Code's `wordWrap` and `lineNumbers` are strings where this editor has
+booleans. Writing the test first caught the version of that which was wrong —
+the enums were `["on","off"]`, so a perfectly valid `"relative"` or `"bounded"`
+from a real profile would have been refused. VS Code's actual value sets are
+there now.
+
+**JSON with comments**, because that is what VS Code writes. A pre-pass rather
+than a parser, and it respects strings — `"https://x"` is not a comment, and
+treating it as one is the classic way this goes wrong. There is a test for
+exactly that, and for an escaped quote inside a string.
+
+**Precedence, decided once and reported.** Defaults, then the account (§2.49),
+then the workspace file — the most specific statement wins, and a file committed
+to the repository is more specific than a preference somebody carries between
+machines. `origins` says which layer each value came from, because the settings
+screen has to be able to say "this is coming from the repository": otherwise
+somebody drags a slider, watches it snap back, and concludes the editor is
+broken.
+
+**§14.4 said do this after 2a or the two would disagree about the source of
+truth. They do not**, and the mechanism is worth naming: the workspace values
+live in a second store and are merged at the point of use. They are never
+written into `editorSettingsStore`, so opening a project with a `settings.json`
+does not permanently change that person's settings everywhere, including in
+projects that never asked.
+
+**Keybindings are read per-workspace, which VS Code does not do.** A deliberate
+departure: this row's point is settings that are committable, and "F5 runs THIS
+thing" is exactly the binding somebody wants in the repository. VS Code's
+leading-`-` removal syntax is honoured as a removal rather than bound to a
+command named `-run.toggle`.
+
+**Snippet bodies are passed through untranslated.** Monaco understands VS Code's
+own `$1` / `${1:name}` / `${1|a,b|}` syntax, so `InsertAsSnippet` is both less
+code and more correct than any translation. The provider reads the current
+snippets on every keystroke rather than closing over a list, so editing a
+`.code-snippets` file takes effect immediately — and it registers on model
+change as well as on mount, because one editor instance shows every file and
+registering only for the first would give snippets that work in whichever file
+you happened to land on.
+
+**Verified.** 31 server tests, 7 web, and the false-versus-absent trap checked
+by mutating `withWorkspace` to `||` and watching the right test fail. Server
+2864 passing / 9 skipped, web 1376, typecheck and lint clean 3/3.
+
+**Not verified:** nobody has pasted a real VS Code profile in and compared the
+result against that profile in VS Code itself. The mapping is tested name by
+name; it is not tested against a real file somebody uses.
+
 ---
 
 ## 3. Open
@@ -5296,7 +5362,23 @@ decision needs. Under Route A the cost of every one of them is zero.
       language surface growing past diagnostics, completion and hover" — is
       reached the moment somebody wants rename or code actions).
 
-- [ ] **10.9 Settings, keybindings and snippets that live in files.**
+- [x] **10.9 Settings, keybindings and snippets that live in files.**
+      **Shipped 2026-09-10 — §2.54.** `.vscode/settings.json`,
+      `.vscode/keybindings.json` and `.vscode/*.code-snippets`, read from the
+      repository, **in VS Code's own names** — `editor.fontSize`, not
+      `fontSize`. That is the whole "bring an existing profile across" half of
+      this row: a `settings.json` somebody already has does something when
+      pasted in, and one written here is not nonsense in a real VS Code.
+
+      **Precedence is VS Code's:** defaults, then the account (§2.49), then the
+      workspace file. §14.4 was right that this had to come after 2a, and the
+      reason is now in the code: a workspace value is applied at the point of
+      use and never written into the person's own store, so opening a project
+      with a `settings.json` does not permanently change their settings
+      everywhere.
+
+      Original note follows.
+
       `editorSettingsStore` persists sixteen preferences to `localStorage` under
       `rc-editor-settings`, and `keybindingStore` holds chord overrides the same
       way. That means: no `settings.json`, no per-workspace settings, nothing
@@ -7152,7 +7234,10 @@ between a browser editor somebody tolerates and one they reach for. Ordered by
 what a personal user notices soonest, which is §10's own recommended order with
 10.6 and 10.7 struck out:
 
-1. **10.9 — settings, keybindings and snippets in files.** §10 calls this the
+1. ~~**10.9 — settings, keybindings and snippets in files.**~~ **Done
+   2026-09-10 — §2.54**, after 2a as this said, and the two do not disagree
+   about the source of truth: workspace values are merged at the point of use
+   and never written into the person's own store. Original note follows. §10 calls this the
    row that most decides whether the thing *feels* like a personal editor, and
    the cheapest of the nine. It also subsumes 2a's follow-the-person question
    for the settings half specifically, so do it after 2a rather than before, or

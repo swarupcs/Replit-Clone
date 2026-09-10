@@ -11,6 +11,7 @@ import type {
   MachineStatus,
   AccountSecrets,
   AccountSshKeys,
+  EditorConfig,
   RemoteAccess,
   EditorSessionState,
   EditorSessionUpdate,
@@ -1109,6 +1110,16 @@ export const setEditorSessionApi = async (
   const response = await axios.put<ApiSuccess<EditorSessionState>>(
     "/api/v1/account/session",
     { entries },
+  );
+  return response.data.data;
+};
+
+/** Settings, keybindings and snippets from the repository. plan.md §10.9. */
+export const getEditorConfigApi = async (
+  projectId: string,
+): Promise<EditorConfig> => {
+  const response = await axios.get<ApiSuccess<EditorConfig>>(
+    `/api/v1/projects/${projectId}/editor-config`,
   );
   return response.data.data;
 };

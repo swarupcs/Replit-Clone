@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 // Must precede the Editor import's first render: points Monaco at our bundle
 // rather than a CDN. See the file for why.
 import "../../../config/monacoSetup.ts";
@@ -40,6 +40,8 @@ import { useViewportSync } from "../../../hooks/useViewportSync.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
 import { NotebookEditor } from "../../organisms/NotebookEditor/NotebookEditor.tsx";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
+import { useWorkspaceConfigStore } from "../../../store/workspaceConfigStore.ts";
+import { registerSnippets } from "../../../lib/snippetProvider.ts";
 import {
   buildDiffOptions,
   buildEditorOptions,
@@ -185,7 +187,14 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
    *  the "server owns saving" decision re-render. */
   const [collabTick, setCollabTick] = useState(0);
   useEffect(() => subscribeCollab(() => setCollabTick((value) => value + 1)), []);
-  const settings = useEditorSettingsStore();
+  const own = useEditorSettingsStore();
+  /** The repository's `.vscode/settings.json`, where it has an opinion --
+   *  plan.md §10.9. Subscribed rather than read once, so saving that file
+   *  changes the editor without a reload. The workspace wins: a file committed
+   *  to the repository is a more specific statement than a preference somebody
+   *  carries between machines. */
+  const workspace = useWorkspaceConfigStore((state) => state.config?.settings);
+  const settings = useMemo(() => ({ ...own, ...(workspace ?? {}) }), [own, workspace]);
   /** Both themes are ours. Light used to be Monaco's stock "vs", which is a
    *  perfectly good theme and the wrong one here: it is lit differently from
    *  the app around it, so the editor read as a pane borrowed from somewhere
@@ -673,6 +682,21 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     // The themes are NOT defined here. They are registered in monacoSetup at
     // module load, because this hook fires after the editor has already been
     // created and themed -- see that file.
+
+    // The repository's snippets -- plan.md §10.9. Per language and once each;
+    // the provider reads the current snippets on every keystroke, so a
+    // `.code-snippets` file that is edited takes effect without a reload.
+    const registerForCurrentModel = (): void => {
+      const language = codeEditor.getModel()?.getLanguageId();
+      if (language) registerSnippets(monaco, language);
+    };
+    registerForCurrentModel();
+    // And again whenever the model changes. `handleMount` fires once, but this
+    // editor instance shows every file the user opens -- registering only for
+    // the first one would mean snippets that work in the file you happened to
+    // land on and nowhere else.
+    codeEditor.onDidChangeModel(registerForCurrentModel);
+    codeEditor.onDidChangeModelLanguage(registerForCurrentModel);
 
     // Feeds the status bar. Monaco owns the cursor, so this is the only way to
     // observe it; the listener is disposed with the editor.

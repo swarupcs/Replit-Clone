@@ -57,6 +57,7 @@ import {
   openLocalFolderController,
 } from "../../controllers/localFolderController.js";
 import { capabilities } from "../../config/deploymentMode.js";
+import { getEditorConfigController } from "../../controllers/editorConfigController.js";
 import { getRemoteAccessController } from "../../controllers/sshKeyController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
@@ -198,6 +199,9 @@ router.get("/local/browse", asyncHandler(browseLocalFoldersController));
 router.post("/local", createLimiter, asyncHandler(openLocalFolderController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
 router.get("/:projectId/ports", asyncHandler(getProjectPorts));
+
+// Settings, keybindings and snippets from the repository -- plan.md §10.9.
+router.get("/:projectId/editor-config", asyncHandler(getEditorConfigController));
 
 // How to attach your own editor to this workspace -- plan.md §10.1 Route C.
 // Owner-only; the controller says why.
