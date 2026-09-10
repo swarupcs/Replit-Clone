@@ -57,6 +57,7 @@ import {
   openLocalFolderController,
 } from "../../controllers/localFolderController.js";
 import { capabilities } from "../../config/deploymentMode.js";
+import { browserPreviewController } from "../../controllers/browserPreviewController.js";
 import {
   timelineController,
   timelineVersionController,
@@ -220,6 +221,10 @@ router.get("/local/browse", asyncHandler(browseLocalFoldersController));
 router.post("/local", createLimiter, asyncHandler(openLocalFolderController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
 router.get("/:projectId/ports", asyncHandler(getProjectPorts));
+
+// A preview the reader's own browser builds -- plan.md §13.2. Visitor, because
+// the readers this exists for are the ones with a link and no account.
+router.get("/:projectId/browser-preview", asyncHandler(browserPreviewController));
 
 // A file's own history -- plan.md §10.12. Snapshots have been taken on every
 // save since §2.x; until now nothing could read them.

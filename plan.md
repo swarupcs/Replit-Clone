@@ -56,8 +56,8 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2938 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1410 passing** (116 files), re-run 2026-09-09 |
+| the same, with `TEST_DATABASE_URL` set | **2952 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1431 passing** (118 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,10 +146,10 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 174 items. Open: 12 — four blocked, none from §10, whose last row
+**Done: 175 items. Open: 11 — four blocked, none from §10, whose last row
 closed on 2026-09-10 (with two items carried into §2.59), none from §11, whose
 last row closed on 2026-09-10, two from §12, which reads neither and
-asks what a cloud machine is for, and seven from §13, which names the two
+asks what a cloud machine is for, and six from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
 2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, which closed
 three §10 rows at once: 10.1 itself, and 10.6 and 10.7 by another road. The
@@ -157,7 +157,7 @@ seven that remain are merely open rather than blocked. §11's last row is 11.10,
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 0 + 0 + 1 + 7 = 12, and they are written out
+Those five numbers are 4 + 0 + 0 + 1 + 6 = 11, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3898,6 +3898,58 @@ and lint clean 3/3.
 **Not verified:** no Docker daemon, so no terminal has been opened with a
 non-default shell. The argv is tested; the exec is not.
 
+### 2.60 Since (2026-09-10) — §13.2, a preview the host does not pay for
+
+Every preview in this product was a reverse proxy to a dev server inside
+Docker. That is right for the projects it serves and wrong for a shared link: a
+container costs memory, takes seconds, and is reaped when nobody is looking — so
+an embed on a busy page is a container per reader. This is the other half.
+`esbuild-wasm` builds the project in the reader's own browser; the host spends
+one text response.
+
+**The row calls itself "the row most likely to be over-sold", and that shaped
+the design more than the bundler did.** Eligibility is an **allowlist of five
+templates**, not a deny-list of servers: a template this platform has not heard
+of is refused, because a new one is far likelier to be another kind of server
+than another front end, and a wrong refusal costs a fallback to the preview that
+already works. Getting it wrong the other way gives the reader a blank page and
+the conclusion that the project is broken.
+
+**Next.js is refused, front-end though it is.** It has a server, server
+components, and a router that runs on it. "Previews except for the half that is
+server-rendered" is not a preview, and shipping it would have been the
+over-selling this row warns about.
+
+**A refusal is a sentence about the project, not an error.** "This project runs
+a server, so it needs a container" tells the reader what is true and what to use
+instead; "failed" tells them the project is broken.
+
+**The sandbox attribute is the one line that matters.** `allow-scripts` is what
+makes the project run at all, and `allow-same-origin` is deliberately absent —
+together they are no sandbox whatever, since the previewed code could then reach
+this app's cookies, storage and DOM. There is a test whose only job is to assert
+that second half, and it fails when the attribute is widened.
+
+**esm.sh is a real dependency and is named as one.** Bare imports resolve
+through it, so a reader with no route gets a build error that says so — with the
+container preview named as the thing that does not need it — rather than
+"Could not resolve react", which sends somebody to look at their imports.
+
+**Extension resolution is why a real bundler was used.** `./App` means
+`./App.tsx` in every project written the ordinary way; a half-resolver produces
+a preview that works for the example and fails for the project, which is the
+worst outcome for a feature whose audience did not write the code.
+
+**Verified.** 14 server tests on eligibility and gathering, 14 on the resolver
+and the document, 7 on the component; the allowlist, the `node_modules` skip and
+the sandbox attribute each mutation-checked. Server 2952 passing / 9 skipped,
+web 1431, typecheck and lint clean 3/3.
+
+**Not verified, and it is the interesting half:** nothing has actually been
+bundled. `esbuild-wasm` needs a WebAssembly runtime and esm.sh needs a network,
+and the tests exercise every decision around the build rather than the build. A
+real project has never been rendered in that iframe.
+
 ---
 
 ## 3. Open
@@ -6991,7 +7043,21 @@ below is written to respect it rather than to argue with it.
       what §6 decision 13 and the embed's design refused. Do not build it
       before 13.2, which is the version of it that costs nothing.
 
-- [ ] **13.2 A preview that does not need a container at all.**
+- [x] **13.2 A preview that does not need a container at all.**
+      **Shipped 2026-09-10 — §2.60.** `esbuild-wasm` in the reader's own
+      browser, imports resolved out of the files the server sent and bare ones
+      from esm.sh, rendered in an iframe with `allow-scripts` and **not**
+      `allow-same-origin`.
+
+      **This row's warning was followed rather than noted.** It says this is
+      "the row most likely to be over-sold", so eligibility is an **allowlist of
+      five templates** rather than a deny-list of servers: a template this
+      platform has not heard of is refused, because a new one is far likelier to
+      be another kind of server than another front end. Next.js is refused too,
+      front-end though it is — it has a server, and "previews except for the
+      server-rendered half" is not a preview.
+
+      Original note follows.
       `grep -riE "sandpack|webcontainer|esbuild-wasm"` over `apps/` and
       `packages/` returns **0 hits**. Every preview in this product is a
       reverse proxy to a dev server inside Docker.
@@ -7667,7 +7733,9 @@ what a personal user notices soonest, which is §10's own recommended order with
 **This is where the CodeSandbox target begins, and it begins with an
 architectural addition rather than a feature.**
 
-**4a. A preview that needs no container (§13.2).** A browser-side bundler that
+~~**4a. A preview that needs no container (§13.2).**~~ **Done 2026-09-10 —
+§2.60**, with the over-selling this phase warns about answered by an allowlist
+rather than a deny-list. Original note follows. A browser-side bundler that
 resolves dependencies, builds in a worker and renders in an iframe with no
 server-side process. It boots in about a second, survives being embedded on a
 thousand pages, and costs this host nothing — which is why CodeSandbox's embeds

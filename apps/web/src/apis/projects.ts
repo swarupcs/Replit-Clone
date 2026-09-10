@@ -11,6 +11,7 @@ import type {
   MachineStatus,
   AccountSecrets,
   AccountSshKeys,
+  BrowserPreviewPlan,
   EditorConfig,
   TaskList,
   TaskRun,
@@ -1116,6 +1117,16 @@ export const setEditorSessionApi = async (
   const response = await axios.put<ApiSuccess<EditorSessionState>>(
     "/api/v1/account/session",
     { entries },
+  );
+  return response.data.data;
+};
+
+/** What a browser needs to preview a project itself. plan.md §13.2. */
+export const getBrowserPreviewApi = async (
+  projectId: string,
+): Promise<BrowserPreviewPlan> => {
+  const response = await axios.get<ApiSuccess<BrowserPreviewPlan>>(
+    `/api/v1/projects/${projectId}/browser-preview`,
   );
   return response.data.data;
 };

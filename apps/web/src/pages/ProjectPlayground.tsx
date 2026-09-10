@@ -34,6 +34,7 @@ import { StatusBar } from "../components/molecules/StatusBar/StatusBar.tsx";
 import { BottomPanel } from "../components/organisms/BottomPanel/BottomPanel.tsx";
 import { TreeStructure } from "../components/organisms/TreeStructure/TreeStructure.tsx";
 import { Browser } from "../components/organisms/Browser/Browser.tsx";
+import { BrowserPreview } from "../components/organisms/BrowserPreview/BrowserPreview.tsx";
 import { useTreeStructureStore } from "../store/treeStructureStore.ts";
 import {
   selectCanEdit,
@@ -167,6 +168,9 @@ export const ProjectPlayground = () => {
   const [remoteOpen, setRemoteOpen] = useState(false);
   const [gitToolsOpen, setGitToolsOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
+  /** Whether the preview pane builds in this browser instead of proxying a
+   *  container. plan.md §13.2. */
+  const [browserPreview, setBrowserPreview] = useState(false);
   /** Subscribed, not read from `getState()` during render: the dialog has to
    *  follow the active tab, and a snapshot taken at render time would name
    *  whichever file happened to be open when the page mounted. */
@@ -515,6 +519,14 @@ export const ProjectPlayground = () => {
         run: () => {
           setSidebarView("packages");
           openView("sidebar");
+        },
+      },
+      {
+        id: "preview.browser",
+        category: "View",
+        title: "Switch between the container preview and the browser one",
+        run: () => {
+          setBrowserPreview((value) => !value);
         },
       },
       {
@@ -1295,7 +1307,17 @@ export const ProjectPlayground = () => {
               second={
                 projectIdFromUrl ? (
                   <ErrorBoundary label="The preview">
-                    <Browser projectId={projectIdFromUrl} />
+                    {/* Two previews, and which one is showing is the user's
+                        choice -- plan.md §13.2. The container preview is the
+                        one that can show a server; the browser one costs this
+                        host nothing and starts in about a second. Neither
+                        replaces the other, which is why this is a toggle
+                        rather than a heuristic. */}
+                    {browserPreview ? (
+                      <BrowserPreview projectId={projectIdFromUrl} />
+                    ) : (
+                      <Browser projectId={projectIdFromUrl} />
+                    )}
                   </ErrorBoundary>
                 ) : null
               }
