@@ -28,6 +28,13 @@ export type CounterName =
   // deciding whether to leave PREBUILD_STOPPED on wants is how often the
   // machine was woken, not how often an install was saved.
   | "prebuilds_cold_started"
+  // Dev Container Features -- plan.md §11.10. Three counters rather than one,
+  // because "reused" is the number that says whether the image cache is
+  // earning its keep, and a deployment where every open is a fresh build has a
+  // cache key problem rather than a feature problem.
+  | "feature_builds_completed"
+  | "feature_builds_reused"
+  | "feature_builds_failed"
   // Gave up after the install timeout. The stamp is untouched, so the next
   // real start installs exactly as it would have.
   | "prebuilds_abandoned"

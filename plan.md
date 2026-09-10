@@ -56,7 +56,7 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2791 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| the same, with `TEST_DATABASE_URL` set | **2833 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
 | `pnpm --filter web test` | **1369 passing** (107 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
@@ -146,8 +146,8 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 166 items. Open: 20 — four blocked, seven from §10, one from §11, which
-reads the sandbox rather than the editor, two from §12, which reads neither and
+**Done: 167 items. Open: 19 — four blocked, seven from §10, none from §11, whose
+last row closed on 2026-09-10, two from §12, which reads neither and
 asks what a cloud machine is for, and seven from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
 2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, which closed
@@ -156,7 +156,7 @@ seven that remain are merely open rather than blocked. §11's last row is 11.10,
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 7 + 1 + 1 + 7 = 20, and they are written out
+Those five numbers are 4 + 7 + 0 + 1 + 7 = 19, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3452,6 +3452,66 @@ text` read back out of `\d projects`.
 container, built it and stopped it. And the three numbers remain guesses — that
 is the row's own warning and shipping does not answer it.
 
+### 2.53 Since (2026-09-10) — §11.10, Features, and the root that stays in a box
+
+§14.3's Phase 2c, and the last open row in §11. The row was explicit that it was
+not one row of work but "a question with three answers, and picking one is what
+unblocks it". Picked: **run the install scripts as root in a throwaway container
+and commit the result.**
+
+**The reasoning, because the other two are not obviously wrong.** Building from
+a Dockerfile — option one — ends in the same place, but its input is arbitrary
+code from a repository this platform did not write, which is exactly why
+`build` and `dockerFile` are refused today. Option two's input is a Feature
+artifact from a registry an operator allowlisted, run against a base image this
+repository ships: a strictly smaller thing to have said yes to. Option three,
+the home-directory subset, would refuse most real Features confusingly rather
+than clearly, and the row is right about that.
+
+**The sentence §11.2 wants kept is kept.** The workspace still never runs as
+root and never gains a capability. Root lives in a build container with no bind
+mount of the user's tree — so whatever the script does, it cannot touch the
+project, which is the specific harm `privileged` is refused to prevent — with
+capabilities trimmed to what `apt-get` genuinely needs and a lifetime of one
+install.
+
+**What is new code, and what it treats as hostile.** An OCI client of three
+requests (token, manifest, blob); an options-to-environment mapping; and
+`installsAfter` ordering. The registry is a host named in a file this platform
+did not write, so: the blob is capped **while streaming**, because
+`Content-Length` is the registry's claim rather than a fact; the layer's digest
+is verified against what was actually read, which is the only thing that makes
+"pinned by digest" mean anything; and every path in the tar is resolved and
+checked to be inside the target, because this archive is about to be run as
+root and `../../etc/cron.d/x` is not a theoretical entry.
+
+**Two bugs found by writing the tests, both worth recording.** The unpacker
+first rejected two promises for one bad archive — a `finish`/`error` promise
+*and* `pipeline` — and the one nothing awaited is an unhandled rejection, which
+in a server is a process that exits. Collapsing it to one holder then exposed a
+race the tests caught immediately: `pipeline` can resolve before the async entry
+handler has recorded WHY it refused, so an archive whose only entry was hostile
+was accepted. The handlers are now chained and awaited, which is what makes the
+check deterministic rather than usually right.
+
+**And one of the tests could only pass once.** With the escape guard removed —
+which is what a mutation check does — the archive really did write
+`/tmp/escaped.sh`, and it stayed there and failed the next run. It now unpacks
+into a folder inside a parent the test owns, so an escape lands somewhere it
+deletes.
+
+**Off by default**, with an allowlist of registries. The refusal string that was
+correct for as long as this row was open now names the variable that turns it
+on.
+
+**Verified.** 42 tests, both path guards checked by deleting them. Server 2833
+passing / 9 skipped, web 1369, typecheck and lint clean 3/3.
+
+**Not verified, and it is the whole runtime half:** no Docker daemon and no
+registry reachable here, so nothing has fetched a real Feature, run an install
+script, or committed an image. The parsing, ordering, option mapping, image
+keying, script generation and archive safety are tested; the build is not.
+
 ---
 
 ## 3. Open
@@ -5589,7 +5649,42 @@ document.**
 
 ---
 
-- [ ] **11.10 Dev Container Features.** Split out of 11.2 on 2026-09-05,
+- [x] **11.10 Dev Container Features.** **DECIDED and shipped 2026-09-10 —
+      §2.53.** This row was "a question with three answers, and picking one is
+      what unblocks it". **The second is picked**: run the install scripts as
+      root in a throwaway container and commit the result to a derived image the
+      workspace then runs.
+
+      **Why the second and not the first.** Both end in a derived image; what
+      differs is the input. Option one means this platform builds from a
+      Dockerfile — and `build` and `dockerFile` are refused *today* precisely
+      because a Dockerfile is arbitrary code from a repository this platform did
+      not write. Option two's input is a Feature artifact from a registry an
+      operator allowlisted, run against a base image this repository ships. It
+      is a strictly smaller yes, and it does not reopen the refusal 11.2 wants
+      kept.
+
+      **Why not the third.** It would refuse most real Features confusingly
+      rather than clearly, which is this row's own objection to it.
+
+      **The sentence this row is built around stays true.** The WORKSPACE never
+      runs as root and never gains a capability; `privileged` and `capAdd` stay
+      refused however personal this gets. Root exists only inside a build
+      container with **no bind mount of the user's tree**, a capability set
+      trimmed to what a package install needs (`CHOWN`, `DAC_OVERRIDE`,
+      `FOWNER`, `FSETID`, `SETUID`, `SETGID` — not `SYS_ADMIN`), and a lifetime
+      of one install. What 11.2 refuses is a workspace with power over the host.
+      This is a build step with power over its own filesystem, which is what
+      every image build is.
+
+      **Off by default** (`DEVCONTAINER_FEATURES`), with
+      `DEVCONTAINER_FEATURE_REGISTRIES` deciding whose code may run. An operator
+      who did not ask to execute third-party install scripts on their host must
+      not begin doing so because they upgraded — and while it is off, the
+      refusal string is still the honest answer, now naming the variable that
+      turns it on.
+
+      Original note follows. Split out of 11.2 on 2026-09-05,
       because calling it "cheap" there was wrong and only became obvious with
       `mounts` finished beside it.
 
@@ -7037,7 +7132,10 @@ afterwards. Choosing them without having watched a host is how a background
 task becomes the reason a machine is always busy, so this belongs *after*
 Phase 1 has produced a host somebody is actually using.
 
-**2c. Dev Container Features (§11.10).** A question with three answers, none
+~~**2c. Dev Container Features (§11.10).**~~ **Done 2026-09-10 — §2.53**, by
+answering the question rather than waiting to live in a devcontainer daily. The
+answer is the throwaway-root-container one, and it keeps §11.2's refusal
+intact. Original note follows. A question with three answers, none
 obviously right. Cheap to answer once somebody is living in a devcontainer
 daily, which Phase 1 produces and nothing before it does.
 

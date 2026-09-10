@@ -21,6 +21,7 @@ import {
   vscodeVolumeName,
 } from "./remoteAccess.js";
 import { accountSshKeys } from "../service/accountSshKeyService.js";
+import { buildWithFeatures } from "./features/featureBuild.js";
 import { getEnvVars, toDockerEnv } from "../service/projectEnvService.js";
 import { endProjectSessions } from "../terminal/terminalSessions.js";
 import { SANDBOX_NETWORK } from "./sandboxNetwork.js";
@@ -227,16 +228,23 @@ export async function devcontainerCapabilities(
       where: { id: projectId },
       select: { ownerId: true },
     });
-    if (!project) return { mounts: false };
+    if (!project) return { mounts: false, features: false };
 
     const { resolveEntitlements } = await import(
       "../service/entitlementService.js"
     );
     const { devcontainerMounts } = await resolveEntitlements(project.ownerId);
 
-    return { mounts: devcontainerMounts };
+    return {
+      mounts: devcontainerMounts,
+      // A deployment switch rather than an entitlement -- plan.md §11.10.
+      // Whether third-party install scripts run as root on this host is the
+      // operator's question about their machine, not a thing a plan grants a
+      // customer.
+      features: env.DEVCONTAINER_FEATURES,
+    };
   } catch {
-    return { mounts: false };
+    return { mounts: false, features: false };
   }
 }
 
@@ -566,7 +574,34 @@ async function startContainer(projectId: string): Promise<Container> {
     setDevcontainerStatus(projectId, { refusedMounts: refused });
   }
 
-  const image = imageFor(projectId, template.image, devcontainer);
+  const baseImage = imageFor(projectId, template.image, devcontainer);
+
+  // Dev Container Features -- plan.md §11.10. Produces a derived image with
+  // the features installed, or hands back the base unchanged. Never throws:
+  // being locked out of a project by a file you are trying to fix is the worst
+  // failure available here, so a feature that will not build is a status the
+  // editor shows beside the config that asked for it, and the project opens on
+  // the base image exactly as it did before.
+  let image = baseImage;
+  let featureEnvVars: Record<string, string> = {};
+
+  if (devcontainer?.features && Object.keys(devcontainer.features).length > 0) {
+    try {
+      const built = await buildWithFeatures({
+        docker,
+        baseImage,
+        features: devcontainer.features,
+        projectId,
+      });
+      image = built.image;
+      featureEnvVars = built.containerEnv;
+      setDevcontainerStatus(projectId, { featureError: null });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown";
+      logger.warn("could not build features for a project", { projectId, error });
+      setDevcontainerStatus(projectId, { featureError: reason });
+    }
+  }
   const workspaceFolder = resolveWorkspaceFolder(
     devcontainer?.workspaceFolder,
     MOUNT_POINT,
@@ -640,6 +675,11 @@ async function startContainer(projectId: string): Promise<Container> {
         // egress filtering is off. These point tools at the gateway; they do
         // not enforce anything — see `egressGateway.proxyEnv`.
         ...proxyEnv(),
+        // What the features put on the PATH -- plan.md §11.10. First, so the
+        // devcontainer's own containerEnv and the project's secrets can both
+        // override them: a feature's idea of PATH is a default, and the file
+        // that asked for the feature is more specific than the feature.
+        ...toDockerEnv(featureEnvVars),
         // The devcontainer's own variables, before the project's. It is a file
         // in the repository and the project's are the secret store, so where
         // the two name the same variable the secret wins -- otherwise a

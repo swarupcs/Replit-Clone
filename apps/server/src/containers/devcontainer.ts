@@ -74,10 +74,14 @@ const IGNORED = new Set([
 export interface DevcontainerCapabilities {
   /** Whether `mounts` is read at all. False refuses it exactly as before. */
   mounts: boolean;
+  /** Whether Dev Container Features are installed -- plan.md §11.10. False
+   *  keeps the refusal string, which was the honest answer for as long as
+   *  nobody had chosen among that row's three options. */
+  features: boolean;
 }
 
 /** Nothing granted. The default, and deliberately the safe one. */
-const NOTHING: DevcontainerCapabilities = { mounts: false };
+const NOTHING: DevcontainerCapabilities = { mounts: false, features: false };
 
 /** One entry of `mounts`, as asked for. Whether it is ALLOWED is a question
  *  about the host and is answered in devcontainerMounts.ts; this is only the
@@ -102,6 +106,11 @@ export interface DevcontainerConfig {
    *  the caller said mounts may be read; every one is still checked against
    *  the deployment's allowlist before it reaches Docker. */
   mounts?: DevcontainerMount[];
+  /** Dev Container Features the file asked for -- plan.md §11.10. Present only
+   *  when the deployment installs them; the references and their options are
+   *  validated where they are used, because whether a registry is permitted is
+   *  a deployment question rather than a parsing one. */
+  features?: Record<string, unknown>;
   /** Keys present that this does not act on, with the reason. Shown to the
    *  user, because silently ignoring half a config is how somebody spends an
    *  afternoon wondering why their Dockerfile did nothing. */
@@ -135,8 +144,9 @@ const REFUSALS: Record<string, string> = {
     "\"runServices\" is not read. Every service in the project's " +
     "docker-compose.yml that this deployment permits is started.",
   features:
-    "Dev Container Features are not supported. Install what you need in " +
-    "\"postCreateCommand\" instead.",
+    "Dev Container Features are not installed on this deployment. An operator " +
+    "turns them on with DEVCONTAINER_FEATURES; until then, install what you " +
+    "need in \"postCreateCommand\".",
   mounts:
     "Extra mounts are not supported: the project directory is the only thing " +
     "mounted, deliberately.",
@@ -380,11 +390,22 @@ export function interpret(
     if (SUPPORTED_KEYS.has(key)) continue;
     // Understood on this plan, so not a refusal to report.
     if (key === "mounts" && allowed.mounts) continue;
+    // plan.md §11.10. Understood only where the deployment installs them; the
+    // refusal string below is still the honest answer everywhere else.
+    if (key === "features" && allowed.features) continue;
     config.unsupported.push({
       key,
       reason:
         REFUSALS[key] ?? `"${key}" is not supported by this platform and was ignored.`,
     });
+  }
+
+  if (allowed.features && input["features"] !== undefined) {
+    const features = input["features"];
+    if (typeof features !== "object" || features === null || Array.isArray(features)) {
+      throw new DevcontainerError(`"features" must be an object`);
+    }
+    config.features = features as Record<string, unknown>;
   }
 
   if (input["image"] !== undefined) {
@@ -535,6 +556,16 @@ export interface DevcontainerStatus {
    *  a file you are trying to fix is the worst possible failure here — but the
    *  reason has to reach the user, or the file looks like it worked. */
   error: string | null;
+  /** Why the Dev Container Features in this file could not be installed, or
+   *  null. plan.md §11.10.
+   *
+   *  Separate from `error` for the same reason `refusedMounts` is: the project
+   *  STARTED. It is running the base image without the features, which is a
+   *  partial refusal — reporting it as a failure to open would be wrong, and
+   *  reporting nothing would leave somebody wondering why the language they
+   *  asked for is not there. */
+  featureError?: string | null;
+
   /** Mounts the file asked for that were refused, with the reason. Separate
    *  from `error` because the container started and everything else in the
    *  config was honoured -- this is a partial refusal, and reporting it as a

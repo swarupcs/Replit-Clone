@@ -791,6 +791,46 @@ const envSchema = z.object({
    *  thing to do by accident, so it is spelled out rather than inferred. */
   SANDBOX_SSH_BIND: z.string().default("127.0.0.1"),
 
+  /** Install Dev Container Features. plan.md §11.10.
+   *
+   *  Off by default, and this default is load-bearing rather than cautious:
+   *  turning it on means third-party install scripts run as root in a container
+   *  on this host. That is what a Feature IS -- an OCI artifact whose payload
+   *  is an `install.sh` -- and it is a thing an operator should switch on
+   *  deliberately, never something they acquire by upgrading.
+   *
+   *  What it never does, however personal a deployment gets: give the
+   *  WORKSPACE root or a capability. §11.2's refusal of `privileged` and
+   *  `capAdd` stands. Root here lives in a build container with no bind mount
+   *  of the user's tree and a lifetime of one install. */
+  DEVCONTAINER_FEATURES: z
+    .string()
+    .optional()
+    .transform((value) => value === "true" || value === "1"),
+
+  /** Whose features may be installed, by registry host.
+   *
+   *  Hosts rather than full references, because this list decides whose code
+   *  runs as root and a host is the coarsest thing an operator can actually
+   *  reason about -- and the coarsest is the right grain for a list somebody
+   *  has to maintain. `*` permits any, and is exactly as alarming as it looks. */
+  DEVCONTAINER_FEATURE_REGISTRIES: z
+    .string()
+    .default("ghcr.io")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+
+  /** How many features one devcontainer may ask for.
+   *
+   *  Each one is a download and an install script; a file asking for forty is
+   *  either a mistake or an attempt to make the first open of a project take
+   *  an hour. */
+  DEVCONTAINER_FEATURE_LIMIT: z.coerce.number().int().min(1).max(32).default(10),
+
   /** Prebuild a workspace that is STOPPED, not only one already running.
    *  plan.md §12.5.
    *

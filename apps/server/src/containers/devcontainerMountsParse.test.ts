@@ -9,7 +9,7 @@ import { interpret } from "./devcontainer.js";
  *  whether this account was permitted to be asked.
  */
 
-const ALLOW = { mounts: true };
+const ALLOW = { mounts: true, features: false };
 
 function read(raw: Record<string, unknown>, allowed = ALLOW) {
   return interpret(raw, "devcontainer.json", allowed);
@@ -34,7 +34,7 @@ describe("the gate", () => {
     const config = interpret(
       { mounts: ["source=/data,target=/data,type=bind"] },
       "devcontainer.json",
-      { mounts: false },
+      { mounts: false, features: false },
     );
 
     expect(config.unsupported.map((entry) => entry.key)).toContain("mounts");
