@@ -14,6 +14,7 @@ import type {
   SocketData,
 } from "@replit-clone/shared";
 import apiRouter from "./routes/index.js";
+import { webhookRawBody } from "./middlewares/webhookRawBody.js";
 import {
   createPreviewProxy,
   installPreviewUpgrade,
@@ -198,6 +199,13 @@ const deploySiteServer = createDeploySiteServer();
 // upgrade. Installed here rather than inside the factory so the listener and
 // its handler are visible in one place.
 installServiceUpgrade(deploySiteServer);
+
+// BEFORE the JSON parser, and that order is the whole point: a webhook
+// signature covers the bytes that were sent, and express.json both consumes
+// them and marks the request handled — which makes the `express.raw` on the
+// route itself a no-op. See webhookRawBody.ts; this was a live bug rather than
+// a precaution.
+app.use(webhookRawBody());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

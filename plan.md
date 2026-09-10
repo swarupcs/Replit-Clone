@@ -55,8 +55,8 @@ it and is dealt with under the table.
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
-| `pnpm --filter server test` | **2704 passing**, 269 skipped (179 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2964 passing**, 9 skipped. Green 2026-09-10 against all **43** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter server test` | **2710 passing**, 269 skipped (180 files) — no database configured |
+| the same, with `TEST_DATABASE_URL` set | **2970 passing**, 9 skipped. Green 2026-09-10 against all **43** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
 | `pnpm --filter web test` | **1431 passing** (116 files), re-run 2026-09-10 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
@@ -4689,6 +4689,31 @@ Specifically:
   the document making it has since been deleted.
 - Every file named as a deliverable in §2 exists, bar `forkProjectService.ts`,
   which the old plan invented; `forkProject` is in `service/projectService.ts`.
+
+**Found 2026-09-10, while reading the one webhook in the tree as a pattern for
+§13.3's: the billing webhook could never have verified a single delivery.**
+`billing.ts` mounts `express.raw` on its own route and explains in a comment why
+the raw bytes matter. `index.ts:202` mounts `express.json()` globally in front of
+the whole API. The global one wins — body-parser marks the request handled and
+every later parser skips — so the route received a parsed object,
+`Buffer.isBuffer(req.body)` was false, the raw string was `""`, and every genuine
+delivery failed with `BAD_SIGNATURE`. The route's own header says the webhook is
+"the only writer of subscription state", so no subscription would ever have
+changed in production.
+
+**The test could not see it, and said so in a comment that was false.**
+`billing.test.ts` assembles its app without the global parser and asserted "the
+test app is assembled the way the real one is". It was not. This is the
+defect class worth naming: **a test that builds its own app proves the handler,
+never the mounting** — and the mounting was the whole bug. The same shape as the
+`z.record` finding in §2.61 a few hours earlier, one layer further out.
+
+Fixed by `middlewares/webhookRawBody.ts`, mounted before `express.json()`, whose
+test builds the app in `index.ts`'s real order — the only arrangement in which
+the bug is visible. Mutation-checked: three of its six tests go red when the
+middleware is made a pass-through. **Not verified**, and it cannot be here: no
+delivery from Stripe has been received, so what is proven is that the bytes now
+reach the route intact, not that a real signature validates.
 
 **Verified 2026-08-29**, having been carried as unverified since 2026-08-28:
 the two `Project` rows without working trees are real. Twenty rows in the
