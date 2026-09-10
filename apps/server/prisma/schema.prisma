@@ -1346,6 +1346,20 @@ model Embed {
   /// whichever the tree offers.
   activeFile String?
 
+  /// Whether a stranger with this link may EDIT and RUN it. plan.md §13.1.
+  ///
+  /// Off by default, and the default is the decision: an embed is something to
+  /// read, and turning every existing one into an editable sandbox because the
+  /// column appeared would be changing what somebody already published.
+  ///
+  /// What it does NOT do, and must never do: start a container. The edits live
+  /// in the visitor's own browser and the build happens there too (§13.2), so
+  /// an anonymous visitor spends their own memory and none of this host's.
+  /// That is the refusal §6 decision 13 and the `preview` column above both
+  /// make, kept intact — this row is affordable precisely because 13.2 shipped
+  /// first.
+  sandbox Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

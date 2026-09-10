@@ -116,6 +116,11 @@ export type CounterName =
   | "embeds_created"
   | "embeds_revoked"
   | "embed_views"
+  // A stranger opening an editable sandbox -- plan.md §13.1. Counted apart
+  // from `embed_views` because the two answer different questions: one is how
+  // often the shop window is looked at, the other how often somebody stepped
+  // inside.
+  | "sandbox_views"
   | "embed_path_rejected"
   // Moderation. `project_reported` climbing while `report_actioned` and
   // `report_dismissed` stay flat is the signal that matters most here: it says

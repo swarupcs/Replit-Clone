@@ -50,6 +50,19 @@ export interface EmbedSettings {
   /** Which file opens first, as a project-relative POSIX path. Null means the
    *  first file the tree offers. */
   activeFile: string | null;
+
+  /** Whether a stranger with this link may edit it and run it. plan.md §13.1.
+   *
+   *  The defining act of a sandbox product — "somebody sent me a link, I
+   *  changed a line and ran it" — without the thing that made it unaffordable.
+   *  The edits live in the visitor's browser and the build happens there
+   *  (§13.2), so **no container is started for an anonymous visitor** and the
+   *  refusal `preview` above describes stays intact.
+   *
+   *  Nothing the visitor types reaches this server. Saving means forking, and
+   *  forking means signing in — which is the same boundary the product already
+   *  had, moved to after the interesting part rather than before it. */
+  sandbox: boolean;
 }
 
 /** What the owner sees and changes in the share dialog. */
@@ -86,6 +99,36 @@ export interface EmbedPayload {
   /** Deep link back to the full project. Anonymous readers cannot open it
    *  without an account, which is the point: an embed is a shop window. */
   projectUrl: string | null;
+
+  /** Whether this link is an editable sandbox. plan.md §13.1. */
+  sandbox: boolean;
+}
+
+/** Everything a stranger needs to open a project, change a line and run it —
+ *  with no account and no container. plan.md §13.1.
+ *
+ *  A different shape from `EmbedPayload` on purpose. An embed serves file
+ *  *metadata* and fetches contents one at a time, which is right for a reader
+ *  clicking through code. A sandbox needs **every source file at once**,
+ *  because the build happens in the visitor's browser and a bundler cannot ask
+ *  the server for an import halfway through.
+ */
+export interface SandboxPayload {
+  projectName: string;
+  template: string;
+  /** Path to contents, for every source file. The same set §13.2's browser
+   *  preview gathers, because it is the same build. */
+  files: Record<string, string>;
+  /** Where the bundle starts. Null when the project has no entry this can
+   *  build, which is a refusal the page shows rather than a broken preview. */
+  entry: string | null;
+  /** The project's own `index.html`, when it has one. */
+  html?: string;
+  /** Why it cannot be run here, when it cannot. The same vocabulary §13.2
+   *  uses, because it is the same question. */
+  refusal?: string;
+  /** Where signing in would take the visitor to keep their changes. */
+  forkUrl: string;
 }
 
 /** One file's contents, fetched when the reader opens it. */

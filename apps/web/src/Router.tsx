@@ -39,6 +39,15 @@ const EmbedPage = lazy(() =>
   })),
 );
 
+/** The editable one -- plan.md §13.1. Lazy for the embed's reasons and one
+ *  more: it pulls in Monaco and a WebAssembly bundler, neither of which should
+ *  be on the dashboard's critical path. */
+const SandboxPage = lazy(() =>
+  import("./pages/SandboxPage.tsx").then((module) => ({
+    default: module.SandboxPage,
+  })),
+);
+
 const RouteFallback = () => (
   <Flex
     align="center"
@@ -75,6 +84,19 @@ export const Router = () => {
           element={
             <Suspense fallback={<RouteFallback />}>
               <EmbedPage />
+            </Suspense>
+          }
+        />
+
+        {/* Outside ProtectedRoute for the same reason and more sharply: the
+            entire point of §13.1 is that somebody with a link can change a line
+            and run it with no account. A login form here would be the feature
+            not existing. */}
+        <Route
+          path="/sandbox/:token"
+          element={
+            <Suspense fallback={<RouteFallback />}>
+              <SandboxPage />
             </Suspense>
           }
         />

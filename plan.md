@@ -55,9 +55,9 @@ it and is dealt with under the table.
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
-| `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2952 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1431 passing** (118 files), re-run 2026-09-09 |
+| `pnpm --filter server test` | **2704 passing**, 269 skipped (179 files) — no database configured |
+| the same, with `TEST_DATABASE_URL` set | **2964 passing**, 9 skipped. Green 2026-09-10 against all **43** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1431 passing** (116 files), re-run 2026-09-10 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,18 +146,22 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 175 items. Open: 11 — four blocked, none from §10, whose last row
+**Done: 176 items. Open: 10 — four blocked, none from §10, whose last row
 closed on 2026-09-10 (with two items carried into §2.59), none from §11, whose
-last row closed on 2026-09-10, two from §12, which reads neither and
-asks what a cloud machine is for, and six from §13, which names the two
-products this most resembles and diffs against them. **§10.1 was decided on
+last row closed on 2026-09-10, one from §12, which reads neither and
+asks what a cloud machine is for, and five from §13, which names the two
+products this most resembles and diffs against them. **§13.1 closed on
+2026-09-10 (§2.61)** — the row §13 called "the defining act of the product this
+section names", and the one whose own text said not to build it before 13.2.
+It was built the day after 13.2, in that order, and the objection in it is
+answered rather than waived: the sandbox starts no container. **§10.1 was decided on
 2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, which closed
 three §10 rows at once: 10.1 itself, and 10.6 and 10.7 by another road. The
-seven that remain are merely open rather than blocked. §11's last row is 11.10, which needs a
-decision before it needs code, and 12.4 is blocked on hardware rather than on
-anybody.**
+six that remain are merely open rather than blocked. §11's last row was 11.10,
+which needed a decision before it needed code and got one (§2.53), and 12.4 is
+blocked on hardware rather than on anybody.**
 
-Those five numbers are 4 + 0 + 0 + 1 + 6 = 11, and they are written out
+Those five numbers are 4 + 0 + 0 + 1 + 5 = 10, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -444,20 +448,30 @@ page that loses data rather than failing to add a feature.~~ **Backups shipped
 until one is, with a restore command and `docs/BACKUP.md`. What has not
 happened is a host being rebuilt from one.
 
-**Blocked on a decision nobody has taken.** Dev Container Features (§11.10) is
-a question with three answers, none obviously right. Prebuilding a *stopped*
-workspace (§12.5) needs three numbers somebody has to choose by watching a real
-host. Teams (§8.5) needs a pricing decision and turns every `ownerId === userId`
-into a membership question.
+**Blocked on a decision nobody has taken.** ~~Dev Container Features (§11.10)
+is a question with three answers, none obviously right.~~ — decided and shipped
+2026-09-10, §2.53. ~~Prebuilding a *stopped* workspace (§12.5) needs three
+numbers somebody has to choose by watching a real host.~~ — shipped
+2026-09-09, §2.52, with the three numbers made env vars whose defaults are
+documented as guesses. Teams (§8.5) needs a pricing decision and turns every
+`ownerId === userId` into a membership question — **still open, and now the
+only row in this paragraph that is.**
 
-**Simply absent, and unblocked.** Notebooks (§12.3). GPUs (§12.4), which need
-different hardware.
+**Two of the three were unblocked by somebody taking the decision rather than
+by the question getting easier**, which is worth leaving visible: "blocked on a
+decision nobody has taken" described who had been asked, not how hard it was to
+answer. §8.5 is the exception that keeps the category honest — a pricing
+decision is genuinely not this document's to take.
+
+**Simply absent, and unblocked.** ~~Notebooks (§12.3).~~ — shipped 2026-09-05,
+§2.42. GPUs (§12.4), which need different hardware.
 
 **Absent against the two products this most resembles** (§13, added
 2026-09-09). Nothing here is in the editor, so none of it waits on §10.1. For
 a *CodeSandbox*: there is no cheap project — every path into a working tree
-ends at a container, so there is no anonymous sandbox (§13.1), no
-container-free preview (§13.2), no URL per pull request (§13.3), no second
+ends at a container, so ~~there is no anonymous sandbox (§13.1)~~ — shipped
+2026-09-10, §2.61 — ~~no container-free preview (§13.2)~~ — shipped 2026-09-10,
+§2.60 — no URL per pull request (§13.3), no second
 checkout of one repository (§13.4), no devtools for the previewed app (§13.5),
 and no pairing link for somebody without an account (§13.6). For a *personal
 cloud editor*: ~~a terminal is killed when its WebSocket closes, so closing the
@@ -3952,6 +3966,92 @@ real project has never been rendered in that iframe.
 
 ---
 
+### 2.61 Since (2026-09-10) — §13.1, the sandbox, and what it refuses to spend
+
+§13 calls this "the defining act of the product this section names" and then
+tells you not to build it: an unauthenticated visitor who can start a container
+is an unauthenticated visitor spending this host's memory, which is what §6
+decision 13 refused on purpose. The row's own instruction is "do not build it
+before 13.2". 13.2 shipped yesterday, so this is what "after" looks like.
+
+**The objection is answered rather than waived, and the answer is that no
+container starts.** `GET /api/v1/embeds/:token/sandbox` returns the files and
+one text response ends the host's involvement. The visitor's edits live in
+their browser and the build happens there. An anonymous page view spends their
+memory and none of this deployment's — so the refusal stands exactly where it
+was, and what moved is when the account is asked for.
+
+**Saving is forking and forking still means signing in.** That boundary is not
+softened anywhere: there is no anonymous write path, no `ProjectCollaborator`
+row without a `userId`, and nothing the visitor does reaches the database. What
+changed is the order — a stranger changes a line and runs it, and meets the
+account only when they want to keep the result rather than before they can see
+whether it is worth keeping.
+
+**Off by default, and that is a decision about links already published.** The
+`sandbox` column defaults to `false` and the owner turns it on per embed. An
+embed is something to read; if a migration turned every published one into an
+editable sandbox it would change what somebody already shared, without their
+having said so. A link whose owner did not opt in gets a sentence — "that link
+is an embed, not a sandbox" — not an error.
+
+**Two guards were mutation-checked** by deleting them and watching a test fail:
+the refusal above, and the `isSecretPath` filter that keeps `.env` and its
+neighbours out of a payload served to anybody with the URL.
+
+**A mutation-check found a real hole rather than confirming a good one.** The
+service-level tests passed with `sandbox` deleted from the controller's
+`settingsSchema` — because `z.object` strips what it does not name, so the UI
+switch would have posted the flag and Zod would have dropped it silently, on
+every save, with every service test green. The schema is now exported and
+tested directly. The lesson is the one §5 keeps recording in other forms: a
+test that goes through the layer below cannot see a layer above it discarding
+the field.
+
+**The migration writes `embeds`, the mapped table name**, not the model name —
+§5 records two migrations that shipped green having never run because they
+wrote the model name, and nothing but Postgres reads that file. Applied to both
+databases and the column read back with `\d embeds` before this was called
+done.
+
+**What it inherits from 13.2 it inherits whole.** Five templates, no
+server-side anything, and a project outside the allowlist has no sandbox at
+all. That is the honest half of the row, and it is the same half 13.2 was
+careful about.
+
+**Verified.** 12 tests on the payload, the refusals and the schema. Server 2964
+passing / 9 skipped against 43 migrations, web 1431 passing (116 files),
+typecheck and lint clean 3/3.
+
+**Three figures in §1's table were corrected here, and two of them had been
+wrong for some time.** Under §7 this commit re-ran the suites, so it owns the
+row. The web *file* count had been incremented by hand rather than read from
+the run output — it drifted +1 at `d5462ab` and +2 by `96aef3d`, where it read
+118 against a real 116 — while the test counts beside it stayed right because
+those were copied from the output. The no-database server row was staler still:
+it read 2124 passing / 296 skipped / 152 files against a measured 2704 / 269 /
+179. Every figure in that table is now a measurement taken today. This is §1's
+own recurring failure in its third column: a number that is incremented is not
+a number that was checked.
+
+**§3's preamble was carrying four claims that the tree had already falsified**,
+and they are struck rather than deleted so the pattern stays legible: it still
+said there was no anonymous sandbox (this row) and no container-free preview
+(§13.2, yesterday), listed Dev Container Features and prebuilding a stopped
+workspace under "blocked on a decision nobody has taken" after both had shipped,
+and listed notebooks as "simply absent" five days after §2.42. §1's own sentence
+about §11's last row needing a decision was stale the same way. The prose that
+narrates the checkboxes does not move when a checkbox does, and nothing checks
+it — which makes it the same defect class as the counts above, in sentences
+instead of numbers.
+
+**Not verified, and it is inherited from 13.2:** nothing has still actually
+been bundled — no WebAssembly runtime and no network here — so a real project
+has never been rendered in that iframe, and the sandbox's whole point is that
+iframe.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -7025,7 +7125,37 @@ container instead was refused on purpose — "an anonymous page view must not be
 able to start one on the owner's behalf". That refusal is right and every row
 below is written to respect it rather than to argue with it.
 
-- [ ] **13.1 A sandbox a stranger can open, run and fork with no account.**
+- [x] **13.1 A sandbox a stranger can open, run and fork with no account.**
+      **Shipped 2026-09-10 — §2.61.** `GET /api/v1/embeds/:token/sandbox`
+      behind a per-embed `sandbox` flag that is **off by default**, a page at
+      `/sandbox/:token` outside `ProtectedRoute`, and Fork as the one button
+      that asks who you are.
+
+      **The row's "against" was answered rather than accepted, and 13.2 is the
+      whole reason it could be.** The objection is an unauthenticated visitor
+      who can start a container; this starts none. The visitor's edits live in
+      their browser and the build happens there, so an anonymous page view
+      spends their memory and none of this host's. §6 decision 13 stands
+      untouched — what moved is *when* the account is asked for, not whether.
+
+      **Saving is forking, and forking still means signing in.** The stranger
+      changes a line and runs it first and meets the account only when they
+      want to keep the result, which is the same boundary the product always
+      had, placed after the interesting part instead of in front of it.
+
+      **Off by default, because an embed is something to read.** The column
+      defaults to `false` and the owner turns it on per link: a published embed
+      does not become editable because a migration ran. The refusal for a link
+      whose owner did not is a sentence — "that link is an embed, not a
+      sandbox" — and secret paths are filtered out of the payload on the way
+      out, both mutation-checked.
+
+      **What it inherits from 13.2 it inherits whole**, including the limits:
+      the five-template allowlist, no server-side anything, and a refusal that
+      names the container preview. A project outside the allowlist has no
+      sandbox, and that is the honest half of this row.
+
+      Original note follows.
       The defining act of the product this section names, and the one thing
       here that is a product decision before it is code.
 
@@ -7747,15 +7877,25 @@ over-sold: it serves front-end projects with no server. `python-flask`,
 outside it permanently. That is about half the template registry, and it is the
 half people paste into issues.
 
-**4b. A sandbox a stranger can open, run and fork (§13.1).** Only after 4a,
+**4b. A sandbox a stranger can open, run and fork (§13.1).** **Shipped
+2026-09-10 — §2.61**, the day after 4a and in that order, which is what this
+note asked for. The version that costs nothing is the one that shipped: no
+container starts for an anonymous visitor, and the refusal stands.
+
+Original note follows. Only after 4a,
 which is what makes it affordable. Doing it first would mean an unauthenticated
 visitor who can start a container — spending this host's memory with no account
 behind it, which is exactly what §6 decision 13 and the embed's design refused
 on purpose. With 4a there is a version that costs nothing and the refusal
 stands.
 
-This pair is the largest single body of work in the plan and it should be
-costed as such before it is started.
+**Phase 4 is complete.** It was called "the largest single body of work in the
+plan" and it took two days, which is worth recording beside the estimate rather
+than instead of it: the cost was in 4a, and 4b was mostly the decision 4a had
+already paid for.
+
+Original note follows. This pair is the largest single body of work in the plan
+and it should be costed as such before it is started.
 
 ---
 

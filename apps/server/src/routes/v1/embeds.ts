@@ -4,6 +4,7 @@ import { asyncHandler } from "../../middlewares/errorHandler.js";
 import {
   readEmbedController,
   readEmbedFileController,
+  readSandboxController,
 } from "../../controllers/embedController.js";
 
 /** The two endpoints an embedded iframe calls, with nobody signed in.
@@ -43,5 +44,11 @@ router.use(embedLimiter);
 
 router.get("/:token", asyncHandler(readEmbedController));
 router.get("/:token/file", asyncHandler(readEmbedFileController));
+
+/** The editable version -- plan.md §13.1. Same router, same limiter, same
+ *  absence of a session, and deliberately so: this is the embed's token with
+ *  the owner's permission to change what it shows. It starts no container and
+ *  writes nothing, so the reasons this router exists all still hold. */
+router.get("/:token/sandbox", asyncHandler(readSandboxController));
 
 export default router;

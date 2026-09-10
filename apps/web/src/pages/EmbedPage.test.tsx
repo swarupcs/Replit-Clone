@@ -26,6 +26,9 @@ vi.mock("../config/monacoSetup.ts", () => ({}));
 import { EmbedPage } from "./EmbedPage.tsx";
 
 const PAYLOAD: EmbedPayload = {
+  // Not a sandbox: this fixture is an ordinary read-only embed, which is what
+  // every test in this file is about. plan.md §13.1.
+  sandbox: false,
   projectName: "demo",
   template: "react-vite",
   view: "split",

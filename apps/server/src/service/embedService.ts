@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { planBrowserPreview } from "./browserPreviewService.js";
 import { readFile, stat } from "node:fs/promises";
 import {
   EMBED_TOKEN_PATTERN,
@@ -7,6 +8,7 @@ import {
   type EmbedFile,
   type EmbedFileContents,
   type EmbedPayload,
+  type SandboxPayload,
   type EmbedPreview,
   type EmbedSettings,
   type EmbedState,
@@ -53,6 +55,9 @@ const DEFAULT_SETTINGS: EmbedSettings = {
   view: "split",
   preview: "deployment",
   activeFile: null,
+  // Off. An embed is something to read; making every existing one editable
+  // because a column appeared would change what somebody already published.
+  sandbox: false,
 };
 
 interface EmbedRow {
@@ -60,6 +65,7 @@ interface EmbedRow {
   view: string;
   preview: string;
   activeFile: string | null;
+  sandbox: boolean;
 }
 
 /** Reads a stored row back into settings, tolerating values this version does
@@ -76,6 +82,7 @@ function toSettings(row: EmbedRow): EmbedSettings {
     view: isEmbedView(row.view) ? row.view : DEFAULT_SETTINGS.view,
     preview: isEmbedPreview(row.preview) ? row.preview : DEFAULT_SETTINGS.preview,
     activeFile: row.activeFile,
+    sandbox: row.sandbox,
   };
 }
 
@@ -164,6 +171,17 @@ function normalise(settings: Partial<EmbedSettings>): Partial<EmbedRow> {
 
   if (settings.activeFile !== undefined) {
     out.activeFile = settings.activeFile === null ? null : cleanPath(settings.activeFile);
+  }
+
+  if (settings.sandbox !== undefined) {
+    // Strictly a boolean rather than a truthy read -- plan.md §13.1. This
+    // switch decides whether strangers may change what a published link shows,
+    // and `"false"` arriving as a string and being read as true is exactly the
+    // sort of thing that should not silently turn it on.
+    if (typeof settings.sandbox !== "boolean") {
+      throw new BadRequestError("sandbox must be true or false");
+    }
+    out.sandbox = settings.sandbox;
   }
 
   return out;
@@ -315,6 +333,10 @@ export async function embedPayload(rawToken: string): Promise<EmbedPayload> {
     // Only useful to somebody who already has an account, and harmless to
     // somebody who does not: the editor route is behind auth either way.
     projectUrl: `${env.WEB_ORIGIN}/project/${projectId}`,
+    // So the embed page can offer the sandbox when the owner turned it on --
+    // plan.md §13.1. An embed and a sandbox are the same link with a different
+    // permission, and the reader should be told which one they have.
+    sandbox: settings.sandbox,
   };
 }
 
@@ -396,4 +418,65 @@ function cleanPathForRead(raw: string): string {
   }
 
   return value;
+}
+
+/** Everything a stranger needs to open a project, change a line and run it.
+ *  plan.md §13.1.
+ *
+ *  **The whole design is what this does NOT do.** It starts no container,
+ *  writes nothing, and needs no account. The visitor's edits live in their
+ *  browser and the build happens there too (§13.2), so an anonymous page view
+ *  spends the visitor's memory and none of this host's — which is the refusal
+ *  §6 decision 13 makes, kept intact. §14.5 is explicit that doing this row
+ *  before 13.2 would have meant breaking it.
+ *
+ *  Secrets are filtered twice, and the second time is not redundant.
+ *  `planBrowserPreview` only gathers source extensions, so a `.env` is already
+ *  outside it — but that is a property of a list in another file that exists
+ *  for a different reason, and the one thing that must never happen here is
+ *  handing a stranger somebody's credentials. `isSecretPath` is the rule that
+ *  says so, and it is applied where the handing-over happens.
+ */
+export async function sandboxPayload(rawToken: string): Promise<SandboxPayload> {
+  const { projectId, projectName, template, settings } = await resolveToken(rawToken);
+
+  if (!settings.sandbox) {
+    // A different message from a bad token, and deliberately so: this token IS
+    // served publicly by the embed endpoint, so its existence is not a secret
+    // and pretending otherwise would only confuse the owner who has not turned
+    // the switch on.
+    throw new NotFoundError("That link is an embed, not a sandbox");
+  }
+
+  const plan = await planBrowserPreview(projectId);
+  increment("sandbox_views");
+
+  const forkUrl = `${env.WEB_ORIGIN}/project/${projectId}`;
+
+  if (!plan.supported || !plan.entry || !plan.files) {
+    return {
+      projectName,
+      template,
+      files: {},
+      entry: null,
+      refusal: plan.message ?? "This project cannot be run in a browser.",
+      forkUrl,
+    };
+  }
+
+  const files: Record<string, string> = {};
+  for (const [relPath, contents] of Object.entries(plan.files)) {
+    // See above: the rule about secrets is applied where the handing-over is.
+    if (isSecretPath(relPath)) continue;
+    files[relPath] = contents;
+  }
+
+  return {
+    projectName,
+    template,
+    files,
+    entry: plan.entry,
+    html: plan.html,
+    forkUrl,
+  };
 }
