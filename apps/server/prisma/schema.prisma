@@ -138,11 +138,14 @@ model User {
 
   /// Repositories whose pull requests get workspaces on this account. §13.3.
   pullRequestRepos PullRequestRepo[]
-  notifications    Notification[]
-  apiKeys          ApiKey[]
-  accountActions   AccountAction[]   @relation("AccountActionSubject")
-  computeUsage     ComputeUsage[]
-  subscription     Subscription?
+
+  /// Repositories this account has more than one checkout of. §13.4.
+  workspaceGroups WorkspaceGroup[]
+  notifications   Notification[]
+  apiKeys         ApiKey[]
+  accountActions  AccountAction[]  @relation("AccountActionSubject")
+  computeUsage    ComputeUsage[]
+  subscription    Subscription?
 
   /// A second factor, when the account has one. A table of its own for the
   /// same reason as the row below it, and more sharply: the TOTP secret is a
@@ -774,6 +777,48 @@ model BillingEvent {
   @@map("billing_events")
 }
 
+/// Several checkouts of one repository that know they are related. plan.md §13.4.
+///
+/// A `Project` is one directory and one row, and `switchBranch` changes the
+/// branch IN PLACE — refusing outright when the worktree is dirty. So reviewing
+/// a colleague's branch meant stashing (which §10.13 has since shipped, so the
+/// row's parenthetical is stale) or importing the repository a second time as an
+/// unrelated project with its own env vars and its own history.
+///
+/// This is the object that makes the second checkout related rather than
+/// unrelated: it owns the repository identity and the shared environment, and
+/// the projects under it are the checkouts. §13.3's pull request workspaces join
+/// one too — the row predicted the two would want the same object, and they do.
+model WorkspaceGroup {
+  id String @id @default(uuid())
+
+  /// Whose checkouts these are. The group is per account, not global: two
+  /// people working on one repository each get their own.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Lower-cased, for the reason §13.3's rows give: GitHub sends whichever case
+  /// the event carried, and a case-sensitive key opens a second group for the
+  /// same repository.
+  owner String
+  repo  String
+
+  /// Environment shared by every checkout, sealed exactly as a project's own
+  /// vars are. Layered BETWEEN the account's and the project's: more specific
+  /// than "everything I own", less specific than "this checkout", which is the
+  /// order somebody would say them in.
+  envVars Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects Project[]
+
+  /// One group per repository per account.
+  @@unique([userId, owner, repo])
+  @@map("workspace_groups")
+}
+
 /// A repository whose pull requests may have workspaces here. plan.md §13.3.
 ///
 /// **Enrolment is explicit, and that is the security decision in this row.**
@@ -969,6 +1014,14 @@ model Project {
   /// The pull request this workspace exists for, when it is one this server
   /// opened from a webhook rather than one a person made. plan.md §13.3.
   pullRequest PullRequestWorkspace?
+
+  /// The repository this is a checkout of, when it is one of several. §13.4.
+  ///
+  /// Null for the ordinary case: a project that is nobody's second checkout.
+  /// `SetNull` rather than `Cascade` — dissolving a group must not delete the
+  /// work in it, which is the difference between grouping and owning.
+  groupId String?
+  group   WorkspaceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt

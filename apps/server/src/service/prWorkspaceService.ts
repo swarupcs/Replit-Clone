@@ -5,6 +5,7 @@ import { githubApi, githubToken, getRepo } from "./githubService.js";
 import { importRepository } from "./repoImportService.js";
 import { publish, siteUrl } from "./deployService.js";
 import { trashProjectService } from "./projectService.js";
+import { joinGroup } from "./workspaceGroupService.js";
 import type { WebhookDecision } from "./pullRequestEvent.js";
 
 /** A workspace and a URL per pull request. plan.md §13.3.
@@ -185,6 +186,12 @@ async function upsert(
     ref: pull.headRef,
     name: `${repo.repo}-pr-${String(pull.number)}`,
   }, descriptor);
+
+  // §13.4's group. The row for 13.4 predicted that it and 13.3 "want the same
+  // object", and this is where that turns out to be true: a pull request
+  // workspace IS a second checkout of one repository, so it joins the group and
+  // gets the shared environment rather than being another unrelated project.
+  await joinGroup(project.id, userId, repo.owner, repo.repo);
 
   await prisma.pullRequestWorkspace.create({
     data: {

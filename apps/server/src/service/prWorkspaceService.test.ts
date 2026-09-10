@@ -22,6 +22,7 @@ const hoisted = vi.hoisted(() => ({
   githubApi: vi.fn(),
   githubToken: vi.fn(),
   getRepo: vi.fn(),
+  joinGroup: vi.fn(),
 }));
 
 vi.mock("../lib/prisma.js", () => ({
@@ -44,6 +45,11 @@ vi.mock("./deployService.js", () => ({
   siteUrl: (subdomain: string) => `https://${subdomain}.example.test`,
 }));
 vi.mock("./projectService.js", () => ({ trashProjectService: hoisted.trashProjectService }));
+// §13.4: a pull request workspace is a second checkout, so it joins the
+// repository's group. Mocked here because this suite is about which expensive
+// things get called, not about the group's rows — those are covered against
+// real Postgres in workspaceGroup.db.test.ts.
+vi.mock("./workspaceGroupService.js", () => ({ joinGroup: hoisted.joinGroup }));
 vi.mock("./githubService.js", () => ({
   githubApi: hoisted.githubApi,
   githubToken: hoisted.githubToken,
@@ -66,6 +72,7 @@ beforeEach(() => {
   hoisted.importRepository.mockResolvedValue({ id: "project-1" });
   hoisted.publish.mockResolvedValue({ subdomain: "pr-7" });
   hoisted.githubApi.mockResolvedValue({ data: { id: 5150 }, headers: new Headers() });
+  hoisted.joinGroup.mockResolvedValue(undefined);
   hoisted.wsCreate.mockResolvedValue({});
   hoisted.wsUpdate.mockResolvedValue({});
 });
@@ -81,6 +88,15 @@ describe("a pull request on an enrolled repository", () => {
       expect.anything(),
     );
     expect(hoisted.publish).toHaveBeenCalledWith("project-1");
+  });
+
+  it("puts the new workspace in the repository's group (§13.4)", async () => {
+    // 13.4's row predicted that it and 13.3 "want the same object". A pull
+    // request workspace IS a second checkout, so it gets the shared
+    // environment rather than being another unrelated project.
+    await applyDecision({ kind: "upsert", repo, pull });
+
+    expect(hoisted.joinGroup).toHaveBeenCalledWith("project-1", "user-1", "acme", "widget");
   });
 
   it("posts the link back as a comment", async () => {

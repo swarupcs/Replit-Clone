@@ -71,6 +71,12 @@ import { getRemoteAccessController } from "../../controllers/sshKeyController.js
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import {
+  addCheckoutController,
+  listGroupsController,
+  setGroupEnvController,
+  siblingsController,
+} from "../../controllers/workspaceGroupController.js";
+import {
   createShareLinkController,
   listSharingController,
   previewShareLinkController,
@@ -207,6 +213,14 @@ if (capabilities().gallery) {
 // Before every `/:projectId` route, or "trash" is a project id.
 router.get("/trash", asyncHandler(listTrashController));
 router.get("/", asyncHandler(listProjectsController));
+
+// Several checkouts of one repository. plan.md §13.4. Mounted here rather than
+// under /github because a checkout is a project first: what makes it a checkout
+// is which group it is in, not where it came from.
+router.get("/groups", asyncHandler(listGroupsController));
+router.post("/groups/checkouts", asyncHandler(addCheckoutController));
+router.put("/groups/:groupId/env", asyncHandler(setGroupEnvController));
+router.get("/:projectId/siblings", asyncHandler(siblingsController));
 router.post("/", createLimiter, asyncHandler(createProjectController));
 
 // Opening a folder that is already on the disk. All three are before every

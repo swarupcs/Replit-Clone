@@ -159,10 +159,26 @@ export function sealEnvVars(vars: EnvVars): Record<string, string> {
   );
 }
 
+/** The shared environment of a repository's checkouts (§13.4).
+ *
+ *  Local rather than imported: `workspaceGroupService` reads `sealEnvVars` and
+ *  `parseEnvVars` from this file, so importing it back would make a cycle.
+ */
+async function groupEnvVarsFor(groupId: string | null): Promise<EnvVars> {
+  if (!groupId) return {};
+
+  const row = await prisma.workspaceGroup.findUnique({
+    where: { id: groupId },
+    select: { envVars: true },
+  });
+
+  return parseEnvVars(row?.envVars);
+}
+
 export async function getEnvVars(projectId: string): Promise<EnvVars> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { envVars: true, ownerId: true },
+    select: { envVars: true, ownerId: true, groupId: true },
   });
 
   const own = parseEnvVars(project?.envVars);
@@ -193,7 +209,23 @@ export async function getEnvVars(projectId: string): Promise<EnvVars> {
   // said which database they mean, and silently overriding it would be the
   // platform arguing with them.
   const managed = await databaseEnv(projectId).catch(() => ({}));
-  return { ...account, ...managed, ...own };
+
+  // The environment shared by every checkout of one repository (§13.4).
+  //
+  // BETWEEN the account's and this checkout's, which is the order somebody
+  // would say them in: more specific than "everything I own", less specific
+  // than "this checkout". Read here rather than at container start for the
+  // same reason the two above are — `envSignature` is computed from what this
+  // returns, so changing a group's variable changes the signature of every
+  // checkout in it and each is rebuilt on its next start instead of keeping
+  // the old value for the rest of its life.
+  //
+  // Read here with Prisma rather than through `workspaceGroupService`, which
+  // imports `sealEnvVars` and `parseEnvVars` from this file: going the other
+  // way too would make the pair a cycle.
+  const group = await groupEnvVarsFor(project?.groupId ?? null).catch(() => ({}));
+
+  return { ...account, ...group, ...managed, ...own };
 }
 
 export async function setEnvVars(
