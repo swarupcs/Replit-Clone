@@ -5,21 +5,22 @@ import { useMutation } from "@tanstack/react-query";
 import { loader } from "@monaco-editor/react";
 import { Button, Flex, Tooltip, Typography, message } from "antd";
 import {
+  VscBeaker,
+  VscCloudUpload,
+  VscDatabase,
   VscFiles,
+  VscHistory,
+  VscKey,
   VscLayoutPanel,
   VscLayoutSidebarLeft,
-  VscKey,
-  VscSearch,
-  VscSourceControl,
   VscPackage,
-  VscDatabase,
-  VscSymbolClass,
-  VscCloudUpload,
-  VscWatch,
-  VscBeaker,
-  VscSettingsGear,
-  VscSparkle,
   VscRepoForked,
+  VscSearch,
+  VscSettingsGear,
+  VscSourceControl,
+  VscSparkle,
+  VscSymbolClass,
+  VscWatch,
 } from "react-icons/vsc";
 import {
   ArrowLeftOutlined,
@@ -51,6 +52,7 @@ import { RemoteAccessDialog } from "../components/organisms/RemoteAccessDialog/R
 import { GitToolsDialog } from "../components/organisms/GitTools/GitToolsDialog.tsx";
 import { CompareDialog } from "../components/organisms/CompareDialog/CompareDialog.tsx";
 import { useCompareStore } from "../store/compareStore.ts";
+import { TimelinePanel } from "../components/organisms/TimelinePanel/TimelinePanel.tsx";
 import { useBlameStore } from "../store/blameStore.ts";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
@@ -191,6 +193,7 @@ export const ProjectPlayground = () => {
     | "tests"
     | "database"
     | "outline"
+    | "timeline"
     | "ai"
   >(
     "files",
@@ -1008,6 +1011,19 @@ export const ProjectPlayground = () => {
                     <VscPackage size={16} />
                   </button>
                 </Tooltip>
+                {/* A file's own history -- plan.md §10.12. In the sidebar
+                    rather than the bottom panel because it is about the file
+                    you are looking at, which is what the sidebar is for. */}
+                <Tooltip title="Timeline" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "timeline"}
+                    aria-label="Timeline"
+                    onClick={() => setSidebarView("timeline")}
+                  >
+                    <VscHistory size={16} />
+                  </button>
+                </Tooltip>
                 <Tooltip title="Deploy" placement="right">
                   <button
                     className="rc-icon-button"
@@ -1116,6 +1132,17 @@ export const ProjectPlayground = () => {
 {/* Mounted only while it is showing, unlike search and the
                     assistant: it holds nothing worth keeping across a glance
                     at another view, and mounting it re-reads the manifest. */}
+                {sidebarView === "timeline" && projectIdFromUrl && (
+                  <div style={{ height: "100%" }}>
+                    <ErrorBoundary label="Timeline">
+                      <TimelinePanel
+                        projectId={projectIdFromUrl}
+                        relPath={activeRelPathForCompare}
+                      />
+                    </ErrorBoundary>
+                  </div>
+                )}
+
                 {sidebarView === "packages" && projectIdFromUrl && (
                   <div style={{ height: "100%" }}>
                     <ErrorBoundary label="Packages">

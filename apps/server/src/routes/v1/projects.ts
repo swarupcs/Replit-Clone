@@ -58,6 +58,10 @@ import {
 } from "../../controllers/localFolderController.js";
 import { capabilities } from "../../config/deploymentMode.js";
 import {
+  timelineController,
+  timelineVersionController,
+} from "../../controllers/timelineController.js";
+import {
   listTasksController,
   runTaskController,
 } from "../../controllers/taskController.js";
@@ -216,6 +220,11 @@ router.get("/local/browse", asyncHandler(browseLocalFoldersController));
 router.post("/local", createLimiter, asyncHandler(openLocalFolderController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
 router.get("/:projectId/ports", asyncHandler(getProjectPorts));
+
+// A file's own history -- plan.md §10.12. Snapshots have been taken on every
+// save since §2.x; until now nothing could read them.
+router.get("/:projectId/timeline", asyncHandler(timelineController));
+router.get("/:projectId/timeline/version", asyncHandler(timelineVersionController));
 
 // Tasks from the repository -- plan.md §10.10. Reading the list is viewer;
 // running one is editor, because a task is an arbitrary command line.

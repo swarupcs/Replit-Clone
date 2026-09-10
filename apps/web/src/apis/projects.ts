@@ -1120,6 +1120,36 @@ export const setEditorSessionApi = async (
   return response.data.data;
 };
 
+/* ---- a file's own history. plan.md §10.12 ---- */
+
+export interface TimelineEntry {
+  at: number;
+  bytes: number;
+}
+
+export const getTimelineApi = async (
+  projectId: string,
+  relPath: string,
+): Promise<TimelineEntry[]> => {
+  const response = await axios.get<ApiSuccess<TimelineEntry[]>>(
+    `/api/v1/projects/${projectId}/timeline`,
+    { params: { path: relPath } },
+  );
+  return response.data.data;
+};
+
+export const getTimelineVersionApi = async (
+  projectId: string,
+  relPath: string,
+  at: number,
+): Promise<string> => {
+  const response = await axios.get<ApiSuccess<{ at: number; contents: string }>>(
+    `/api/v1/projects/${projectId}/timeline/version`,
+    { params: { path: relPath, at } },
+  );
+  return response.data.data.contents;
+};
+
 /* ---- tasks. plan.md §10.10 ---- */
 
 export const getTasksApi = async (projectId: string): Promise<TaskList> => {

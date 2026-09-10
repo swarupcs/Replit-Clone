@@ -56,8 +56,8 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2920 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1399 passing** (113 files), re-run 2026-09-09 |
+| the same, with `TEST_DATABASE_URL` set | **2923 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1406 passing** (115 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,7 +146,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 171 items. Open: 15 — four blocked, three from §10, none from §11, whose
+**Done: 172 items. Open: 14 — four blocked, two from §10, none from §11, whose
 last row closed on 2026-09-10, two from §12, which reads neither and
 asks what a cloud machine is for, and seven from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
@@ -156,7 +156,7 @@ seven that remain are merely open rather than blocked. §11's last row is 11.10,
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 3 + 0 + 1 + 7 = 15, and they are written out
+Those five numbers are 4 + 2 + 0 + 1 + 7 = 14, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3740,6 +3740,47 @@ lint clean 3/3.
 file parsing, ordering, matchers and path normalisation are tested; the exec is
 not.
 
+### 2.57b Since (2026-09-10) — §10.12, the history that was already being kept
+
+**The row was half wrong and that is the finding.** It says checkpoints "are the
+wrong granularity — whole-project, explicit". They are neither: `snapshot()` is
+called per file, automatically, from the write handler, on every save, and has
+been since §2.x. It even snapshots *what is being replaced* rather than what is
+being written, with a comment explaining that the old version is the thing
+somebody wants back an hour later.
+
+**What was actually missing: a reader.** `listCheckpoints` and `readCheckpoint`
+were written, correct, and reachable from nothing — no route, no client, no UI.
+The data was on disk and the question "what did this look like an hour ago" had
+no way to be asked. That is the second row this session where a claim measured a
+symptom correctly and drew the wrong conclusion from it (§2.56 was the first),
+which is worth noticing about this document rather than about these two rows.
+
+**Opening a version compares rather than restores.** §10.11 made the diff pane's
+left-hand side a choice earlier the same day, so an old version goes there —
+and what somebody wants out of an hour-old file is usually three lines, not the
+whole thing back.
+
+**What the panel says out loud:** these live beside the project on the same
+disk, so they are useful for the last hour and are not a backup. §3.3 is the
+backup. A panel that implied otherwise would be the most expensive kind of
+wrong.
+
+**A test that claimed too much, corrected rather than kept.** `readCheckpoint`
+validates `at` with `Number.isSafeInteger`, and a test asserted that guard
+"rather than building a path from it" — but mutating the guard away leaves the
+test green, because a bad number names a file that does not exist either way.
+The test now states the outcome and records that the check is belt to that
+braces. A test whose comment claims a mechanism it does not exercise is worse
+than no comment.
+
+**Verified.** 3 server tests, 7 web. Server 2923 passing / 9 skipped, web 1406,
+typecheck and lint clean 3/3.
+
+**Not verified:** nobody has saved a file, waited, and watched the version
+appear. The reading path is tested; the snapshot half was already shipped and is
+covered by its own tests from §2.x.
+
 ---
 
 ## 3. Open
@@ -5588,7 +5629,19 @@ decision needs. Under Route A the cost of every one of them is zero.
       with saved, compare two arbitrary files, compare against a branch, and
       **edit inside the diff**.
 
-- [ ] **10.12 Local history, and a timeline.** No timeline view and no per-file
+- [x] **10.12 Local history, and a timeline.** **Shipped 2026-09-10 — §2.57b**,
+      and **the row's own premise was half wrong**: checkpoints are neither
+      whole-project nor explicit. `snapshot()` runs per file, automatically, on
+      every save, and has since §2.x. What was missing is that **nothing could
+      read them** — `listCheckpoints` and `readCheckpoint` existed with no
+      route, no client and no UI, so "what did this look like an hour ago" was
+      answered on disk and unreachable. A Timeline panel now reads them, and
+      opening a version puts it in the diff pane (§10.11) rather than over the
+      file.
+
+      **What is still true from the row:** they are on the same disk as the tree
+      they snapshot, so they are not a backup — §3.3 is, and the panel says so
+      in those words. Original note follows. No timeline view and no per-file
       history. Checkpoints (§2.x) are the nearest thing and they are the wrong
       granularity — whole-project, explicit, and on the same disk as the tree
       they snapshot. VS Code's local history is per file, automatic, and answers
@@ -7450,7 +7503,10 @@ what a personal user notices soonest, which is §10's own recommended order with
    feeds and 13.5 is the third. **10.10 — tasks**, whose problem-matcher half has somewhere to go: the
    problems panel exists and is fed only by the language server. Sequence it
    with 13.5, which is the third feed for the same panel.
-5. **10.12 — local history and a timeline.** Checkpoints are the wrong
+5. ~~**10.12 — local history and a timeline.**~~ **Done 2026-09-10 — §2.57b**,
+   which found the premise half wrong: the checkpoints ARE per file and
+   automatic, and only the reader was missing. Original note follows.
+   Checkpoints are the wrong
    granularity for the question this answers.
 6. **10.8 — languages past Python and Go.** One policy entry and one image per
    language. Note decision 2's revisit trigger fires here: the moment somebody
