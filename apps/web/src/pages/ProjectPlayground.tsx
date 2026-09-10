@@ -48,6 +48,8 @@ import { useRunStore } from "../store/runStore.ts";
 import { useWorkspaceStore } from "../store/workspaceStore.ts";
 import { useWorkspaceConfig } from "../hooks/useWorkspaceConfig.ts";
 import { RemoteAccessDialog } from "../components/organisms/RemoteAccessDialog/RemoteAccessDialog.tsx";
+import { GitToolsDialog } from "../components/organisms/GitTools/GitToolsDialog.tsx";
+import { useBlameStore } from "../store/blameStore.ts";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
 import { QuickOpen } from "../components/organisms/QuickOpen/QuickOpen.tsx";
@@ -159,6 +161,7 @@ export const ProjectPlayground = () => {
   /** Go-to-symbol, and zen mode. Both are pure layout over what exists. */
   const [symbolSearchOpen, setSymbolSearchOpen] = useState(false);
   const [remoteOpen, setRemoteOpen] = useState(false);
+  const [gitToolsOpen, setGitToolsOpen] = useState(false);
   const [zen, setZen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
@@ -495,6 +498,22 @@ export const ProjectPlayground = () => {
         run: () => {
           setSidebarView("packages");
           openView("sidebar");
+        },
+      },
+      {
+        id: "git.blame",
+        category: "Source control",
+        title: "Show or hide who last changed each line",
+        run: () => {
+          useBlameStore.getState().toggle();
+        },
+      },
+      {
+        id: "git.tools",
+        category: "Source control",
+        title: "Tags, compare branches, amend, revert, cherry-pick",
+        run: () => {
+          setGitToolsOpen(true);
         },
       },
       {
@@ -1244,6 +1263,16 @@ export const ProjectPlayground = () => {
       <StatusBar projectId={projectIdFromUrl} />
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
+      {projectIdFromUrl && (
+        <GitToolsDialog
+          projectId={projectIdFromUrl}
+          open={gitToolsOpen}
+          canWrite={canEdit}
+          onClose={() => {
+            setGitToolsOpen(false);
+          }}
+        />
+      )}
       {projectIdFromUrl && (
         <RemoteAccessDialog
           projectId={projectIdFromUrl}

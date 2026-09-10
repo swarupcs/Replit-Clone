@@ -12,6 +12,10 @@ import type {
   AccountSecrets,
   AccountSshKeys,
   EditorConfig,
+  GitBlameLine,
+  GitRefComparison,
+  GitStash,
+  GitTag,
   RemoteAccess,
   EditorSessionState,
   EditorSessionUpdate,
@@ -1110,6 +1114,136 @@ export const setEditorSessionApi = async (
   const response = await axios.put<ApiSuccess<EditorSessionState>>(
     "/api/v1/account/session",
     { entries },
+  );
+  return response.data.data;
+};
+
+/* ---- the rest of git. plan.md §10.13 ---- */
+
+export const getStashesApi = async (projectId: string): Promise<GitStash[]> => {
+  const response = await axios.get<ApiSuccess<GitStash[]>>(
+    `/api/v1/projects/${projectId}/git/stashes`,
+  );
+  return response.data.data;
+};
+
+export const pushStashApi = async (
+  projectId: string,
+  message: string,
+  includeUntracked: boolean,
+): Promise<GitStash[]> => {
+  const response = await axios.post<ApiSuccess<GitStash[]>>(
+    `/api/v1/projects/${projectId}/git/stashes`,
+    { message, includeUntracked },
+  );
+  return response.data.data;
+};
+
+/** Returns the status too: applying a stash is the one of these whose whole
+ *  point is what it did to the working tree. */
+export const applyStashApi = async (
+  projectId: string,
+  index: number,
+  drop: boolean,
+): Promise<{ stashes: GitStash[]; status: GitStatus }> => {
+  const response = await axios.post<
+    ApiSuccess<{ stashes: GitStash[]; status: GitStatus }>
+  >(`/api/v1/projects/${projectId}/git/stashes/apply`, { index, drop });
+  return response.data.data;
+};
+
+export const dropStashApi = async (
+  projectId: string,
+  index: number,
+): Promise<GitStash[]> => {
+  const response = await axios.post<ApiSuccess<GitStash[]>>(
+    `/api/v1/projects/${projectId}/git/stashes/drop`,
+    { index },
+  );
+  return response.data.data;
+};
+
+export const getBlameApi = async (
+  projectId: string,
+  relPath: string,
+): Promise<GitBlameLine[]> => {
+  const response = await axios.get<ApiSuccess<GitBlameLine[]>>(
+    `/api/v1/projects/${projectId}/git/blame`,
+    { params: { path: relPath } },
+  );
+  return response.data.data;
+};
+
+export const amendCommitApi = async (
+  projectId: string,
+  message: string,
+): Promise<GitCommit[]> => {
+  const response = await axios.post<ApiSuccess<GitCommit[]>>(
+    `/api/v1/projects/${projectId}/git/amend`,
+    { message },
+  );
+  return response.data.data;
+};
+
+export const revertCommitApi = async (
+  projectId: string,
+  sha: string,
+): Promise<GitStatus> => {
+  const response = await axios.post<ApiSuccess<GitStatus>>(
+    `/api/v1/projects/${projectId}/git/revert`,
+    { sha },
+  );
+  return response.data.data;
+};
+
+export const cherryPickApi = async (
+  projectId: string,
+  sha: string,
+): Promise<GitStatus> => {
+  const response = await axios.post<ApiSuccess<GitStatus>>(
+    `/api/v1/projects/${projectId}/git/cherry-pick`,
+    { sha },
+  );
+  return response.data.data;
+};
+
+export const getTagsApi = async (projectId: string): Promise<GitTag[]> => {
+  const response = await axios.get<ApiSuccess<GitTag[]>>(
+    `/api/v1/projects/${projectId}/git/tags`,
+  );
+  return response.data.data;
+};
+
+export const createTagApi = async (
+  projectId: string,
+  name: string,
+  message: string,
+): Promise<GitTag[]> => {
+  const response = await axios.post<ApiSuccess<GitTag[]>>(
+    `/api/v1/projects/${projectId}/git/tags`,
+    { name, message },
+  );
+  return response.data.data;
+};
+
+export const deleteTagApi = async (
+  projectId: string,
+  name: string,
+): Promise<GitTag[]> => {
+  const response = await axios.delete<ApiSuccess<GitTag[]>>(
+    `/api/v1/projects/${projectId}/git/tags/${encodeURIComponent(name)}`,
+  );
+  return response.data.data;
+};
+
+export const compareRefsApi = async (
+  projectId: string,
+  from: string,
+  to: string,
+): Promise<GitRefComparison> => {
+  const response = await axios.get<ApiSuccess<GitRefComparison>>(
+    `/api/v1/projects/${projectId}/git/compare`,
+    { params: { from, to } },
   );
   return response.data.data;
 };

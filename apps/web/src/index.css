@@ -2008,6 +2008,18 @@ body {
  *  same whichever surface it is seen on. The deletion marker is a triangle
  *  rather than a bar because there is no line to draw a bar over — the text
  *  is gone, and the mark belongs at the seam it left behind. */
+/* Blame annotations at the end of a line. plan.md §10.13.
+ *
+ *  Deliberately quiet: it is on every line at once, so anything with real
+ *  contrast would turn the file into two columns of text competing for
+ *  attention. Italic and dim is enough to read when you look for it and easy to
+ *  stop seeing when you are reading the code. */
+.rc-blame {
+  color: var(--rc-text-subtle);
+  font-style: italic;
+  opacity: 0.7;
+}
+
 .rc-gutter {
   width: 3px !important;
   margin-left: 3px;

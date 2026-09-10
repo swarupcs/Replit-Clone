@@ -34,6 +34,7 @@ import { DiffView } from "./DiffView.tsx";
 import { useEditorSocketStore } from "../../../store/editorSocketStore.ts";
 import { getGithubStatusApi } from "../../../apis/github.ts";
 import type { GithubPullRequest } from "@replit-clone/shared";
+import { StashSection } from "../GitTools/StashSection.tsx";
 import {
   getGitBranchesApi,
   getGitLogApi,
@@ -893,6 +894,18 @@ export function SourceControlPanel({ projectId, canWrite, isOwner }: Props) {
           </Button>
         </div>
       )}
+
+      {/* Stash -- plan.md §10.13. Here rather than behind a menu because it is
+          part of the same loop as staging and committing: it is what somebody
+          reaches for INSTEAD of committing, and hiding it would make the
+          cheaper option the harder one to find. */}
+      <div style={{ padding: "0 8px 8px" }}>
+        <StashSection
+          projectId={projectId}
+          canEdit={canWrite}
+          onChanged={() => void refresh(true)}
+        />
+      </div>
 
       <div style={{ flex: 1, overflowY: "auto" }}>
         {showHistory ? (

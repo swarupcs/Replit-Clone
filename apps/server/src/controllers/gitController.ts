@@ -829,3 +829,167 @@ function describeSync(
 
   return did ? `${did} ${why}` : why;
 }
+
+/* ---- the rest of git. plan.md §10.13 ---- */
+
+/** One query parameter, as a string.
+ *
+ *  Express types a query value as `string | string[] | ParsedQs`, because
+ *  `?path=a&path=b` and `?path[x]=y` are both things a client can send.
+ *  `String()` on either of those produces "a,b" or "[object Object]" -- so this
+ *  takes the string case and refuses the rest, rather than passing a plausible
+ *  looking nonsense into a git argument.
+ */
+function queryString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+/** Reading is `viewer`; anything that changes the repository is `editor`.
+ *
+ *  The same line the rest of this file draws, and worth restating for two of
+ *  these: blame is a READ, so a read-only visitor gets it — refusing would mean
+ *  somebody who can see the file cannot see who wrote it, which is not a
+ *  boundary anybody asked for. Amend, revert and cherry-pick change history and
+ *  are `editor`.
+ */
+
+export async function gitStashListController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  res.json({ success: true, message: "Stashes", data: await git.stashes(projectId) });
+}
+
+export async function gitStashPushController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { message, includeUntracked } = req.body as {
+    message?: string;
+    includeUntracked?: boolean;
+  };
+
+  await git.stashPush(projectId, message ?? "", includeUntracked === true);
+  res.json({ success: true, message: "Stashed", data: await git.stashes(projectId) });
+}
+
+export async function gitStashApplyController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { index, drop } = req.body as { index?: number; drop?: boolean };
+
+  await git.stashApply(projectId, Number(index), drop === true);
+  // The status too: applying a stash is the one of these whose whole point is
+  // what it did to the working tree, and a client that had to ask again would
+  // render a stale panel first.
+  res.json({
+    success: true,
+    message: "Applied",
+    data: { stashes: await git.stashes(projectId), status: await git.status(projectId) },
+  });
+}
+
+export async function gitStashDropController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { index } = req.body as { index?: number };
+
+  await git.stashDrop(projectId, Number(index));
+  res.json({ success: true, message: "Dropped", data: await git.stashes(projectId) });
+}
+
+export async function gitBlameController(req: Request, res: Response): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  const relPath = queryString(req.query["path"]);
+
+  res.json({
+    success: true,
+    message: "Blame",
+    data: await git.blame(projectId, relPath),
+  });
+}
+
+export async function gitAmendController(req: Request, res: Response): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { message } = req.body as { message?: string };
+
+  res.json({
+    success: true,
+    message: "Amended",
+    data: await git.amendCommit(projectId, message ?? ""),
+  });
+}
+
+export async function gitRevertController(req: Request, res: Response): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { sha } = req.body as { sha?: string };
+
+  await git.revertCommit(projectId, String(sha ?? ""));
+  res.json({
+    success: true,
+    message: "Reverted",
+    data: await git.status(projectId),
+  });
+}
+
+export async function gitCherryPickController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { sha } = req.body as { sha?: string };
+
+  await git.cherryPick(projectId, String(sha ?? ""));
+  res.json({ success: true, message: "Cherry-picked", data: await git.status(projectId) });
+}
+
+export async function gitTagsController(req: Request, res: Response): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  res.json({ success: true, message: "Tags", data: await git.tags(projectId) });
+}
+
+export async function gitCreateTagController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { name, message } = req.body as { name?: string; message?: string };
+
+  res.json({
+    success: true,
+    message: "Tagged",
+    data: await git.createTag(projectId, String(name ?? ""), message ?? ""),
+  });
+}
+
+export async function gitDeleteTagController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "editor");
+  const { name } = req.params as { name: string };
+
+  res.json({
+    success: true,
+    message: "Tag deleted",
+    data: await git.deleteTag(projectId, name),
+  });
+}
+
+export async function gitCompareController(req: Request, res: Response): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  const from = queryString(req.query["from"]);
+  const to = queryString(req.query["to"]);
+
+  res.json({
+    success: true,
+    message: "Comparison",
+    data: await git.compareRefs(projectId, from, to),
+  });
+}

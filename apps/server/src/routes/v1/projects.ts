@@ -93,6 +93,18 @@ import {
   gitDiffController,
   gitInitController,
   gitLogController,
+  gitStashListController,
+  gitStashPushController,
+  gitStashApplyController,
+  gitStashDropController,
+  gitBlameController,
+  gitAmendController,
+  gitRevertController,
+  gitCherryPickController,
+  gitTagsController,
+  gitCreateTagController,
+  gitDeleteTagController,
+  gitCompareController,
   gitStageController,
   gitStatusController,
   gitUnstageController,
@@ -212,6 +224,21 @@ router.get("/:projectId/remote", asyncHandler(getRemoteAccessController));
 router.get("/:projectId/git/status", asyncHandler(gitStatusController));
 router.get("/:projectId/git/diff", asyncHandler(gitDiffController));
 router.get("/:projectId/git/log", asyncHandler(gitLogController));
+
+// The rest of git -- plan.md §10.13. Reading is viewer, changing is editor;
+// blame is a read, so somebody who can see the file can see who wrote it.
+router.get("/:projectId/git/stashes", asyncHandler(gitStashListController));
+router.post("/:projectId/git/stashes", asyncHandler(gitStashPushController));
+router.post("/:projectId/git/stashes/apply", asyncHandler(gitStashApplyController));
+router.post("/:projectId/git/stashes/drop", asyncHandler(gitStashDropController));
+router.get("/:projectId/git/blame", asyncHandler(gitBlameController));
+router.post("/:projectId/git/amend", asyncHandler(gitAmendController));
+router.post("/:projectId/git/revert", asyncHandler(gitRevertController));
+router.post("/:projectId/git/cherry-pick", asyncHandler(gitCherryPickController));
+router.get("/:projectId/git/tags", asyncHandler(gitTagsController));
+router.post("/:projectId/git/tags", asyncHandler(gitCreateTagController));
+router.delete("/:projectId/git/tags/:name", asyncHandler(gitDeleteTagController));
+router.get("/:projectId/git/compare", asyncHandler(gitCompareController));
 router.get("/:projectId/git/branches", asyncHandler(gitBranchesController));
 router.post("/:projectId/git/branch", asyncHandler(gitBranchController));
 router.post("/:projectId/git/init", asyncHandler(gitInitController));

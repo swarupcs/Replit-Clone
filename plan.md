@@ -56,8 +56,8 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2864 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1376 passing** (109 files), re-run 2026-09-09 |
+| the same, with `TEST_DATABASE_URL` set | **2890 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1381 passing** (110 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,7 +146,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 168 items. Open: 18 — four blocked, six from §10, none from §11, whose
+**Done: 169 items. Open: 17 — four blocked, five from §10, none from §11, whose
 last row closed on 2026-09-10, two from §12, which reads neither and
 asks what a cloud machine is for, and seven from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
@@ -156,7 +156,7 @@ seven that remain are merely open rather than blocked. §11's last row is 11.10,
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 6 + 0 + 1 + 7 = 18, and they are written out
+Those five numbers are 4 + 5 + 0 + 1 + 7 = 17, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3578,6 +3578,60 @@ by mutating `withWorkspace` to `||` and watching the right test fail. Server
 result against that profile in VS Code itself. The mapping is tested name by
 name; it is not tested against a real file somebody uses.
 
+### 2.55 Since (2026-09-10) — §10.13, the git you reach for in the second week
+
+The daily loop was already complete. This is stash, blame, amend, revert, tags,
+cherry-pick and comparing two refs — with stash and blame put where the work is,
+because §10 named them the two somebody notices in the first week and a feature
+you have to go looking for is one you use half as often.
+
+**Stash is inline in the source control panel**, not in a dialog: it is what
+somebody reaches for *instead of* committing, and hiding it would make the
+cheaper option the harder one to find. Apply and pop are separate actions rather
+than a checkbox — the primary one keeps the stash, and popping is confirmed,
+because a stash you meant to keep and popped is recoverable only through the
+reflog, which nobody reaches for in time.
+
+**Blame annotates the end of each line** rather than opening a column. The same
+answer VS Code arrived at, for the same reason: a blame column pushes the code
+sideways and every line of it is the same three words. It is off until asked
+for, because it runs a process per file.
+
+**Amend refuses a commit that is already pushed.** `merge-base --is-ancestor
+HEAD @{upstream}` is exactly the question "has anybody else seen this", and a
+non-zero exit covers both "not pushed" and "no upstream", which are both fine to
+amend. That check is the difference between a convenience and a way to lose
+somebody else's work.
+
+**Nothing here takes a ref as a free string.** A stash is addressed by index, a
+commit by a sha checked against a hex pattern, and a branch or tag through the
+`check-ref-format` the file already used. `execCapture` runs no shell, so there
+is no quoting bug to have — but a value beginning with `-` is still a flag git
+itself would read, and `--message=x` goes in as ONE argv entry so a message
+starting with a dash cannot become an option. Four of those guards were verified
+by removing them and watching the matching test fail.
+
+**Two bugs the tests caught, both in this session's own new code.** The stash
+panel first used `useQuery`, and `SourceControlPanel` is rendered without a
+`QueryClientProvider` above it — so it threw "No QueryClient set" and took the
+whole panel down. It reads with plain state now, the way the panel around it
+already does. And the panel's existing tests mock the API module wholesale, so
+adding calls to it made them `undefined()`; the mock lists them now.
+
+**Deliberately not done, and named so it is not mistaken for an oversight:**
+rebase, including interactive, and a commit graph. Rebase is history rewriting
+with a conflict-resolution loop attached, and this platform's conflict UI is
+built around merge; shipping a rebase that could strand somebody mid-operation
+with no way out through this UI would be worse than not having it. The graph is
+a rendering problem rather than a git one. Both stay open in §10.13's text.
+
+**Verified.** 26 server tests, 5 web, four guards mutation-checked. Server 2890
+passing / 9 skipped, web 1381, typecheck and lint clean 3/3.
+
+**Not verified:** no Docker daemon, so every one of these has been tested at the
+argv it builds and the output it parses, and none has been run against a real
+repository.
+
 ---
 
 ## 3. Open
@@ -5411,7 +5465,17 @@ decision needs. Under Route A the cost of every one of them is zero.
       "what did this look like an hour ago" for a file that was never committed,
       which is the question checkpoints do not answer.
 
-- [ ] **10.13 The rest of git.** `gitService.ts` covers status, diff, stage and
+- [x] **10.13 The rest of git.** **Shipped 2026-09-10 — §2.55.** Stash, blame,
+      amend, revert, tags, cherry-pick and comparing two branches. **Not**
+      rebase, interactive or otherwise, and not a commit graph — see §2.55 for
+      why those two are named as not-done rather than quietly dropped.
+
+      Stash and blame, which this row calls the two a personal user notices in
+      the first week, are where the work is rather than behind a menu: stash is
+      inline in the source control panel, blame is a palette toggle that
+      annotates the lines in place. Original note follows.
+
+      `gitService.ts` covers status, diff, stage and
       unstage, hunk staging, commit, log, branches, switch, discard, remotes,
       fetch, pull, push and conflict resolution — a genuinely complete daily
       loop. Absent: stash, blame, amend, revert, tags, cherry-pick, rebase
@@ -7242,7 +7306,8 @@ what a personal user notices soonest, which is §10's own recommended order with
    the cheapest of the nine. It also subsumes 2a's follow-the-person question
    for the settings half specifically, so do it after 2a rather than before, or
    the two will disagree about which is the source of truth.
-2. **10.13 — the rest of git.** Stash and blame are the two a personal user
+2. ~~**10.13 — the rest of git.**~~ **Done 2026-09-10 — §2.55**, except rebase
+   and the commit graph, which §2.55 names and explains. Stash and blame are the two a personal user
    notices in the first week; amend, revert, tags, cherry-pick and a graph
    after.
 3. **10.11 — a real diff editor.** `createDiffEditor` is unused. Compare with

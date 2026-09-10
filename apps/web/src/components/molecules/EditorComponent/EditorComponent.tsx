@@ -42,6 +42,8 @@ import { NotebookEditor } from "../../organisms/NotebookEditor/NotebookEditor.ts
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
 import { useWorkspaceConfigStore } from "../../../store/workspaceConfigStore.ts";
 import { registerSnippets } from "../../../lib/snippetProvider.ts";
+import { useBlame } from "../../../hooks/useBlame.ts";
+import { useBlameStore } from "../../../store/blameStore.ts";
 import {
   buildDiffOptions,
   buildEditorOptions,
@@ -573,6 +575,47 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
       })),
     );
   }, [gutterRegionsForFile, mountTick]);
+
+  /** Blame, as an annotation at the end of each line. plan.md §10.13.
+   *
+   *  `after` content rather than a margin column, and the reason is the same
+   *  one VS Code arrived at: a blame column pushes the code sideways and every
+   *  line of it is the same three words, so it costs a lot of width to say very
+   *  little. At the end of the line it is there when you look and invisible when
+   *  you are reading.
+   *
+   *  Off until asked for -- see `useBlame`. Blame runs a process per file.
+   */
+  const blameEnabled = useBlameStore((state) => state.enabled);
+  const { lines: blameLines } = useBlame(
+    lspProjectId ?? undefined,
+    activeTab?.relPath ?? null,
+    blameEnabled,
+  );
+  const blameDecorations = useRef<string[]>([]);
+
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const codeEditor = editorRef.current;
+    if (!monaco || !codeEditor) return;
+
+    blameDecorations.current = codeEditor.deltaDecorations(
+      blameDecorations.current,
+      blameLines.map((line) => ({
+        range: new monaco.Range(line.line, 1, line.line, 1),
+        options: {
+          after: {
+            content: `    ${line.author} · ${line.summary}`,
+            inlineClassName: "rc-blame",
+          },
+          // The whole line, so the annotation sits at its end wherever that is.
+          hoverMessage: {
+            value: `${line.shortSha} — ${line.author}, ${line.at.slice(0, 10)}\n\n${line.summary}`,
+          },
+        },
+      })),
+    );
+  }, [blameLines, mountTick]);
 
   /** Clicking a bar opens the diff, which is what the bar is a summary of.
    *
