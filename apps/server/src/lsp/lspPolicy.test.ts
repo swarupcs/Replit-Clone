@@ -5,7 +5,9 @@ const { env } = vi.hoisted(() => ({
 }));
 vi.mock("../config/env.js", () => ({ env }));
 
-const { canStartLanguageServer } = await import("./lspPolicy.js");
+const { canStartLanguageServer, LANGUAGE_SERVERS, servesImage } = await import(
+  "./lspPolicy.js"
+);
 
 describe("canStartLanguageServer", () => {
   beforeEach(() => {
@@ -25,7 +27,9 @@ describe("canStartLanguageServer", () => {
   });
 
   it("refuses a language it has no server for", () => {
-    expect(canStartLanguageServer("rust")).toMatchObject({
+    // Ruby rather than Rust since §10.8, which added a Rust entry and an image
+    // to go with it. The example moved; the rule did not.
+    expect(canStartLanguageServer("ruby")).toMatchObject({
       allowed: false,
       code: "UNSUPPORTED_LANGUAGE",
     });
@@ -140,10 +144,71 @@ describe("a file whose language the container cannot serve", () => {
   });
 
   it("reports an unsupported language before an image mismatch", () => {
-    // "No server for Rust" is the useful sentence; "Rust needs the Rust image"
-    // would be a lie about an image that does not exist.
-    expect(canStartLanguageServer("rust", "sandbox-node:latest")).toMatchObject({
+    // "No server for Ruby" is the useful sentence; "Ruby needs the Ruby image"
+    // would be a lie about an image that does not exist. That warning is why
+    // §10.8 added `images/rust` and `images/cpp` rather than only registry
+    // entries pointing at images nothing builds.
+    expect(canStartLanguageServer("ruby", "sandbox-node:latest")).toMatchObject({
       code: "UNSUPPORTED_LANGUAGE",
     });
+  });
+});
+
+/** plan.md §10.8. The registry grew from two languages to seven, and the two
+ *  things that changed shape are worth holding: a server can belong to more
+ *  than one image, and every image named here is one this repository builds. */
+describe("languages past Python and Go", () => {
+  it("serves TypeScript and JavaScript from the node image", () => {
+    // The most valuable entry: Monaco's own worker is per model, so it sees the
+    // file and not the project.
+    for (const language of ["typescript", "javascript"]) {
+      expect(
+        canStartLanguageServer(language, "sandbox-node:latest"),
+      ).toEqual({ allowed: true });
+    }
+  });
+
+  it("drives both through one tsserver", () => {
+    expect(LANGUAGE_SERVERS["javascript"]?.argv).toEqual(
+      LANGUAGE_SERVERS["typescript"]?.argv,
+    );
+  });
+
+  it("serves C and C++ from one image", () => {
+    expect(LANGUAGE_SERVERS["c"]?.images).toEqual(LANGUAGE_SERVERS["cpp"]?.images);
+  });
+
+  it("names an image this repository actually builds", () => {
+    // The test above warns that naming an image that does not exist is a lie in
+    // the refusal message. This is that warning as a check: every image in the
+    // registry is one `pnpm images:build` produces.
+    const built = new Set([
+      "sandbox-node:latest",
+      "sandbox-python:latest",
+      "sandbox-go:latest",
+      "sandbox-rust:latest",
+      "sandbox-cpp:latest",
+    ]);
+
+    for (const server of Object.values(LANGUAGE_SERVERS)) {
+      for (const image of server.images) expect(built.has(image)).toBe(true);
+    }
+  });
+
+  it("accepts any of a server's images, not just the first", () => {
+    // No entry names two images today, so this is checked against the function
+    // rather than through the registry -- otherwise the list behaviour would be
+    // latent, and a check comparing only the first image would pass identically
+    // until the day somebody added a second.
+    const twoImages = { argv: ["x"], images: ["a:latest", "b:latest"] };
+
+    expect(servesImage(twoImages, "a:latest")).toBe(true);
+    expect(servesImage(twoImages, "b:latest")).toBe(true);
+    expect(servesImage(twoImages, "c:latest")).toBe(false);
+  });
+
+  it("still refuses a TypeScript file riding in a Python project", () => {
+    const refusal = canStartLanguageServer("typescript", "sandbox-python:latest");
+    expect(refusal).toMatchObject({ allowed: false, code: "WRONG_IMAGE" });
   });
 });

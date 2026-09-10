@@ -41,6 +41,19 @@ RUN useradd --create-home --shell /bin/bash --uid 1001 --gid 0 sandbox \
 RUN npm install --global serve@14 \
     && npm cache clean --force
 
+# The TypeScript language server, installed into the image rather than on
+# demand -- plan.md §10.8.
+#
+# Monaco ships its own TS worker and it is PER MODEL: it sees the file you have
+# open and not the project around it, so a rename is a rename in one buffer and
+# "go to definition" across files is a guess. `tsserver` behind
+# `typescript-language-server` sees the project.
+#
+# Pinned, and `typescript` beside it: the server is a wrapper and needs a
+# tsserver to drive. A project with its own TypeScript in node_modules is used
+# in preference by the server itself; this is the floor for one that has none.
+RUN npm install --global typescript-language-server@4.3.3 typescript@5.7.2     && npm cache clean --force
+
 # pnpm and yarn, via the corepack that ships with Node.
 #
 # Not a convenience. `warmStart` already fingerprints `pnpm-lock.yaml` and

@@ -56,7 +56,7 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2923 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| the same, with `TEST_DATABASE_URL` set | **2929 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
 | `pnpm --filter web test` | **1406 passing** (115 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
@@ -146,7 +146,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 172 items. Open: 14 — four blocked, two from §10, none from §11, whose
+**Done: 173 items. Open: 13 — four blocked, one from §10, none from §11, whose
 last row closed on 2026-09-10, two from §12, which reads neither and
 asks what a cloud machine is for, and seven from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
@@ -156,7 +156,7 @@ seven that remain are merely open rather than blocked. §11's last row is 11.10,
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 2 + 0 + 1 + 7 = 14, and they are written out
+Those five numbers are 4 + 1 + 0 + 1 + 7 = 13, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3781,6 +3781,66 @@ typecheck and lint clean 3/3.
 appear. The reading path is tested; the snapshot half was already shipped and is
 covered by its own tests from §2.x.
 
+### 2.58 Since (2026-09-10) — §10.8, five more languages, and one that mattered
+
+Two language servers became seven entries: TypeScript and JavaScript from the
+node image, Rust and C/C++ from images added with this row.
+
+**TypeScript is the one worth having and the row nearly undersold it.** It says
+TS and JS "get Monaco's bundled worker, which is per-model and does not see the
+project" — which is not a weaker intelligence but a different one. A rename
+renames one buffer. Go-to-definition across files is a guess. `tsserver` behind
+`typescript-language-server` sees the project, and it went into the node image
+this platform already builds, so it cost one registry entry and one `npm
+install -g`.
+
+**A test warned about the mistake this row could have made, and it was
+listened to.** An existing test said: naming an image for a language whose
+image does not exist "would be a lie about an image that does not exist". The
+tempting version of this row is registry entries for Rust and C++ pointing at
+`sandbox-rust:latest` and `sandbox-cpp:latest` — which nothing builds, so the
+refusal message becomes exactly that lie. So the Dockerfiles are here, they are
+in `pnpm images:build`, and they are in CI, because an image nothing builds is
+an image whose Dockerfile is wrong and nobody knows it. A test now asserts that
+every image named in the registry is one the build produces.
+
+**`image` became `images`**, because `typescript-language-server` serves two
+language ids and a server can belong to more than one image. Mutating the check
+to compare only the first image left every test green — every entry names one
+image today — so `servesImage` is exported and tested directly. A capability
+that is latent rather than exercised is one that breaks the day it is first
+used.
+
+**Two tests used Rust as their example of an unsupported language** and this row
+made Rust supported. Their intent was untouched; the example moved to Ruby, with
+a note saying so.
+
+**Choices about the images themselves.** `rust-analyzer` comes from `rustup
+component add` rather than a release tarball, so the analyzer and the compiler
+are the same version — the pairing that decides whether it understands the
+project's syntax. `clangd` comes from Debian for the same reason: an analyzer
+that disagrees with the compiler about where `<vector>` lives is worse than
+none. And `CARGO_TARGET_DIR` points into the cache volume, because a debug build
+is hundreds of megabytes and rebuilding it on every container rebuild is the
+waste the node_modules cache already exists to avoid.
+
+**Not done, and named:** Java, C#, Ruby, PHP. Each is another image and another
+server, and none has a template here to be used from.
+
+**Verified.** 36 LSP tests, the image-list behaviour mutation-checked. Server
+2929 passing / 9 skipped, web 1406, typecheck and lint clean 3/3.
+
+**A flake was confirmed rather than assumed.** One run failed on
+`refreshTokenService`'s concurrent-refresh test — which §1 already records as
+failing "roughly one run in three" under load, untouched since well before it
+was first seen. Re-run 3/3 green in isolation and green on the next full run,
+and this change touches nothing near it.
+
+**Not verified:** no Docker daemon, so `images/rust` and `images/cpp` have never
+been built, and no `rust-analyzer`, `clangd` or `tsserver` has been started. The
+policy is tested; the images are Dockerfiles nobody has run. CI builds them on
+the first push that reaches it, which is where that gap closes.
+
 ---
 
 ## 3. Open
@@ -5551,7 +5611,23 @@ decision needs. Under Route A the cost of every one of them is zero.
       largely defined by the six extensions its owner cannot work without, and
       "we have a file-icon table" is not an answer to that.
 
-- [ ] **10.8 Languages past Python and Go.** `lspPolicy.ts` knows two servers:
+- [x] **10.8 Languages past Python and Go.** **Shipped 2026-09-10 — §2.58.**
+      Seven languages now: Python, Go, **TypeScript, JavaScript** (the node
+      image, via `typescript-language-server`), **Rust** (`rust-analyzer`) and
+      **C/C++** (`clangd`), with `images/rust` and `images/cpp` added and built
+      in CI.
+
+      **TypeScript is the valuable one and this row nearly undersold it.** The
+      row notes that TS and JS "get Monaco's bundled worker, which is per-model
+      and does not see the project the way `tsserver` does" — that is not a
+      smaller version of intelligence, it is a different one: a rename is a
+      rename in one buffer, and go-to-definition across files is a guess.
+
+      **What is deliberately still missing:** Java, C#, Ruby and PHP. Each is
+      another image and another server, and none has a template here to be used
+      from. Original note follows.
+
+      `lspPolicy.ts` knows two servers:
       `pylsp` and `gopls`. TypeScript and JavaScript get Monaco's bundled
       worker, which is per-model and does not see the project the way `tsserver`
       does; everything else — Rust, Java, C/C++, C#, Ruby, PHP — gets syntax
@@ -7508,7 +7584,10 @@ what a personal user notices soonest, which is §10's own recommended order with
    automatic, and only the reader was missing. Original note follows.
    Checkpoints are the wrong
    granularity for the question this answers.
-6. **10.8 — languages past Python and Go.** One policy entry and one image per
+6. ~~**10.8 — languages past Python and Go.**~~ **Done 2026-09-10 — §2.58**,
+   and "one image per language" turned out to be wrong in a way worth keeping:
+   TypeScript and JavaScript share one server in an image that already existed.
+   Original note follows. One policy entry and one image per
    language. Note decision 2's revisit trigger fires here: the moment somebody
    wants rename or code actions, `lspClient.ts` is the seam that has to grow.
 7. **10.14 — the small ones.** §10's own caution applies hardest here: a week
