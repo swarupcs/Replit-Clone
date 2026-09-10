@@ -20,6 +20,7 @@ vi.mock("../lib/logger.js", () => ({
 vi.mock("../lib/prisma.js", () => ({ prisma: {} }));
 
 import {
+  showFileAtRef,
   amendCommit,
   blame,
   compareRefs,
@@ -311,5 +312,40 @@ describe("comparing two refs", () => {
 
     // An empty comparison would read as "these are the same".
     await expect(compareRefs(PROJECT, "main", "nope")).rejects.toThrow();
+  });
+});
+
+describe("one file as it stands on another ref", () => {
+  it("reads it with ref:path as a single argument", async () => {
+    exec
+      .mockResolvedValueOnce(ok()) // check-ref-format
+      .mockResolvedValueOnce(ok("export const x = 1;\n"));
+
+    await expect(showFileAtRef(PROJECT, "main", "src/a.ts")).resolves.toBe(
+      "export const x = 1;\n",
+    );
+    expect(argv(1)).toEqual(["show", "main:src/a.ts"]);
+  });
+
+  it("is null for a file that does not exist on that ref", async () => {
+    exec.mockResolvedValueOnce(ok()).mockResolvedValueOnce(fail("path does not exist"));
+
+    // "This file is new on your branch" is an ANSWER: the diff is against
+    // nothing and every line is an addition. An error would make a legitimate
+    // comparison look like a failure.
+    await expect(showFileAtRef(PROJECT, "main", "new.ts")).resolves.toBeNull();
+  });
+
+  it("refuses a ref that could be read as a flag", async () => {
+    await expect(showFileAtRef(PROJECT, "--upload-pack=x", "a.ts")).rejects.toThrow(
+      /not a usable branch name/,
+    );
+  });
+
+  it("refuses a path that climbs out of the project", async () => {
+    exec.mockResolvedValueOnce(ok());
+    await expect(showFileAtRef(PROJECT, "main", "../../etc/passwd")).rejects.toThrow(
+      /not a path/,
+    );
   });
 });

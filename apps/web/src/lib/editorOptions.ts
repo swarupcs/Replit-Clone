@@ -116,8 +116,17 @@ export const buildEditorOptions = (
  */
 export const buildDiffOptions = (
   settings: EditorSettings,
+  /** Whether the modified side may be typed into. plan.md §10.11 asked for
+   *  "edit inside the diff", and a diff you can only read is one you have to
+   *  leave in order to act on it. False for a viewer, and false for the
+   *  assistant's review pane, where the right-hand side is a PROPOSAL rather
+   *  than the buffer -- editing that would edit something nobody is saving. */
+  editable = false,
 ): editor.IDiffEditorConstructionOptions => ({
-  readOnly: true,
+  readOnly: !editable,
+  // The left side is a version that is not checked out -- the saved file,
+  // another branch, another file. Never editable: there is nowhere to write it.
+  originalEditable: false,
   renderSideBySide: true,
   fontSize: settings.fontSize,
   fontFamily: '"JetBrains Mono", "Fira Code", monospace',

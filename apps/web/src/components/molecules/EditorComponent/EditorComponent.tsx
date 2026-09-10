@@ -44,6 +44,7 @@ import { useWorkspaceConfigStore } from "../../../store/workspaceConfigStore.ts"
 import { registerSnippets } from "../../../lib/snippetProvider.ts";
 import { useBlame } from "../../../hooks/useBlame.ts";
 import { useBlameStore } from "../../../store/blameStore.ts";
+import { useCompareStore } from "../../../store/compareStore.ts";
 import {
   buildDiffOptions,
   buildEditorOptions,
@@ -586,6 +587,7 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
    *
    *  Off until asked for -- see `useBlame`. Blame runs a process per file.
    */
+  const compareLeft = useCompareStore((state) => state.left);
   const blameEnabled = useBlameStore((state) => state.enabled);
   const { lines: blameLines } = useBlame(
     lspProjectId ?? undefined,
@@ -1152,10 +1154,26 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
           width="100%"
           theme={monacoTheme}
           language={language}
-          // Left is the file as saved; right is what is in the buffer now.
-          original={activeTab.value}
+          // Left is whatever the person chose to compare against -- plan.md
+          // §10.11. The saved copy is the default and the behaviour that
+          // already existed; a branch or another file is fetched into
+          // `compareLeft`.
+          original={compareLeft ?? activeTab.value}
           modified={diffCurrent}
-          options={buildDiffOptions(settings)}
+          // Editable on the modified side when the file itself is -- §10.11
+          // asked for "edit inside the diff", and a diff you can only read is
+          // one you have to leave to act on. Changes go through the same
+          // dirty-marking and debounced write as the main editor, so there is
+          // one save path rather than two.
+          options={buildDiffOptions(settings, canEdit)}
+          onMount={(diffEditor) => {
+            diffEditor.getModifiedEditor().onDidChangeModelContent(() => {
+              if (!canEdit) return;
+              const text = diffEditor.getModifiedEditor().getValue();
+              markDirty(activeTab.relPath, true);
+              queueIfAllowed(activeTab.relPath, text, WRITE_DEBOUNCE_MS);
+            });
+          }}
         />
       </div>
 

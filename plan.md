@@ -56,8 +56,8 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2890 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1381 passing** (110 files), re-run 2026-09-09 |
+| the same, with `TEST_DATABASE_URL` set | **2894 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1387 passing** (111 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,7 +146,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 169 items. Open: 17 — four blocked, five from §10, none from §11, whose
+**Done: 170 items. Open: 16 — four blocked, four from §10, none from §11, whose
 last row closed on 2026-09-10, two from §12, which reads neither and
 asks what a cloud machine is for, and seven from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
@@ -156,7 +156,7 @@ seven that remain are merely open rather than blocked. §11's last row is 11.10,
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 5 + 0 + 1 + 7 = 17, and they are written out
+Those five numbers are 4 + 4 + 0 + 1 + 7 = 16, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3632,6 +3632,59 @@ passing / 9 skipped, web 1381, typecheck and lint clean 3/3.
 argv it builds and the output it parses, and none has been run against a real
 repository.
 
+### 2.56 Since (2026-09-10) — §10.11, a diff you can compare and type in
+
+**One of this row's claims was wrong when it was written, and finding that out
+is most of the work.** "grep for `createDiffEditor` returns nothing, so Monaco's
+own side-by-side diff is unused" — the grep is accurate and the conclusion is
+not: `@monaco-editor/react`'s `DiffEditor` wraps `createDiffEditor`, and it was
+already rendering two cases, the assistant's review pane and compare-with-saved.
+A row that measures a symptom can be right about the symptom and wrong about the
+diagnosis; this one was.
+
+**What was genuinely missing, and shipped.** The left-hand side is now a choice
+— the saved copy, a branch or commit, or another file in the project — and the
+right-hand side can be typed into. §10.11 asked for exactly that ("edit inside
+the diff"), and a diff you can only read is one you have to leave in order to
+act on.
+
+**Reading a version that is not checked out** is `git show ref:path`, which is
+the only way: the working tree holds one version at a time, and "compare against
+main" is a question about one that is not there. A file that does not exist on
+that ref answers **null rather than an error**, because "this file is new on
+your branch" is an answer — the diff is against nothing and every line is an
+addition. An error there would make a legitimate comparison look like a failure.
+
+**Reading another file goes through the download endpoint that already exists**,
+not a new route: same question, already scoped to `viewer`, already confined by
+`resolveInProject`, and a second route would be a second place for that
+confinement to be got right. Deliberately not through the editor socket — that
+path OPENS A TAB, so using it to fetch a comparison would put the file you are
+comparing against into your editor as a side effect.
+
+**Two things that would have been wrong and are not.** The dialog subscribes to
+the active tab rather than reading `getState()` during render, which would have
+named whichever file was open when the page mounted. And switching files resets
+the comparison: the left-hand side was fetched for the file that WAS open, and
+keeping it would diff two unrelated files and look, for a moment, like a real
+answer. The store drops its text when the SOURCE changes rather than when the
+new text arrives, for the same reason — verified by removing that and watching
+two tests fail.
+
+**The original side stays read-only.** It is a version that is not checked out;
+there is nowhere to write it. And the assistant's review pane stays read-only
+too: its right-hand side is a PROPOSAL rather than the buffer, so editing it
+would be editing something nobody is saving.
+
+**Verified.** 4 server tests on `show ref:path` including a ref that could be
+read as a flag and a path that climbs out of the project, 6 on the compare
+store, one guard mutation-checked. Server 2894 passing / 9 skipped, web 1387,
+typecheck and lint clean 3/3.
+
+**Not verified:** nobody has typed into the diff and watched the file save. The
+change path is the same `markDirty` + `queueIfAllowed` pair the main editor
+uses, which is good evidence and is not the same as having done it.
+
 ---
 
 ## 3. Open
@@ -5451,7 +5504,18 @@ decision needs. Under Route A the cost of every one of them is zero.
       (`problems.ts`, `ProblemsPanel`) and is fed only by the language server,
       so the matcher half has somewhere to go.
 
-- [ ] **10.11 A real diff editor.** `parseUnifiedDiff` plus `DiffView` renders
+- [x] **10.11 A real diff editor.** **Shipped 2026-09-10 — §2.56.** Compare
+      against a branch, a commit or another file, and **type in the diff** —
+      the modified side is editable and its changes go through the same
+      dirty-marking and debounced write as the main editor.
+
+      **One line of this row was already stale when it was written**, and
+      §2.56 says so: `createDiffEditor` returns nothing because the React
+      wrapper is what is used, and `DiffEditor` was already rendering two
+      cases. What was genuinely missing is what this shipped. Original note
+      follows.
+
+      `parseUnifiedDiff` plus `DiffView` renders
       `git diff` output; `grep` for `createDiffEditor` returns nothing, so
       Monaco's own side-by-side diff is unused. What is missing is the thing you
       reach for daily and not the thing you reach for at commit time: compare
@@ -7310,7 +7374,9 @@ what a personal user notices soonest, which is §10's own recommended order with
    and the commit graph, which §2.55 names and explains. Stash and blame are the two a personal user
    notices in the first week; amend, revert, tags, cherry-pick and a graph
    after.
-3. **10.11 — a real diff editor.** `createDiffEditor` is unused. Compare with
+3. ~~**10.11 — a real diff editor.**~~ **Done 2026-09-10 — §2.56**, which also
+   records that "createDiffEditor is unused" was true as a grep and wrong as a
+   conclusion. Original note follows. `createDiffEditor` is unused. Compare with
    saved, compare two files, compare against a branch, and edit inside the
    diff.
 4. **10.10 — tasks**, whose problem-matcher half has somewhere to go: the

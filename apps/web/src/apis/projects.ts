@@ -1236,6 +1236,19 @@ export const deleteTagApi = async (
   return response.data.data;
 };
 
+/** One file as it stands on another ref. plan.md §10.11. */
+export const showFileAtRefApi = async (
+  projectId: string,
+  ref: string,
+  relPath: string,
+): Promise<{ contents: string; exists: boolean }> => {
+  const response = await axios.get<ApiSuccess<{ contents: string; exists: boolean }>>(
+    `/api/v1/projects/${projectId}/git/show`,
+    { params: { ref, path: relPath } },
+  );
+  return response.data.data;
+};
+
 export const compareRefsApi = async (
   projectId: string,
   from: string,

@@ -993,3 +993,22 @@ export async function gitCompareController(req: Request, res: Response): Promise
     data: await git.compareRefs(projectId, from, to),
   });
 }
+
+export async function gitShowFileController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const projectId = await authorise(req, "viewer");
+  const ref = queryString(req.query["ref"]);
+  const relPath = queryString(req.query["path"]);
+
+  const contents = await git.showFileAtRef(projectId, ref, relPath);
+  res.json({
+    success: true,
+    message: "File at ref",
+    // `exists: false` rather than a 404: a file that is new on this branch is
+    // an answer, not a failure, and the diff against nothing is every line
+    // added.
+    data: { contents: contents ?? "", exists: contents !== null },
+  });
+}

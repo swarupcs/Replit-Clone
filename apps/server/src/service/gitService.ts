@@ -1205,3 +1205,31 @@ export async function compareRefs(
     files,
   };
 }
+
+/** One file as it stands on another ref. plan.md §10.11.
+ *
+ *  `git show ref:path`, which is the only way to read a version that is not
+ *  checked out — the working tree has exactly one of them at a time, and
+ *  "compare against main" is a question about a version that is not there.
+ *
+ *  Returns null rather than throwing when the file does not exist on that ref,
+ *  because "this file is new on your branch" is an ANSWER: the diff is against
+ *  nothing, and every line is an addition. An error would make a legitimate
+ *  comparison look like a failure.
+ */
+export async function showFileAtRef(
+  projectId: string,
+  ref: string,
+  relPath: string,
+): Promise<string | null> {
+  await assertValidBranchName(projectId, ref);
+
+  const { stdout, exitCode } = await git(projectId, [
+    "show",
+    // `--` is not accepted by `show` for this form; the ref:path pair is one
+    // argument, and both halves are validated above and below.
+    `${ref}:${assertRepoPath(relPath)}`,
+  ]);
+
+  return exitCode === 0 ? stdout : null;
+}

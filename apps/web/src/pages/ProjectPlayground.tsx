@@ -49,6 +49,8 @@ import { useWorkspaceStore } from "../store/workspaceStore.ts";
 import { useWorkspaceConfig } from "../hooks/useWorkspaceConfig.ts";
 import { RemoteAccessDialog } from "../components/organisms/RemoteAccessDialog/RemoteAccessDialog.tsx";
 import { GitToolsDialog } from "../components/organisms/GitTools/GitToolsDialog.tsx";
+import { CompareDialog } from "../components/organisms/CompareDialog/CompareDialog.tsx";
+import { useCompareStore } from "../store/compareStore.ts";
 import { useBlameStore } from "../store/blameStore.ts";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
@@ -162,6 +164,18 @@ export const ProjectPlayground = () => {
   const [symbolSearchOpen, setSymbolSearchOpen] = useState(false);
   const [remoteOpen, setRemoteOpen] = useState(false);
   const [gitToolsOpen, setGitToolsOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+  /** Subscribed, not read from `getState()` during render: the dialog has to
+   *  follow the active tab, and a snapshot taken at render time would name
+   *  whichever file happened to be open when the page mounted. */
+  const activeRelPathForCompare = useOpenTabsStore((state) => state.activeRelPath);
+
+  useEffect(() => {
+    // Switching files drops the comparison -- plan.md §10.11. The left-hand
+    // side was fetched for the file that WAS open; keeping it would diff two
+    // unrelated files and look, for a moment, like a real answer.
+    useCompareStore.getState().reset();
+  }, [activeRelPathForCompare]);
   const [zen, setZen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
@@ -498,6 +512,14 @@ export const ProjectPlayground = () => {
         run: () => {
           setSidebarView("packages");
           openView("sidebar");
+        },
+      },
+      {
+        id: "editor.compare",
+        category: "View",
+        title: "Compare this file with a branch, another file, or its saved copy",
+        run: () => {
+          setCompareOpen(true);
         },
       },
       {
@@ -1263,6 +1285,16 @@ export const ProjectPlayground = () => {
       <StatusBar projectId={projectIdFromUrl} />
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
+      {projectIdFromUrl && (
+        <CompareDialog
+          projectId={projectIdFromUrl}
+          open={compareOpen}
+          relPath={activeRelPathForCompare}
+          onClose={() => {
+            setCompareOpen(false);
+          }}
+        />
+      )}
       {projectIdFromUrl && (
         <GitToolsDialog
           projectId={projectIdFromUrl}

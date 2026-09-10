@@ -105,6 +105,7 @@ import {
   gitCreateTagController,
   gitDeleteTagController,
   gitCompareController,
+  gitShowFileController,
   gitStageController,
   gitStatusController,
   gitUnstageController,
@@ -239,6 +240,9 @@ router.get("/:projectId/git/tags", asyncHandler(gitTagsController));
 router.post("/:projectId/git/tags", asyncHandler(gitCreateTagController));
 router.delete("/:projectId/git/tags/:name", asyncHandler(gitDeleteTagController));
 router.get("/:projectId/git/compare", asyncHandler(gitCompareController));
+// One file as it stands on another ref -- plan.md §10.11's "compare against a
+// branch". The working tree holds one version at a time; this is the other.
+router.get("/:projectId/git/show", asyncHandler(gitShowFileController));
 router.get("/:projectId/git/branches", asyncHandler(gitBranchesController));
 router.post("/:projectId/git/branch", asyncHandler(gitBranchController));
 router.post("/:projectId/git/init", asyncHandler(gitInitController));
