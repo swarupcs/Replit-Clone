@@ -56,8 +56,8 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2894 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1387 passing** (111 files), re-run 2026-09-09 |
+| the same, with `TEST_DATABASE_URL` set | **2920 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1399 passing** (113 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,7 +146,7 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 170 items. Open: 16 — four blocked, four from §10, none from §11, whose
+**Done: 171 items. Open: 15 — four blocked, three from §10, none from §11, whose
 last row closed on 2026-09-10, two from §12, which reads neither and
 asks what a cloud machine is for, and seven from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
@@ -156,7 +156,7 @@ seven that remain are merely open rather than blocked. §11's last row is 11.10,
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 4 + 0 + 1 + 7 = 16, and they are written out
+Those five numbers are 4 + 3 + 0 + 1 + 7 = 15, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3685,6 +3685,61 @@ typecheck and lint clean 3/3.
 change path is the same `markDirty` + `queueIfAllowed` pair the main editor
 uses, which is good evidence and is not the same as having done it.
 
+### 2.57 Since (2026-09-10) — §10.10, tasks, and the panel's second feed
+
+Named tasks, groups and `dependsOn` are the small half. The row itself points at
+the large one: "the problems panel already exists and is fed only by the
+language server, so the matcher half has somewhere to go." It does, and a build
+error is now something you click rather than something you read in a terminal
+and then go looking for.
+
+**The matchers are named the way `tasks.json` names them** — `$tsc`,
+`$eslint-stylish`, `$go`, `$gcc` — for the same reason §10.9's settings use VS
+Code's names: a file somebody already has should work. Each has a test written
+against **real output from the tool it names**, because a regex written against
+imagined output is a regex that matches imagined output.
+
+**Two lists, not one.** Task problems live beside the language server's rather
+than merged into them, and the reason is lifetime: markers are recomputed on
+every keystroke and replaced wholesale, while a task's problems are true until
+that task runs again. Merging them would mean the next keystroke silently
+deleting a build's errors — at the moment somebody most needs to see them. The
+status bar counts both, because a count that omits the build says "everything is
+fine" while the build is red.
+
+**Background tasks are refused by name.** `isBackground` is a watch, and this
+platform already has one notion of a process that stays running — the dev server
+(§2.7), with a lifecycle, a log, a preview and a reconciler. A second would be
+two answers to "what is running". The refusal says that, where the Run button
+is, rather than starting something and abandoning it when the request ends.
+
+**A dependency that fails stops the chain**, because a `build` that runs after
+`install` failed reports the consequence rather than the cause. A cycle is
+refused rather than broken, for the reason `orderFeatures` gives: an arbitrary
+order produces a build that works here and not in VS Code.
+
+**`execCapture` grew a timeout**, optional and absent by default so nothing else
+changes. A task's command line comes from a file in the repository; a build that
+hangs would otherwise hold the request open until the client gave up and leave
+nothing to say why. It resolves with what it read and exit code 124 — the number
+`timeout(1)` uses — rather than throwing the output away.
+
+**One matcher was written and then deleted rather than shipped.** A Python
+traceback line carries a file and a line and *no message* — the message is on
+the last line of the traceback. A matcher built on it would fill the panel with
+entries whose text is the traceback line, which is worse than an empty panel: it
+looks like the feature works. The comment where it was says so, and says what
+doing it properly would take.
+
+**Verified.** 26 server tests, 12 web, two guards mutation-checked — and the
+merged status-bar count was found *untested* by mutation, so it has tests now
+rather than a claim. Server 2920 passing / 9 skipped, web 1399, typecheck and
+lint clean 3/3.
+
+**Not verified:** no Docker daemon, so no task has actually been executed. The
+file parsing, ordering, matchers and path normalisation are tested; the exec is
+not.
+
 ---
 
 ## 3. Open
@@ -5496,7 +5551,18 @@ decision needs. Under Route A the cost of every one of them is zero.
       This is the row that most decides whether the thing *feels* like a
       personal editor, and it is the cheapest of the nine on Route B.
 
-- [ ] **10.10 Tasks.** A project carries exactly one run command (§2.7 row 7,
+- [x] **10.10 Tasks.** **Shipped 2026-09-10 — §2.57.** `.vscode/tasks.json`:
+      named tasks, build and test groups, `dependsOn` ordering, and **problem
+      matchers feeding the panel this row said had somewhere to go** — which it
+      did, and now has two feeds instead of one.
+
+      **Background tasks are refused by name, with the reason.** VS Code's
+      `isBackground` is a watch, and this platform already has exactly one
+      notion of a process that stays running — the dev server, with a
+      lifecycle, a log, a preview and a reconciler behind it. A second would be
+      two things that can disagree about what is running.
+
+      Original note follows. A project carries exactly one run command (§2.7 row 7,
       read from `package.json` at import) plus a test command (§2.18). VS Code
       has `tasks.json`: named tasks, build versus test groups, compound and
       dependent tasks, and problem matchers that turn compiler output into
@@ -7379,7 +7445,9 @@ what a personal user notices soonest, which is §10's own recommended order with
    conclusion. Original note follows. `createDiffEditor` is unused. Compare with
    saved, compare two files, compare against a branch, and edit inside the
    diff.
-4. **10.10 — tasks**, whose problem-matcher half has somewhere to go: the
+4. ~~**10.10 — tasks**~~ **Done 2026-09-10 — §2.57.** Original note follows,
+   including the sequencing with 13.5, which still holds: the panel now has two
+   feeds and 13.5 is the third. **10.10 — tasks**, whose problem-matcher half has somewhere to go: the
    problems panel exists and is fed only by the language server. Sequence it
    with 13.5, which is the third feed for the same panel.
 5. **10.12 — local history and a timeline.** Checkpoints are the wrong

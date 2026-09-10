@@ -1259,7 +1259,7 @@ export const ProjectPlayground = () => {
                   second={
                     projectIdFromUrl ? (
                       <ErrorBoundary label="The terminal panel">
-                        <BottomPanel projectId={projectIdFromUrl} />
+                        <BottomPanel projectId={projectIdFromUrl} canRun={canEdit} />
                       </ErrorBoundary>
                     ) : null
                   }

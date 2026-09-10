@@ -210,7 +210,7 @@ describe("panel tabs from the keyboard", () => {
     return screen.getAllByRole("tab");
   }
 
-  it("presents the shells, Problems and Output as one set of tabs", () => {
+  it("presents the shells, Tasks, Problems and Output as one set of tabs", () => {
     render(<BottomPanel projectId={PROJECT} />);
     fireEvent.click(screen.getByLabelText("New shell"));
 
@@ -218,6 +218,9 @@ describe("panel tabs from the keyboard", () => {
     expect(tabs().map((tab) => tab.dataset["rcTab"])).toEqual([
       "terminal:1",
       "terminal:2",
+      // Tasks sits before Problems -- plan.md §10.10 -- because running one is
+      // the ordinary way problems get into that panel.
+      "tasks",
       "problems",
       "output",
     ]);

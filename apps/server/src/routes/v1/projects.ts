@@ -57,6 +57,10 @@ import {
   openLocalFolderController,
 } from "../../controllers/localFolderController.js";
 import { capabilities } from "../../config/deploymentMode.js";
+import {
+  listTasksController,
+  runTaskController,
+} from "../../controllers/taskController.js";
 import { getEditorConfigController } from "../../controllers/editorConfigController.js";
 import { getRemoteAccessController } from "../../controllers/sshKeyController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
@@ -212,6 +216,11 @@ router.get("/local/browse", asyncHandler(browseLocalFoldersController));
 router.post("/local", createLimiter, asyncHandler(openLocalFolderController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
 router.get("/:projectId/ports", asyncHandler(getProjectPorts));
+
+// Tasks from the repository -- plan.md §10.10. Reading the list is viewer;
+// running one is editor, because a task is an arbitrary command line.
+router.get("/:projectId/tasks", asyncHandler(listTasksController));
+router.post("/:projectId/tasks/run", asyncHandler(runTaskController));
 
 // Settings, keybindings and snippets from the repository -- plan.md §10.9.
 router.get("/:projectId/editor-config", asyncHandler(getEditorConfigController));

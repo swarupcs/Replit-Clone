@@ -12,6 +12,8 @@ import type {
   AccountSecrets,
   AccountSshKeys,
   EditorConfig,
+  TaskList,
+  TaskRun,
   GitBlameLine,
   GitRefComparison,
   GitStash,
@@ -1114,6 +1116,27 @@ export const setEditorSessionApi = async (
   const response = await axios.put<ApiSuccess<EditorSessionState>>(
     "/api/v1/account/session",
     { entries },
+  );
+  return response.data.data;
+};
+
+/* ---- tasks. plan.md §10.10 ---- */
+
+export const getTasksApi = async (projectId: string): Promise<TaskList> => {
+  const response = await axios.get<ApiSuccess<TaskList>>(
+    `/api/v1/projects/${projectId}/tasks`,
+  );
+  return response.data.data;
+};
+
+/** Returns one entry per task that ran, dependencies first. */
+export const runTaskApi = async (
+  projectId: string,
+  label: string,
+): Promise<TaskRun[]> => {
+  const response = await axios.post<ApiSuccess<TaskRun[]>>(
+    `/api/v1/projects/${projectId}/tasks/run`,
+    { label },
   );
   return response.data.data;
 };

@@ -49,7 +49,14 @@ function groupByFile(problems: Problem[]): FileProblems[] {
  *  file until something was underlined.
  */
 export const ProblemsPanel = () => {
-  const problems = useProblemsStore((state) => state.problems);
+  const fromLanguageServer = useProblemsStore((state) => state.problems);
+  /** What a task's problem matcher found -- plan.md §10.10. This panel is one
+   *  surface with two feeds now; §13.5 will make it three. */
+  const fromTasks = useProblemsStore((state) => state.taskProblems);
+  const problems = useMemo(
+    () => [...fromLanguageServer, ...fromTasks],
+    [fromLanguageServer, fromTasks],
+  );
   const editorSocket = useEditorSocketStore((state) => state.editorSocket);
 
   const groups = useMemo(() => groupByFile(problems), [problems]);
