@@ -15,6 +15,7 @@ vi.mock("../utils/projectPaths.js", () => ({
 
 import {
   keybindingsFrom,
+  terminalShellFrom,
   parseJsonc,
   readEditorConfig,
   settingsFrom,
@@ -273,5 +274,54 @@ describe("the merged answer", () => {
 
     const config = await readEditorConfig(PROJECT);
     expect(config.keybindings["run.toggle"]).toBe("f5");
+  });
+});
+
+/** Terminal profiles. plan.md §10.14. */
+describe("which shell a terminal opens", () => {
+  it("says nothing when the file says nothing", () => {
+    // Null rather than bash: the caller's default is the one place that
+    // decision lives.
+    expect(terminalShellFrom({})).toBeNull();
+    expect(terminalShellFrom({ "editor.fontSize": 14 })).toBeNull();
+  });
+
+  it("reads a profile's path", () => {
+    expect(
+      terminalShellFrom({
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.profiles.linux": { zsh: { path: "/usr/bin/zsh" } },
+      }),
+    ).toBe("/usr/bin/zsh");
+  });
+
+  it("takes the first of a list of candidate paths, as VS Code allows", () => {
+    expect(
+      terminalShellFrom({
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.profiles.linux": {
+          bash: { path: ["/usr/local/bin/bash", "/bin/bash"] },
+        },
+      }),
+    ).toBe("/usr/local/bin/bash");
+  });
+
+  it("resolves a built-in profile name that defines no profile", () => {
+    // Common in real files: the name refers to a profile VS Code ships.
+    expect(
+      terminalShellFrom({ "terminal.integrated.defaultProfile.linux": "zsh" }),
+    ).toBe("/bin/zsh");
+  });
+
+  it("hands back whatever was written, leaving the allowlist to the caller", () => {
+    // Two jobs kept apart: this reads the file, `isAllowedShell` decides what
+    // may run. A reader that also filtered would be a second place to change
+    // when the list does.
+    expect(
+      terminalShellFrom({
+        "terminal.integrated.defaultProfile.linux": "evil",
+        "terminal.integrated.profiles.linux": { evil: { path: "/tmp/payload" } },
+      }),
+    ).toBe("/tmp/payload");
   });
 });

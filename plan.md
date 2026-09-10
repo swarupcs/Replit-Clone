@@ -56,8 +56,8 @@ it and is dealt with under the table.
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2929 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1406 passing** (115 files), re-run 2026-09-09 |
+| the same, with `TEST_DATABASE_URL` set | **2938 passing**, 9 skipped. Green 2026-09-09 against all **42** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1410 passing** (116 files), re-run 2026-09-09 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,7 +146,8 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 173 items. Open: 13 — four blocked, one from §10, none from §11, whose
+**Done: 174 items. Open: 12 — four blocked, none from §10, whose last row
+closed on 2026-09-10 (with two items carried into §2.59), none from §11, whose
 last row closed on 2026-09-10, two from §12, which reads neither and
 asks what a cloud machine is for, and seven from §13, which names the two
 products this most resembles and diffs against them. **§10.1 was decided on
@@ -156,7 +157,7 @@ seven that remain are merely open rather than blocked. §11's last row is 11.10,
 decision before it needs code, and 12.4 is blocked on hardware rather than on
 anybody.**
 
-Those five numbers are 4 + 1 + 0 + 1 + 7 = 13, and they are written out
+Those five numbers are 4 + 0 + 0 + 1 + 7 = 12, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -3841,6 +3842,62 @@ been built, and no `rust-analyzer`, `clangd` or `tsserver` has been started. The
 policy is tested; the images are Dockerfiles nobody has run. CI builds them on
 the first push that reaches it, which is where that gap closes.
 
+### 2.59 Since (2026-09-10) — §10.14, and what a bundle row hides
+
+Six items, and **two were already done when the row was written**: notebooks
+shipped in §2.42, and editor splits have been persisting `editorSplitWidth`
+since §2.x. That is the hazard of a bundle row — it is read as one unit and
+ages as six.
+
+**Markdown preview reuses §2.42's parser and renderer** rather than adding a
+markdown library. The obvious move is `marked` plus `dompurify`, which is two
+dependencies and an `innerHTML` in front of content from a repository this
+platform did not write. `parseMarkdown` and `MarkdownBlocks` already exist and
+already refuse a `javascript:` link through `safeHref` — a second markdown path
+would be a second place for that refusal to be got right. What it does not
+render, because the parser does not: tables, footnotes, block quotes, images,
+HTML.
+
+**A bug written and caught in the same hour.** The preview first read
+`diffCurrent`, which is only set when the diff pane is opened — so it would have
+shown the last SAVED text, silently, in the one case anybody looks at a preview.
+The comment beside it said "previewing what you have typed is the whole point"
+while the code did the opposite. It is fed from the live buffer now, updated
+only while the preview is open so a hidden pane does not re-parse on every
+keystroke.
+
+**Terminal profiles read VS Code's own spelling** —
+`terminal.integrated.defaultProfile.linux` plus the profiles map, with a
+built-in name resolving to `/bin/<name>` as VS Code's shipped profiles do. The
+value comes from a file in a repository this platform did not write and is
+interpolated into a command line, so an **allowlist of absolute paths** decides
+what may run; anything else is ignored in favour of bash rather than refused,
+because a devcontainer naming a shell the image lacks should open a working
+terminal, not none. A bare `zsh` is refused: PATH inside a sandbox is a thing
+the project itself can change.
+
+**The wrapper is `/bin/sh` now, and the reason is fish.** `shellArgv` wraps the
+shell to record its own pid, and the first version of that comment claimed the
+wrapper avoided running rc files twice — which is wrong, since a `-c` shell is
+not interactive. The real reason is that `$$` is the pid in every POSIX shell
+and is **not** in fish: a wrapper written in the chosen shell would record the
+wrong pid for one of the shells this allows, and the pid file is what the hangup
+uses. The failure would have been a shell nobody can kill — §13.7's defect
+again, reintroduced by a feature.
+
+**Two items stay open and are named in this entry** rather than left inside a
+closed row: split terminal panes, and multi-root workspaces. The second is not
+small — one project is one container, one bind mount and one quota, and a
+second root is a second of each — and calling it small is how it ended up in a
+bundle labelled "the small ones".
+
+**Verified.** 21 terminal-shell tests, 5 config tests, 4 preview tests, the
+allowlist mutation-checked. Server 2938 passing / 9 skipped, web 1410, typecheck
+and lint clean 3/3.
+
+**Not verified:** no Docker daemon, so no terminal has been opened with a
+non-default shell. The argv is tested; the exec is not.
+
 ---
 
 ## 3. Open
@@ -5741,12 +5798,19 @@ decision needs. Under Route A the cost of every one of them is zero.
       (including interactive), a commit graph, and comparing two branches.
       Stash and blame are the two a personal user notices in the first week.
 
-- [ ] **10.14 The small ones, listed so they are not each rediscovered.**
-      Multi-root workspaces (one project is one root, and there is no
-      `.code-workspace`); markdown preview; notebooks; terminal profiles
-      (`shellArgv` hardcodes `/bin/bash`) and split terminal panes (multiple
-      terminals exist, as tabs only); and editor split views beyond the single
-      Monaco instance.
+- [x] **10.14 The small ones, listed so they are not each rediscovered.**
+      **Shipped 2026-09-10 — §2.59**, and the list had six items of which **two
+      were already done when it was written**: notebooks (§2.42) and editor
+      splits (`editorSplitWidth` has been persisted since §2.x). Shipped now:
+      **markdown preview** and **terminal profiles**.
+
+      **Still open, and named rather than left in a bundle:** split terminal
+      PANES (terminals exist as tabs; two side by side is layout work in the
+      bottom panel) and **multi-root workspaces**, which is not small at all —
+      one project is one container, one bind mount and one quota, and a second
+      root is a second of each. Both are carried in §2.59 rather than here,
+      because a row that keeps two items alive after four are done is a row
+      that will be re-read as four things still to do.
 
 ---
 
@@ -7590,7 +7654,9 @@ what a personal user notices soonest, which is §10's own recommended order with
    Original note follows. One policy entry and one image per
    language. Note decision 2's revisit trigger fires here: the moment somebody
    wants rename or code actions, `lspClient.ts` is the seam that has to grow.
-7. **10.14 — the small ones.** §10's own caution applies hardest here: a week
+7. ~~**10.14 — the small ones.**~~ **Done 2026-09-10 — §2.59**, which found two
+   of the six already shipped and carries two forward by name. Original note
+   follows. §10's own caution applies hardest here: a week
    of daily use would probably promote one of these and it would be a surprise
    which.
 

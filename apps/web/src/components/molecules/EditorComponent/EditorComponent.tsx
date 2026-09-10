@@ -7,7 +7,11 @@ import Editor, { DiffEditor } from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { Flex, Tooltip, Typography } from "antd";
-import { VscDiff, VscSparkle } from "react-icons/vsc";
+import {
+  VscDiff,
+  VscOpenPreview,
+  VscSparkle,
+} from "react-icons/vsc";
 import { MAX_FILE_BYTES, isNotebookPath } from "@replit-clone/shared";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import {
@@ -42,6 +46,7 @@ import { NotebookEditor } from "../../organisms/NotebookEditor/NotebookEditor.ts
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
 import { useWorkspaceConfigStore } from "../../../store/workspaceConfigStore.ts";
 import { registerSnippets } from "../../../lib/snippetProvider.ts";
+import { MarkdownPreview } from "../MarkdownPreview/MarkdownPreview.tsx";
 import { useBlame } from "../../../hooks/useBlame.ts";
 import { useBlameStore } from "../../../store/blameStore.ts";
 import { useCompareStore } from "../../../store/compareStore.ts";
@@ -217,6 +222,12 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const [writeError, setWriteError] = useState<string | null>(null);
   /** Showing the unsaved changes rather than the editor. */
   const [showDiff, setShowDiff] = useState(false);
+  /** Rendered markdown instead of the source -- plan.md §10.14. Per editor
+   *  instance rather than per file: it is a way of LOOKING at the thing you
+   *  have open, and a split showing source on one side and rendered on the
+   *  other is the arrangement people actually want. */
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewSource, setPreviewSource] = useState("");
 
   const review = useOpenTabsStore((state) => state.review);
   const endReview = useOpenTabsStore((state) => state.endReview);
@@ -890,6 +901,13 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     const { relPath } = activeTab;
     markDirty(relPath, true);
     queueIfAllowed(relPath, value, WRITE_DEBOUNCE_MS);
+
+    // Keeps the markdown preview on the LIVE buffer -- plan.md §10.14.
+    // Previewing what you have typed is the whole point, and a preview of the
+    // last save is wrong in the one case anybody looks at it. Only while the
+    // preview is open, so an ordinary edit does not re-render a hidden pane on
+    // every keystroke.
+    if (showPreview) setPreviewSource(value);
   }
 
   /** Publish what this pane is showing, for the app's one status bar.
@@ -993,6 +1011,10 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
    *  against a notebook" is therefore not available, rather than broken.
    */
   const isNotebook = isNotebookPath(activeTab.relPath);
+  /** plan.md §10.14. Extension rather than Monaco's language id, because the
+   *  id is only known once a model exists and this decides whether to make one
+   *  visible at all. */
+  const isMarkdown = /\.mdx?$/i.test(activeTab.relPath);
 
   // `collabTick` is what makes this re-read after a sync; the value lives
   // outside React so nothing else would.
@@ -1046,6 +1068,31 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
             >
               +{others}
             </span>
+          </Tooltip>
+        )}
+
+        {/* Rendered markdown instead of the source -- plan.md §10.14. */}
+        {isMarkdown && (
+          <Tooltip title={showPreview ? "Show the source" : "Preview"}>
+            <button
+              className="rc-icon-button"
+              style={{ marginLeft: others > 0 ? 0 : "auto", marginRight: 4 }}
+              data-on={showPreview}
+              aria-label="Preview markdown"
+              aria-pressed={showPreview}
+              onClick={() => {
+                // Seeded from the editor as it opens, then kept current by
+                // `handleChange`. Reading it here rather than on every render
+                // is what keeps a hidden pane from re-parsing on every
+                // keystroke.
+                if (!showPreview) {
+                  setPreviewSource(editorRef.current?.getValue() ?? activeTab.value);
+                }
+                setShowPreview((value) => !value);
+              }}
+            >
+              <VscOpenPreview size={14} />
+            </button>
           </Tooltip>
         )}
 
@@ -1128,6 +1175,22 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         />
       ) : (
         <>
+      {/* Hidden rather than unmounted, like the diff panes beside it: the
+          editor's model, undo history and scroll position all survive a trip
+          through the preview and back. */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: showPreview && !reviewing && !showDiff ? "block" : "none",
+        }}
+      >
+        {/* Reads the live buffer, not the saved file: previewing what you have
+            typed is the whole point, and a preview of the last save would be
+            wrong in the one case anybody looks. */}
+        <MarkdownPreview source={previewSource} />
+      </div>
+
       <div style={{ flex: 1, minHeight: 0, display: reviewing ? "block" : "none" }}>
         <DiffEditor
           height="100%"

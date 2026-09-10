@@ -236,6 +236,45 @@ export function settingsFrom(raw: unknown): ParsedSettings {
   return { settings, problems };
 }
 
+/** The shell a terminal should open with, from `.vscode/settings.json`.
+ *  plan.md §10.14.
+ *
+ *  VS Code spells this as a profile NAME
+ *  (`terminal.integrated.defaultProfile.linux`) plus a profiles map that gives
+ *  each name a `path`. Both are read, because a settings file that names a
+ *  profile without defining one is common — the name refers to a profile VS
+ *  Code ships, and the shells it ships are the ones already in the allowlist.
+ *
+ *  Returns null when nothing is said, which is different from saying bash: the
+ *  caller's default is the one place that decision lives.
+ */
+export function terminalShellFrom(raw: unknown): string | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const settings = raw as Record<string, unknown>;
+
+  const name = settings["terminal.integrated.defaultProfile.linux"];
+  if (typeof name !== "string" || name.trim() === "") return null;
+
+  const profiles = settings["terminal.integrated.profiles.linux"];
+  if (typeof profiles === "object" && profiles !== null) {
+    const profile = (profiles as Record<string, unknown>)[name];
+    if (typeof profile === "object" && profile !== null) {
+      const path = (profile as { path?: unknown }).path;
+      // VS Code allows `path` to be a string or a list of candidates.
+      if (typeof path === "string") return path;
+      if (Array.isArray(path)) {
+        const first = path.find((entry): entry is string => typeof entry === "string");
+        if (first !== undefined) return first;
+      }
+    }
+  }
+
+  // No profile defined: the name is one of VS Code's built-ins, which are
+  // named after the shell. `/bin/<name>` is what those resolve to, and the
+  // allowlist decides whether it is one this platform will run.
+  return `/bin/${name}`;
+}
+
 /** `.vscode/keybindings.json`, which VS Code has only at the user level.
  *
  *  Read per-workspace here, deliberately and as a departure: this row's whole
@@ -428,4 +467,27 @@ async function readSnippets(
     logger.debug("read workspace snippets", { projectId, count: snippets.length });
   }
   return snippets;
+}
+
+/** The shell this project's terminals should open with, or null.
+ *
+ *  Separate from `readEditorConfig` because the caller is different: that one
+ *  serves the editor over HTTP, and this one is asked by the terminal gateway
+ *  as a shell is created. Reading the whole config there would be three file
+ *  reads to answer one question.
+ */
+export async function projectTerminalShell(
+  projectId: string,
+): Promise<string | null> {
+  const text = await readIfPresent(projectId, EDITOR_CONFIG_FILES.settings);
+  if (text === null) return null;
+
+  try {
+    return terminalShellFrom(parseJsonc(text));
+  } catch {
+    // A settings file that is not JSON must not stop a terminal opening. The
+    // editor's own config endpoint reports the parse error; this path is not
+    // the place to surface it.
+    return null;
+  }
 }
