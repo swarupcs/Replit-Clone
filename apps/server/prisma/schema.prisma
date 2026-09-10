@@ -53,7 +53,7 @@ model Plan {
   /// Whether a devcontainer.json on this plan may ask for extra host mounts.
   /// Gated again by DEVCONTAINER_MOUNT_ROOTS, which is empty by default.
   devcontainerMounts Boolean @default(false)
-  scheduledJobs    Boolean @default(false)
+  scheduledJobs      Boolean @default(false)
 
   /// Withdrawn from the catalogue without being deleted. Accounts already on
   /// it keep every number: a plan that stops being sold is not a plan that
@@ -135,9 +135,12 @@ model User {
   reportsFiled     ProjectReport[]
   tokens           UserToken[]
   githubConnection GithubConnection?
+
+  /// Repositories whose pull requests get workspaces on this account. §13.3.
+  pullRequestRepos PullRequestRepo[]
   notifications    Notification[]
   apiKeys          ApiKey[]
-  accountActions   AccountAction[]       @relation("AccountActionSubject")
+  accountActions   AccountAction[]   @relation("AccountActionSubject")
   computeUsage     ComputeUsage[]
   subscription     Subscription?
 
@@ -145,18 +148,18 @@ model User {
   /// same reason as the row below it, and more sharply: the TOTP secret is a
   /// password equivalent, and `authenticateUser` does a bare `findUnique` on
   /// this model with no `select` at all.
-  twoFactor        UserTwoFactor?
+  twoFactor UserTwoFactor?
 
   /// Dotfiles and a signing key. A table of its own rather than columns here,
   /// and the private key is the reason: a column on `users` is returned by
   /// every `findUnique` that forgets a `select`, and this repository has
   /// already shipped one defect that was exactly a forgotten `select` key.
   /// A separate row cannot be loaded by accident.
-  personalization  UserPersonalization?
+  personalization UserPersonalization?
 
   /// Where the editor was left: which tabs, which splits, which settings.
   /// plan.md §13.11.
-  editorState      UserEditorState[]
+  editorState UserEditorState[]
 
   /// "Which accounts are on this plan" is the operator's question, and the one
   /// a pricing change has to answer before it is made.
@@ -771,6 +774,99 @@ model BillingEvent {
   @@map("billing_events")
 }
 
+/// A repository whose pull requests may have workspaces here. plan.md §13.3.
+///
+/// **Enrolment is explicit, and that is the security decision in this row.**
+/// The alternative was to match a delivery against `GithubConnection.login` and
+/// build any repository a connected user happens to own. That silently enrols
+/// every repository of every connected account, so a leaked webhook secret — or
+/// an App pointed at this URL by mistake — would start containers for
+/// repositories nobody here chose. Somebody has to say "this repository, on my
+/// account", and this row is them saying it.
+model PullRequestRepo {
+  id String @id @default(uuid())
+
+  /// Lower-cased on the way in, because GitHub sends whichever case the event
+  /// carried and a case-sensitive key would miss the enrolment.
+  owner String
+  repo  String
+
+  /// Whose account pays for the workspaces: they own every project this
+  /// creates, and their quota is what it counts against.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  /// One enrolment per repository. Two accounts cannot both claim it, which
+  /// keeps "whose quota" a question with one answer.
+  @@unique([owner, repo])
+  @@index([userId])
+  @@map("pull_request_repos")
+}
+
+/// One pull request that has a workspace and a URL on this server. plan.md §13.3.
+model PullRequestWorkspace {
+  id String @id @default(uuid())
+
+  /// The base repository, lower-cased on the way in. GitHub treats owner and
+  /// repo names case-insensitively and sends whichever case the event happened
+  /// to carry, so a case-sensitive key would open a second workspace for the
+  /// same pull request the first time somebody typed the name differently.
+  owner  String
+  repo   String
+  number Int
+
+  /// The branch the pull request is from. Kept for the comment, and for telling
+  /// a reopened pull request from a new one on the same number.
+  headRef String
+
+  /// The commit the workspace was last built at. A `synchronize` carrying a sha
+  /// already recorded here is a redelivery, not new work.
+  headSha String
+
+  /// The workspace itself. Cascades: if the project is deleted by any of the
+  /// paths that delete projects, this row must not outlive it pointing at
+  /// nothing.
+  ///
+  /// Unique because a project belongs to at most one pull request. Without it
+  /// two rows could point at one workspace, and the second teardown would
+  /// delete a project the first had already given away.
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// The id of the comment posted back on the pull request, so the next push
+  /// edits it instead of adding another. Null until one is posted — which
+  /// includes every deployment whose token cannot write.
+  commentId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One workspace per pull request. This unique index is what makes a
+  /// redelivered `opened` event a no-op rather than a second container.
+  @@unique([owner, repo, number])
+  @@map("pull_request_workspaces")
+}
+
+/// A webhook delivery this server has already acted on. plan.md §13.3.
+///
+/// The billing equivalent is an efficiency measure. This one is a CORRECTNESS
+/// requirement: GitHub's signature covers the body and carries no timestamp, so
+/// a captured delivery stays valid forever and replaying it is free. Refusing a
+/// delivery id already seen is the only replay defence there is.
+model WebhookDelivery {
+  /// GitHub's `X-GitHub-Delivery`, verbatim. The primary key for the reason
+  /// `BillingEvent` gives: there is no second identity for this row.
+  id String @id
+
+  event      String
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+  @@map("webhook_deliveries")
+}
+
 enum SubscriptionStatus {
   /// Paid and current.
   ACTIVE
@@ -869,6 +965,10 @@ model Project {
   localPath String? @unique
 
   moderationActions ModerationAction[]
+
+  /// The pull request this workspace exists for, when it is one this server
+  /// opened from a webhook rather than one a person made. plan.md §13.3.
+  pullRequest PullRequestWorkspace?
 
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -984,24 +1084,13 @@ model Project {
   forkedFrom   Project?  @relation("ProjectForks", fields: [forkedFromId], references: [id], onDelete: SetNull)
   forks        Project[] @relation("ProjectForks")
 
-  collaborators      ProjectCollaborator[]
-  reports            ProjectReport[]
-  deployment         Deployment?
-  databaseConnection ProjectDatabaseConnection?
-  managedDatabase    ManagedDatabase?
-  embed              Embed?
-  scheduledJobs      ScheduledJob[]
-
-  @@index([ownerId])
-  /// The gallery reads this, and only this.
-  @@index([visibility])
-  @@index([forkedFromId])
-  /// Only the trash. Every other query asks for `deletedAt IS NULL`, which is
-  /// almost every row; the index that helps is over the few that are not.
-  @@index([deletedAt])
-  /// Only ever queried for the handful that are not READY -- the dashboard
-  /// poll and the boot reconcile both ask which of these is unfinished.
-  @@index([scaffoldStatus])
+  collaborators       ProjectCollaborator[]
+  reports             ProjectReport[]
+  deployment          Deployment?
+  databaseConnection  ProjectDatabaseConnection?
+  managedDatabase     ManagedDatabase?
+  embed               Embed?
+  scheduledJobs       ScheduledJob[]
   /// The dependency fingerprint a prebuild last completed for. plan.md §12.5.
   ///
   /// A host-side copy of the stamp `warmStart` keeps INSIDE the container.
@@ -1017,8 +1106,17 @@ model Project {
   /// decides what actually runs.
   prebuiltFingerprint String?
 
+  @@index([ownerId])
+  /// The gallery reads this, and only this.
+  @@index([visibility])
+  @@index([forkedFromId])
+  /// Only the trash. Every other query asks for `deletedAt IS NULL`, which is
+  /// almost every row; the index that helps is over the few that are not.
+  @@index([deletedAt])
+  /// Only ever queried for the handful that are not READY -- the dashboard
+  /// poll and the boot reconcile both ask which of these is unfinished.
+  @@index([scaffoldStatus])
   @@map("projects")
-
 }
 
 enum ProjectVisibility {

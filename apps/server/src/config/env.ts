@@ -232,6 +232,9 @@ const envSchema = z.object({
   /** GitHub sign-in. Both empty means the feature is simply off. */
   GITHUB_CLIENT_ID: z.string().optional(),
   GITHUB_CLIENT_SECRET: z.string().optional(),
+  /// The GitHub App's webhook signing secret. Absent means the receiver exists
+  /// and is unconfigured, which is what it then reports. plan.md §13.3.
+  GITHUB_WEBHOOK_SECRET: z.string().optional(),
 
   /** 32 bytes, base64, for secrets the server has to keep and later spend --
    *  today the GitHub token that makes importing and pushing possible without

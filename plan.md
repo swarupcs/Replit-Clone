@@ -55,8 +55,8 @@ it and is dealt with under the table.
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
-| `pnpm --filter server test` | **2710 passing**, 269 skipped (180 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2970 passing**, 9 skipped. Green 2026-09-10 against all **43** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter server test` | **2765 passing**, 277 skipped (185 files) — no database configured |
+| the same, with `TEST_DATABASE_URL` set | **3033 passing**, 9 skipped. Green 2026-09-10 against all **45** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
 | `pnpm --filter web test` | **1431 passing** (116 files), re-run 2026-09-10 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
@@ -146,10 +146,10 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 176 items. Open: 10 — four blocked, none from §10, whose last row
+**Done: 177 items. Open: 9 — four blocked, none from §10, whose last row
 closed on 2026-09-10 (with two items carried into §2.59), none from §11, whose
 last row closed on 2026-09-10, one from §12, which reads neither and
-asks what a cloud machine is for, and five from §13, which names the two
+asks what a cloud machine is for, and four from §13, which names the two
 products this most resembles and diffs against them. **§13.1 closed on
 2026-09-10 (§2.61)** — the row §13 called "the defining act of the product this
 section names", and the one whose own text said not to build it before 13.2.
@@ -157,11 +157,11 @@ It was built the day after 13.2, in that order, and the objection in it is
 answered rather than waived: the sandbox starts no container. **§10.1 was decided on
 2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, which closed
 three §10 rows at once: 10.1 itself, and 10.6 and 10.7 by another road. The
-six that remain are merely open rather than blocked. §11's last row was 11.10,
+five that remain are merely open rather than blocked. §11's last row was 11.10,
 which needed a decision before it needed code and got one (§2.53), and 12.4 is
 blocked on hardware rather than on anybody.**
 
-Those five numbers are 4 + 0 + 0 + 1 + 5 = 10, and they are written out
+Those five numbers are 4 + 0 + 0 + 1 + 4 = 9, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -471,7 +471,7 @@ decision is genuinely not this document's to take.
 a *CodeSandbox*: there is no cheap project — every path into a working tree
 ends at a container, so ~~there is no anonymous sandbox (§13.1)~~ — shipped
 2026-09-10, §2.61 — ~~no container-free preview (§13.2)~~ — shipped 2026-09-10,
-§2.60 — no URL per pull request (§13.3), no second
+§2.60 — ~~no URL per pull request (§13.3)~~ — shipped 2026-09-10, §2.62 — no second
 checkout of one repository (§13.4), no devtools for the previewed app (§13.5),
 and no pairing link for somebody without an account (§13.6). For a *personal
 cloud editor*: ~~a terminal is killed when its WebSocket closes, so closing the
@@ -4052,6 +4052,76 @@ iframe.
 
 ---
 
+### 2.62 Since (2026-09-10) — §13.3, a URL per pull request, and who pays for it
+
+§13.3 says four of its five parts already exist — `repoImportService`,
+`deployService`, `releaseService`, the trash — and that the fifth is a route.
+That estimate was right. `POST /api/v1/github/webhook` verifies an HMAC, decides
+what the delivery means, and drives the parts that were already there.
+
+**The question the row does not ask is the one that shaped the design: whose
+account pays for a workspace a webhook creates.** Nothing in the schema links a
+project to a repository — the remote lives in git config inside the container —
+so there was no cheap way to find "the account that imported this repo". The
+obvious substitute was `GithubConnection.login`: build any repository a
+connected user happens to own. That silently enrols every repository of every
+connected account, so a leaked webhook secret, or an App pointed at this URL by
+mistake, would start containers for repositories nobody here chose. Enrolment is
+explicit instead — `PullRequestRepo`, one row per repository, unique so that
+"whose quota" has one answer. An unenrolled delivery starts nothing, and that
+guard is mutation-checked.
+
+**A pull request from a fork is refused.** Building one means cloning a branch
+nobody here controls and running its install scripts and dev server on this
+host, which is §6 decision 13's refusal arriving by a different road and wearing
+a collaborator's clothes. This is not an edge case — a fork PR is the ordinary
+way an outside contributor sends a change, and for a public repository it is the
+majority case. Refusing it is the honest limit of the row rather than an
+oversight in it, and the guard goes red when deleted.
+
+**The replay defence is a correctness requirement here, not an efficiency
+one.** Stripe signs a timestamp; GitHub does not. Its signature covers the body
+alone, so a captured delivery stays valid forever and replaying it is free —
+"the signature is correct" really does only mean "GitHub sent this at some
+point". `WebhookDelivery` refusing an id already seen is the only thing between
+that and a replayed `opened` starting another container, which is why a delivery
+with no id is refused outright rather than acted on once and hoped about. A ping
+is answered without claiming its id, so a re-ping after a reconfigure does not
+look like a replay.
+
+**It supplies the trigger §12.2 says in its own text that it lacks.** That row
+shipped prebuilds and stated what was missing was a policy for *when* — "build
+on push, or build on a schedule, or build when a `devcontainer.json` changes".
+A push to a branch an open pull request is from now refreshes that workspace:
+the first of the three, arriving with a reason attached rather than a schedule
+somebody guessed.
+
+**Teardown is the trash, not a purge.** `trashProjectService` removes the
+container, stops the managed database and takes the deployment offline — all of
+the cost — while leaving seven days for somebody who merged by mistake. Decision
+13's shape again: the guarantee is that the expensive things stopped, not that
+the row is gone.
+
+**The comment is allowed to fail.** A deployment whose token cannot write gets
+the workspace without the comment rather than neither, and the next push edits
+the comment already posted instead of adding another — a pull request carrying
+fifteen near-identical bot comments is worse than one carrying none.
+
+**Verified.** 9 tests on the signature, 24 on the decision layer, 12 on the
+orchestration, 10 on the route, and 8 against real Postgres. The route tests
+assemble the app in `index.ts`'s real parser order, which is the arrangement §5
+records the billing webhook's tests never checked. Two guards mutation-checked:
+the fork refusal and the enrolment requirement. Server 3033 passing / 9 skipped
+against 45 migrations, web 1431 passing, typecheck and lint clean 3/3.
+
+**Not verified, and it is the expensive half.** There is no Docker daemon here,
+so `importRepository` and `publish` have never run for a real delivery — what is
+proven is which of them is called and when, not what happens when they do. No
+delivery from GitHub has been received either, so the App itself is unexercised:
+the signature verifier is tested against signatures this repository generates.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -7239,7 +7309,38 @@ below is written to respect it rather than to argue with it.
       neither of those is a person this deployment has, this row has no user,
       and 13.1 has no cheap version — which is the honest reading of both.
 
-- [ ] **13.3 Every pull request gets a URL.**
+- [x] **13.3 Every pull request gets a URL.**
+      **Shipped 2026-09-10 — §2.62.** `POST /api/v1/github/webhook` behind an
+      HMAC, a workspace per head ref, the existing deploy path pointed at it, a
+      comment edited rather than repeated, and the trash on merge or close.
+
+      **The row's own estimate was right: four of the five parts existed.**
+      What was missing was the receiver and the bookkeeping between them. What
+      the row did NOT name is the question that turned out to decide the
+      design — *whose account pays for a workspace a webhook creates* — and the
+      answer is `PullRequestRepo`, an explicit per-repository enrolment. The
+      alternative, matching a delivery against a connected account's login,
+      silently enrols every repository of every connected user, so a leaked
+      secret or a misdirected App would start containers nobody chose.
+
+      **A pull request from a fork is refused, and that is the honest limit.**
+      Building one means cloning a branch nobody here controls and running its
+      install scripts on this host — §6 decision 13's refusal arriving by
+      another road, wearing a collaborator's clothes. A fork PR is the ordinary
+      way an outside contributor sends a change, so this is the majority case
+      for a public repository, not an edge case.
+
+      **It does supply §12.2's missing trigger**, as the row predicted: a push
+      to a branch some open pull request is from refreshes that workspace, so
+      the prebuild policy fires on a reason instead of a schedule somebody
+      guessed.
+
+      **Not exercised end to end, and it is the expensive half.** No Docker
+      daemon here, so `importRepository` and `publish` have never run for a
+      real delivery; the tests prove which of them is called and when, not what
+      happens when they do. No delivery from GitHub has been received either.
+
+      Original note follows.
       The most valuable row in 13A for anybody working with other people, and
       the one whose mechanism is most nearly already here.
 
@@ -7926,7 +8027,16 @@ and it should be costed as such before it is started.
 
 ### 14.6 Phase 5 — the git workflow other people can see
 
-**5a. A URL per pull request (§13.3).** The most valuable row in §13 for
+**5a. A URL per pull request (§13.3).** **Shipped 2026-09-10 — §2.62.** The
+four fifths were there, as this note says; what it does not mention is the
+question that decided the design — whose account pays for a workspace a webhook
+creates — answered with explicit per-repository enrolment. Fork pull requests
+are refused, which is the honest limit. **Reading the only webhook in the tree
+as a pattern is also how §5's raw-body defect was found**: the billing receiver
+could never have verified a delivery, because `express.json()` was mounted in
+front of it.
+
+Original note follows. The most valuable row in §13 for
 anybody working with other people, and four fifths of the mechanism exists —
 `repoImportService`, `deployService`, `releaseService` and the trash. What is
 missing is a GitHub App with `pull_request` and `push` events, a workspace per

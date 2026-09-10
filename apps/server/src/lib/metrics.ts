@@ -163,6 +163,17 @@ export type CounterName =
   | "billing_grace_expired"
   | "billing_event_duplicate"
   | "billing_webhook_rejected"
+  // Pull request workspaces (§13.3). `github_pr_not_enrolled` is the loud one
+  // for a misconfigured App: an installation delivers every repository's
+  // events, so a deployment seeing nothing but this has the webhook wired up
+  // and nothing enrolled behind it.
+  | "github_delivery_duplicate"
+  | "github_webhook_rejected"
+  | "github_pr_not_enrolled"
+  | "github_pr_created"
+  | "github_pr_refreshed"
+  | "github_pr_torn_down"
+  | "github_pr_comment_failed"
   // Notifications. `notifications_created` against `notifications_mailed` is
   // the honest measure of how much of this actually reaches anybody: the gap
   // between them is people who have to open the app to find out, which is the
