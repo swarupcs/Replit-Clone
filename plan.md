@@ -146,24 +146,36 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 181 items. Open: 5 — four blocked, none from §10, whose last row
-closed on 2026-09-10 (with two items carried into §2.59), none from §11, whose
-last row closed on 2026-09-10, one from §12, which reads neither and
-asks what a cloud machine is for, and none from §13, whose last row closed on
-2026-09-11, which names the two
-products this most resembles and diffs against them. **§13.1 closed on
-2026-09-10 (§2.61)** — the row §13 called "the defining act of the product this
-section names", and the one whose own text said not to build it before 13.2.
-It was built the day after 13.2, in that order, and the objection in it is
-answered rather than waived: the sandbox starts no container. **§10.1 was decided on
-2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, which closed
-three §10 rows at once: 10.1 itself, and 10.6 and 10.7 by another road. The
-one that remains is merely open rather than blocked. §11's last row was 11.10,
-which needed a decision before it needed code and got one (§2.53), and 12.4 is
-blocked on hardware rather than on anybody.**
+**Done: 181 items. Open: 5 — and all five are blocked. Nothing is left that is
+merely open.**
+
+The five are §3.3's four (certificates, process snapshots, autoscale, and
+debugging) plus §12.4. **§10, §11 and §13 are empty**: §10's last row closed on
+2026-09-10 with two items carried into §2.59, §11's on 2026-09-10, and §13's on
+2026-09-11.
+
+**None of the five is blocked on somebody writing code**, which is why this
+figure stops moving here rather than continuing down. Certificates are "a
+Caddyfile and a decision" about where this deployment's keys live, and the code
+half shipped in §2.31. Process snapshots need a disk budget and a mechanism
+nothing here resembles. Autoscale is a pricing decision before it is an
+engineering one. Debugging is deferred on purpose by §6 decision 1, whose own
+instruction is to **revisit the route, not the row** — building it here would be
+overruling a decision this document records rather than completing a row it
+lists. 12.4 is blocked on hardware rather than on anybody.
+
+**§10.1 was decided on 2026-09-09 — B + C — and Route C shipped the same day
+(§2.50)**, which closed three §10 rows at once: 10.1 itself, and 10.6 and 10.7
+by another road. §11's last row was 11.10, which needed a decision before it
+needed code and got one (§2.53). **§13.1 closed on 2026-09-10 (§2.61)** — the
+row §13 called "the defining act of the product this section names", and the one
+whose own text said not to build it before 13.2. It was built the day after
+13.2, in that order, and the objection in it is answered rather than waived: the
+sandbox starts no container.
 
 Those five numbers are 4 + 0 + 0 + 1 + 0 = 5, and they are written out
-because they did not add up once already — see the paragraph below.
+because they did not add up once already — see the paragraph below. The §13 term
+reaching zero is what ended the buildable part of this plan.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
 unblocked**, after backups shipped (§2.47) — and the split was the same one
