@@ -6,6 +6,9 @@ import { useAuthStore } from "../../../store/authStore.ts";
 import { refreshAccessToken } from "../../../config/axiosConfig.ts";
 import { VscClearAll, VscDebugRestart } from "react-icons/vsc";
 import { useThemeMode } from "../../../hooks/useThemeMode.ts";
+import { useMediaQuery } from "../../../hooks/useMediaQuery.ts";
+import { COARSE_POINTER_QUERY } from "../../../lib/deviceLayout.ts";
+import { TerminalKeyBar } from "./TerminalKeyBar.tsx";
 import { TERMINAL_THEME } from "../../../lib/terminalTheme.ts";
 import {
   hasTerminalSession,
@@ -79,6 +82,23 @@ export const BrowserTerminal = ({ projectId, tabId }: BrowserTerminalProps) => {
    *  effect re-running (which is how a reconnect happens). A dropped socket --
    *  the server restarting, a network blip, a rotated-out token -- used to
    *  leave the terminal dead until the user clicked reconnect by hand. */
+  /** The live socket, so the touch key bar can write into the same stream the
+   *  keyboard does. plan.md §13.10 — a software keyboard has no `Ctrl`, and a
+   *  shell you cannot interrupt is a shell you cannot use. */
+  const socketRef = useRef<WebSocket | null>(null);
+
+  /** Pointer, not width: a narrow desktop window has a real Ctrl on a real
+   *  keyboard and does not want a row of fake ones in front of its terminal. */
+  const coarsePointer = useMediaQuery(COARSE_POINTER_QUERY);
+
+  const sendKey = useCallback((data: string) => {
+    const socket = socketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) socket.send(data);
+    // Focus goes back to the terminal so the software keyboard stays up and
+    // the next character lands where somebody expects it.
+    termRef.current?.focus();
+  }, []);
+
   const retriesRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
 
@@ -141,6 +161,7 @@ export const BrowserTerminal = ({ projectId, tabId }: BrowserTerminalProps) => {
         token,
       ]);
       socket.binaryType = "arraybuffer";
+      socketRef.current = socket;
 
       /** fit() reads renderer cell dimensions that do not exist until the
        *  element is laid out; the first layout pass reports 0x0. */
@@ -368,6 +389,9 @@ export const BrowserTerminal = ({ projectId, tabId }: BrowserTerminalProps) => {
         style={{ flex: 1, minHeight: 0, padding: "4px 10px 8px" }}
         id="terminal-container"
       />
+
+      {/* The keys a software keyboard does not have. plan.md §13.10. */}
+      {coarsePointer && <TerminalKeyBar onSend={sendKey} />}
     </div>
   );
 };

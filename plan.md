@@ -57,7 +57,7 @@ it and is dealt with under the table.
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2778 passing**, 304 skipped (188 files) — no database configured |
 | the same, with `TEST_DATABASE_URL` set | **3073 passing**, 9 skipped. Green 2026-09-11 against all **47** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1476 passing** (119 files), re-run 2026-09-11 |
+| `pnpm --filter web test` | **1516 passing** (122 files), re-run 2026-09-11 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,10 +146,11 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 180 items. Open: 6 — four blocked, none from §10, whose last row
+**Done: 181 items. Open: 5 — four blocked, none from §10, whose last row
 closed on 2026-09-10 (with two items carried into §2.59), none from §11, whose
 last row closed on 2026-09-10, one from §12, which reads neither and
-asks what a cloud machine is for, and one from §13, which names the two
+asks what a cloud machine is for, and none from §13, whose last row closed on
+2026-09-11, which names the two
 products this most resembles and diffs against them. **§13.1 closed on
 2026-09-10 (§2.61)** — the row §13 called "the defining act of the product this
 section names", and the one whose own text said not to build it before 13.2.
@@ -157,11 +158,11 @@ It was built the day after 13.2, in that order, and the objection in it is
 answered rather than waived: the sandbox starts no container. **§10.1 was decided on
 2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, which closed
 three §10 rows at once: 10.1 itself, and 10.6 and 10.7 by another road. The
-two that remain are merely open rather than blocked. §11's last row was 11.10,
+one that remains is merely open rather than blocked. §11's last row was 11.10,
 which needed a decision before it needed code and got one (§2.53), and 12.4 is
 blocked on hardware rather than on anybody.**
 
-Those five numbers are 4 + 0 + 0 + 1 + 1 = 6, and they are written out
+Those five numbers are 4 + 0 + 0 + 1 + 0 = 5, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -476,10 +477,14 @@ checkout of one repository (§13.4)~~ — shipped 2026-09-10, §2.63 — ~~no de
 and ~~no pairing link for somebody without an account (§13.6)~~ — shipped 2026-09-11, §2.65. For a *personal
 cloud editor*: ~~a terminal is killed when its WebSocket closes, so closing the
 laptop kills the build (§13.7)~~ — fixed 2026-09-09, §2.46; ~~secrets belong to
-a project rather than to the account (§13.8)~~ — fixed 2026-09-09, §2.48; no credential inside the sandbox can clone a private
-repository (§13.9); the editor has one mobile breakpoint and nothing else
-(§13.10); and the session — tabs, splits, settings — lives in `localStorage`
-rather than on the server it is connected to (§13.11).
+a project rather than to the account (§13.8)~~ — fixed 2026-09-09, §2.48; ~~no credential inside the sandbox can clone a private
+repository (§13.9)~~ — fixed 2026-09-09; ~~the editor has one mobile breakpoint
+and nothing else (§13.10)~~ — fixed 2026-09-11, §2.66; and ~~the session —
+tabs, splits, settings — lives in `localStorage` rather than on the server it is
+connected to (§13.11)~~ — fixed 2026-09-09, §2.49.
+
+**Every row in this paragraph is now struck**, which is the whole of §13B
+closed.
 
 ### What is verified, and what is asserted
 
@@ -4337,6 +4342,63 @@ The endpoints are the deliverable; the join screen is not built.
 
 ---
 
+### 2.66 Since (2026-09-11) — §13.10, and the question a breakpoint does not ask
+
+`useMediaQuery("(max-width: 900px)")` was the whole of the mobile story, and the
+row is right about that. It is also a good breakpoint answering a question that
+is not this row's. **Width says how much room there is. It does not say whether
+there is a mouse.**
+
+The two come apart in both directions and both are ordinary. A tablet at 1024px
+is wide enough for every pane and has no keyboard, so it was getting mouse-sized
+hit targets and no way to type `Ctrl`. A desktop window dragged to 800px is
+narrow and has a real keyboard, so it was getting a layout built for fingers it
+does not have. Touch affordances now key off `(pointer: coarse)` — a capability
+the browser actually knows — and layout keeps keying off width. The existing
+breakpoint is untouched: this adds a question rather than moving the answer to
+the old one.
+
+**"A terminal with no `Ctrl`" is the part of this row that is not a matter of
+taste.** A software keyboard has letters, digits and punctuation; no control
+key, no escape, usually no tab and no arrows. So `Ctrl+C` cannot be typed at
+all, and a shell you cannot interrupt is a shell you cannot use. The key bar is
+a table of bytes, because a terminal takes a stream and not key events: 0x03 for
+interrupt, `ESC[A` and friends for the arrows, and the control range computed
+from the letter rather than tabulated so twenty-six rows cannot drift.
+
+**`Ctrl` is one-shot, and that is the only defensible behaviour.** It applies to
+the next key and lets go, exactly as a real modifier does. A latching modifier
+on a screen with no key to look at is a mode somebody is stuck in without being
+able to see it. Tapping it twice disarms it, so a mis-tap costs nothing.
+Mutation-checked: making it latch turns five tests red across two files.
+
+**Interrupt is on the bar by name as well as behind the modifier.** It is the
+reason the bar exists, and putting the most-needed key two taps away would have
+been designing the feature and then hiding it.
+
+**What this does not claim.** Monaco is not made into a mobile editor — the
+handful of its defaults that are actively wrong without a mouse are turned off
+(the hover popup that covers the line it was opened from, the minimap that is a
+mouse's scrollbar) and nothing else. The font is nudged one step and left alone
+if somebody has already chosen a larger one, because they chose it. The file
+tree gets finger-sized hit targets and no redesign.
+
+**Verified.** 19 tests on the byte table, 15 on the capability layer, 6 on the
+bar. Web 1516 passing (122 files), server 3073 passing / 9 skipped, typecheck
+and lint clean 3/3.
+
+**The row says it is "not recommended", and shipping it has not made that less
+true.** §13.10 notes it "may well have no user here" and that §12's warning
+about this method applies to it harder than to any other row on the page. That
+is still the honest reading. It was built because the plan was to be finished.
+**Nothing here has been touched by an actual finger** — there is no touch device
+in this environment, so what is proven is that the right bytes leave the bar and
+the right queries drive the layout, not that any of it is pleasant to use on a
+phone. That is a smaller claim than "the editor works on a tablet", and it is
+the one the tests support.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -6088,7 +6150,9 @@ decision needs. Under Route A the cost of every one of them is zero.
       **What is still true, and is not a footnote.** There is no debugging in
       the BROWSER editor and this row does not deliver one. Somebody on an iPad,
       or on a machine where they cannot install an editor, still cannot set a
-      breakpoint — that is 13.10's territory and it stays open. What this row
+      breakpoint — that is 13.10's territory, and 13.10 shipping on 2026-09-11
+      did not change it: that row delivered a terminal key bar and a pointer
+      layer, not a debugger. What this row
       claimed was that the *platform* had no debugging at all, and that is what
       is no longer true.
 
@@ -7873,7 +7937,41 @@ the machine is somewhere else.
       first is the only one that is not a secret sitting in a container, and it
       exists only if §10.1 goes to Route C.
 
-- [ ] **13.10 The editor on a device that is not a laptop.**
+- [x] **13.10 The editor on a device that is not a laptop.**
+      **Shipped 2026-09-11 — §2.66, and read the caveat below before valuing
+      it.** A terminal key bar for the keys a software keyboard does not have,
+      and a pointer-based capability layer beside the existing width
+      breakpoint.
+
+      **The row's diagnosis was right and its framing was one question short.**
+      One breakpoint was indeed the whole story — but width and pointer are
+      different questions, and the breakpoint only answers the first. A tablet
+      at 1024px is wide enough for the panes and has no keyboard; a desktop
+      window dragged to 800px is narrow and has a real `Ctrl`. Touch
+      affordances now key off `(pointer: coarse)`, a capability the browser
+      knows, and layout keeps keying off width, which is what width is for. The
+      old breakpoint is unchanged.
+
+      **"A terminal with no `Ctrl`" was the part worth building.** It is the
+      one item in the row that is not a matter of taste: a shell you cannot
+      interrupt is a shell you cannot use. The bar sends bytes — 0x03 for
+      interrupt, real escape sequences for the arrows — and `Ctrl` is one-shot,
+      applying to the next key and letting go, because a modifier that latches
+      invisibly is worse than no modifier. Mutation-checked: making it latch
+      turns five tests red.
+
+      **What it does NOT claim.** Monaco is not made into a mobile editor; the
+      handful of its defaults that are actively wrong without a mouse are
+      turned off and nothing else. The file tree gets finger-sized hit targets
+      and no redesign.
+
+      **The row says it is "not recommended" and that stands.** It was built
+      because the plan was to be finished, not because a user for it is known
+      to exist — and nothing here has been touched by an actual finger. §12's
+      warning about this method applies to this row harder than to any other on
+      the page, and shipping it has not made that less true.
+
+      Original note follows.
       `useMediaQuery("(max-width: 900px)")` in `ProjectPlayground.tsx:255` is
       the whole of the mobile story: one breakpoint that collapses the layout.
       Monaco on a touch keyboard, a terminal with no `Ctrl`, and a file tree
@@ -7998,7 +8096,9 @@ below was run, not remembered.
 - `gitService.ts:475` — `switchBranch` operates on the project's single working
   tree (13.4).
 - `ProjectPlayground.tsx:255` — one `useMediaQuery("(max-width: 900px)")`, and
-  no other breakpoint or touch handling in the tree (13.10).
+  no other breakpoint or touch handling in the tree (13.10). **No longer true as
+  of §2.66**: the breakpoint is unchanged and still the only width query, but
+  `(pointer: coarse)` now sits beside it, and the terminal has a key bar.
 - `editorSettingsStore`, `keybindingStore`, `openTabsStore` and
   `treeStructureStore` all persist to `localStorage`; no endpoint reads or
   writes any of them (13.11). **No longer true as of §2.49** — and the detail
@@ -8413,10 +8513,16 @@ CodeSandbox track and nowhere in the personal one.
 
 Recorded so nobody reads their absence as an oversight.
 
-- **13.10 — the editor on a phone.** Ranked last in §13B, and §13B's own text
-  says it may have no user. Large work for a device nobody here has been
-  observed using. If somebody starts editing on a tablet, promote it; do not
-  build it on the theory that they might.
+- ~~**13.10 — the editor on a phone.**~~ **Built anyway on 2026-09-11 (§2.66),
+  and this entry is left here rather than deleted because it was the better
+  judgement.** The reasoning below still holds: it is work for a device nobody
+  here has been observed using, and nothing in it has been touched by a finger.
+  What was built is narrow — a terminal key bar and a pointer-based capability
+  layer — rather than the large work this entry warns about, which is the only
+  reason the warning and the row can both stand. Original entry: ranked last in
+  §13B, and §13B's own text says it may have no user. Large work for a device
+  nobody here has been observed using. If somebody starts editing on a tablet,
+  promote it; do not build it on the theory that they might.
 - **12.4 — GPUs.** Blocked on hardware, not on anybody. An afternoon of
   `DeviceRequests` if the host has one and unstartable if it does not.
 - **§3.3 autoscale.** A different product with a different cost model. §9.3's
