@@ -174,6 +174,11 @@ export type CounterName =
   | "github_pr_refreshed"
   | "github_pr_torn_down"
   | "github_pr_comment_failed"
+  // Pairing (§13.6). `pairing_redeem_refused` covers expired, revoked and
+  // moderated alike, because the RESPONSE cannot distinguish them: a link that
+  // says "expired" tells whoever holds it that it was once real.
+  | "pairing_redeemed"
+  | "pairing_redeem_refused"
   // Notifications. `notifications_created` against `notifications_mailed` is
   // the honest measure of how much of this actually reaches anybody: the gap
   // between them is people who have to open the app to find out, which is the

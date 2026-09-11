@@ -141,11 +141,14 @@ model User {
 
   /// Repositories this account has more than one checkout of. §13.4.
   workspaceGroups WorkspaceGroup[]
-  notifications   Notification[]
-  apiKeys         ApiKey[]
-  accountActions  AccountAction[]  @relation("AccountActionSubject")
-  computeUsage    ComputeUsage[]
-  subscription    Subscription?
+
+  /// Pairing links this account opened. §13.6.
+  pairingInvites PairingInvite[]
+  notifications  Notification[]
+  apiKeys        ApiKey[]
+  accountActions AccountAction[] @relation("AccountActionSubject")
+  computeUsage   ComputeUsage[]
+  subscription   Subscription?
 
   /// A second factor, when the account has one. A table of its own for the
   /// same reason as the row below it, and more sharply: the TOTP secret is a
@@ -777,6 +780,56 @@ model BillingEvent {
   @@map("billing_events")
 }
 
+/// A link that pairs somebody into a project without an account. plan.md §13.6.
+///
+/// The EDITOR share link is "a named grant": redeeming it adds the signed-in
+/// user as a collaborator the owner can see and demote. That is the right
+/// default for a platform and the wrong one for ten minutes of pairing, which
+/// is the case the collaborative layer is most obviously for.
+///
+/// This is the other thing: redeeming mints a scoped, expiring GUEST identity
+/// and writes no `ProjectCollaborator` row at all. The guest is never an
+/// account, never appears in the collaborator list, and cannot outlive the
+/// token — so the owner has nothing to remember to revoke afterwards.
+model PairingInvite {
+  id String @id @default(uuid())
+
+  /// The bearer string in the link. Unique, and the only thing a guest has.
+  token String @unique
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Who opened the door. Kept so the owner can see who invited whom, and so
+  /// revoking is attributable.
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  /// Never more than this, whatever the guest asks for.
+  role ProjectRole @default(EDITOR)
+
+  /// What to call the link in the owner's list — "pairing with Sam", say.
+  label String?
+
+  /// When the LINK stops being redeemable. Distinct from the token's life: the
+  /// link is pasted into a chat and outlives the conversation.
+  expiresAt DateTime
+
+  /// Set when the owner ends it. A WHERE clause rather than a delete, so the
+  /// row survives as a record of what was granted and when it stopped.
+  revokedAt DateTime?
+
+  /// How many guests have come through. Not a limit — a fact the owner can
+  /// look at, and the thing that says whether a link was ever used.
+  redeemedCount Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([expiresAt])
+  @@map("pairing_invites")
+}
+
 /// Several checkouts of one repository that know they are related. plan.md §13.4.
 ///
 /// A `Project` is one directory and one row, and `switchBranch` changes the
@@ -1014,6 +1067,9 @@ model Project {
   /// The pull request this workspace exists for, when it is one this server
   /// opened from a webhook rather than one a person made. plan.md §13.3.
   pullRequest PullRequestWorkspace?
+
+  /// Links that pair somebody in without an account. §13.6.
+  pairingInvites PairingInvite[]
 
   /// The repository this is a checkout of, when it is one of several. §13.4.
   ///

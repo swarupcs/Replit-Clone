@@ -9,6 +9,7 @@ import authRouter from "./auth.js";
 import projectRouter from "./projects.js";
 import githubRouter from "./github.js";
 import embedRouter from "./embeds.js";
+import pairingRouter from "./pairing.js";
 import adminRouter from "./admin.js";
 import notificationRouter from "./notifications.js";
 import accountRouter from "./account.js";
@@ -72,5 +73,11 @@ router.use("/tls", tlsRouter);
 // Deliberately NOT behind requireAuth: an embed is read by people who have
 // no account here and never will. See routes/v1/embeds.ts.
 router.use("/embeds", embedRouter);
+
+// Also deliberately NOT behind requireAuth: §13.6's whole point is the person
+// who has no account, so requiring one to redeem would require the thing the
+// row exists to avoid. What redeeming returns is a typed, project-scoped,
+// expiring pairing token — never a session.
+router.use("/pairing", pairingRouter);
 
 export default router;

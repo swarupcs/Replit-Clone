@@ -55,8 +55,8 @@ it and is dealt with under the table.
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
-| `pnpm --filter server test` | **2766 passing**, 291 skipped (186 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **3048 passing**, 9 skipped. Green 2026-09-10 against all **46** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter server test` | **2778 passing**, 304 skipped (188 files) — no database configured |
+| the same, with `TEST_DATABASE_URL` set | **3073 passing**, 9 skipped. Green 2026-09-11 against all **47** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
 | `pnpm --filter web test` | **1476 passing** (119 files), re-run 2026-09-11 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
@@ -146,10 +146,10 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 179 items. Open: 7 — four blocked, none from §10, whose last row
+**Done: 180 items. Open: 6 — four blocked, none from §10, whose last row
 closed on 2026-09-10 (with two items carried into §2.59), none from §11, whose
 last row closed on 2026-09-10, one from §12, which reads neither and
-asks what a cloud machine is for, and two from §13, which names the two
+asks what a cloud machine is for, and one from §13, which names the two
 products this most resembles and diffs against them. **§13.1 closed on
 2026-09-10 (§2.61)** — the row §13 called "the defining act of the product this
 section names", and the one whose own text said not to build it before 13.2.
@@ -157,11 +157,11 @@ It was built the day after 13.2, in that order, and the objection in it is
 answered rather than waived: the sandbox starts no container. **§10.1 was decided on
 2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, which closed
 three §10 rows at once: 10.1 itself, and 10.6 and 10.7 by another road. The
-three that remain are merely open rather than blocked. §11's last row was 11.10,
+two that remain are merely open rather than blocked. §11's last row was 11.10,
 which needed a decision before it needed code and got one (§2.53), and 12.4 is
 blocked on hardware rather than on anybody.**
 
-Those five numbers are 4 + 0 + 0 + 1 + 2 = 7, and they are written out
+Those five numbers are 4 + 0 + 0 + 1 + 1 = 6, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -473,7 +473,7 @@ ends at a container, so ~~there is no anonymous sandbox (§13.1)~~ — shipped
 2026-09-10, §2.61 — ~~no container-free preview (§13.2)~~ — shipped 2026-09-10,
 §2.60 — ~~no URL per pull request (§13.3)~~ — shipped 2026-09-10, §2.62 — ~~no second
 checkout of one repository (§13.4)~~ — shipped 2026-09-10, §2.63 — ~~no devtools for the previewed app (§13.5)~~ — shipped 2026-09-11, §2.64 —
-and no pairing link for somebody without an account (§13.6). For a *personal
+and ~~no pairing link for somebody without an account (§13.6)~~ — shipped 2026-09-11, §2.65. For a *personal
 cloud editor*: ~~a terminal is killed when its WebSocket closes, so closing the
 laptop kills the build (§13.7)~~ — fixed 2026-09-09, §2.46; ~~secrets belong to
 a project rather than to the account (§13.8)~~ — fixed 2026-09-09, §2.48; no credential inside the sandbox can clone a private
@@ -4263,6 +4263,80 @@ executing it in a browser.
 
 ---
 
+### 2.65 Since (2026-09-11) — §13.6, a guest, and the claim that scopes them
+
+The collaborative layer — Yjs per file, awareness, remote cursors, presence,
+follow mode — was finished and unreachable without an account. Even the EDITOR
+share link is "a named grant": redeeming it adds the signed-in user as a
+collaborator, so the person on the other end signs up first. Correct for a
+platform, wrong for ten minutes of pairing, which is what that layer is most
+obviously for. Redeeming a pairing link now writes **no collaborator row at
+all**.
+
+**The row named the mechanism and it was right.** Preview and MFA tokens are
+both typed, short-lived and checked on verify; this is the third of that shape.
+What it adds is one claim they do not have. `pid` names the single project the
+credential is good for, and `pairingAccess` compares it against the project
+being joined — so a guest holding a valid token for project A gets exactly what
+a stranger gets against project B. Without that claim a pairing token would be a
+general API credential belonging to nobody, which is the same failure the `typ`
+claim was added to stop, one level out. Deleting the comparison turns a test
+red.
+
+**Both directions of the `typ` guard are asserted**, because this is the first
+credential in the product with no account behind it: a pairing token is refused
+where an access token is expected, and an access token and a preview token are
+both refused where a pairing token is expected. The preview cookie matters most
+there — it is handed to untrusted project code, so it is the most exposed token
+this product has.
+
+**A test found a real defect rather than confirming a good line.**
+`verifyPairingToken` read the display name as `typeof nam === "string" ? nam :
+"Guest"`, and an empty string is a string — so a guest who sent `""` would have
+rendered as a cursor with no label beside it. The fix is a length check; the
+lesson is the ordinary one about `typeof` standing in for "present".
+
+**Every refusal says the same sentence.** Expired, revoked, pointing at a
+moderated project, pointing at a trashed one, or never having existed all
+produce "that pairing link is not valid". A link that says *expired* tells
+whoever holds it that it was once real and that this project exists, which makes
+the link a way to ask. There is a test asserting the three messages are one
+message, and the distinctions live in the metrics instead.
+
+**`takenDownAt` and `deletedAt` are in the check, not assumed away.** §6
+decision 13's rule again: a project taken down for MALWARE must stop handing
+anybody a container to run it in, and a guarantee that depends on a cleanup
+having succeeded is not a guarantee.
+
+**Creating a link is the owner's alone**, not an editor's. A collaborator
+handing out anonymous guest access is spending the owner's compute on a decision
+the owner never made.
+
+**Revoking closes the door; it does not reach through it.** Revocation is
+stamped rather than deleted, so the row survives as a record of what was granted
+and when it stopped, and a guest already holding a token keeps it until it
+expires. `PAIRING_TOKEN_TTL_HOURS` — 4, a guess in §12.5's sense rather than a
+measurement — is the bound on how long that is, and it is the honest answer to
+"how do I get them out right now": you cannot, for at most four hours.
+
+**Verified.** 8 tests on the token, 17 against real Postgres covering every
+refusal and the name handling. Server 3073 passing / 9 skipped against 47
+migrations, web 1476 passing, typecheck and lint clean 3/3. The migration writes
+the mapped table name and the table was read back out of `\d`.
+
+**§10.5's warning is repeated here rather than argued with:** at n=1 this row
+and everything it reaches is dead weight. It was built because §13 is a diff
+against two products, not because this deployment is known to have a second
+person in it.
+
+**Not verified:** no guest has actually joined a session. The socket handshake
+accepts a pairing token and resolves it to a project-scoped access level, and
+that path is asserted at the unit level — but two browsers have never been in
+one document here, and no web UI for creating or redeeming a link exists yet.
+The endpoints are the deliverable; the join screen is not built.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -7611,7 +7685,39 @@ below is written to respect it rather than to argue with it.
       with, who cannot open devtools on somebody else's page and would not know
       to.
 
-- [ ] **13.6 A pairing link for somebody with no account.**
+- [x] **13.6 A pairing link for somebody with no account.**
+      **Shipped 2026-09-11 — §2.65.** `PairingInvite` plus a `pairing` token
+      type: redeeming mints a scoped, expiring guest identity and writes **no
+      `ProjectCollaborator` row at all**.
+
+      **The row named the mechanism and it was the right one.** Preview and MFA
+      tokens are both typed, short-lived and checked on verify, and this is the
+      third of that shape — with one claim they do not have. `pid` names the
+      one project the credential is good for, and `pairingAccess` compares it
+      against the project being joined. Without it a pairing token would be a
+      general API credential belonging to nobody, which is the failure the
+      `typ` claim was added to stop, one level up. Mutation-checked.
+
+      **Every refusal says the same sentence.** Expired, revoked, moderated, or
+      never-existed all produce "that pairing link is not valid", because a link
+      that says *expired* tells whoever holds it that it was once real and that
+      this project exists. The distinctions live in the metrics.
+
+      **Creating a link is the owner's alone.** An EDITOR collaborator handing
+      out anonymous guest access would be spending the owner's compute on a
+      decision the owner never made.
+
+      **Revoking closes the door; it does not reach through it.** A guest
+      already holding a token keeps it until it expires, and
+      `PAIRING_TOKEN_TTL_HOURS` (4, a guess in §12.5's sense) is the bound on
+      how long that is.
+
+      **§10.5's warning stands and is worth repeating rather than arguing
+      with:** at n=1 this row and everything it reaches is dead weight. It was
+      built because §13 is a diff against two products, not because this
+      deployment is known to have a second person in it.
+
+      Original note follows.
       The collaborative layer is real and finished — Yjs per file, awareness,
       remote cursors, presence, follow mode — and reaching it requires being a
       row in `ProjectCollaborator`. An EDITOR share link exists
@@ -8286,7 +8392,12 @@ the real browser's console today — which the reader of an embed does not have
 open and which on a tablet does not exist. A `postMessage` bridge and a tab,
 feeding the problems panel that already exists.
 
-**6b. A pairing link for somebody with no account (§13.6).** The multiplayer
+**6b. A pairing link for somebody with no account (§13.6).** **Shipped
+2026-09-11 — §2.65.** "A token that mints a scoped, expiring identity rather
+than an account" is exactly what was built, with a `pid` claim scoping it to one
+project. No web join screen yet.
+
+Original note follows. The multiplayer
 layer is finished and reaching it requires being a row in
 `ProjectCollaborator`. A token that mints a scoped, expiring identity rather
 than an account — a thing this codebase already knows how to do twice, in

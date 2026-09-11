@@ -61,6 +61,17 @@ const envSchema = z.object({
    *  well inside this window for anyone actually using the editor. */
   PREVIEW_TOKEN_TTL_HOURS: z.coerce.number().int().positive().default(12),
 
+  /// How long a guest stays paired before the link has to be used again.
+  /// plan.md §13.6. Four hours: longer than a pairing session, shorter than a
+  /// working day, so a laptop left open overnight is not still joined. A
+  /// GUESS rather than a measurement, in the sense §12.5 records.
+  PAIRING_TOKEN_TTL_HOURS: z.coerce.number().int().positive().default(4),
+
+  /// How long a pairing INVITE stays redeemable, in hours. Distinct from the
+  /// token's life: the invite is the thing that gets pasted into a chat and
+  /// outlives the conversation, so it expires on its own. plan.md §13.6.
+  PAIRING_INVITE_TTL_HOURS: z.coerce.number().int().positive().default(24),
+
   /** Port serving project previews, on an origin of its own.
    *
    *  Previews must NOT share the API's origin: a project's code would then run

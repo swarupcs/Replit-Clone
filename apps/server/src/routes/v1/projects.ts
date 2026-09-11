@@ -71,6 +71,11 @@ import { getRemoteAccessController } from "../../controllers/sshKeyController.js
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import {
+  createPairingInviteController,
+  listPairingInvitesController,
+  revokePairingInviteController,
+} from "../../controllers/pairingController.js";
+import {
   addCheckoutController,
   listGroupsController,
   setGroupEnvController,
@@ -221,6 +226,16 @@ router.get("/groups", asyncHandler(listGroupsController));
 router.post("/groups/checkouts", asyncHandler(addCheckoutController));
 router.put("/groups/:groupId/env", asyncHandler(setGroupEnvController));
 router.get("/:projectId/siblings", asyncHandler(siblingsController));
+
+// Pairing links. plan.md §13.6. Creating one is the owner's alone — an EDITOR
+// collaborator handing out anonymous guest access would be spending the
+// owner's compute on a decision the owner never made.
+router.get("/:projectId/pairing", asyncHandler(listPairingInvitesController));
+router.post("/:projectId/pairing", asyncHandler(createPairingInviteController));
+router.delete(
+  "/:projectId/pairing/:inviteId",
+  asyncHandler(revokePairingInviteController),
+);
 router.post("/", createLimiter, asyncHandler(createProjectController));
 
 // Opening a folder that is already on the disk. All three are before every
