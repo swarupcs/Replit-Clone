@@ -3,6 +3,9 @@ import { Alert, Button, Spin } from "antd";
 import { VscRefresh } from "react-icons/vsc";
 import type { BrowserPreviewPlan } from "@replit-clone/shared";
 import { getBrowserPreviewApi } from "../../../apis/projects.ts";
+import { DevtoolsPanel } from "../DevtoolsPanel/DevtoolsPanel.tsx";
+import { usePreviewDevtools } from "../../../hooks/usePreviewDevtools.ts";
+import { useDevtoolsStore } from "../../../store/devtoolsStore.ts";
 import {
   bundle,
   describeFailure,
@@ -29,6 +32,11 @@ export function BrowserPreview({ projectId }: { projectId: string }) {
    *  which is what "Reload" means to somebody whose app has state in it. */
   const [nonce, setNonce] = useState(0);
   const cancelled = useRef(false);
+
+  /** The iframe, so the bridge listener can tell this preview's messages from
+   *  anything else on the page. plan.md §13.5. */
+  const frame = useRef<HTMLIFrameElement | null>(null);
+  usePreviewDevtools(frame);
 
   const build = useCallback(async () => {
     setBuilding(true);
@@ -97,6 +105,8 @@ export function BrowserPreview({ projectId }: { projectId: string }) {
           icon={<VscRefresh />}
           aria-label="Rebuild the preview"
           onClick={() => {
+            // The previous page's console belongs to the previous page.
+            useDevtoolsStore.getState().clearForReload();
             setNonce((value) => value + 1);
             void build();
           }}
@@ -117,6 +127,7 @@ export function BrowserPreview({ projectId }: { projectId: string }) {
         document_ !== null && (
           <iframe
             key={nonce}
+            ref={frame}
             title="Preview"
             srcDoc={document_}
             style={{ flex: 1, width: "100%", border: 0, background: "#fff" }}
@@ -128,6 +139,10 @@ export function BrowserPreview({ projectId }: { projectId: string }) {
           />
         )
       )}
+
+      {/* What the preview said about itself. plan.md §13.5 — the reader of a
+          shared link cannot open devtools on somebody else's page. */}
+      <DevtoolsPanel />
     </div>
   );
 }

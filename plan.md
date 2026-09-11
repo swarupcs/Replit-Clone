@@ -57,7 +57,7 @@ it and is dealt with under the table.
 | `pnpm -r lint` | clean, 3/3 packages |
 | `pnpm --filter server test` | **2766 passing**, 291 skipped (186 files) — no database configured |
 | the same, with `TEST_DATABASE_URL` set | **3048 passing**, 9 skipped. Green 2026-09-10 against all **46** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1431 passing** (116 files), re-run 2026-09-10 |
+| `pnpm --filter web test` | **1476 passing** (119 files), re-run 2026-09-11 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,10 +146,10 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 178 items. Open: 8 — four blocked, none from §10, whose last row
+**Done: 179 items. Open: 7 — four blocked, none from §10, whose last row
 closed on 2026-09-10 (with two items carried into §2.59), none from §11, whose
 last row closed on 2026-09-10, one from §12, which reads neither and
-asks what a cloud machine is for, and three from §13, which names the two
+asks what a cloud machine is for, and two from §13, which names the two
 products this most resembles and diffs against them. **§13.1 closed on
 2026-09-10 (§2.61)** — the row §13 called "the defining act of the product this
 section names", and the one whose own text said not to build it before 13.2.
@@ -157,11 +157,11 @@ It was built the day after 13.2, in that order, and the objection in it is
 answered rather than waived: the sandbox starts no container. **§10.1 was decided on
 2026-09-09 — B + C — and Route C shipped the same day (§2.50)**, which closed
 three §10 rows at once: 10.1 itself, and 10.6 and 10.7 by another road. The
-four that remain are merely open rather than blocked. §11's last row was 11.10,
+three that remain are merely open rather than blocked. §11's last row was 11.10,
 which needed a decision before it needed code and got one (§2.53), and 12.4 is
 blocked on hardware rather than on anybody.**
 
-Those five numbers are 4 + 0 + 0 + 1 + 3 = 8, and they are written out
+Those five numbers are 4 + 0 + 0 + 1 + 2 = 7, and they are written out
 because they did not add up once already — see the paragraph below.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
@@ -472,7 +472,7 @@ a *CodeSandbox*: there is no cheap project — every path into a working tree
 ends at a container, so ~~there is no anonymous sandbox (§13.1)~~ — shipped
 2026-09-10, §2.61 — ~~no container-free preview (§13.2)~~ — shipped 2026-09-10,
 §2.60 — ~~no URL per pull request (§13.3)~~ — shipped 2026-09-10, §2.62 — ~~no second
-checkout of one repository (§13.4)~~ — shipped 2026-09-10, §2.63 — no devtools for the previewed app (§13.5),
+checkout of one repository (§13.4)~~ — shipped 2026-09-10, §2.63 — ~~no devtools for the previewed app (§13.5)~~ — shipped 2026-09-11, §2.64 —
 and no pairing link for somebody without an account (§13.6). For a *personal
 cloud editor*: ~~a terminal is killed when its WebSocket closes, so closing the
 laptop kills the build (§13.7)~~ — fixed 2026-09-09, §2.46; ~~secrets belong to
@@ -4187,6 +4187,82 @@ checkout has never actually been cloned.
 
 ---
 
+### 2.64 Since (2026-09-11) — §13.5, devtools, and believing nothing the preview says
+
+A runtime `TypeError` in a previewed app lands in the *real* browser's console —
+which the reader of a shared link does not have open, would not know to open,
+and on a tablet does not have. §13.5 asks for four things and this is all four:
+a console tab, a network tab, an error overlay, and a device-size frame, fed by
+a `postMessage` bridge injected into the preview document.
+
+**The row's description of the problems panel is stale.** It says the panel is
+fed "only by the language server, with the matcher half unbuilt" — §10.10
+shipped `taskProblems`, so it has had two feeds since. The architectural
+suggestion, that a runtime console is a third, was reconsidered rather than
+followed: a console line, an HTTP request and an unhandled rejection are not
+diagnostics with a file and a line, and squeezing them into the `Problem` shape
+would have meant inventing positions they do not have. They got a panel of their
+own. **Fifth row running whose text was partly wrong about the tree**, and the
+pattern is now worth naming as a habit rather than an anecdote: check the claim,
+keep the intent.
+
+**All of the security is in the parent, and the interesting part is which check
+is useless.** The previewed code runs with `allow-scripts` and can post anything
+it likes, including a message shaped exactly like a record. The obvious guard is
+`event.origin` — and it does not work here: a sandboxed iframe without
+`allow-same-origin` has an opaque origin and reports the string `"null"`, which
+is exactly what every other opaque frame on the page reports. So the check is
+`event.source` identity against the iframe's own `contentWindow`, and every
+field is re-validated and re-clipped on arrival regardless. Deleting the
+identity check turns two tests red.
+
+**Bounded at both ends, which is design rather than caution.** A `console.log`
+inside `requestAnimationFrame` is sixty messages a second forever and is an
+entirely ordinary thing to write by accident; unbounded, this panel is a memory
+leak with a scrollbar. The bridge rate-limits at the source and says so once
+when it mutes; the store caps each feed **separately**, so a chatty log cannot
+push the errors — the rows somebody actually needs — out of the list. What was
+dropped is counted and shown, rather than quietly presenting the last 500 as if
+they were all of them.
+
+**The bridge never replaces the real console.** It calls the original method
+first, unconditionally, and reports as a side effect — so somebody who *does*
+have devtools open loses nothing by this existing. It also stringifies in the
+preview rather than posting values, because structured clone cannot carry a DOM
+node, a function or a circular object, and a bridge that throws while reporting
+an error is worse than no bridge.
+
+**The overlay is over the preview, not in a tab.** A blank iframe with the
+explanation filed under a tab nobody opened is precisely the situation this row
+describes — the reader concludes the project is broken. Dismissing it is
+per-error: "I have seen this one" must not mean "stop telling me", and there is
+a test for the second error arriving after the first was dismissed.
+
+**The device frame names sizes, not devices.** "Phone — 390×844" rather than a
+handset model, because this frames the iframe and does not emulate: no pixel
+ratio, no user-agent string, no touch emulation. Naming it after a phone would
+promise all three.
+
+**Verified.** 29 tests on the bridge boundary and the injection, 7 on the
+store's caps, 9 on the panel and overlay. Web 1476 passing (119 files), server
+3048 passing / 9 skipped, typecheck and lint clean 3/3.
+
+**Where it does not work, and this is half the row's audience: the container
+preview.** The bridge reaches documents this platform generates — §13.2's
+browser preview and therefore §13.1's sandbox, which is the reader of a shared
+link, the person the row calls its sharpest user. The ordinary editor preview is
+a reverse proxy to a dev server, and injecting there means buffering and
+decompressing every HTML response through `http-proxy-middleware`: a real
+cost against a working proxy, and a separate decision rather than something to
+slip into this row. The device frame works for both, being only CSS.
+
+**Not verified:** nothing has been bundled or run in this environment, so no
+real `console.log` has ever crossed the bridge — the tests exercise the protocol
+and the panel, and the agent script is asserted by reading it rather than by
+executing it in a browser.
+
+---
+
 ## 3. Open
 
 ### 3.1 Defects — code that is merged and wrong
@@ -7482,7 +7558,42 @@ below is written to respect it rather than to argue with it.
       **For:** anybody who reviews code. Cheap only if 13.3 exists, since the
       two want the same object.
 
-- [ ] **13.5 Devtools for the thing being previewed.**
+- [x] **13.5 Devtools for the thing being previewed.**
+      **Shipped 2026-09-11 — §2.64.** A `postMessage` bridge injected into the
+      preview document, a console tab, a network tab, an error overlay over the
+      iframe, and a device-size frame — the four things this row asks for.
+
+      **This row's text about the problems panel is stale.** It says the panel
+      "is fed **only** by the language server, with the matcher half unbuilt";
+      §10.10 shipped `taskProblems`, so it already has two feeds. The
+      architectural point survives — a runtime console is a third — but the
+      devtools ended up a panel of their own rather than a tab on that one: a
+      console, a request log and an overlay are not diagnostics with a file and
+      a line, and forcing them into the `Problem` shape would have meant
+      inventing positions they do not have.
+
+      **The security of this row is entirely in the parent, not the bridge.**
+      The previewed code runs with `allow-scripts` and can `postMessage`
+      anything, including something shaped exactly like a record. `event.origin`
+      is NOT usable to check it — a sandboxed iframe without
+      `allow-same-origin` has an opaque origin and reports `"null"`, which is
+      what every other opaque frame reports too. Sender identity against the
+      iframe's `contentWindow` is the check that still means something, and it
+      is mutation-checked.
+
+      **Bounded on both sides.** A `console.log` inside `requestAnimationFrame`
+      is sixty messages a second forever and is an ordinary thing to write by
+      accident, so the bridge rate-limits at the source and the store caps per
+      feed — separately, so a chatty log cannot push the errors out.
+
+      **Where it does NOT work: the container preview.** The bridge reaches a
+      document this platform generates (§13.2's browser preview, and therefore
+      §13.1's sandbox). The container preview is a reverse proxy, and injecting
+      into it means buffering and decompressing every HTML response through
+      `http-proxy-middleware` — a real cost and a separate decision, not done
+      here. The device-size frame works for both, being only CSS.
+
+      Original note follows.
       The preview is an iframe pointed at a proxy, and that is all it is. A
       runtime `TypeError` in the previewed app appears in the *real* browser's
       console — which the embed's reader does not have open, and which on a
@@ -8163,7 +8274,13 @@ projects. Cheap only once 5a exists, because the two want the same object.
 
 ### 14.7 Phase 6 — the preview, and the people
 
-**6a. Devtools for the previewed app (§13.5).** Console capture, network log,
+**6a. Devtools for the previewed app (§13.5).** **Shipped 2026-09-11 —
+§2.64**, all four, though not "feeding the problems panel that already exists":
+a console line and an HTTP request are not diagnostics with a file and a line,
+so they got a panel of their own. Reaches the browser preview and the sandbox,
+not the container preview's reverse proxy.
+
+Original note follows. Console capture, network log,
 an error overlay, a device-size frame. A runtime `TypeError` appears only in
 the real browser's console today — which the reader of an embed does not have
 open and which on a tablet does not exist. A `postMessage` bridge and a tab,

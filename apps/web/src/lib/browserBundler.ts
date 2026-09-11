@@ -1,4 +1,4 @@
-import type { BrowserPreviewPlan } from "@replit-clone/shared";
+import { type BrowserPreviewPlan, injectBridge } from "@replit-clone/shared";
 
 /** Building a project in the reader's own browser. plan.md §13.2.
  *
@@ -212,7 +212,11 @@ export function previewDocument(code: string, html?: string): string {
   const script = `<script type="module">\n${code}\n</script>`;
 
   if (html === undefined) {
-    return `<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div>${script}</body></html>`;
+    // The devtools bridge goes in first, so it is installed before the bundle
+    // runs and catches an error thrown at module scope. plan.md §13.5.
+    return injectBridge(
+      `<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div>${script}</body></html>`,
+    );
   }
 
   // The author's own module script is what this replaces: it points at a path
@@ -223,7 +227,9 @@ export function previewDocument(code: string, html?: string): string {
     "",
   );
 
-  return stripped.includes("</body>")
-    ? stripped.replace("</body>", `${script}</body>`)
-    : `${stripped}${script}`;
+  return injectBridge(
+    stripped.includes("</body>")
+      ? stripped.replace("</body>", `${script}</body>`)
+      : `${stripped}${script}`,
+  );
 }

@@ -10,6 +10,14 @@ import {
   previewDocument,
 } from "../lib/browserBundler.ts";
 import { useThemeMode } from "../hooks/useThemeMode.ts";
+import { usePreviewDevtools } from "../hooks/usePreviewDevtools.ts";
+import {
+  DeviceSelect,
+  DevtoolsPanel,
+  PreviewErrorOverlay,
+} from "../components/organisms/DevtoolsPanel/DevtoolsPanel.tsx";
+import { presetById } from "../lib/previewBridge.ts";
+import { useDevtoolsStore } from "../store/devtoolsStore.ts";
 import { EDITOR_THEMES } from "../config/editorThemes.ts";
 
 /** A sandbox a stranger can open, change and run. plan.md §13.1.
@@ -71,6 +79,8 @@ export function SandboxPage() {
   const run = useCallback(async () => {
     if (!payload?.entry) return;
 
+    // The previous run's console belongs to the previous run.
+    useDevtoolsStore.getState().clearForReload();
     setBuilding(true);
     setFailure(null);
 
@@ -96,6 +106,15 @@ export function SandboxPage() {
    *  the Run button is how somebody says they are ready for the next one. A
    *  ref rather than a trimmed dependency list, so the effect can name
    *  everything it actually uses. */
+  /** The iframe, so the devtools bridge can tell this preview's messages from
+   *  anything else on the page. plan.md §13.5 — this reader most of all: they
+   *  cannot open devtools on somebody else's page and would not know to. */
+  const frame = useRef<HTMLIFrameElement | null>(null);
+  usePreviewDevtools(frame);
+
+  const [device, setDevice] = useState("fit");
+  const preset = presetById(device);
+
   const builtOnce = useRef(false);
 
   // The first build happens on its own, because a sandbox that opens showing
@@ -213,7 +232,27 @@ export function SandboxPage() {
           )}
         </div>
 
-        <div style={{ flex: 1, minWidth: 0, borderLeft: "1px solid var(--rc-border)" }}>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            borderLeft: "1px solid var(--rc-border)",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: 8,
+              padding: 8,
+              borderBottom: "1px solid var(--rc-border)",
+            }}
+          >
+            <DeviceSelect value={device} onChange={setDevice} />
+          </div>
+
           {failure !== null ? (
             <Alert
               type="error"
@@ -226,17 +265,45 @@ export function SandboxPage() {
             />
           ) : (
             document_ !== null && (
-              <iframe
-                title="Sandbox preview"
-                srcDoc={document_}
-                style={{ width: "100%", height: "100%", border: 0, background: "#fff" }}
-                // Somebody else's code, edited by a stranger, in a page with no
-                // session. `allow-scripts` without `allow-same-origin`: the two
-                // together would let it reach this origin's storage.
-                sandbox="allow-scripts allow-forms allow-popups allow-modals"
-              />
+              // `position: relative` so the error overlay can sit over the
+              // preview rather than under a tab nobody opened — a blank iframe
+              // with the explanation filed elsewhere is the exact situation
+              // §13.5 describes.
+              <div
+                style={{
+                  flex: 1,
+                  position: "relative",
+                  minHeight: 0,
+                  display: "grid",
+                  placeItems: preset.width === null ? "stretch" : "start center",
+                  overflow: "auto",
+                  background: preset.width === null ? undefined : "var(--rc-bg-subtle, #f5f5f5)",
+                }}
+              >
+                <iframe
+                  ref={frame}
+                  title="Sandbox preview"
+                  srcDoc={document_}
+                  style={{
+                    width: preset.width === null ? "100%" : preset.width,
+                    height: preset.height === null ? "100%" : preset.height,
+                    maxWidth: "100%",
+                    border: 0,
+                    background: "#fff",
+                  }}
+                  // Somebody else's code, edited by a stranger, in a page with no
+                  // session. `allow-scripts` without `allow-same-origin`: the two
+                  // together would let it reach this origin's storage.
+                  sandbox="allow-scripts allow-forms allow-popups allow-modals"
+                />
+                <PreviewErrorOverlay onDismiss={() => undefined} />
+              </div>
             )
           )}
+
+          <div style={{ borderTop: "1px solid var(--rc-border)" }}>
+            <DevtoolsPanel />
+          </div>
         </div>
       </div>
     </div>
