@@ -10,6 +10,16 @@ import type {
   CreatedApiKey,
   MachineStatus,
   AccountSecrets,
+  AccountSshKeys,
+  BrowserPreviewPlan,
+  EditorConfig,
+  TaskList,
+  TaskRun,
+  GitBlameLine,
+  GitRefComparison,
+  GitStash,
+  GitTag,
+  RemoteAccess,
   EditorSessionState,
   EditorSessionUpdate,
   Personalization,
@@ -1107,6 +1117,251 @@ export const setEditorSessionApi = async (
   const response = await axios.put<ApiSuccess<EditorSessionState>>(
     "/api/v1/account/session",
     { entries },
+  );
+  return response.data.data;
+};
+
+/** What a browser needs to preview a project itself. plan.md §13.2. */
+export const getBrowserPreviewApi = async (
+  projectId: string,
+): Promise<BrowserPreviewPlan> => {
+  const response = await axios.get<ApiSuccess<BrowserPreviewPlan>>(
+    `/api/v1/projects/${projectId}/browser-preview`,
+  );
+  return response.data.data;
+};
+
+/* ---- a file's own history. plan.md §10.12 ---- */
+
+export interface TimelineEntry {
+  at: number;
+  bytes: number;
+}
+
+export const getTimelineApi = async (
+  projectId: string,
+  relPath: string,
+): Promise<TimelineEntry[]> => {
+  const response = await axios.get<ApiSuccess<TimelineEntry[]>>(
+    `/api/v1/projects/${projectId}/timeline`,
+    { params: { path: relPath } },
+  );
+  return response.data.data;
+};
+
+export const getTimelineVersionApi = async (
+  projectId: string,
+  relPath: string,
+  at: number,
+): Promise<string> => {
+  const response = await axios.get<ApiSuccess<{ at: number; contents: string }>>(
+    `/api/v1/projects/${projectId}/timeline/version`,
+    { params: { path: relPath, at } },
+  );
+  return response.data.data.contents;
+};
+
+/* ---- tasks. plan.md §10.10 ---- */
+
+export const getTasksApi = async (projectId: string): Promise<TaskList> => {
+  const response = await axios.get<ApiSuccess<TaskList>>(
+    `/api/v1/projects/${projectId}/tasks`,
+  );
+  return response.data.data;
+};
+
+/** Returns one entry per task that ran, dependencies first. */
+export const runTaskApi = async (
+  projectId: string,
+  label: string,
+): Promise<TaskRun[]> => {
+  const response = await axios.post<ApiSuccess<TaskRun[]>>(
+    `/api/v1/projects/${projectId}/tasks/run`,
+    { label },
+  );
+  return response.data.data;
+};
+
+/* ---- the rest of git. plan.md §10.13 ---- */
+
+export const getStashesApi = async (projectId: string): Promise<GitStash[]> => {
+  const response = await axios.get<ApiSuccess<GitStash[]>>(
+    `/api/v1/projects/${projectId}/git/stashes`,
+  );
+  return response.data.data;
+};
+
+export const pushStashApi = async (
+  projectId: string,
+  message: string,
+  includeUntracked: boolean,
+): Promise<GitStash[]> => {
+  const response = await axios.post<ApiSuccess<GitStash[]>>(
+    `/api/v1/projects/${projectId}/git/stashes`,
+    { message, includeUntracked },
+  );
+  return response.data.data;
+};
+
+/** Returns the status too: applying a stash is the one of these whose whole
+ *  point is what it did to the working tree. */
+export const applyStashApi = async (
+  projectId: string,
+  index: number,
+  drop: boolean,
+): Promise<{ stashes: GitStash[]; status: GitStatus }> => {
+  const response = await axios.post<
+    ApiSuccess<{ stashes: GitStash[]; status: GitStatus }>
+  >(`/api/v1/projects/${projectId}/git/stashes/apply`, { index, drop });
+  return response.data.data;
+};
+
+export const dropStashApi = async (
+  projectId: string,
+  index: number,
+): Promise<GitStash[]> => {
+  const response = await axios.post<ApiSuccess<GitStash[]>>(
+    `/api/v1/projects/${projectId}/git/stashes/drop`,
+    { index },
+  );
+  return response.data.data;
+};
+
+export const getBlameApi = async (
+  projectId: string,
+  relPath: string,
+): Promise<GitBlameLine[]> => {
+  const response = await axios.get<ApiSuccess<GitBlameLine[]>>(
+    `/api/v1/projects/${projectId}/git/blame`,
+    { params: { path: relPath } },
+  );
+  return response.data.data;
+};
+
+export const amendCommitApi = async (
+  projectId: string,
+  message: string,
+): Promise<GitCommit[]> => {
+  const response = await axios.post<ApiSuccess<GitCommit[]>>(
+    `/api/v1/projects/${projectId}/git/amend`,
+    { message },
+  );
+  return response.data.data;
+};
+
+export const revertCommitApi = async (
+  projectId: string,
+  sha: string,
+): Promise<GitStatus> => {
+  const response = await axios.post<ApiSuccess<GitStatus>>(
+    `/api/v1/projects/${projectId}/git/revert`,
+    { sha },
+  );
+  return response.data.data;
+};
+
+export const cherryPickApi = async (
+  projectId: string,
+  sha: string,
+): Promise<GitStatus> => {
+  const response = await axios.post<ApiSuccess<GitStatus>>(
+    `/api/v1/projects/${projectId}/git/cherry-pick`,
+    { sha },
+  );
+  return response.data.data;
+};
+
+export const getTagsApi = async (projectId: string): Promise<GitTag[]> => {
+  const response = await axios.get<ApiSuccess<GitTag[]>>(
+    `/api/v1/projects/${projectId}/git/tags`,
+  );
+  return response.data.data;
+};
+
+export const createTagApi = async (
+  projectId: string,
+  name: string,
+  message: string,
+): Promise<GitTag[]> => {
+  const response = await axios.post<ApiSuccess<GitTag[]>>(
+    `/api/v1/projects/${projectId}/git/tags`,
+    { name, message },
+  );
+  return response.data.data;
+};
+
+export const deleteTagApi = async (
+  projectId: string,
+  name: string,
+): Promise<GitTag[]> => {
+  const response = await axios.delete<ApiSuccess<GitTag[]>>(
+    `/api/v1/projects/${projectId}/git/tags/${encodeURIComponent(name)}`,
+  );
+  return response.data.data;
+};
+
+/** One file as it stands on another ref. plan.md §10.11. */
+export const showFileAtRefApi = async (
+  projectId: string,
+  ref: string,
+  relPath: string,
+): Promise<{ contents: string; exists: boolean }> => {
+  const response = await axios.get<ApiSuccess<{ contents: string; exists: boolean }>>(
+    `/api/v1/projects/${projectId}/git/show`,
+    { params: { ref, path: relPath } },
+  );
+  return response.data.data;
+};
+
+export const compareRefsApi = async (
+  projectId: string,
+  from: string,
+  to: string,
+): Promise<GitRefComparison> => {
+  const response = await axios.get<ApiSuccess<GitRefComparison>>(
+    `/api/v1/projects/${projectId}/git/compare`,
+    { params: { from, to } },
+  );
+  return response.data.data;
+};
+
+/** Settings, keybindings and snippets from the repository. plan.md §10.9. */
+export const getEditorConfigApi = async (
+  projectId: string,
+): Promise<EditorConfig> => {
+  const response = await axios.get<ApiSuccess<EditorConfig>>(
+    `/api/v1/projects/${projectId}/editor-config`,
+  );
+  return response.data.data;
+};
+
+/** Public keys for attaching your own editor. plan.md §10.1 Route C. */
+export const getSshKeysApi = async (): Promise<AccountSshKeys> => {
+  const response = await axios.get<ApiSuccess<AccountSshKeys>>(
+    "/api/v1/account/ssh-keys",
+  );
+  return response.data.data;
+};
+
+/** The whole set, for the same reason account secrets are: removing a key that
+ *  should no longer open your workspaces is the operation somebody most needs
+ *  to be sure of. */
+export const setSshKeysApi = async (
+  lines: string[],
+): Promise<AccountSshKeys> => {
+  const response = await axios.put<ApiSuccess<AccountSshKeys>>(
+    "/api/v1/account/ssh-keys",
+    { lines },
+  );
+  return response.data.data;
+};
+
+/** How to reach one workspace with your own editor. */
+export const getRemoteAccessApi = async (
+  projectId: string,
+): Promise<RemoteAccess> => {
+  const response = await axios.get<ApiSuccess<RemoteAccess>>(
+    `/api/v1/projects/${projectId}/remote`,
   );
   return response.data.data;
 };

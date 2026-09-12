@@ -1,10 +1,14 @@
 import type {
+  GitBlameLine,
   GitBranch,
-  GitRemote,
   GitChange,
   GitChangeState,
   GitCommit,
+  GitRefComparison,
+  GitRemote,
+  GitStash,
   GitStatus,
+  GitTag,
 } from "@replit-clone/shared";
 import { randomBytes } from "node:crypto";
 import fsp from "node:fs/promises";
@@ -841,4 +845,391 @@ export async function pushRemote(
       "GIT_FAILED",
     );
   }
+}
+
+/* ---- the rest of git. plan.md §10.13 ---- */
+
+/** Stash, blame, amend, revert, tags, cherry-pick and comparing two refs.
+ *
+ *  §10.13's own framing: the daily loop was complete and these are what
+ *  somebody reaches for in the second week, with "stash and blame the two a
+ *  personal user notices in the first". Everything here goes through the same
+ *  `git`/`gitOrThrow` pair as the rest of the file, so it runs INSIDE the
+ *  project's container and the repository is the sandbox's rather than the
+ *  host's — which is the property that made the existing loop safe and is not
+ *  worth re-deciding per command.
+ *
+ *  **Nothing here takes a ref as a free string.** A stash is addressed by
+ *  index and a commit by a sha that is checked against a hex pattern, because
+ *  every one of these ends up as an argv entry: `execCapture` does not use a
+ *  shell, so there is no quoting bug to have — but `--upstream=$(...)` as a
+ *  "branch name" is still a flag git itself would interpret, and a value that
+ *  begins with `-` must never reach it.
+ */
+
+/** A sha somebody may name. Full or abbreviated, hex only. */
+const SHA = /^[0-9a-f]{4,40}$/;
+
+function assertSha(value: string): string {
+  if (!SHA.test(value)) {
+    throw new BadRequestError("That is not a commit id", "GIT_BAD_REF");
+  }
+  return value;
+}
+
+/** A path inside the repository, for blame and for a scoped log.
+ *
+ *  Relative, no `..`, and never starting with `-`. The last is the one that
+ *  matters: a path is an argv entry, and git reads a leading dash as a flag.
+ */
+function assertRepoPath(relPath: string): string {
+  if (
+    relPath === "" ||
+    relPath.startsWith("-") ||
+    relPath.startsWith("/") ||
+    relPath.split("/").includes("..")
+  ) {
+    throw new BadRequestError("That is not a path in this project", "GIT_BAD_PATH");
+  }
+  return relPath;
+}
+
+export async function stashes(projectId: string): Promise<GitStash[]> {
+  if (!(await isRepo(projectId))) return [];
+
+  const { stdout, exitCode } = await git(projectId, [
+    "stash",
+    "list",
+    "--pretty=format:%gd%x1f%gs%x1f%aI%x00",
+  ]);
+  if (exitCode !== 0) return [];
+
+  return stdout
+    .split("\0")
+    .map((record) => record.trim())
+    .filter(Boolean)
+    .map((record, index) => {
+      const [ref = "", subject = "", at = ""] = record.split("\x1f");
+      // `git stash list` writes "WIP on main: 1234abc message" or
+      // "On main: message". Both are parsed rather than shown raw, because the
+      // branch is most of how somebody tells two stashes apart.
+      const match = /^(?:WIP on|On) ([^:]+): (.*)$/.exec(subject);
+      return {
+        ref,
+        index,
+        branch: match?.[1] ?? "",
+        message: match?.[2] ?? subject,
+        at,
+      };
+    });
+}
+
+export async function stashPush(
+  projectId: string,
+  message: string,
+  includeUntracked: boolean,
+): Promise<void> {
+  const argv = ["stash", "push"];
+  if (includeUntracked) argv.push("--include-untracked");
+  // `--message` with `=` rather than two argv entries, and the message last,
+  // so a message beginning with `-` cannot be read as a flag.
+  if (message.trim()) argv.push(`--message=${message.trim().slice(0, 500)}`);
+
+  const { stdout, stderr, exitCode } = await git(projectId, argv);
+  if (exitCode !== 0) {
+    throw new BadRequestError(
+      (stderr || stdout).trim().split("\n")[0] ?? "git stash failed",
+      "GIT_FAILED",
+    );
+  }
+}
+
+/** Applies a stash, optionally dropping it.
+ *
+ *  `pop` and `apply` as one function with a flag, because they differ by
+ *  exactly one thing and the caller's question is "do I want to keep it". A
+ *  conflict leaves the stash in place either way — that is git's behaviour and
+ *  it is the right one, since a half-applied stash you have also deleted is
+ *  unrecoverable.
+ */
+export async function stashApply(
+  projectId: string,
+  index: number,
+  drop: boolean,
+): Promise<void> {
+  if (!Number.isInteger(index) || index < 0) {
+    throw new BadRequestError("That is not a stash", "GIT_BAD_REF");
+  }
+  await gitOrThrow(projectId, [
+    "stash",
+    drop ? "pop" : "apply",
+    `stash@{${String(index)}}`,
+  ]);
+}
+
+export async function stashDrop(projectId: string, index: number): Promise<void> {
+  if (!Number.isInteger(index) || index < 0) {
+    throw new BadRequestError("That is not a stash", "GIT_BAD_REF");
+  }
+  await gitOrThrow(projectId, ["stash", "drop", `stash@{${String(index)}}`]);
+}
+
+/** Who last touched each line.
+ *
+ *  `--line-porcelain` rather than the default format, because the default is
+ *  meant to be read by people and its columns move with the longest author
+ *  name. The porcelain form repeats the header for every line, which is more
+ *  bytes and exactly one parsing rule.
+ */
+export async function blame(
+  projectId: string,
+  relPath: string,
+): Promise<GitBlameLine[]> {
+  if (!(await isRepo(projectId))) return [];
+
+  const { stdout, exitCode } = await git(projectId, [
+    "blame",
+    "--line-porcelain",
+    "--",
+    assertRepoPath(relPath),
+  ]);
+  // A file that is not tracked yet, or a repository with no commits. Neither is
+  // an error worth showing: there is simply nothing to attribute.
+  if (exitCode !== 0) return [];
+
+  const lines: GitBlameLine[] = [];
+  let current: Partial<GitBlameLine> & { sha?: string } = {};
+
+  for (const line of stdout.split("\n")) {
+    const header = /^([0-9a-f]{40}) \d+ (\d+)/.exec(line);
+    if (header) {
+      current = { sha: header[1], line: Number(header[2]) };
+      continue;
+    }
+    if (line.startsWith("author ")) current.author = line.slice(7);
+    else if (line.startsWith("author-time ")) {
+      current.at = new Date(Number(line.slice(12)) * 1000).toISOString();
+    } else if (line.startsWith("summary ")) current.summary = line.slice(8);
+    else if (line.startsWith("\t")) {
+      // The tab-prefixed line is the file's own content, which ends a record.
+      if (current.sha && current.line !== undefined) {
+        lines.push({
+          line: current.line,
+          sha: current.sha,
+          shortSha: current.sha.slice(0, 7),
+          author: current.author ?? "",
+          at: current.at ?? "",
+          summary: current.summary ?? "",
+        });
+      }
+      current = {};
+    }
+  }
+
+  return lines;
+}
+
+/** Rewrites the last commit.
+ *
+ *  Refused when the branch has no commit yet, and refused when the commit is
+ *  already pushed — that second check is the difference between a convenience
+ *  and a way to lose somebody else's work. `@{upstream}` existing and
+ *  containing HEAD is exactly the question "has anybody else seen this".
+ */
+export async function amendCommit(
+  projectId: string,
+  message: string,
+): Promise<GitCommit[]> {
+  if (!(await isRepo(projectId))) {
+    throw new BadRequestError("This project is not a git repository", "GIT_NO_REPO");
+  }
+
+  const head = await git(projectId, ["rev-parse", "HEAD"]);
+  if (head.exitCode !== 0) {
+    throw new BadRequestError("There is no commit to amend yet", "GIT_FAILED");
+  }
+
+  const pushed = await git(projectId, [
+    "merge-base",
+    "--is-ancestor",
+    "HEAD",
+    "@{upstream}",
+  ]);
+  // Exit 0 means HEAD is an ancestor of the upstream: it has been pushed.
+  // A non-zero exit covers both "not pushed" and "no upstream configured",
+  // and both of those are fine to amend.
+  if (pushed.exitCode === 0) {
+    throw new BadRequestError(
+      "That commit is already pushed. Amending it would rewrite history somebody else may have.",
+      "GIT_ALREADY_PUSHED",
+    );
+  }
+
+  const trimmed = message.trim();
+  if (!trimmed) throw new BadRequestError("A commit needs a message");
+
+  await gitOrThrow(projectId, ["commit", "--amend", `--message=${trimmed}`]);
+  return history(projectId, 20);
+}
+
+/** Undoes a commit by making a new one.
+ *
+ *  `--no-edit` so it does not wait for an editor it does not have, and
+ *  `--no-commit` is deliberately NOT used: a revert that leaves the change
+ *  staged looks, in the status panel, exactly like somebody's own uncommitted
+ *  work.
+ */
+export async function revertCommit(projectId: string, sha: string): Promise<void> {
+  await gitOrThrow(projectId, ["revert", "--no-edit", assertSha(sha)]);
+}
+
+export async function cherryPick(projectId: string, sha: string): Promise<void> {
+  await gitOrThrow(projectId, ["cherry-pick", assertSha(sha)]);
+}
+
+export async function tags(projectId: string): Promise<GitTag[]> {
+  if (!(await isRepo(projectId))) return [];
+
+  const { stdout, exitCode } = await git(projectId, [
+    "for-each-ref",
+    "--sort=-creatordate",
+    "--format=%(refname:short)%1f%(objectname)%1f%(objecttype)%1f%(contents:subject)%00",
+    "refs/tags",
+  ]);
+  if (exitCode !== 0) return [];
+
+  return stdout
+    .split("\0")
+    .map((record) => record.trim())
+    .filter(Boolean)
+    .map((record) => {
+      const [name = "", sha = "", type = "", subject = ""] = record.split("\x1f");
+      return {
+        name,
+        sha,
+        // An annotated tag is its own object; a lightweight one points straight
+        // at the commit. Worth showing: one is a bookmark, the other a record.
+        annotated: type === "tag",
+        message: subject,
+      };
+    });
+}
+
+export async function createTag(
+  projectId: string,
+  name: string,
+  message: string,
+): Promise<GitTag[]> {
+  // The same rule as a branch name, and for the same reason: it is an argv
+  // entry and git's own ref grammar refuses most of what people try.
+  await assertValidBranchName(projectId, name);
+
+  const trimmed = message.trim();
+  await gitOrThrow(
+    projectId,
+    trimmed
+      ? // Annotated, because a message was given. `--message=` in one argv
+        // entry so a message beginning with `-` is not read as a flag.
+        ["tag", "--annotate", `--message=${trimmed.slice(0, 500)}`, name]
+      : ["tag", name],
+  );
+  return tags(projectId);
+}
+
+export async function deleteTag(projectId: string, name: string): Promise<GitTag[]> {
+  await assertValidBranchName(projectId, name);
+  await gitOrThrow(projectId, ["tag", "--delete", name]);
+  return tags(projectId);
+}
+
+/** How two refs differ.
+ *
+ *  Three questions in one answer, because they are only useful together: what
+ *  is on the other branch that is not here, what is here that is not there,
+ *  and which files that adds up to.
+ */
+export async function compareRefs(
+  projectId: string,
+  from: string,
+  to: string,
+): Promise<GitRefComparison> {
+  await assertValidBranchName(projectId, from);
+  await assertValidBranchName(projectId, to);
+
+  const [aheadOut, behindOut, statOut] = await Promise.all([
+    git(projectId, [
+      "log",
+      `${from}..${to}`,
+      "--max-count=100",
+      "--pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x00",
+    ]),
+    git(projectId, [
+      "log",
+      `${to}..${from}`,
+      "--max-count=100",
+      "--pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x00",
+    ]),
+    git(projectId, ["diff", "--numstat", `${from}...${to}`]),
+  ]);
+
+  // A ref that does not exist makes all three fail. Reported as a refusal
+  // rather than as an empty comparison, which would read as "these are the
+  // same".
+  if (aheadOut.exitCode !== 0 && behindOut.exitCode !== 0) {
+    throw new BadRequestError(
+      (aheadOut.stderr || aheadOut.stdout).trim().split("\n")[0] ??
+        "those branches cannot be compared",
+      "GIT_FAILED",
+    );
+  }
+
+  const files = statOut.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [added = "", removed = "", ...rest] = line.split("\t");
+      return {
+        path: rest.join("\t"),
+        // `-` for a binary file, which is not zero and must not be shown as
+        // zero.
+        added: added === "-" ? 0 : Number(added),
+        removed: removed === "-" ? 0 : Number(removed),
+      };
+    })
+    .filter((entry) => entry.path !== "");
+
+  return {
+    ahead: parseLog(aheadOut.stdout),
+    behind: parseLog(behindOut.stdout),
+    files,
+  };
+}
+
+/** One file as it stands on another ref. plan.md §10.11.
+ *
+ *  `git show ref:path`, which is the only way to read a version that is not
+ *  checked out — the working tree has exactly one of them at a time, and
+ *  "compare against main" is a question about a version that is not there.
+ *
+ *  Returns null rather than throwing when the file does not exist on that ref,
+ *  because "this file is new on your branch" is an ANSWER: the diff is against
+ *  nothing, and every line is an addition. An error would make a legitimate
+ *  comparison look like a failure.
+ */
+export async function showFileAtRef(
+  projectId: string,
+  ref: string,
+  relPath: string,
+): Promise<string | null> {
+  await assertValidBranchName(projectId, ref);
+
+  const { stdout, exitCode } = await git(projectId, [
+    "show",
+    // `--` is not accepted by `show` for this form; the ref:path pair is one
+    // argument, and both halves are validated above and below.
+    `${ref}:${assertRepoPath(relPath)}`,
+  ]);
+
+  return exitCode === 0 ? stdout : null;
 }

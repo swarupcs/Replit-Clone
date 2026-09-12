@@ -10,9 +10,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  the stamp is NOT written.
  */
 
+const projectUpdate = vi.hoisted(() => vi.fn().mockResolvedValue({}));
 const projectFindUnique = vi.hoisted(() => vi.fn());
 vi.mock("../lib/prisma.js", () => ({
-  prisma: { project: { findUnique: projectFindUnique } },
+  // `update` as well as `findUnique` since §12.5: a completed prebuild records
+  // its fingerprint host-side, so the cold sweep can tell whether starting a
+  // stopped workspace is worth it without starting it.
+  prisma: {
+    project: { findUnique: projectFindUnique, update: projectUpdate },
+  },
 }));
 
 const getRunningContainer = vi.hoisted(() => vi.fn());
@@ -220,6 +226,26 @@ describe("running one", () => {
     getRunningContainer.mockRejectedValue(new Error("no daemon"));
 
     await expect(prebuild(PROJECT)).resolves.toBe(false);
+  });
+});
+
+describe("recording what was built, host-side", () => {
+  it("writes the fingerprint against the project row", async () => {
+    // plan.md §12.5. The stamp `writeStamp` puts in the container is right
+    // where it is and is unreadable for the question the cold sweep asks --
+    // "does this STOPPED workspace need building" -- because there is no
+    // container to read it from.
+    await prebuild(PROJECT);
+
+    expect(projectUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: PROJECT } }),
+    );
+  });
+
+  it("does not undo a prebuild that ran because recording it failed", async () => {
+    // A hint, not a source of truth.
+    projectUpdate.mockRejectedValueOnce(new Error("database is down"));
+    await expect(prebuild(PROJECT)).resolves.toBe(true);
   });
 });
 

@@ -32,6 +32,17 @@ const TERMINAL_ID = 7;
 
 /** Enough of a WebSocket for the shell to attach to, with a readyState that
  *  can be moved the way a departing client moves it. */
+/** The exec that opens the shell.
+ *
+ *  Matched on the joined command rather than on array membership since §10.14:
+ *  the wrapper is `/bin/sh -c "... exec <shell>"`, so `/bin/bash` is now part
+ *  of the script rather than an argv entry of its own. The shell is
+ *  configurable, so this looks for the wrapper's shape and not for bash.
+ */
+function isShellExec(cmd: string[]): boolean {
+  return cmd[0] === "/bin/sh" && (cmd[2] ?? "").includes("exec /");
+}
+
 function fakeSocket(readyState = 1) {
   const handlers = new Map<string, (() => void)[]>();
 
@@ -106,7 +117,8 @@ function fakeContainer() {
     container: container as unknown as Container,
     stream,
     calls,
-    shellStarted: () => calls.some((call) => call.cmd.includes("/bin/bash") && call.started),
+    shellStarted: () =>
+      calls.some((call) => isShellExec(call.cmd) && call.started),
     create: () => finishCreate?.(),
     start: () => finishStart?.(),
   };
@@ -117,7 +129,7 @@ const attachInput = () => undefined;
 /** The shell's exec, whatever order it was created in — the sweep for orphaned
  *  shells creates one of its own first. */
 function shellCall(docker: ReturnType<typeof fakeContainer>): ExecCall | undefined {
-  return docker.calls.find((call) => call.cmd.includes("/bin/bash"));
+  return docker.calls.find((call) => isShellExec(call.cmd));
 }
 
 /** The pid file this shell was actually given. Read back rather than rebuilt,
@@ -433,14 +445,14 @@ describe("a terminal the client can come back to", () => {
     first.closeFromClient();
 
     const shellsBefore = docker.calls.filter((call) =>
-      call.cmd.includes("/bin/bash"),
+      isShellExec(call.cmd),
     ).length;
 
     const second = fakeSocket();
     bindSocketToSession(findSession("user-1:project-1:key-abcdefgh")!, second.ws, attachInput);
 
     expect(
-      docker.calls.filter((call) => call.cmd.includes("/bin/bash")),
+      docker.calls.filter((call) => isShellExec(call.cmd)),
     ).toHaveLength(shellsBefore);
   });
 

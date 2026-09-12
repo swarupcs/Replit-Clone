@@ -380,3 +380,57 @@ export type StartCommandResponse = ApiSuccess<{
   command: string | null;
   templateDefault: string;
 }>;
+
+/** The rest of git. plan.md §10.13.
+ *
+ *  `gitService` covered a complete daily loop — status, diff, stage, commit,
+ *  log, branches, remotes, push, pull, conflicts — and none of the things
+ *  somebody reaches for in the second week. These are those.
+ */
+
+/** One entry of `git stash list`. */
+export interface GitStash {
+  /** `stash@{0}`. The index moves as stashes are pushed and popped, so this is
+   *  never stored anywhere — it is read, used, and read again. */
+  ref: string;
+  /** The zero-based position, which is what a client should send back: a `ref`
+   *  round-tripped as a string is a shell argument, and this is a number. */
+  index: number;
+  message: string;
+  /** The branch it was made on, which is most of why anybody can tell two
+   *  stashes apart. */
+  branch: string;
+  at: string;
+}
+
+/** One line of `git blame`, as the gutter needs it. */
+export interface GitBlameLine {
+  line: number;
+  sha: string;
+  shortSha: string;
+  author: string;
+  at: string;
+  summary: string;
+}
+
+/** A tag, annotated or not. */
+export interface GitTag {
+  name: string;
+  /** The commit it points at. */
+  sha: string;
+  /** An annotated tag's message. Empty for a lightweight one, and the
+   *  difference is worth showing: a lightweight tag is a bookmark and an
+   *  annotated one is a record. */
+  message: string;
+  annotated: boolean;
+}
+
+/** How two refs differ, for "compare with branch". */
+export interface GitRefComparison {
+  /** Commits on `to` that are not on `from`. */
+  ahead: GitCommit[];
+  /** Commits on `from` that are not on `to`. */
+  behind: GitCommit[];
+  /** Files that differ, with their change counts. */
+  files: { path: string; added: number; removed: number }[];
+}

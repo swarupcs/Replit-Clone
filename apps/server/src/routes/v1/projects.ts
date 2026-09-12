@@ -57,8 +57,30 @@ import {
   openLocalFolderController,
 } from "../../controllers/localFolderController.js";
 import { capabilities } from "../../config/deploymentMode.js";
+import { browserPreviewController } from "../../controllers/browserPreviewController.js";
+import {
+  timelineController,
+  timelineVersionController,
+} from "../../controllers/timelineController.js";
+import {
+  listTasksController,
+  runTaskController,
+} from "../../controllers/taskController.js";
+import { getEditorConfigController } from "../../controllers/editorConfigController.js";
+import { getRemoteAccessController } from "../../controllers/sshKeyController.js";
 import { asyncHandler } from "../../middlewares/errorHandler.js";
 import { requireAuth } from "../../middlewares/requireAuth.js";
+import {
+  createPairingInviteController,
+  listPairingInvitesController,
+  revokePairingInviteController,
+} from "../../controllers/pairingController.js";
+import {
+  addCheckoutController,
+  listGroupsController,
+  setGroupEnvController,
+  siblingsController,
+} from "../../controllers/workspaceGroupController.js";
 import {
   createShareLinkController,
   listSharingController,
@@ -91,6 +113,19 @@ import {
   gitDiffController,
   gitInitController,
   gitLogController,
+  gitStashListController,
+  gitStashPushController,
+  gitStashApplyController,
+  gitStashDropController,
+  gitBlameController,
+  gitAmendController,
+  gitRevertController,
+  gitCherryPickController,
+  gitTagsController,
+  gitCreateTagController,
+  gitDeleteTagController,
+  gitCompareController,
+  gitShowFileController,
   gitStageController,
   gitStatusController,
   gitUnstageController,
@@ -183,6 +218,24 @@ if (capabilities().gallery) {
 // Before every `/:projectId` route, or "trash" is a project id.
 router.get("/trash", asyncHandler(listTrashController));
 router.get("/", asyncHandler(listProjectsController));
+
+// Several checkouts of one repository. plan.md §13.4. Mounted here rather than
+// under /github because a checkout is a project first: what makes it a checkout
+// is which group it is in, not where it came from.
+router.get("/groups", asyncHandler(listGroupsController));
+router.post("/groups/checkouts", asyncHandler(addCheckoutController));
+router.put("/groups/:groupId/env", asyncHandler(setGroupEnvController));
+router.get("/:projectId/siblings", asyncHandler(siblingsController));
+
+// Pairing links. plan.md §13.6. Creating one is the owner's alone — an EDITOR
+// collaborator handing out anonymous guest access would be spending the
+// owner's compute on a decision the owner never made.
+router.get("/:projectId/pairing", asyncHandler(listPairingInvitesController));
+router.post("/:projectId/pairing", asyncHandler(createPairingInviteController));
+router.delete(
+  "/:projectId/pairing/:inviteId",
+  asyncHandler(revokePairingInviteController),
+);
 router.post("/", createLimiter, asyncHandler(createProjectController));
 
 // Opening a folder that is already on the disk. All three are before every
@@ -198,11 +251,50 @@ router.post("/local", createLimiter, asyncHandler(openLocalFolderController));
 router.get("/:projectId/tree", asyncHandler(getProjectTree));
 router.get("/:projectId/ports", asyncHandler(getProjectPorts));
 
+// A preview the reader's own browser builds -- plan.md §13.2. Visitor, because
+// the readers this exists for are the ones with a link and no account.
+router.get("/:projectId/browser-preview", asyncHandler(browserPreviewController));
+
+// A file's own history -- plan.md §10.12. Snapshots have been taken on every
+// save since §2.x; until now nothing could read them.
+router.get("/:projectId/timeline", asyncHandler(timelineController));
+router.get("/:projectId/timeline/version", asyncHandler(timelineVersionController));
+
+// Tasks from the repository -- plan.md §10.10. Reading the list is viewer;
+// running one is editor, because a task is an arbitrary command line.
+router.get("/:projectId/tasks", asyncHandler(listTasksController));
+router.post("/:projectId/tasks/run", asyncHandler(runTaskController));
+
+// Settings, keybindings and snippets from the repository -- plan.md §10.9.
+router.get("/:projectId/editor-config", asyncHandler(getEditorConfigController));
+
+// How to attach your own editor to this workspace -- plan.md §10.1 Route C.
+// Owner-only; the controller says why.
+router.get("/:projectId/remote", asyncHandler(getRemoteAccessController));
+
 // Source control. Every one of these runs git INSIDE the project's container,
 // so the repository is handled by the sandbox rather than by the host.
 router.get("/:projectId/git/status", asyncHandler(gitStatusController));
 router.get("/:projectId/git/diff", asyncHandler(gitDiffController));
 router.get("/:projectId/git/log", asyncHandler(gitLogController));
+
+// The rest of git -- plan.md §10.13. Reading is viewer, changing is editor;
+// blame is a read, so somebody who can see the file can see who wrote it.
+router.get("/:projectId/git/stashes", asyncHandler(gitStashListController));
+router.post("/:projectId/git/stashes", asyncHandler(gitStashPushController));
+router.post("/:projectId/git/stashes/apply", asyncHandler(gitStashApplyController));
+router.post("/:projectId/git/stashes/drop", asyncHandler(gitStashDropController));
+router.get("/:projectId/git/blame", asyncHandler(gitBlameController));
+router.post("/:projectId/git/amend", asyncHandler(gitAmendController));
+router.post("/:projectId/git/revert", asyncHandler(gitRevertController));
+router.post("/:projectId/git/cherry-pick", asyncHandler(gitCherryPickController));
+router.get("/:projectId/git/tags", asyncHandler(gitTagsController));
+router.post("/:projectId/git/tags", asyncHandler(gitCreateTagController));
+router.delete("/:projectId/git/tags/:name", asyncHandler(gitDeleteTagController));
+router.get("/:projectId/git/compare", asyncHandler(gitCompareController));
+// One file as it stands on another ref -- plan.md §10.11's "compare against a
+// branch". The working tree holds one version at a time; this is the other.
+router.get("/:projectId/git/show", asyncHandler(gitShowFileController));
 router.get("/:projectId/git/branches", asyncHandler(gitBranchesController));
 router.post("/:projectId/git/branch", asyncHandler(gitBranchController));
 router.post("/:projectId/git/init", asyncHandler(gitInitController));

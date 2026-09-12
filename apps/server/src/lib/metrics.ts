@@ -23,6 +23,18 @@ export type CounterName =
   // A prebuild that exited non-zero, or threw. Deliberately not notified --
   // nobody asked for the work -- so this counter is the only place it shows.
   | "prebuilds_failed"
+  // A workspace this STARTED in order to build it -- plan.md §12.5. Counted
+  // separately from `prebuilds_completed`, because the number an operator
+  // deciding whether to leave PREBUILD_STOPPED on wants is how often the
+  // machine was woken, not how often an install was saved.
+  | "prebuilds_cold_started"
+  // Dev Container Features -- plan.md §11.10. Three counters rather than one,
+  // because "reused" is the number that says whether the image cache is
+  // earning its keep, and a deployment where every open is a fresh build has a
+  // cache key problem rather than a feature problem.
+  | "feature_builds_completed"
+  | "feature_builds_reused"
+  | "feature_builds_failed"
   // Gave up after the install timeout. The stamp is untouched, so the next
   // real start installs exactly as it would have.
   | "prebuilds_abandoned"
@@ -104,6 +116,11 @@ export type CounterName =
   | "embeds_created"
   | "embeds_revoked"
   | "embed_views"
+  // A stranger opening an editable sandbox -- plan.md §13.1. Counted apart
+  // from `embed_views` because the two answer different questions: one is how
+  // often the shop window is looked at, the other how often somebody stepped
+  // inside.
+  | "sandbox_views"
   | "embed_path_rejected"
   // Moderation. `project_reported` climbing while `report_actioned` and
   // `report_dismissed` stay flat is the signal that matters most here: it says
@@ -146,6 +163,22 @@ export type CounterName =
   | "billing_grace_expired"
   | "billing_event_duplicate"
   | "billing_webhook_rejected"
+  // Pull request workspaces (§13.3). `github_pr_not_enrolled` is the loud one
+  // for a misconfigured App: an installation delivers every repository's
+  // events, so a deployment seeing nothing but this has the webhook wired up
+  // and nothing enrolled behind it.
+  | "github_delivery_duplicate"
+  | "github_webhook_rejected"
+  | "github_pr_not_enrolled"
+  | "github_pr_created"
+  | "github_pr_refreshed"
+  | "github_pr_torn_down"
+  | "github_pr_comment_failed"
+  // Pairing (§13.6). `pairing_redeem_refused` covers expired, revoked and
+  // moderated alike, because the RESPONSE cannot distinguish them: a link that
+  // says "expired" tells whoever holds it that it was once real.
+  | "pairing_redeemed"
+  | "pairing_redeem_refused"
   // Notifications. `notifications_created` against `notifications_mailed` is
   // the honest measure of how much of this actually reaches anybody: the gap
   // between them is people who have to open the app to find out, which is the

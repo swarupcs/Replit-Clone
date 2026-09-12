@@ -91,6 +91,11 @@ jobs:
           docker build -t sandbox-node:latest images/node
           docker build -t sandbox-python:latest images/python
           docker build -t sandbox-go:latest images/go
+          # Rust and C/C++ -- plan.md §10.8. Built in CI for the same reason
+          # the other three are: an image nothing builds is an image whose
+          # Dockerfile is wrong and nobody knows it.
+          docker build -t sandbox-rust:latest images/rust
+          docker build -t sandbox-cpp:latest images/cpp
 
       # The bind mount is owned by the host, so the sandbox user must be able to
       # write a directory it does not own. Regressing this breaks every

@@ -54,8 +54,45 @@ export function shellNonce(): string {
  *  bash — no login shell in between, which would have changed the environment
  *  the terminal has always had.
  */
-export function shellArgv(pidFile: string): string[] {
-  return ["/bin/bash", "-c", `echo $$ > ${pidFile}; exec /bin/bash`];
+export function shellArgv(pidFile: string, shell = DEFAULT_SHELL): string[] {
+  const chosen = isAllowedShell(shell) ? shell : DEFAULT_SHELL;
+  // `/bin/sh` runs the wrapper whatever the chosen shell is, and the reason is
+  // fish: `$$` is the pid in every POSIX shell and is NOT in fish, where it
+  // means something else entirely. A wrapper written in the chosen shell would
+  // record the wrong pid for one of the shells this allows -- and the pid file
+  // is what the hangup uses to find the process, so the failure would be a
+  // shell that cannot be killed rather than an error anybody sees.
+  return ["/bin/sh", "-c", `echo $$ > ${pidFile}; exec ${chosen}`];
+}
+
+/** The shell a terminal opens with when nothing says otherwise. */
+export const DEFAULT_SHELL = "/bin/bash";
+
+/** The shells a project may ask for. plan.md §10.14.
+ *
+ *  An allowlist rather than a path check, and it is the whole security story
+ *  of this feature: the value comes from `.vscode/settings.json`, which is a
+ *  file in a repository this platform did not write, and it is interpolated
+ *  into a command line. Anything outside this list is ignored in favour of the
+ *  default — not refused, because a devcontainer that names `/usr/bin/fish` on
+ *  an image without fish should open a working terminal rather than none.
+ *
+ *  Absolute paths only. A bare `zsh` would be resolved through PATH, and PATH
+ *  inside a sandbox is a thing the project itself can change.
+ */
+const ALLOWED_SHELLS = new Set([
+  "/bin/bash",
+  "/bin/sh",
+  "/bin/dash",
+  "/bin/zsh",
+  "/usr/bin/bash",
+  "/usr/bin/sh",
+  "/usr/bin/zsh",
+  "/usr/bin/fish",
+]);
+
+export function isAllowedShell(shell: string): boolean {
+  return ALLOWED_SHELLS.has(shell);
 }
 
 /** The script that hangs a shell up. Exported for the test to read. */

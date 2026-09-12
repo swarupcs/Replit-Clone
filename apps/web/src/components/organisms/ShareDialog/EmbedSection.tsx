@@ -1,6 +1,15 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Input, Popconfirm, Select, Tag, Typography, message } from "antd";
+import {
+  Button,
+  Input,
+  Popconfirm,
+  Select,
+  Switch,
+  Tag,
+  Typography,
+  message,
+} from "antd";
 import { CodeOutlined } from "@ant-design/icons";
 import type { EmbedPreview, EmbedView } from "@replit-clone/shared";
 import {
@@ -55,12 +64,16 @@ export const EmbedSection = ({
 
   const [view, setView] = useState<EmbedView | null>(null);
   const [preview, setPreview] = useState<EmbedPreview | null>(null);
+  /** plan.md §13.1. Null until the owner touches it, so the stored value shows
+   *  through -- the same shape `view` and `preview` above use. */
+  const [sandbox, setSandbox] = useState<boolean | null>(null);
 
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ["embed", projectId] });
 
   const chosenView = view ?? data?.settings.view ?? "split";
   const chosenPreview = preview ?? data?.settings.preview ?? "deployment";
+  const sandboxOn = sandbox ?? data?.settings.sandbox ?? false;
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -78,7 +91,11 @@ export const EmbedSection = ({
   });
 
   const updateMutation = useMutation({
-    mutationFn: (settings: { view?: EmbedView; preview?: EmbedPreview }) =>
+    mutationFn: (settings: {
+      view?: EmbedView;
+      preview?: EmbedPreview;
+      sandbox?: boolean;
+    }) =>
       updateProjectEmbedApi(projectId, settings),
     onSuccess: refresh,
   });
@@ -141,6 +158,21 @@ export const EmbedSection = ({
 
         {data?.token ? (
           <>
+            {/* plan.md §13.1. A switch rather than another Select, because it
+                is a yes-or-no about what strangers may do rather than a choice
+                among modes -- and because the sentence beneath it is the part
+                that matters. */}
+            <Switch
+              size="small"
+              checked={sandboxOn}
+              aria-label="Let anyone with the link edit and run it"
+              onChange={(next) => {
+                setSandbox(next);
+                updateMutation.mutate({ sandbox: next });
+              }}
+            />
+            <span style={{ fontSize: 12 }}>Editable sandbox</span>
+
             <Button
               size="small"
               icon={<CodeOutlined />}

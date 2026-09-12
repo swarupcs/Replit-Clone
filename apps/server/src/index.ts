@@ -14,6 +14,7 @@ import type {
   SocketData,
 } from "@replit-clone/shared";
 import apiRouter from "./routes/index.js";
+import { webhookRawBody } from "./middlewares/webhookRawBody.js";
 import {
   createPreviewProxy,
   installPreviewUpgrade,
@@ -72,6 +73,7 @@ import {
   stopAllContainers,
   setOnProjectReaped,
 } from "./containers/containerManager.js";
+import { sweepColdPrebuilds } from "./containers/coldPrebuild.js";
 import { sweepPrebuilds } from "./containers/prebuild.js";
 import { reconcileScaffolds } from "./service/scaffoldService.js";
 import { ensureEgressGateway } from "./containers/egressGateway.js";
@@ -197,6 +199,13 @@ const deploySiteServer = createDeploySiteServer();
 // upgrade. Installed here rather than inside the factory so the listener and
 // its handler are visible in one place.
 installServiceUpgrade(deploySiteServer);
+
+// BEFORE the JSON parser, and that order is the whole point: a webhook
+// signature covers the bytes that were sent, and express.json both consumes
+// them and marks the request handled — which makes the `express.raw` on the
+// route itself a no-op. See webhookRawBody.ts; this was a live bug rather than
+// a precaution.
+app.use(webhookRawBody());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -375,16 +384,24 @@ function startTokenPrune(): void {
  *  plan.md §12.2. Every fifteen minutes rather than hourly: the case this
  *  exists for is a `git pull` that adds a dependency, and an hour is long
  *  enough that the next start would usually beat it to the work. Only
- *  workspaces that are already running are considered -- starting a stopped
- *  one to build it is §12.5, and is a decision rather than a line of code.
+ *  Both halves now: workspaces already running (§12.2), then stopped ones
+ *  (§12.5) when PREBUILD_STOPPED is on. The second is off by default, because
+ *  its three gates are numbers chosen without having watched a real host.
  */
 function startPrebuildSweep(): void {
   const sweep = (): void => {
-    void sweepPrebuilds().catch((error: unknown) => {
-      // Nothing is waiting on this, so a failure is a log line and not an
-      // incident.
-      logger.info("could not sweep prebuilds", { error });
-    });
+    void sweepPrebuilds()
+      // Running workspaces first, then stopped ones -- plan.md §12.5. In that
+      // order and never at once: the warm sweep is the cheap one and the cold
+      // one starts containers, so anything the warm pass is going to consume
+      // should already have been consumed before the cold pass measures
+      // headroom. `sweepColdPrebuilds` is a no-op unless PREBUILD_STOPPED is on.
+      .then(() => sweepColdPrebuilds())
+      .catch((error: unknown) => {
+        // Nothing is waiting on this, so a failure is a log line and not an
+        // incident.
+        logger.info("could not sweep prebuilds", { error });
+      });
   };
 
   // Not on boot. A restart is the one moment several containers come up at

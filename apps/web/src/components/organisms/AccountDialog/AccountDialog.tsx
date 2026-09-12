@@ -12,6 +12,7 @@ import { getAccountApi } from "../../../apis/projects.ts";
 import { ApiKeys } from "./ApiKeys.tsx";
 import { Identity } from "./Identity.tsx";
 import { Secrets } from "./Secrets.tsx";
+import { SshKeys } from "./SshKeys.tsx";
 import { Security } from "./Security.tsx";
 import { TrashPanel } from "../TrashPanel/TrashPanel.tsx";
 import { useDeployment } from "../../../hooks/useDeployment.ts";
@@ -226,7 +227,7 @@ function hours(seconds: number): string {
 
 export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
   const [tab, setTab] = useState<
-    "usage" | "keys" | "trash" | "identity" | "secrets" | "security"
+    "usage" | "keys" | "trash" | "identity" | "secrets" | "ssh" | "security"
   >("usage");
 
   const { data, isLoading, error } = useQuery<AccountSummary>({
@@ -269,6 +270,10 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
           // plan.md §11.6. Beside Identity rather than inside it: that panel
           // is about what follows you into a container, and this is about who
           // is allowed to open one.
+          // plan.md §10.1 Route C. Beside Secrets for the reason that panel
+          // gives: Identity is what makes a container look like your machine,
+          // Secrets is what it can reach, and this is how you reach IT.
+          { label: "SSH keys", value: "ssh" },
           { label: "Security", value: "security" },
         ]}
         value={tab}
@@ -280,6 +285,7 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
               | "trash"
               | "identity"
               | "secrets"
+              | "ssh"
               | "security",
           );
         }}
@@ -292,6 +298,8 @@ export const AccountDialog = ({ open, onClose }: AccountDialogProps) => {
         <Identity />
       ) : tab === "secrets" ? (
         <Secrets />
+      ) : tab === "ssh" ? (
+        <SshKeys />
       ) : tab === "security" ? (
         <Security />
       ) : tab === "trash" ? (

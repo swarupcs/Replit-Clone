@@ -18,13 +18,31 @@ export interface Problem {
 }
 
 interface ProblemsStore {
-  /** Every current problem, worst first, then by file and position. */
+  /** Every current problem from the language server, worst first, then by file
+   *  and position. */
   problems: Problem[];
   setProblems: (problems: Problem[]) => void;
+
+  /** What a task's problem matcher found -- plan.md §10.10.
+   *
+   *  A SECOND list rather than merged into the first, and the reason is the
+   *  lifetime: language-server markers are recomputed on every keystroke and
+   *  replaced wholesale, while a task's problems are true until the task runs
+   *  again. Merging them would mean the next keystroke silently deleting a
+   *  build's errors -- which is the moment somebody most needs to see them.
+   */
+  taskProblems: Problem[];
+  setTaskProblems: (problems: Problem[]) => void;
 }
 
 export const useProblemsStore = create<ProblemsStore>((set) => ({
   problems: [],
+  taskProblems: [],
+
+  setTaskProblems: (taskProblems) =>
+    set((state) =>
+      same(state.taskProblems, taskProblems) ? state : { taskProblems },
+    ),
 
   setProblems: (problems) =>
     set((state) =>
@@ -57,14 +75,22 @@ function same(a: Problem[], b: Problem[]): boolean {
  *  subscriber on every store read, which is every keystroke anywhere, forever.
  *  Numbers compare equal.
  */
+/** Both feeds, because the status bar's number has to be the number of
+ *  problems -- a count that omits the build's errors is a count that says
+ *  "everything is fine" while the build is red. plan.md §10.10. */
 export const selectErrorCount = (state: ProblemsStore): number =>
-  state.problems.reduce(
-    (total, problem) => total + (problem.severity === "error" ? 1 : 0),
-    0,
-  );
+  count(state, "error");
 
 export const selectWarningCount = (state: ProblemsStore): number =>
-  state.problems.reduce(
-    (total, problem) => total + (problem.severity === "warning" ? 1 : 0),
-    0,
-  );
+  count(state, "warning");
+
+function count(state: ProblemsStore, severity: Problem["severity"]): number {
+  let total = 0;
+  for (const problem of state.problems) {
+    if (problem.severity === severity) total += 1;
+  }
+  for (const problem of state.taskProblems) {
+    if (problem.severity === severity) total += 1;
+  }
+  return total;
+}

@@ -18,6 +18,10 @@ import {
   getEditorSessionController,
   setEditorSessionController,
 } from "../../controllers/editorSessionController.js";
+import {
+  getSshKeysController,
+  setSshKeysController,
+} from "../../controllers/sshKeyController.js";
 
 /** Somebody's own account: what they are using, and what they are allowed.
  *
@@ -57,5 +61,13 @@ router.put("/secrets", asyncHandler(setAccountSecretsController));
 // one project's, and the per-project half is a map inside one of the values.
 router.get("/session", asyncHandler(getEditorSessionController));
 router.put("/session", asyncHandler(setEditorSessionController));
+
+// Public keys for attaching your own editor -- plan.md §10.1 Route C. Here
+// because the key belongs to the person's laptop, not to one workspace, and
+// session-only for a sharper reason than the rest of this router: a key added
+// here opens a shell in every workspace the account owns, and survives a
+// session being revoked.
+router.get("/ssh-keys", asyncHandler(getSshKeysController));
+router.put("/ssh-keys", asyncHandler(setSshKeysController));
 
 export default router;

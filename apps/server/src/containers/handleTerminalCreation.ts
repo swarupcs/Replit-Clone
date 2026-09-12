@@ -15,6 +15,7 @@ import type { TerminalSession } from "../terminal/terminalSessions.js";
 import {
   hangUpShell,
   reclaimShells,
+  DEFAULT_SHELL,
   shellArgv,
   shellNonce,
   terminalPidFile,
@@ -158,6 +159,11 @@ export const handleTerminalCreation = (
    *  attachment it takes ownership of. Absent in the tests that only care
    *  about the exec's shape. */
   session?: { id: string; projectId: string; release: () => void },
+  /** The shell to open, from `.vscode/settings.json` -- plan.md §10.14.
+   *  Undefined means the default; anything outside the allowlist is ignored in
+   *  favour of it, so a devcontainer naming a shell the image does not have
+   *  opens a working terminal rather than none. */
+  shell?: string,
 ): void => {
   const template = getTemplate(templateId);
   const startCommand = startCommandOverride?.trim() || template.startCommand;
@@ -172,7 +178,7 @@ export const handleTerminalCreation = (
 
   container.exec(
     {
-      Cmd: shellArgv(pidFile),
+      Cmd: shellArgv(pidFile, shell ?? DEFAULT_SHELL),
       AttachStdin: true,
       AttachStdout: true,
       AttachStderr: true,

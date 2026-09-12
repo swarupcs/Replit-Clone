@@ -175,6 +175,9 @@ describe("installTerminalGateway", () => {
         // No session, because this socket named none: an unnamed terminal
         // keeps the lifecycle it had before §13.7.
         undefined,
+        // No shell either: this project has no `.vscode/settings.json` naming
+        // one, so the terminal opens on the default. plan.md §10.14.
+        undefined,
       ),
     );
     expect(projectService.assertProjectAccess).toHaveBeenCalledWith(
@@ -358,6 +361,8 @@ describe("a socket that names its terminal", () => {
           id: `${USER.sub}:${PROJECT}:${KEY}`,
           projectId: PROJECT,
         }),
+        // The shell, from `.vscode/settings.json` when there is one. §10.14.
+        undefined,
       ),
     );
   });
@@ -406,6 +411,7 @@ describe("a socket that names its terminal", () => {
         "node",
         expect.any(Function),
         expect.any(Number),
+        undefined,
         undefined,
         undefined,
       ),

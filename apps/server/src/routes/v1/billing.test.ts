@@ -63,8 +63,16 @@ function app() {
   const instance = express();
   // Note what is NOT here: `express.json()`. The route brings its own
   // `express.raw`, and mounting a JSON parser in front of it is precisely the
-  // bug that would make every real delivery fail its signature -- so the test
-  // app is assembled the way the real one is.
+  // bug that would make every real delivery fail its signature.
+  //
+  // This comment used to end "-- so the test app is assembled the way the real
+  // one is", and that was FALSE: `index.ts` mounts `express.json()` globally in
+  // front of the whole API, so every genuine delivery did fail its signature,
+  // and this file could not see it. Keeping the parser out here is right for
+  // what these tests are about -- the route's own logic -- but it is not a
+  // statement about the real app. The mounting order is guarded by
+  // `middlewares/webhookRawBody.test.ts`, which builds the app the way
+  // `index.ts` builds it.
   instance.use("/billing", billingRouter);
   instance.use(errorHandler);
   return instance;

@@ -5,6 +5,7 @@ import {
   VscAdd,
   VscChromeClose,
   VscOutput,
+  VscPlay,
   VscTerminal,
   VscWarning,
 } from "react-icons/vsc";
@@ -17,6 +18,7 @@ import {
   selectWarningCount,
   useProblemsStore,
 } from "../../../store/problemsStore.ts";
+import { TasksPanel } from "../TasksPanel/TasksPanel.tsx";
 import { useRunStore } from "../../../store/runStore.ts";
 import {
   selectCanEdit,
@@ -25,12 +27,16 @@ import {
 
 interface BottomPanelProps {
   projectId: string;
+  /** False for a viewer. A task is an arbitrary command line from the
+   *  repository, so running one is running code in the container. */
+  canRun?: boolean;
 }
 
 /** `output` is the dev server log; every other tab is an independent shell. */
 type ActiveTab =
   | { kind: "output" }
   | { kind: "problems" }
+  | { kind: "tasks" }
   | { kind: "terminal"; id: number };
 
 /** Terminals and dev-server output as tabs.
@@ -45,7 +51,7 @@ type ActiveTab =
  *  WebSocket and a PTY, so unmounting it to switch tabs would kill the shell
  *  and lose its scrollback.
  */
-export const BottomPanel = ({ projectId }: BottomPanelProps) => {
+export const BottomPanel = ({ projectId, canRun = false }: BottomPanelProps) => {
   const [terminals, setTerminals] = useState<number[]>([1]);
   const [active, setActive] = useState<ActiveTab>({ kind: "terminal", id: 1 });
   /** Monotonic, so closing terminal 2 and opening another gives 3 rather than
@@ -116,6 +122,7 @@ export const BottomPanel = ({ projectId }: BottomPanelProps) => {
       const name = node.dataset["rcTab"];
       if (name === "output") setActive({ kind: "output" });
       else if (name === "problems") setActive({ kind: "problems" });
+      else if (name === "tasks") setActive({ kind: "tasks" });
       else if (name?.startsWith("terminal:")) {
         setActive({ kind: "terminal", id: Number(name.slice("terminal:".length)) });
       }
@@ -240,6 +247,23 @@ export const BottomPanel = ({ projectId }: BottomPanelProps) => {
 
         <span style={{ flex: 1 }} />
 
+        {/* Tasks -- plan.md §10.10. Beside Problems, because running one is
+            the ordinary way problems get INTO that panel. */}
+        <div
+          className="rc-panel-tab"
+          role="tab"
+          data-rc-tab="tasks"
+          aria-selected={active.kind === "tasks"}
+          tabIndex={active.kind === "tasks" ? 0 : -1}
+          data-active={active.kind === "tasks"}
+          onClick={() => {
+            setActive({ kind: "tasks" });
+          }}
+        >
+          <VscPlay size={13} />
+          Tasks
+        </div>
+
         {/* Before Output, because a compile error is what sends you looking
             at the output in the first place. */}
         <div
@@ -333,6 +357,10 @@ export const BottomPanel = ({ projectId }: BottomPanelProps) => {
 
       <Pane visible={active.kind === "problems"}>
         <ProblemsPanel />
+      </Pane>
+
+      <Pane visible={active.kind === "tasks"}>
+        <TasksPanel projectId={projectId} canRun={canRun} />
       </Pane>
 
       <Pane visible={active.kind === "output"}>

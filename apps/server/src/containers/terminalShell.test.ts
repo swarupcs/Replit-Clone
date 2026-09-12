@@ -6,6 +6,7 @@ vi.mock("../lib/logger.js", () => ({
 
 import {
   hangUpScript,
+  isAllowedShell,
   reclaimScript,
   shellArgv,
   shellNonce,
@@ -100,6 +101,9 @@ describe("shellArgv", () => {
    *  naming a process that is not the one to hang up. */
   it("replaces the wrapper with the shell rather than nesting one inside it", () => {
     expect(shellArgv("/tmp/x.pid").join(" ")).toContain("exec /bin/bash");
+    // And the wrapper is /bin/sh whatever the shell is -- see the comment in
+    // shellArgv: `$$` is not the pid in fish.
+    expect(shellArgv("/tmp/x.pid")[0]).toBe("/bin/sh");
   });
 
   /** The terminal has always given users a plain interactive bash. A login
@@ -132,5 +136,36 @@ describe("hangUpScript", () => {
    *  — and the next hangup would signal whatever now holds it. */
   it("removes the pid file", () => {
     expect(hangUpScript("/tmp/x.pid")).toContain("rm -f /tmp/x.pid");
+  });
+});
+
+/** Terminal profiles. plan.md §10.14. */
+describe("choosing a shell", () => {
+  it("opens the chosen one", () => {
+    expect(shellArgv("/tmp/x.pid", "/bin/zsh").join(" ")).toContain("exec /bin/zsh");
+  });
+
+  it("ignores one outside the allowlist in favour of the default", () => {
+    // The value comes from a file in a repository this platform did not write
+    // and is interpolated into a command line. Ignored rather than refused: a
+    // devcontainer naming a shell the image lacks should open a working
+    // terminal, not none.
+    expect(shellArgv("/tmp/x.pid", "/tmp/payload; rm -rf /").join(" ")).toContain(
+      "exec /bin/bash",
+    );
+    expect(shellArgv("/tmp/x.pid", "/tmp/payload; rm -rf /").join(" ")).not.toContain(
+      "payload",
+    );
+  });
+
+  it("refuses a bare name, because PATH is the project's to change", () => {
+    expect(isAllowedShell("zsh")).toBe(false);
+    expect(isAllowedShell("/bin/zsh")).toBe(true);
+  });
+
+  it("still records the pid where the hangup looks", () => {
+    // The pid file is how a shell gets killed. A chosen shell that broke it
+    // would be a shell nobody can hang up, which is the §13.7 defect again.
+    expect(shellArgv("/tmp/x.pid", "/bin/zsh").join(" ")).toContain("> /tmp/x.pid");
   });
 });

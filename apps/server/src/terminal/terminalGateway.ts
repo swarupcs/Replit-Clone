@@ -18,6 +18,7 @@ import { assertValidProjectId } from "../utils/projectPaths.js";
 import { logger } from "../lib/logger.js";
 import { watchAccess } from "../service/accessWatch.js";
 import { increment } from "../lib/metrics.js";
+import { projectTerminalShell } from "../service/editorConfigService.js";
 import { AppError } from "../utils/errors.js";
 import {
   endUserSessions,
@@ -301,6 +302,11 @@ async function startTerminal(
     // Counted here rather than on arrival, so the metric means "shells opened"
     // and not "sockets seen". It read 11 for a project that never had more
     // than a couple of shells in it.
+    // The project's own shell, if `.vscode/settings.json` names one --
+    // plan.md §10.14. Never throws and returns null when nothing is said, so a
+    // terminal opens on the default rather than not at all.
+    const shell = (await projectTerminalShell(projectId)) ?? undefined;
+
     increment("terminal_sessions");
     handleTerminalCreation(
       container,
@@ -310,6 +316,7 @@ async function startTerminal(
       terminalId,
       startCommand,
       id ? { id, projectId, release: releaseAttachment } : undefined,
+      shell,
     );
   } catch (error) {
     logger.error("could not start terminal", error, { projectId });

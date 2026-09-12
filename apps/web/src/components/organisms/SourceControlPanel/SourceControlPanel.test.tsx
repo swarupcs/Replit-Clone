@@ -54,6 +54,13 @@ const api = vi.hoisted(() => ({
   gitUnstageApi: vi.fn(),
   gitCommitApi: vi.fn(),
   gitInitApi: vi.fn(),
+  // Stash -- plan.md §10.13. The panel renders StashSection, which calls
+  // these; a mock that omits them makes the call `undefined()` and takes the
+  // whole panel down, which is what happened when they were added.
+  getStashesApi: vi.fn(),
+  pushStashApi: vi.fn(),
+  applyStashApi: vi.fn(),
+  dropStashApi: vi.fn(),
 }));
 
 vi.mock("../../../apis/projects.ts", () => api);
@@ -128,6 +135,8 @@ beforeEach(() => {
     base: "main",
   });
   getGitStatusApi.mockResolvedValue(STATUS);
+  // Nothing stashed, which is the state every test here is about.
+  api.getStashesApi.mockResolvedValue([]);
   getGitLogApi.mockResolvedValue([]);
   getGitDiffApi.mockResolvedValue(PATCH);
   getGitBranchesApi.mockResolvedValue(BRANCHES);

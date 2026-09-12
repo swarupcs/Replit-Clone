@@ -55,9 +55,9 @@ it and is dealt with under the table.
 |---|---|
 | `pnpm -r typecheck` | clean, 3/3 packages |
 | `pnpm -r lint` | clean, 3/3 packages |
-| `pnpm --filter server test` | **2124 passing**, 296 skipped (152 files) — no database configured |
-| the same, with `TEST_DATABASE_URL` set | **2712 passing**, 9 skipped. Green 2026-09-09 against all **40** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
-| `pnpm --filter web test` | **1355 passing** (105 files), re-run 2026-09-09 |
+| `pnpm --filter server test` | **2778 passing**, 304 skipped (188 files) — no database configured |
+| the same, with `TEST_DATABASE_URL` set | **3073 passing**, 9 skipped. Green 2026-09-11 against all **47** migrations, on a Postgres 16 initialised by hand — see §2.48 and §2.49. The 9 need a Docker daemon, not a database |
+| `pnpm --filter web test` | **1516 passing** (122 files), re-run 2026-09-11 |
 | Debt scan (`TODO`/`FIXME`/`HACK` over the three `src` trees) | **0** real markers over ~116k lines |
 
 The debt scan returns two hits and neither is debt: both are the literal word
@@ -146,16 +146,36 @@ around the platform rather than another thing wrong with the platform, which is
 why it is a section of its own; it is counted in the totals below like
 everything else.
 
-**Done: 161 items. Open: 25 — four blocked, ten from §10 that are all
-waiting on one decision (§10.1), one from §11, which reads the sandbox
-rather than the editor, two from §12, which reads neither and asks what
-a cloud machine is for, and eight from §13, which names the two products this
-most resembles and diffs against them. §11's last row is 11.10, which needs a
-decision before it needs code, and 12.4 is blocked on hardware rather than on
-anybody.**
+**Done: 181 items. Open: 5 — and all five are blocked. Nothing is left that is
+merely open.**
 
-Those five numbers are 4 + 10 + 1 + 2 + 8 = 25, and they are written out
-because they did not add up once already — see the paragraph below.
+The five are §3.3's four (certificates, process snapshots, autoscale, and
+debugging) plus §12.4. **§10, §11 and §13 are empty**: §10's last row closed on
+2026-09-10 with two items carried into §2.59, §11's on 2026-09-10, and §13's on
+2026-09-11.
+
+**None of the five is blocked on somebody writing code**, which is why this
+figure stops moving here rather than continuing down. Certificates are "a
+Caddyfile and a decision" about where this deployment's keys live, and the code
+half shipped in §2.31. Process snapshots need a disk budget and a mechanism
+nothing here resembles. Autoscale is a pricing decision before it is an
+engineering one. Debugging is deferred on purpose by §6 decision 1, whose own
+instruction is to **revisit the route, not the row** — building it here would be
+overruling a decision this document records rather than completing a row it
+lists. 12.4 is blocked on hardware rather than on anybody.
+
+**§10.1 was decided on 2026-09-09 — B + C — and Route C shipped the same day
+(§2.50)**, which closed three §10 rows at once: 10.1 itself, and 10.6 and 10.7
+by another road. §11's last row was 11.10, which needed a decision before it
+needed code and got one (§2.53). **§13.1 closed on 2026-09-10 (§2.61)** — the
+row §13 called "the defining act of the product this section names", and the one
+whose own text said not to build it before 13.2. It was built the day after
+13.2, in that order, and the objection in it is answered rather than waived: the
+sandbox starts no container.
+
+Those five numbers are 4 + 0 + 0 + 1 + 0 = 5, and they are written out
+because they did not add up once already — see the paragraph below. The §13 term
+reaching zero is what ended the buildable part of this plan.
 
 **§3.3 lost a row on 2026-09-09 for the third time by being SPLIT rather than
 unblocked**, after backups shipped (§2.47) — and the split was the same one
@@ -441,28 +461,42 @@ page that loses data rather than failing to add a feature.~~ **Backups shipped
 until one is, with a restore command and `docs/BACKUP.md`. What has not
 happened is a host being rebuilt from one.
 
-**Blocked on a decision nobody has taken.** Dev Container Features (§11.10) is
-a question with three answers, none obviously right. Prebuilding a *stopped*
-workspace (§12.5) needs three numbers somebody has to choose by watching a real
-host. Teams (§8.5) needs a pricing decision and turns every `ownerId === userId`
-into a membership question.
+**Blocked on a decision nobody has taken.** ~~Dev Container Features (§11.10)
+is a question with three answers, none obviously right.~~ — decided and shipped
+2026-09-10, §2.53. ~~Prebuilding a *stopped* workspace (§12.5) needs three
+numbers somebody has to choose by watching a real host.~~ — shipped
+2026-09-09, §2.52, with the three numbers made env vars whose defaults are
+documented as guesses. Teams (§8.5) needs a pricing decision and turns every
+`ownerId === userId` into a membership question — **still open, and now the
+only row in this paragraph that is.**
 
-**Simply absent, and unblocked.** Notebooks (§12.3). GPUs (§12.4), which need
-different hardware.
+**Two of the three were unblocked by somebody taking the decision rather than
+by the question getting easier**, which is worth leaving visible: "blocked on a
+decision nobody has taken" described who had been asked, not how hard it was to
+answer. §8.5 is the exception that keeps the category honest — a pricing
+decision is genuinely not this document's to take.
+
+**Simply absent, and unblocked.** ~~Notebooks (§12.3).~~ — shipped 2026-09-05,
+§2.42. GPUs (§12.4), which need different hardware.
 
 **Absent against the two products this most resembles** (§13, added
 2026-09-09). Nothing here is in the editor, so none of it waits on §10.1. For
 a *CodeSandbox*: there is no cheap project — every path into a working tree
-ends at a container, so there is no anonymous sandbox (§13.1), no
-container-free preview (§13.2), no URL per pull request (§13.3), no second
-checkout of one repository (§13.4), no devtools for the previewed app (§13.5),
-and no pairing link for somebody without an account (§13.6). For a *personal
+ends at a container, so ~~there is no anonymous sandbox (§13.1)~~ — shipped
+2026-09-10, §2.61 — ~~no container-free preview (§13.2)~~ — shipped 2026-09-10,
+§2.60 — ~~no URL per pull request (§13.3)~~ — shipped 2026-09-10, §2.62 — ~~no second
+checkout of one repository (§13.4)~~ — shipped 2026-09-10, §2.63 — ~~no devtools for the previewed app (§13.5)~~ — shipped 2026-09-11, §2.64 —
+and ~~no pairing link for somebody without an account (§13.6)~~ — shipped 2026-09-11, §2.65. For a *personal
 cloud editor*: ~~a terminal is killed when its WebSocket closes, so closing the
 laptop kills the build (§13.7)~~ — fixed 2026-09-09, §2.46; ~~secrets belong to
-a project rather than to the account (§13.8)~~ — fixed 2026-09-09, §2.48; no credential inside the sandbox can clone a private
-repository (§13.9); the editor has one mobile breakpoint and nothing else
-(§13.10); and the session — tabs, splits, settings — lives in `localStorage`
-rather than on the server it is connected to (§13.11).
+a project rather than to the account (§13.8)~~ — fixed 2026-09-09, §2.48; ~~no credential inside the sandbox can clone a private
+repository (§13.9)~~ — fixed 2026-09-09; ~~the editor has one mobile breakpoint
+and nothing else (§13.10)~~ — fixed 2026-09-11, §2.66; and ~~the session —
+tabs, splits, settings — lives in `localStorage` rather than on the server it is
+connected to (§13.11)~~ — fixed 2026-09-09, §2.49.
+
+**Every row in this paragraph is now struck**, which is the whole of §13B
+closed.
 
 ### What is verified, and what is asserted
 
@@ -3302,6 +3336,1079 @@ Postgres 16, and `\d user_editor_state` read back — composite primary key on
 move between them. Every rule above is tested at the seam, which is good
 evidence and is not the same thing.
 
+### 2.50 Since (2026-09-09) — §10.1 decided, and Route C built
+
+**The decision first, because everything below follows from it.** §10.1 had sat
+open since the section was written: Monaco, openvscode-server, or make the
+workspace attachable and let somebody bring their own editor. It is now **B +
+C** — Monaco stays, and the workspace is attachable over SSH. Taken by the
+repository owner's standing instruction to resolve every open decision rather
+than ask; recorded in §10.1 itself with its reasoning and its costs.
+
+**Why the third route wins the argument the first two were having.** §10 said
+Route B was defensible only if multiplayer was the point, *because Route B can
+never reach 10.7*. The §11.1 spike falsified that sentence — the real VS Code
+server and `ms-python.python`, with Pylance and debugpy, run inside the sandbox
+image over SSH. So the expensive half of Route A arrives for 7 MB of image and
+one volume, without rebuilding run control and preview as extensions, and
+without dropping the collaborative layer that is this product's actual
+difference from the thing it is a clone of.
+
+**What shipped.** `openssh-server` in all three sandbox images; an sshd started
+per container as uid 1001 under the same `CapDrop: ["ALL"]` and
+`no-new-privileges` every sandbox already has; public keys on the account, not
+on a project; `GET`/`PUT /api/v1/account/ssh-keys`, `GET
+/api/v1/projects/:id/remote`; an SSH keys panel beside Secrets, and a dialog
+behind a command-palette entry that hands over the `ssh` command and a
+`vscode://` link.
+
+**The two things the spike found the expensive way, both handled.**
+`~/.vscode-server` gets a named volume — it reached 1.3 GB after one extension
+pack, in the writable layer that every environment-signature change throws
+away, so without it an attach re-downloaded 229 MB per rebuild. And that
+download is the first thing an egress-filtered sandbox refuses, so the dialog
+and `SSH_EGRESS_NOTE` both say which hosts to allow rather than leaving somebody
+to debug a silent hang in a client whose logs they cannot see.
+
+**A defect this row nearly shipped, found by reasoning rather than by running.**
+The sshd config first said `UsePrivilegeSeparation no` and
+`ChallengeResponseAuthentication no`. Both read as exactly the right thing to
+say — this daemon runs as the user it authenticates, so there is no privilege to
+separate. **Both are removed options in the OpenSSH 9.2 that Debian bookworm
+ships**, and 9.2 treats an unknown option as fatal: saying the true thing would
+have stopped the daemon starting on every attach, and there is no Docker daemon
+here to have caught it. There is now a test whose only job is to assert those
+two strings are absent, because that is the only place the mistake is visible.
+
+**Choices worth naming.** SSH is **off by default** (`SANDBOX_SSH_ENABLED`) —
+it publishes a host port per running container, and an operator who did not ask
+for that should not get it by upgrading. The port binds to **127.0.0.1** unless
+`SANDBOX_SSH_BIND` widens it. Only the **owner's** keys are installed: a
+collaborator already has a browser terminal, but a key outlives a session and a
+revocation, and handing one over should be its own row with its own decision
+rather than a quiet `OR`. And no forwarding of any kind — with the egress
+gateway on, `AllowTcpForwarding` would be a hole straight through it.
+
+**Verified.** Server 2766 passing / 9 skipped, web 1367 passing, typecheck and
+lint clean 3/3. Migration **run**: all 41 applied, `sshKeys jsonb not null
+default '[]'` read back out of `\d user_personalization`. Three guards checked
+by deleting them and watching the expected test go red.
+
+**Not verified, and it is the load-bearing gap:** no Docker daemon exists in
+this environment, so nothing here has authenticated a real SSH connection. The
+config, the script, the port mapping and the refusals are tested at their seams;
+the daemon has never started. The §11.1 spike did run a real sshd and a real VS
+Code server, which is why this is strong evidence rather than a guess — but the
+first person to turn `SANDBOX_SSH_ENABLED` on is the first person to run this.
+
+### 2.51 Since (2026-09-09) — §13.9, the credential that stays on your machine
+
+§14.2's Phase 1d, and it took one line of sshd config because the row had
+already done the thinking. `git clone git@github.com:me/private` — the most
+ordinary thing anybody does on a new machine — failed in a sandbox, because
+every credential this platform holds is deliberately unreachable from inside
+one: the signing key is only ever offered for signing, dotfiles are cloned with
+no credential on purpose, and `pushRemote` authenticates server-side with a
+token the sandbox never sees.
+
+**The decision, from the three the row named:** agent forwarding. It is the only
+one that is not a secret sitting in a container that runs untrusted code, and it
+became possible the same day, because §10.1 went to Route C.
+
+**The line that matters is that this is not the forwarding that was refused.**
+`AllowTcpForwarding` stays `no` — `ssh -L` out of a sandbox reaches whatever the
+sandbox reaches, which is the one thing the egress gateway exists to control.
+`AllowAgentForwarding` carries no tunnel: a unix socket over which the sandbox
+may ask the user's own agent to sign a challenge. The key never leaves their
+machine. Three tests hold that distinction, including one whose only job is to
+check that turning agent forwarding off does not reopen TCP forwarding.
+
+**Cost, stated where somebody will read it:** while connected, code in the
+sandbox can use the agent for any repository that key opens. The dialog says so
+in those words rather than in a link, and `SANDBOX_SSH_AGENT_FORWARDING=false`
+is there for anybody who would rather type a token.
+
+**And the half this does not fix.** The browser terminal is `docker exec`; it
+has no agent and still cannot clone a private repository. Fixing that needs one
+of the two options this row rejected. Chosen, not missed — and §13's inventory
+now says so.
+
+**Verified.** 28 tests on the config and the connection details, with the
+agent/TCP distinction checked by turning the switch off and asserting TCP
+forwarding stayed shut. **Not verified:** no Docker daemon here, so no agent has
+been forwarded through a real connection.
+
+### 2.52 Since (2026-09-09) — §12.5, building a workspace nobody has open
+
+§14.3's Phase 2b. §2.39 shipped the half where the container is already
+running; this is the first open of a workspace that has been stopped all week,
+which is the case 12.2's own title described and did not cover.
+
+**The row was never blocked on code. It was blocked on three numbers**, and it
+says twice that choosing them without having watched a real host is how a
+background task becomes the reason a machine is always busy. They are chosen —
+under the standing instruction to decide rather than ask — and the honest thing
+available was not to pretend they are measured: each is an env var whose default
+is documented in `env.ts` **as a guess**, and the feature is off by default. An
+operator who watches this misbehave retunes it without a deploy, and the number
+that eventually proves right ends up written down.
+
+**Each collision the row named, and its answer.** Memory is measured against the
+same budget `assertFits` uses, not against a count of containers — a count says
+nothing about a host running one large workspace. The sweep stops what it
+started and only what it started, so a workspace somebody opens mid-sweep is
+left alone. And it re-checks headroom *between* workspaces, because a sweep that
+found the host quiet ten minutes ago is not evidence about the host now.
+
+**Why it always stops what it started, even on a plan whose workspaces never
+sleep.** That was the row's sharpest objection and the answer is not "the plan
+allows it": a prebuilt container left running is indistinguishable, an hour
+later, from one the user opened. It changes what the machine costs rather than
+how fast it opens, and it corrupts the only signal the idle reaper has.
+
+**What building it found that the row had not.** Deciding whether a *stopped*
+workspace needs building was itself the problem. `warmStart`'s stamp lives in
+the container's writable layer, so reading it means starting the container —
+the exact cost this exists to avoid. So a prebuild now also records its
+fingerprint against the project row, host-side, where the dependency files are
+already readable because the tree is bind-mounted. A hint rather than a source
+of truth: when it is stale the cost is one wasted start, and the container's own
+stamp still decides what actually runs.
+
+**Verified.** 19 tests on the gates, 2 more on the fingerprint, three guards
+checked by deleting them. Server 2791 passing / 9 skipped, web 1369, typecheck
+and lint clean 3/3. Migration **run**: all 42 applied, `prebuiltFingerprint
+text` read back out of `\d projects`.
+
+**Not verified:** no Docker daemon here, so nothing has actually started a
+container, built it and stopped it. And the three numbers remain guesses — that
+is the row's own warning and shipping does not answer it.
+
+### 2.53 Since (2026-09-10) — §11.10, Features, and the root that stays in a box
+
+§14.3's Phase 2c, and the last open row in §11. The row was explicit that it was
+not one row of work but "a question with three answers, and picking one is what
+unblocks it". Picked: **run the install scripts as root in a throwaway container
+and commit the result.**
+
+**The reasoning, because the other two are not obviously wrong.** Building from
+a Dockerfile — option one — ends in the same place, but its input is arbitrary
+code from a repository this platform did not write, which is exactly why
+`build` and `dockerFile` are refused today. Option two's input is a Feature
+artifact from a registry an operator allowlisted, run against a base image this
+repository ships: a strictly smaller thing to have said yes to. Option three,
+the home-directory subset, would refuse most real Features confusingly rather
+than clearly, and the row is right about that.
+
+**The sentence §11.2 wants kept is kept.** The workspace still never runs as
+root and never gains a capability. Root lives in a build container with no bind
+mount of the user's tree — so whatever the script does, it cannot touch the
+project, which is the specific harm `privileged` is refused to prevent — with
+capabilities trimmed to what `apt-get` genuinely needs and a lifetime of one
+install.
+
+**What is new code, and what it treats as hostile.** An OCI client of three
+requests (token, manifest, blob); an options-to-environment mapping; and
+`installsAfter` ordering. The registry is a host named in a file this platform
+did not write, so: the blob is capped **while streaming**, because
+`Content-Length` is the registry's claim rather than a fact; the layer's digest
+is verified against what was actually read, which is the only thing that makes
+"pinned by digest" mean anything; and every path in the tar is resolved and
+checked to be inside the target, because this archive is about to be run as
+root and `../../etc/cron.d/x` is not a theoretical entry.
+
+**Two bugs found by writing the tests, both worth recording.** The unpacker
+first rejected two promises for one bad archive — a `finish`/`error` promise
+*and* `pipeline` — and the one nothing awaited is an unhandled rejection, which
+in a server is a process that exits. Collapsing it to one holder then exposed a
+race the tests caught immediately: `pipeline` can resolve before the async entry
+handler has recorded WHY it refused, so an archive whose only entry was hostile
+was accepted. The handlers are now chained and awaited, which is what makes the
+check deterministic rather than usually right.
+
+**And one of the tests could only pass once.** With the escape guard removed —
+which is what a mutation check does — the archive really did write
+`/tmp/escaped.sh`, and it stayed there and failed the next run. It now unpacks
+into a folder inside a parent the test owns, so an escape lands somewhere it
+deletes.
+
+**Off by default**, with an allowlist of registries. The refusal string that was
+correct for as long as this row was open now names the variable that turns it
+on.
+
+**Verified.** 42 tests, both path guards checked by deleting them. Server 2833
+passing / 9 skipped, web 1369, typecheck and lint clean 3/3.
+
+**Not verified, and it is the whole runtime half:** no Docker daemon and no
+registry reachable here, so nothing has fetched a real Feature, run an install
+script, or committed an image. The parsing, ordering, option mapping, image
+keying, script generation and archive safety are tested; the build is not.
+
+### 2.54 Since (2026-09-10) — §10.9, settings you can commit
+
+§14.4's first Phase 3 row, and §10 called it "the row that most decides whether
+the thing *feels* like a personal editor". `.vscode/settings.json`,
+`.vscode/keybindings.json` and `.vscode/*.code-snippets` are now read from the
+repository. Snippets did not exist at all before this.
+
+**The names are VS Code's, and that is the feature.** `editor.fontSize`, not
+`fontSize`. A `settings.json` somebody already has does something when pasted
+in; one written here is not nonsense in a real VS Code. The mapping is a table
+rather than a convention, so a setting VS Code has and this editor does not is
+**reported** instead of silently dropped — and a section this editor has no
+opinion about (`files.*`, `terminal.*`, an extension's namespace) is skipped in
+silence, because reporting every line of somebody's real profile would bury the
+one line that is a problem.
+
+**Two settings differ in kind, not just in name**, and the table absorbs it:
+VS Code's `wordWrap` and `lineNumbers` are strings where this editor has
+booleans. Writing the test first caught the version of that which was wrong —
+the enums were `["on","off"]`, so a perfectly valid `"relative"` or `"bounded"`
+from a real profile would have been refused. VS Code's actual value sets are
+there now.
+
+**JSON with comments**, because that is what VS Code writes. A pre-pass rather
+than a parser, and it respects strings — `"https://x"` is not a comment, and
+treating it as one is the classic way this goes wrong. There is a test for
+exactly that, and for an escaped quote inside a string.
+
+**Precedence, decided once and reported.** Defaults, then the account (§2.49),
+then the workspace file — the most specific statement wins, and a file committed
+to the repository is more specific than a preference somebody carries between
+machines. `origins` says which layer each value came from, because the settings
+screen has to be able to say "this is coming from the repository": otherwise
+somebody drags a slider, watches it snap back, and concludes the editor is
+broken.
+
+**§14.4 said do this after 2a or the two would disagree about the source of
+truth. They do not**, and the mechanism is worth naming: the workspace values
+live in a second store and are merged at the point of use. They are never
+written into `editorSettingsStore`, so opening a project with a `settings.json`
+does not permanently change that person's settings everywhere, including in
+projects that never asked.
+
+**Keybindings are read per-workspace, which VS Code does not do.** A deliberate
+departure: this row's point is settings that are committable, and "F5 runs THIS
+thing" is exactly the binding somebody wants in the repository. VS Code's
+leading-`-` removal syntax is honoured as a removal rather than bound to a
+command named `-run.toggle`.
+
+**Snippet bodies are passed through untranslated.** Monaco understands VS Code's
+own `$1` / `${1:name}` / `${1|a,b|}` syntax, so `InsertAsSnippet` is both less
+code and more correct than any translation. The provider reads the current
+snippets on every keystroke rather than closing over a list, so editing a
+`.code-snippets` file takes effect immediately — and it registers on model
+change as well as on mount, because one editor instance shows every file and
+registering only for the first would give snippets that work in whichever file
+you happened to land on.
+
+**Verified.** 31 server tests, 7 web, and the false-versus-absent trap checked
+by mutating `withWorkspace` to `||` and watching the right test fail. Server
+2864 passing / 9 skipped, web 1376, typecheck and lint clean 3/3.
+
+**Not verified:** nobody has pasted a real VS Code profile in and compared the
+result against that profile in VS Code itself. The mapping is tested name by
+name; it is not tested against a real file somebody uses.
+
+### 2.55 Since (2026-09-10) — §10.13, the git you reach for in the second week
+
+The daily loop was already complete. This is stash, blame, amend, revert, tags,
+cherry-pick and comparing two refs — with stash and blame put where the work is,
+because §10 named them the two somebody notices in the first week and a feature
+you have to go looking for is one you use half as often.
+
+**Stash is inline in the source control panel**, not in a dialog: it is what
+somebody reaches for *instead of* committing, and hiding it would make the
+cheaper option the harder one to find. Apply and pop are separate actions rather
+than a checkbox — the primary one keeps the stash, and popping is confirmed,
+because a stash you meant to keep and popped is recoverable only through the
+reflog, which nobody reaches for in time.
+
+**Blame annotates the end of each line** rather than opening a column. The same
+answer VS Code arrived at, for the same reason: a blame column pushes the code
+sideways and every line of it is the same three words. It is off until asked
+for, because it runs a process per file.
+
+**Amend refuses a commit that is already pushed.** `merge-base --is-ancestor
+HEAD @{upstream}` is exactly the question "has anybody else seen this", and a
+non-zero exit covers both "not pushed" and "no upstream", which are both fine to
+amend. That check is the difference between a convenience and a way to lose
+somebody else's work.
+
+**Nothing here takes a ref as a free string.** A stash is addressed by index, a
+commit by a sha checked against a hex pattern, and a branch or tag through the
+`check-ref-format` the file already used. `execCapture` runs no shell, so there
+is no quoting bug to have — but a value beginning with `-` is still a flag git
+itself would read, and `--message=x` goes in as ONE argv entry so a message
+starting with a dash cannot become an option. Four of those guards were verified
+by removing them and watching the matching test fail.
+
+**Two bugs the tests caught, both in this session's own new code.** The stash
+panel first used `useQuery`, and `SourceControlPanel` is rendered without a
+`QueryClientProvider` above it — so it threw "No QueryClient set" and took the
+whole panel down. It reads with plain state now, the way the panel around it
+already does. And the panel's existing tests mock the API module wholesale, so
+adding calls to it made them `undefined()`; the mock lists them now.
+
+**Deliberately not done, and named so it is not mistaken for an oversight:**
+rebase, including interactive, and a commit graph. Rebase is history rewriting
+with a conflict-resolution loop attached, and this platform's conflict UI is
+built around merge; shipping a rebase that could strand somebody mid-operation
+with no way out through this UI would be worse than not having it. The graph is
+a rendering problem rather than a git one. Both stay open in §10.13's text.
+
+**Verified.** 26 server tests, 5 web, four guards mutation-checked. Server 2890
+passing / 9 skipped, web 1381, typecheck and lint clean 3/3.
+
+**Not verified:** no Docker daemon, so every one of these has been tested at the
+argv it builds and the output it parses, and none has been run against a real
+repository.
+
+### 2.56 Since (2026-09-10) — §10.11, a diff you can compare and type in
+
+**One of this row's claims was wrong when it was written, and finding that out
+is most of the work.** "grep for `createDiffEditor` returns nothing, so Monaco's
+own side-by-side diff is unused" — the grep is accurate and the conclusion is
+not: `@monaco-editor/react`'s `DiffEditor` wraps `createDiffEditor`, and it was
+already rendering two cases, the assistant's review pane and compare-with-saved.
+A row that measures a symptom can be right about the symptom and wrong about the
+diagnosis; this one was.
+
+**What was genuinely missing, and shipped.** The left-hand side is now a choice
+— the saved copy, a branch or commit, or another file in the project — and the
+right-hand side can be typed into. §10.11 asked for exactly that ("edit inside
+the diff"), and a diff you can only read is one you have to leave in order to
+act on.
+
+**Reading a version that is not checked out** is `git show ref:path`, which is
+the only way: the working tree holds one version at a time, and "compare against
+main" is a question about one that is not there. A file that does not exist on
+that ref answers **null rather than an error**, because "this file is new on
+your branch" is an answer — the diff is against nothing and every line is an
+addition. An error there would make a legitimate comparison look like a failure.
+
+**Reading another file goes through the download endpoint that already exists**,
+not a new route: same question, already scoped to `viewer`, already confined by
+`resolveInProject`, and a second route would be a second place for that
+confinement to be got right. Deliberately not through the editor socket — that
+path OPENS A TAB, so using it to fetch a comparison would put the file you are
+comparing against into your editor as a side effect.
+
+**Two things that would have been wrong and are not.** The dialog subscribes to
+the active tab rather than reading `getState()` during render, which would have
+named whichever file was open when the page mounted. And switching files resets
+the comparison: the left-hand side was fetched for the file that WAS open, and
+keeping it would diff two unrelated files and look, for a moment, like a real
+answer. The store drops its text when the SOURCE changes rather than when the
+new text arrives, for the same reason — verified by removing that and watching
+two tests fail.
+
+**The original side stays read-only.** It is a version that is not checked out;
+there is nowhere to write it. And the assistant's review pane stays read-only
+too: its right-hand side is a PROPOSAL rather than the buffer, so editing it
+would be editing something nobody is saving.
+
+**Verified.** 4 server tests on `show ref:path` including a ref that could be
+read as a flag and a path that climbs out of the project, 6 on the compare
+store, one guard mutation-checked. Server 2894 passing / 9 skipped, web 1387,
+typecheck and lint clean 3/3.
+
+**Not verified:** nobody has typed into the diff and watched the file save. The
+change path is the same `markDirty` + `queueIfAllowed` pair the main editor
+uses, which is good evidence and is not the same as having done it.
+
+### 2.57 Since (2026-09-10) — §10.10, tasks, and the panel's second feed
+
+Named tasks, groups and `dependsOn` are the small half. The row itself points at
+the large one: "the problems panel already exists and is fed only by the
+language server, so the matcher half has somewhere to go." It does, and a build
+error is now something you click rather than something you read in a terminal
+and then go looking for.
+
+**The matchers are named the way `tasks.json` names them** — `$tsc`,
+`$eslint-stylish`, `$go`, `$gcc` — for the same reason §10.9's settings use VS
+Code's names: a file somebody already has should work. Each has a test written
+against **real output from the tool it names**, because a regex written against
+imagined output is a regex that matches imagined output.
+
+**Two lists, not one.** Task problems live beside the language server's rather
+than merged into them, and the reason is lifetime: markers are recomputed on
+every keystroke and replaced wholesale, while a task's problems are true until
+that task runs again. Merging them would mean the next keystroke silently
+deleting a build's errors — at the moment somebody most needs to see them. The
+status bar counts both, because a count that omits the build says "everything is
+fine" while the build is red.
+
+**Background tasks are refused by name.** `isBackground` is a watch, and this
+platform already has one notion of a process that stays running — the dev server
+(§2.7), with a lifecycle, a log, a preview and a reconciler. A second would be
+two answers to "what is running". The refusal says that, where the Run button
+is, rather than starting something and abandoning it when the request ends.
+
+**A dependency that fails stops the chain**, because a `build` that runs after
+`install` failed reports the consequence rather than the cause. A cycle is
+refused rather than broken, for the reason `orderFeatures` gives: an arbitrary
+order produces a build that works here and not in VS Code.
+
+**`execCapture` grew a timeout**, optional and absent by default so nothing else
+changes. A task's command line comes from a file in the repository; a build that
+hangs would otherwise hold the request open until the client gave up and leave
+nothing to say why. It resolves with what it read and exit code 124 — the number
+`timeout(1)` uses — rather than throwing the output away.
+
+**One matcher was written and then deleted rather than shipped.** A Python
+traceback line carries a file and a line and *no message* — the message is on
+the last line of the traceback. A matcher built on it would fill the panel with
+entries whose text is the traceback line, which is worse than an empty panel: it
+looks like the feature works. The comment where it was says so, and says what
+doing it properly would take.
+
+**Verified.** 26 server tests, 12 web, two guards mutation-checked — and the
+merged status-bar count was found *untested* by mutation, so it has tests now
+rather than a claim. Server 2920 passing / 9 skipped, web 1399, typecheck and
+lint clean 3/3.
+
+**Not verified:** no Docker daemon, so no task has actually been executed. The
+file parsing, ordering, matchers and path normalisation are tested; the exec is
+not.
+
+### 2.57b Since (2026-09-10) — §10.12, the history that was already being kept
+
+**The row was half wrong and that is the finding.** It says checkpoints "are the
+wrong granularity — whole-project, explicit". They are neither: `snapshot()` is
+called per file, automatically, from the write handler, on every save, and has
+been since §2.x. It even snapshots *what is being replaced* rather than what is
+being written, with a comment explaining that the old version is the thing
+somebody wants back an hour later.
+
+**What was actually missing: a reader.** `listCheckpoints` and `readCheckpoint`
+were written, correct, and reachable from nothing — no route, no client, no UI.
+The data was on disk and the question "what did this look like an hour ago" had
+no way to be asked. That is the second row this session where a claim measured a
+symptom correctly and drew the wrong conclusion from it (§2.56 was the first),
+which is worth noticing about this document rather than about these two rows.
+
+**Opening a version compares rather than restores.** §10.11 made the diff pane's
+left-hand side a choice earlier the same day, so an old version goes there —
+and what somebody wants out of an hour-old file is usually three lines, not the
+whole thing back.
+
+**What the panel says out loud:** these live beside the project on the same
+disk, so they are useful for the last hour and are not a backup. §3.3 is the
+backup. A panel that implied otherwise would be the most expensive kind of
+wrong.
+
+**A test that claimed too much, corrected rather than kept.** `readCheckpoint`
+validates `at` with `Number.isSafeInteger`, and a test asserted that guard
+"rather than building a path from it" — but mutating the guard away leaves the
+test green, because a bad number names a file that does not exist either way.
+The test now states the outcome and records that the check is belt to that
+braces. A test whose comment claims a mechanism it does not exercise is worse
+than no comment.
+
+**Verified.** 3 server tests, 7 web. Server 2923 passing / 9 skipped, web 1406,
+typecheck and lint clean 3/3.
+
+**Not verified:** nobody has saved a file, waited, and watched the version
+appear. The reading path is tested; the snapshot half was already shipped and is
+covered by its own tests from §2.x.
+
+### 2.58 Since (2026-09-10) — §10.8, five more languages, and one that mattered
+
+Two language servers became seven entries: TypeScript and JavaScript from the
+node image, Rust and C/C++ from images added with this row.
+
+**TypeScript is the one worth having and the row nearly undersold it.** It says
+TS and JS "get Monaco's bundled worker, which is per-model and does not see the
+project" — which is not a weaker intelligence but a different one. A rename
+renames one buffer. Go-to-definition across files is a guess. `tsserver` behind
+`typescript-language-server` sees the project, and it went into the node image
+this platform already builds, so it cost one registry entry and one `npm
+install -g`.
+
+**A test warned about the mistake this row could have made, and it was
+listened to.** An existing test said: naming an image for a language whose
+image does not exist "would be a lie about an image that does not exist". The
+tempting version of this row is registry entries for Rust and C++ pointing at
+`sandbox-rust:latest` and `sandbox-cpp:latest` — which nothing builds, so the
+refusal message becomes exactly that lie. So the Dockerfiles are here, they are
+in `pnpm images:build`, and they are in CI, because an image nothing builds is
+an image whose Dockerfile is wrong and nobody knows it. A test now asserts that
+every image named in the registry is one the build produces.
+
+**`image` became `images`**, because `typescript-language-server` serves two
+language ids and a server can belong to more than one image. Mutating the check
+to compare only the first image left every test green — every entry names one
+image today — so `servesImage` is exported and tested directly. A capability
+that is latent rather than exercised is one that breaks the day it is first
+used.
+
+**Two tests used Rust as their example of an unsupported language** and this row
+made Rust supported. Their intent was untouched; the example moved to Ruby, with
+a note saying so.
+
+**Choices about the images themselves.** `rust-analyzer` comes from `rustup
+component add` rather than a release tarball, so the analyzer and the compiler
+are the same version — the pairing that decides whether it understands the
+project's syntax. `clangd` comes from Debian for the same reason: an analyzer
+that disagrees with the compiler about where `<vector>` lives is worse than
+none. And `CARGO_TARGET_DIR` points into the cache volume, because a debug build
+is hundreds of megabytes and rebuilding it on every container rebuild is the
+waste the node_modules cache already exists to avoid.
+
+**Not done, and named:** Java, C#, Ruby, PHP. Each is another image and another
+server, and none has a template here to be used from.
+
+**Verified.** 36 LSP tests, the image-list behaviour mutation-checked. Server
+2929 passing / 9 skipped, web 1406, typecheck and lint clean 3/3.
+
+**A flake was confirmed rather than assumed.** One run failed on
+`refreshTokenService`'s concurrent-refresh test — which §1 already records as
+failing "roughly one run in three" under load, untouched since well before it
+was first seen. Re-run 3/3 green in isolation and green on the next full run,
+and this change touches nothing near it.
+
+**Not verified:** no Docker daemon, so `images/rust` and `images/cpp` have never
+been built, and no `rust-analyzer`, `clangd` or `tsserver` has been started. The
+policy is tested; the images are Dockerfiles nobody has run. CI builds them on
+the first push that reaches it, which is where that gap closes.
+
+### 2.59 Since (2026-09-10) — §10.14, and what a bundle row hides
+
+Six items, and **two were already done when the row was written**: notebooks
+shipped in §2.42, and editor splits have been persisting `editorSplitWidth`
+since §2.x. That is the hazard of a bundle row — it is read as one unit and
+ages as six.
+
+**Markdown preview reuses §2.42's parser and renderer** rather than adding a
+markdown library. The obvious move is `marked` plus `dompurify`, which is two
+dependencies and an `innerHTML` in front of content from a repository this
+platform did not write. `parseMarkdown` and `MarkdownBlocks` already exist and
+already refuse a `javascript:` link through `safeHref` — a second markdown path
+would be a second place for that refusal to be got right. What it does not
+render, because the parser does not: tables, footnotes, block quotes, images,
+HTML.
+
+**A bug written and caught in the same hour.** The preview first read
+`diffCurrent`, which is only set when the diff pane is opened — so it would have
+shown the last SAVED text, silently, in the one case anybody looks at a preview.
+The comment beside it said "previewing what you have typed is the whole point"
+while the code did the opposite. It is fed from the live buffer now, updated
+only while the preview is open so a hidden pane does not re-parse on every
+keystroke.
+
+**Terminal profiles read VS Code's own spelling** —
+`terminal.integrated.defaultProfile.linux` plus the profiles map, with a
+built-in name resolving to `/bin/<name>` as VS Code's shipped profiles do. The
+value comes from a file in a repository this platform did not write and is
+interpolated into a command line, so an **allowlist of absolute paths** decides
+what may run; anything else is ignored in favour of bash rather than refused,
+because a devcontainer naming a shell the image lacks should open a working
+terminal, not none. A bare `zsh` is refused: PATH inside a sandbox is a thing
+the project itself can change.
+
+**The wrapper is `/bin/sh` now, and the reason is fish.** `shellArgv` wraps the
+shell to record its own pid, and the first version of that comment claimed the
+wrapper avoided running rc files twice — which is wrong, since a `-c` shell is
+not interactive. The real reason is that `$$` is the pid in every POSIX shell
+and is **not** in fish: a wrapper written in the chosen shell would record the
+wrong pid for one of the shells this allows, and the pid file is what the hangup
+uses. The failure would have been a shell nobody can kill — §13.7's defect
+again, reintroduced by a feature.
+
+**Two items stay open and are named in this entry** rather than left inside a
+closed row: split terminal panes, and multi-root workspaces. The second is not
+small — one project is one container, one bind mount and one quota, and a
+second root is a second of each — and calling it small is how it ended up in a
+bundle labelled "the small ones".
+
+**Verified.** 21 terminal-shell tests, 5 config tests, 4 preview tests, the
+allowlist mutation-checked. Server 2938 passing / 9 skipped, web 1410, typecheck
+and lint clean 3/3.
+
+**Not verified:** no Docker daemon, so no terminal has been opened with a
+non-default shell. The argv is tested; the exec is not.
+
+### 2.60 Since (2026-09-10) — §13.2, a preview the host does not pay for
+
+Every preview in this product was a reverse proxy to a dev server inside
+Docker. That is right for the projects it serves and wrong for a shared link: a
+container costs memory, takes seconds, and is reaped when nobody is looking — so
+an embed on a busy page is a container per reader. This is the other half.
+`esbuild-wasm` builds the project in the reader's own browser; the host spends
+one text response.
+
+**The row calls itself "the row most likely to be over-sold", and that shaped
+the design more than the bundler did.** Eligibility is an **allowlist of five
+templates**, not a deny-list of servers: a template this platform has not heard
+of is refused, because a new one is far likelier to be another kind of server
+than another front end, and a wrong refusal costs a fallback to the preview that
+already works. Getting it wrong the other way gives the reader a blank page and
+the conclusion that the project is broken.
+
+**Next.js is refused, front-end though it is.** It has a server, server
+components, and a router that runs on it. "Previews except for the half that is
+server-rendered" is not a preview, and shipping it would have been the
+over-selling this row warns about.
+
+**A refusal is a sentence about the project, not an error.** "This project runs
+a server, so it needs a container" tells the reader what is true and what to use
+instead; "failed" tells them the project is broken.
+
+**The sandbox attribute is the one line that matters.** `allow-scripts` is what
+makes the project run at all, and `allow-same-origin` is deliberately absent —
+together they are no sandbox whatever, since the previewed code could then reach
+this app's cookies, storage and DOM. There is a test whose only job is to assert
+that second half, and it fails when the attribute is widened.
+
+**esm.sh is a real dependency and is named as one.** Bare imports resolve
+through it, so a reader with no route gets a build error that says so — with the
+container preview named as the thing that does not need it — rather than
+"Could not resolve react", which sends somebody to look at their imports.
+
+**Extension resolution is why a real bundler was used.** `./App` means
+`./App.tsx` in every project written the ordinary way; a half-resolver produces
+a preview that works for the example and fails for the project, which is the
+worst outcome for a feature whose audience did not write the code.
+
+**Verified.** 14 server tests on eligibility and gathering, 14 on the resolver
+and the document, 7 on the component; the allowlist, the `node_modules` skip and
+the sandbox attribute each mutation-checked. Server 2952 passing / 9 skipped,
+web 1431, typecheck and lint clean 3/3.
+
+**Not verified, and it is the interesting half:** nothing has actually been
+bundled. `esbuild-wasm` needs a WebAssembly runtime and esm.sh needs a network,
+and the tests exercise every decision around the build rather than the build. A
+real project has never been rendered in that iframe.
+
+---
+
+### 2.61 Since (2026-09-10) — §13.1, the sandbox, and what it refuses to spend
+
+§13 calls this "the defining act of the product this section names" and then
+tells you not to build it: an unauthenticated visitor who can start a container
+is an unauthenticated visitor spending this host's memory, which is what §6
+decision 13 refused on purpose. The row's own instruction is "do not build it
+before 13.2". 13.2 shipped yesterday, so this is what "after" looks like.
+
+**The objection is answered rather than waived, and the answer is that no
+container starts.** `GET /api/v1/embeds/:token/sandbox` returns the files and
+one text response ends the host's involvement. The visitor's edits live in
+their browser and the build happens there. An anonymous page view spends their
+memory and none of this deployment's — so the refusal stands exactly where it
+was, and what moved is when the account is asked for.
+
+**Saving is forking and forking still means signing in.** That boundary is not
+softened anywhere: there is no anonymous write path, no `ProjectCollaborator`
+row without a `userId`, and nothing the visitor does reaches the database. What
+changed is the order — a stranger changes a line and runs it, and meets the
+account only when they want to keep the result rather than before they can see
+whether it is worth keeping.
+
+**Off by default, and that is a decision about links already published.** The
+`sandbox` column defaults to `false` and the owner turns it on per embed. An
+embed is something to read; if a migration turned every published one into an
+editable sandbox it would change what somebody already shared, without their
+having said so. A link whose owner did not opt in gets a sentence — "that link
+is an embed, not a sandbox" — not an error.
+
+**Two guards were mutation-checked** by deleting them and watching a test fail:
+the refusal above, and the `isSecretPath` filter that keeps `.env` and its
+neighbours out of a payload served to anybody with the URL.
+
+**A mutation-check found a real hole rather than confirming a good one.** The
+service-level tests passed with `sandbox` deleted from the controller's
+`settingsSchema` — because `z.object` strips what it does not name, so the UI
+switch would have posted the flag and Zod would have dropped it silently, on
+every save, with every service test green. The schema is now exported and
+tested directly. The lesson is the one §5 keeps recording in other forms: a
+test that goes through the layer below cannot see a layer above it discarding
+the field.
+
+**The migration writes `embeds`, the mapped table name**, not the model name —
+§5 records two migrations that shipped green having never run because they
+wrote the model name, and nothing but Postgres reads that file. Applied to both
+databases and the column read back with `\d embeds` before this was called
+done.
+
+**What it inherits from 13.2 it inherits whole.** Five templates, no
+server-side anything, and a project outside the allowlist has no sandbox at
+all. That is the honest half of the row, and it is the same half 13.2 was
+careful about.
+
+**Verified.** 12 tests on the payload, the refusals and the schema. Server 2964
+passing / 9 skipped against 43 migrations, web 1431 passing (116 files),
+typecheck and lint clean 3/3.
+
+**Three figures in §1's table were corrected here, and two of them had been
+wrong for some time.** Under §7 this commit re-ran the suites, so it owns the
+row. The web *file* count had been incremented by hand rather than read from
+the run output — it drifted +1 at `d5462ab` and +2 by `96aef3d`, where it read
+118 against a real 116 — while the test counts beside it stayed right because
+those were copied from the output. The no-database server row was staler still:
+it read 2124 passing / 296 skipped / 152 files against a measured 2704 / 269 /
+179. Every figure in that table is now a measurement taken today. This is §1's
+own recurring failure in its third column: a number that is incremented is not
+a number that was checked.
+
+**§3's preamble was carrying four claims that the tree had already falsified**,
+and they are struck rather than deleted so the pattern stays legible: it still
+said there was no anonymous sandbox (this row) and no container-free preview
+(§13.2, yesterday), listed Dev Container Features and prebuilding a stopped
+workspace under "blocked on a decision nobody has taken" after both had shipped,
+and listed notebooks as "simply absent" five days after §2.42. §1's own sentence
+about §11's last row needing a decision was stale the same way. The prose that
+narrates the checkboxes does not move when a checkbox does, and nothing checks
+it — which makes it the same defect class as the counts above, in sentences
+instead of numbers.
+
+**Not verified, and it is inherited from 13.2:** nothing has still actually
+been bundled — no WebAssembly runtime and no network here — so a real project
+has never been rendered in that iframe, and the sandbox's whole point is that
+iframe.
+
+---
+
+### 2.62 Since (2026-09-10) — §13.3, a URL per pull request, and who pays for it
+
+§13.3 says four of its five parts already exist — `repoImportService`,
+`deployService`, `releaseService`, the trash — and that the fifth is a route.
+That estimate was right. `POST /api/v1/github/webhook` verifies an HMAC, decides
+what the delivery means, and drives the parts that were already there.
+
+**The question the row does not ask is the one that shaped the design: whose
+account pays for a workspace a webhook creates.** Nothing in the schema links a
+project to a repository — the remote lives in git config inside the container —
+so there was no cheap way to find "the account that imported this repo". The
+obvious substitute was `GithubConnection.login`: build any repository a
+connected user happens to own. That silently enrols every repository of every
+connected account, so a leaked webhook secret, or an App pointed at this URL by
+mistake, would start containers for repositories nobody here chose. Enrolment is
+explicit instead — `PullRequestRepo`, one row per repository, unique so that
+"whose quota" has one answer. An unenrolled delivery starts nothing, and that
+guard is mutation-checked.
+
+**A pull request from a fork is refused.** Building one means cloning a branch
+nobody here controls and running its install scripts and dev server on this
+host, which is §6 decision 13's refusal arriving by a different road and wearing
+a collaborator's clothes. This is not an edge case — a fork PR is the ordinary
+way an outside contributor sends a change, and for a public repository it is the
+majority case. Refusing it is the honest limit of the row rather than an
+oversight in it, and the guard goes red when deleted.
+
+**The replay defence is a correctness requirement here, not an efficiency
+one.** Stripe signs a timestamp; GitHub does not. Its signature covers the body
+alone, so a captured delivery stays valid forever and replaying it is free —
+"the signature is correct" really does only mean "GitHub sent this at some
+point". `WebhookDelivery` refusing an id already seen is the only thing between
+that and a replayed `opened` starting another container, which is why a delivery
+with no id is refused outright rather than acted on once and hoped about. A ping
+is answered without claiming its id, so a re-ping after a reconfigure does not
+look like a replay.
+
+**It supplies the trigger §12.2 says in its own text that it lacks.** That row
+shipped prebuilds and stated what was missing was a policy for *when* — "build
+on push, or build on a schedule, or build when a `devcontainer.json` changes".
+A push to a branch an open pull request is from now refreshes that workspace:
+the first of the three, arriving with a reason attached rather than a schedule
+somebody guessed.
+
+**Teardown is the trash, not a purge.** `trashProjectService` removes the
+container, stops the managed database and takes the deployment offline — all of
+the cost — while leaving seven days for somebody who merged by mistake. Decision
+13's shape again: the guarantee is that the expensive things stopped, not that
+the row is gone.
+
+**The comment is allowed to fail.** A deployment whose token cannot write gets
+the workspace without the comment rather than neither, and the next push edits
+the comment already posted instead of adding another — a pull request carrying
+fifteen near-identical bot comments is worse than one carrying none.
+
+**Verified.** 9 tests on the signature, 24 on the decision layer, 12 on the
+orchestration, 10 on the route, and 8 against real Postgres. The route tests
+assemble the app in `index.ts`'s real parser order, which is the arrangement §5
+records the billing webhook's tests never checked. Two guards mutation-checked:
+the fork refusal and the enrolment requirement. Server 3033 passing / 9 skipped
+against 45 migrations, web 1431 passing, typecheck and lint clean 3/3.
+
+**Not verified, and it is the expensive half.** There is no Docker daemon here,
+so `importRepository` and `publish` have never run for a real delivery — what is
+proven is which of them is called and when, not what happens when they do. No
+delivery from GitHub has been received either, so the App itself is unexercised:
+the signature verifier is tested against signatures this repository generates.
+
+---
+
+### 2.63 Since (2026-09-10) — §13.4, a second checkout, and a stale premise
+
+§13.4 asks for several checkouts of one repository that know they are related —
+sharing the account's credentials, the project's env vars, and one entry on the
+dashboard. `WorkspaceGroup` is the object that makes them related: it owns the
+repository identity and the shared environment, and the projects under it are
+the checkouts.
+
+**The row's own premise had gone stale, and checking it was worth the minute.**
+It says reviewing a colleague's branch means stashing, "and §10.13 records that
+stash does not exist". §10.13 shipped earlier the same day, so it does. The
+motivation survives intact for a different reason than the one written down:
+`switchBranch` **refuses outright on a dirty worktree** rather than carrying
+changes across — deliberately, and its comment explains why — so stashing means
+putting your own work down to pick up somebody else's. Two checkouts is what
+lets you hold both. This is the fourth row in this document whose text was
+partly wrong about the tree, and the pattern is consistent: the *observation* is
+accurate and the *conclusion drawn from it* has moved on.
+
+**"Cheap only if 13.3 exists, since the two want the same object" was exactly
+right**, and it is the second time §13 has predicted its own shape correctly. A
+pull request workspace *is* a second checkout of one repository. It joins the
+group in one call, and gets the shared environment rather than being another
+unrelated project with its own everything.
+
+**The environment layers between the account's and the checkout's.** That order
+is the argument: more specific than "everything I own", less specific than "this
+checkout". It is read in `getEnvVars` beside the other two rather than at
+container start, for the reason those two give — `envSignature` is computed from
+what that function returns, so changing a group variable changes the signature
+of every checkout in the group and each is rebuilt on its next start instead of
+keeping the old value for the rest of its life. The precedence is
+mutation-checked: moving the group above the checkout's own value turns a test
+red.
+
+**A cycle was avoided rather than tolerated.** `workspaceGroupService` reads
+`sealEnvVars` and `parseEnvVars` from `projectEnvService`, so `getEnvVars`
+cannot import back. It has its own small reader of the same column, and both go
+through `parseEnvVars` so the "is this column encrypted" answer stays single —
+which is the reason §13.8 gave for exporting `sealEnvVars` at all.
+
+**Dissolving a group does not delete the work in it.** `SET NULL` and not
+`CASCADE`, with a test whose only job is to say so: grouping is not owning, and
+a foreign key is where that distinction is either made or lost.
+
+**Verified.** 14 tests against real Postgres — the group's identity, its
+case-insensitivity, the per-account separation, the listing, the siblings, the
+SET NULL, and five on the environment layering — plus one added to §13.3's suite
+asserting the join. Server 3048 passing / 9 skipped against 46 migrations, web
+1431 passing, typecheck and lint clean 3/3.
+
+**A change here broke §13.3's tests, and that was the right kind of break.**
+Adding the group join gave `prWorkspaceService` a dependency its mocks did not
+cover, and four tests went red immediately. Mocked, and an assertion added that
+the join happens — the behaviour is now stated rather than incidental.
+
+**Not verified: the dashboard's own rendering.** `GET /projects/groups` returns
+one entry per repository with its checkouts under it, and no web view consumes
+it yet. Two of the row's three — shared credentials, shared env vars — are
+delivered end to end; the third is served by the server and not yet by the
+screen. Nothing here has run against a Docker daemon either, so a second
+checkout has never actually been cloned.
+
+---
+
+### 2.64 Since (2026-09-11) — §13.5, devtools, and believing nothing the preview says
+
+A runtime `TypeError` in a previewed app lands in the *real* browser's console —
+which the reader of a shared link does not have open, would not know to open,
+and on a tablet does not have. §13.5 asks for four things and this is all four:
+a console tab, a network tab, an error overlay, and a device-size frame, fed by
+a `postMessage` bridge injected into the preview document.
+
+**The row's description of the problems panel is stale.** It says the panel is
+fed "only by the language server, with the matcher half unbuilt" — §10.10
+shipped `taskProblems`, so it has had two feeds since. The architectural
+suggestion, that a runtime console is a third, was reconsidered rather than
+followed: a console line, an HTTP request and an unhandled rejection are not
+diagnostics with a file and a line, and squeezing them into the `Problem` shape
+would have meant inventing positions they do not have. They got a panel of their
+own. **Fifth row running whose text was partly wrong about the tree**, and the
+pattern is now worth naming as a habit rather than an anecdote: check the claim,
+keep the intent.
+
+**All of the security is in the parent, and the interesting part is which check
+is useless.** The previewed code runs with `allow-scripts` and can post anything
+it likes, including a message shaped exactly like a record. The obvious guard is
+`event.origin` — and it does not work here: a sandboxed iframe without
+`allow-same-origin` has an opaque origin and reports the string `"null"`, which
+is exactly what every other opaque frame on the page reports. So the check is
+`event.source` identity against the iframe's own `contentWindow`, and every
+field is re-validated and re-clipped on arrival regardless. Deleting the
+identity check turns two tests red.
+
+**Bounded at both ends, which is design rather than caution.** A `console.log`
+inside `requestAnimationFrame` is sixty messages a second forever and is an
+entirely ordinary thing to write by accident; unbounded, this panel is a memory
+leak with a scrollbar. The bridge rate-limits at the source and says so once
+when it mutes; the store caps each feed **separately**, so a chatty log cannot
+push the errors — the rows somebody actually needs — out of the list. What was
+dropped is counted and shown, rather than quietly presenting the last 500 as if
+they were all of them.
+
+**The bridge never replaces the real console.** It calls the original method
+first, unconditionally, and reports as a side effect — so somebody who *does*
+have devtools open loses nothing by this existing. It also stringifies in the
+preview rather than posting values, because structured clone cannot carry a DOM
+node, a function or a circular object, and a bridge that throws while reporting
+an error is worse than no bridge.
+
+**The overlay is over the preview, not in a tab.** A blank iframe with the
+explanation filed under a tab nobody opened is precisely the situation this row
+describes — the reader concludes the project is broken. Dismissing it is
+per-error: "I have seen this one" must not mean "stop telling me", and there is
+a test for the second error arriving after the first was dismissed.
+
+**The device frame names sizes, not devices.** "Phone — 390×844" rather than a
+handset model, because this frames the iframe and does not emulate: no pixel
+ratio, no user-agent string, no touch emulation. Naming it after a phone would
+promise all three.
+
+**Verified.** 29 tests on the bridge boundary and the injection, 7 on the
+store's caps, 9 on the panel and overlay. Web 1476 passing (119 files), server
+3048 passing / 9 skipped, typecheck and lint clean 3/3.
+
+**Where it does not work, and this is half the row's audience: the container
+preview.** The bridge reaches documents this platform generates — §13.2's
+browser preview and therefore §13.1's sandbox, which is the reader of a shared
+link, the person the row calls its sharpest user. The ordinary editor preview is
+a reverse proxy to a dev server, and injecting there means buffering and
+decompressing every HTML response through `http-proxy-middleware`: a real
+cost against a working proxy, and a separate decision rather than something to
+slip into this row. The device frame works for both, being only CSS.
+
+**Not verified:** nothing has been bundled or run in this environment, so no
+real `console.log` has ever crossed the bridge — the tests exercise the protocol
+and the panel, and the agent script is asserted by reading it rather than by
+executing it in a browser.
+
+---
+
+### 2.65 Since (2026-09-11) — §13.6, a guest, and the claim that scopes them
+
+The collaborative layer — Yjs per file, awareness, remote cursors, presence,
+follow mode — was finished and unreachable without an account. Even the EDITOR
+share link is "a named grant": redeeming it adds the signed-in user as a
+collaborator, so the person on the other end signs up first. Correct for a
+platform, wrong for ten minutes of pairing, which is what that layer is most
+obviously for. Redeeming a pairing link now writes **no collaborator row at
+all**.
+
+**The row named the mechanism and it was right.** Preview and MFA tokens are
+both typed, short-lived and checked on verify; this is the third of that shape.
+What it adds is one claim they do not have. `pid` names the single project the
+credential is good for, and `pairingAccess` compares it against the project
+being joined — so a guest holding a valid token for project A gets exactly what
+a stranger gets against project B. Without that claim a pairing token would be a
+general API credential belonging to nobody, which is the same failure the `typ`
+claim was added to stop, one level out. Deleting the comparison turns a test
+red.
+
+**Both directions of the `typ` guard are asserted**, because this is the first
+credential in the product with no account behind it: a pairing token is refused
+where an access token is expected, and an access token and a preview token are
+both refused where a pairing token is expected. The preview cookie matters most
+there — it is handed to untrusted project code, so it is the most exposed token
+this product has.
+
+**A test found a real defect rather than confirming a good line.**
+`verifyPairingToken` read the display name as `typeof nam === "string" ? nam :
+"Guest"`, and an empty string is a string — so a guest who sent `""` would have
+rendered as a cursor with no label beside it. The fix is a length check; the
+lesson is the ordinary one about `typeof` standing in for "present".
+
+**Every refusal says the same sentence.** Expired, revoked, pointing at a
+moderated project, pointing at a trashed one, or never having existed all
+produce "that pairing link is not valid". A link that says *expired* tells
+whoever holds it that it was once real and that this project exists, which makes
+the link a way to ask. There is a test asserting the three messages are one
+message, and the distinctions live in the metrics instead.
+
+**`takenDownAt` and `deletedAt` are in the check, not assumed away.** §6
+decision 13's rule again: a project taken down for MALWARE must stop handing
+anybody a container to run it in, and a guarantee that depends on a cleanup
+having succeeded is not a guarantee.
+
+**Creating a link is the owner's alone**, not an editor's. A collaborator
+handing out anonymous guest access is spending the owner's compute on a decision
+the owner never made.
+
+**Revoking closes the door; it does not reach through it.** Revocation is
+stamped rather than deleted, so the row survives as a record of what was granted
+and when it stopped, and a guest already holding a token keeps it until it
+expires. `PAIRING_TOKEN_TTL_HOURS` — 4, a guess in §12.5's sense rather than a
+measurement — is the bound on how long that is, and it is the honest answer to
+"how do I get them out right now": you cannot, for at most four hours.
+
+**Verified.** 8 tests on the token, 17 against real Postgres covering every
+refusal and the name handling. Server 3073 passing / 9 skipped against 47
+migrations, web 1476 passing, typecheck and lint clean 3/3. The migration writes
+the mapped table name and the table was read back out of `\d`.
+
+**§10.5's warning is repeated here rather than argued with:** at n=1 this row
+and everything it reaches is dead weight. It was built because §13 is a diff
+against two products, not because this deployment is known to have a second
+person in it.
+
+**Not verified:** no guest has actually joined a session. The socket handshake
+accepts a pairing token and resolves it to a project-scoped access level, and
+that path is asserted at the unit level — but two browsers have never been in
+one document here, and no web UI for creating or redeeming a link exists yet.
+The endpoints are the deliverable; the join screen is not built.
+
+---
+
+### 2.66 Since (2026-09-11) — §13.10, and the question a breakpoint does not ask
+
+`useMediaQuery("(max-width: 900px)")` was the whole of the mobile story, and the
+row is right about that. It is also a good breakpoint answering a question that
+is not this row's. **Width says how much room there is. It does not say whether
+there is a mouse.**
+
+The two come apart in both directions and both are ordinary. A tablet at 1024px
+is wide enough for every pane and has no keyboard, so it was getting mouse-sized
+hit targets and no way to type `Ctrl`. A desktop window dragged to 800px is
+narrow and has a real keyboard, so it was getting a layout built for fingers it
+does not have. Touch affordances now key off `(pointer: coarse)` — a capability
+the browser actually knows — and layout keeps keying off width. The existing
+breakpoint is untouched: this adds a question rather than moving the answer to
+the old one.
+
+**"A terminal with no `Ctrl`" is the part of this row that is not a matter of
+taste.** A software keyboard has letters, digits and punctuation; no control
+key, no escape, usually no tab and no arrows. So `Ctrl+C` cannot be typed at
+all, and a shell you cannot interrupt is a shell you cannot use. The key bar is
+a table of bytes, because a terminal takes a stream and not key events: 0x03 for
+interrupt, `ESC[A` and friends for the arrows, and the control range computed
+from the letter rather than tabulated so twenty-six rows cannot drift.
+
+**`Ctrl` is one-shot, and that is the only defensible behaviour.** It applies to
+the next key and lets go, exactly as a real modifier does. A latching modifier
+on a screen with no key to look at is a mode somebody is stuck in without being
+able to see it. Tapping it twice disarms it, so a mis-tap costs nothing.
+Mutation-checked: making it latch turns five tests red across two files.
+
+**Interrupt is on the bar by name as well as behind the modifier.** It is the
+reason the bar exists, and putting the most-needed key two taps away would have
+been designing the feature and then hiding it.
+
+**What this does not claim.** Monaco is not made into a mobile editor — the
+handful of its defaults that are actively wrong without a mouse are turned off
+(the hover popup that covers the line it was opened from, the minimap that is a
+mouse's scrollbar) and nothing else. The font is nudged one step and left alone
+if somebody has already chosen a larger one, because they chose it. The file
+tree gets finger-sized hit targets and no redesign.
+
+**Verified.** 19 tests on the byte table, 15 on the capability layer, 6 on the
+bar. Web 1516 passing (122 files), server 3073 passing / 9 skipped, typecheck
+and lint clean 3/3.
+
+**The row says it is "not recommended", and shipping it has not made that less
+true.** §13.10 notes it "may well have no user here" and that §12's warning
+about this method applies to it harder than to any other row on the page. That
+is still the honest reading. It was built because the plan was to be finished.
+**Nothing here has been touched by an actual finger** — there is no touch device
+in this environment, so what is proven is that the right bytes leave the bar and
+the right queries drive the layout, not that any of it is pleasant to use on a
+phone. That is a smaller claim than "the editor works on a tablet", and it is
+the one the tests support.
+
 ---
 
 ## 3. Open
@@ -3941,6 +5048,31 @@ Specifically:
   the document making it has since been deleted.
 - Every file named as a deliverable in §2 exists, bar `forkProjectService.ts`,
   which the old plan invented; `forkProject` is in `service/projectService.ts`.
+
+**Found 2026-09-10, while reading the one webhook in the tree as a pattern for
+§13.3's: the billing webhook could never have verified a single delivery.**
+`billing.ts` mounts `express.raw` on its own route and explains in a comment why
+the raw bytes matter. `index.ts:202` mounts `express.json()` globally in front of
+the whole API. The global one wins — body-parser marks the request handled and
+every later parser skips — so the route received a parsed object,
+`Buffer.isBuffer(req.body)` was false, the raw string was `""`, and every genuine
+delivery failed with `BAD_SIGNATURE`. The route's own header says the webhook is
+"the only writer of subscription state", so no subscription would ever have
+changed in production.
+
+**The test could not see it, and said so in a comment that was false.**
+`billing.test.ts` assembles its app without the global parser and asserted "the
+test app is assembled the way the real one is". It was not. This is the
+defect class worth naming: **a test that builds its own app proves the handler,
+never the mounting** — and the mounting was the whole bug. The same shape as the
+`z.record` finding in §2.61 a few hours earlier, one layer further out.
+
+Fixed by `middlewares/webhookRawBody.ts`, mounted before `express.json()`, whose
+test builds the app in `index.ts`'s real order — the only arrangement in which
+the bug is visible. Mutation-checked: three of its six tests go red when the
+middleware is made a pass-through. **Not verified**, and it cannot be here: no
+delivery from Stripe has been received, so what is proven is that the bytes now
+reach the route intact, not that a real signature validates.
 
 **Verified 2026-08-29**, having been carried as unverified since 2026-08-28:
 the two `Project` rows without working trees are real. Twenty rows in the
@@ -4810,10 +5942,42 @@ those four is about the platform underneath.
 
 ### 10.1 The route — the one decision this section is blocked on
 
-- [ ] **Settle Monaco versus openvscode-server for the single-seat target.**
-      Not a code change and not a research task: the arguments are all written
-      down already, in §6 decision 1 and in the table above. What is missing is
-      somebody choosing, and the choice is between two honest positions:
+- [x] **Settle Monaco versus openvscode-server for the single-seat target.**
+      **DECIDED 2026-09-09: B + C.** Monaco stays as the browser editor, and
+      the workspace becomes attachable over SSH so somebody can bring their own
+      VS Code, Cursor, Zed or `nvim`. Route A — replacing the editor with
+      openvscode-server — is not taken.
+
+      **Who decided, and on what authority.** The repository owner, who had
+      this row put to them three times, instructed that the plan be completed
+      without further questions and that every open decision be resolved on
+      their behalf. This is that decision, recorded here rather than left
+      implicit, and it takes the recommendation §14.1 already carried.
+
+      **Why B + C rather than A.** The spike below is the whole argument. §10
+      said Route B was defensible only if multiplayer was the point, *because
+      Route B can never reach 10.7* — and the spike falsified that sentence:
+      extensions and debugging both arrive over SSH, at a cost of 7 MB of image
+      and one volume. So the expensive half of Route A is reachable without
+      giving up the editor this repository controls, without rebuilding run
+      control and preview as extensions, and without dropping the collaborative
+      layer that is this product's actual differentiator. Codespaces ships both;
+      so does this.
+
+      **What it costs, stated so nobody rediscovers it.** 10.10, 10.12 and
+      10.14 stay hand-built — Route C does nothing for them. Route C does
+      nothing on an iPad, which is 13.10's problem and stays 13.10's problem.
+      And it concedes, in writing, that the browser editor is not where the
+      most serious work happens; it is what you open on a machine you do not
+      control.
+
+      **What this unblocks:** Phase 1b (Route C, properly — the sshd, the key,
+      and the `~/.vscode-server` volume the spike found the expensive way),
+      Phase 1d (§13.9, whose answer follows from the key Route C introduces),
+      and all of Phase 3. It also *closes* 10.6 and 10.7 by another road: see
+      those rows.
+
+      The three routes, as they were argued before the decision, follow.
 
       **Route A — openvscode-server.** Debugging, extensions, tasks, snippets,
       settings files, the diff editor, timeline, multi-root, notebooks and
@@ -4988,7 +6152,29 @@ feature. Route A does not deliver any of them.
 Each row says what it costs on Route B, because that is the number the route
 decision needs. Under Route A the cost of every one of them is zero.
 
-- [ ] **10.6 Debugging.** No breakpoints, no stepping, no watch, no call stack,
+- [x] **10.6 Debugging.** **Closed 2026-09-09 by §10.1's decision and §2.50's
+      code, not by building it.** Route C ships debugging as the user's own
+      editor doing what it already does: the §11.1 spike installed
+      `ms-python.python` into the sandbox over SSH and it brought **debugpy**
+      with it. Breakpoints, stepping, watch, call stack and `launch.json` are
+      the client's problem, and the client is a real VS Code.
+
+      **What is still true, and is not a footnote.** There is no debugging in
+      the BROWSER editor and this row does not deliver one. Somebody on an iPad,
+      or on a machine where they cannot install an editor, still cannot set a
+      breakpoint — that is 13.10's territory, and 13.10 shipping on 2026-09-11
+      did not change it: that row delivered a terminal key bar and a pointer
+      layer, not a debugger. What this row
+      claimed was that the *platform* had no debugging at all, and that is what
+      is no longer true.
+
+      **What it would have cost to do the other way**, kept because it is why
+      this trade is worth making: a hand-written DAP client, a breakpoint gutter
+      and decoration layer, a variables/watch/call-stack UI, a per-language
+      adapter in every sandbox image, and a stdio bridge through `docker exec`.
+      Original note follows.
+
+      No breakpoints, no stepping, no watch, no call stack,
       no `launch.json` — `grep` for `launch.json` or `DAP` over `apps/` returns
       nothing. Route B means a hand-written Debug Adapter Protocol client, a
       breakpoint gutter and decoration layer, a variables/watch/call-stack UI, a
@@ -4997,14 +6183,46 @@ decision needs. Under Route A the cost of every one of them is zero.
       against `monaco-languageclient` applies to twice over. This is the single
       largest item in this section and the one Route A most obviously wins.
 
-- [ ] **10.7 Extensions.** **Unreachable on Route B.** Not "expensive" —
+- [x] **10.7 Extensions.** **Closed 2026-09-09 by §10.1's decision and §2.50's
+      code.** This row's whole claim was that Monaco cannot run VS Code
+      extensions and no amount of work changes that — which remains true, and is
+      now beside the point: over SSH it is the user's own editor running the
+      user's own extensions with the user's own settings. That is *more* than
+      Route A would have given, which is a marketplace inside somebody else's
+      profile.
+
+      The §11.1 spike installed `ms-python.python` from the marketplace into the
+      sandbox and got Pylance with it, so this is measured rather than argued.
+
+      **Still true:** no extensions in the browser editor, ever. A personal IDE
+      is largely defined by the six extensions its owner cannot work without,
+      and they now have them — in the window they attached, not in this one.
+      Original note follows.
+
+      **Unreachable on Route B.** Not "expensive" —
       decision 1's closing sentence is that Monaco cannot reach it at all, and
       §3.3 already lists "the user's own VS Code extensions" as out of scope for
       that reason. Worth stating as a row anyway, because a personal IDE is
       largely defined by the six extensions its owner cannot work without, and
       "we have a file-icon table" is not an answer to that.
 
-- [ ] **10.8 Languages past Python and Go.** `lspPolicy.ts` knows two servers:
+- [x] **10.8 Languages past Python and Go.** **Shipped 2026-09-10 — §2.58.**
+      Seven languages now: Python, Go, **TypeScript, JavaScript** (the node
+      image, via `typescript-language-server`), **Rust** (`rust-analyzer`) and
+      **C/C++** (`clangd`), with `images/rust` and `images/cpp` added and built
+      in CI.
+
+      **TypeScript is the valuable one and this row nearly undersold it.** The
+      row notes that TS and JS "get Monaco's bundled worker, which is per-model
+      and does not see the project the way `tsserver` does" — that is not a
+      smaller version of intelligence, it is a different one: a rename is a
+      rename in one buffer, and go-to-definition across files is a guess.
+
+      **What is deliberately still missing:** Java, C#, Ruby and PHP. Each is
+      another image and another server, and none has a template here to be used
+      from. Original note follows.
+
+      `lspPolicy.ts` knows two servers:
       `pylsp` and `gopls`. TypeScript and JavaScript get Monaco's bundled
       worker, which is per-model and does not see the project the way `tsserver`
       does; everything else — Rust, Java, C/C++, C#, Ruby, PHP — gets syntax
@@ -5018,7 +6236,23 @@ decision needs. Under Route A the cost of every one of them is zero.
       language surface growing past diagnostics, completion and hover" — is
       reached the moment somebody wants rename or code actions).
 
-- [ ] **10.9 Settings, keybindings and snippets that live in files.**
+- [x] **10.9 Settings, keybindings and snippets that live in files.**
+      **Shipped 2026-09-10 — §2.54.** `.vscode/settings.json`,
+      `.vscode/keybindings.json` and `.vscode/*.code-snippets`, read from the
+      repository, **in VS Code's own names** — `editor.fontSize`, not
+      `fontSize`. That is the whole "bring an existing profile across" half of
+      this row: a `settings.json` somebody already has does something when
+      pasted in, and one written here is not nonsense in a real VS Code.
+
+      **Precedence is VS Code's:** defaults, then the account (§2.49), then the
+      workspace file. §14.4 was right that this had to come after 2a, and the
+      reason is now in the code: a workspace value is applied at the point of
+      use and never written into the person's own store, so opening a project
+      with a `settings.json` does not permanently change their settings
+      everywhere.
+
+      Original note follows.
+
       `editorSettingsStore` persists sixteen preferences to `localStorage` under
       `rc-editor-settings`, and `keybindingStore` holds chord overrides the same
       way. That means: no `settings.json`, no per-workspace settings, nothing
@@ -5029,7 +6263,18 @@ decision needs. Under Route A the cost of every one of them is zero.
       This is the row that most decides whether the thing *feels* like a
       personal editor, and it is the cheapest of the nine on Route B.
 
-- [ ] **10.10 Tasks.** A project carries exactly one run command (§2.7 row 7,
+- [x] **10.10 Tasks.** **Shipped 2026-09-10 — §2.57.** `.vscode/tasks.json`:
+      named tasks, build and test groups, `dependsOn` ordering, and **problem
+      matchers feeding the panel this row said had somewhere to go** — which it
+      did, and now has two feeds instead of one.
+
+      **Background tasks are refused by name, with the reason.** VS Code's
+      `isBackground` is a watch, and this platform already has exactly one
+      notion of a process that stays running — the dev server, with a
+      lifecycle, a log, a preview and a reconciler behind it. A second would be
+      two things that can disagree about what is running.
+
+      Original note follows. A project carries exactly one run command (§2.7 row 7,
       read from `package.json` at import) plus a test command (§2.18). VS Code
       has `tasks.json`: named tasks, build versus test groups, compound and
       dependent tasks, and problem matchers that turn compiler output into
@@ -5037,33 +6282,73 @@ decision needs. Under Route A the cost of every one of them is zero.
       (`problems.ts`, `ProblemsPanel`) and is fed only by the language server,
       so the matcher half has somewhere to go.
 
-- [ ] **10.11 A real diff editor.** `parseUnifiedDiff` plus `DiffView` renders
+- [x] **10.11 A real diff editor.** **Shipped 2026-09-10 — §2.56.** Compare
+      against a branch, a commit or another file, and **type in the diff** —
+      the modified side is editable and its changes go through the same
+      dirty-marking and debounced write as the main editor.
+
+      **One line of this row was already stale when it was written**, and
+      §2.56 says so: `createDiffEditor` returns nothing because the React
+      wrapper is what is used, and `DiffEditor` was already rendering two
+      cases. What was genuinely missing is what this shipped. Original note
+      follows.
+
+      `parseUnifiedDiff` plus `DiffView` renders
       `git diff` output; `grep` for `createDiffEditor` returns nothing, so
       Monaco's own side-by-side diff is unused. What is missing is the thing you
       reach for daily and not the thing you reach for at commit time: compare
       with saved, compare two arbitrary files, compare against a branch, and
       **edit inside the diff**.
 
-- [ ] **10.12 Local history, and a timeline.** No timeline view and no per-file
+- [x] **10.12 Local history, and a timeline.** **Shipped 2026-09-10 — §2.57b**,
+      and **the row's own premise was half wrong**: checkpoints are neither
+      whole-project nor explicit. `snapshot()` runs per file, automatically, on
+      every save, and has since §2.x. What was missing is that **nothing could
+      read them** — `listCheckpoints` and `readCheckpoint` existed with no
+      route, no client and no UI, so "what did this look like an hour ago" was
+      answered on disk and unreachable. A Timeline panel now reads them, and
+      opening a version puts it in the diff pane (§10.11) rather than over the
+      file.
+
+      **What is still true from the row:** they are on the same disk as the tree
+      they snapshot, so they are not a backup — §3.3 is, and the panel says so
+      in those words. Original note follows. No timeline view and no per-file
       history. Checkpoints (§2.x) are the nearest thing and they are the wrong
       granularity — whole-project, explicit, and on the same disk as the tree
       they snapshot. VS Code's local history is per file, automatic, and answers
       "what did this look like an hour ago" for a file that was never committed,
       which is the question checkpoints do not answer.
 
-- [ ] **10.13 The rest of git.** `gitService.ts` covers status, diff, stage and
+- [x] **10.13 The rest of git.** **Shipped 2026-09-10 — §2.55.** Stash, blame,
+      amend, revert, tags, cherry-pick and comparing two branches. **Not**
+      rebase, interactive or otherwise, and not a commit graph — see §2.55 for
+      why those two are named as not-done rather than quietly dropped.
+
+      Stash and blame, which this row calls the two a personal user notices in
+      the first week, are where the work is rather than behind a menu: stash is
+      inline in the source control panel, blame is a palette toggle that
+      annotates the lines in place. Original note follows.
+
+      `gitService.ts` covers status, diff, stage and
       unstage, hunk staging, commit, log, branches, switch, discard, remotes,
       fetch, pull, push and conflict resolution — a genuinely complete daily
       loop. Absent: stash, blame, amend, revert, tags, cherry-pick, rebase
       (including interactive), a commit graph, and comparing two branches.
       Stash and blame are the two a personal user notices in the first week.
 
-- [ ] **10.14 The small ones, listed so they are not each rediscovered.**
-      Multi-root workspaces (one project is one root, and there is no
-      `.code-workspace`); markdown preview; notebooks; terminal profiles
-      (`shellArgv` hardcodes `/bin/bash`) and split terminal panes (multiple
-      terminals exist, as tabs only); and editor split views beyond the single
-      Monaco instance.
+- [x] **10.14 The small ones, listed so they are not each rediscovered.**
+      **Shipped 2026-09-10 — §2.59**, and the list had six items of which **two
+      were already done when it was written**: notebooks (§2.42) and editor
+      splits (`editorSplitWidth` has been persisted since §2.x). Shipped now:
+      **markdown preview** and **terminal profiles**.
+
+      **Still open, and named rather than left in a bundle:** split terminal
+      PANES (terminals exist as tabs; two side by side is layout work in the
+      bottom panel) and **multi-root workspaces**, which is not small at all —
+      one project is one container, one bind mount and one quota, and a second
+      root is a second of each. Both are carried in §2.59 rather than here,
+      because a row that keeps two items alive after four are done is a row
+      that will be re-read as four things still to do.
 
 ---
 
@@ -5371,7 +6656,42 @@ document.**
 
 ---
 
-- [ ] **11.10 Dev Container Features.** Split out of 11.2 on 2026-09-05,
+- [x] **11.10 Dev Container Features.** **DECIDED and shipped 2026-09-10 —
+      §2.53.** This row was "a question with three answers, and picking one is
+      what unblocks it". **The second is picked**: run the install scripts as
+      root in a throwaway container and commit the result to a derived image the
+      workspace then runs.
+
+      **Why the second and not the first.** Both end in a derived image; what
+      differs is the input. Option one means this platform builds from a
+      Dockerfile — and `build` and `dockerFile` are refused *today* precisely
+      because a Dockerfile is arbitrary code from a repository this platform did
+      not write. Option two's input is a Feature artifact from a registry an
+      operator allowlisted, run against a base image this repository ships. It
+      is a strictly smaller yes, and it does not reopen the refusal 11.2 wants
+      kept.
+
+      **Why not the third.** It would refuse most real Features confusingly
+      rather than clearly, which is this row's own objection to it.
+
+      **The sentence this row is built around stays true.** The WORKSPACE never
+      runs as root and never gains a capability; `privileged` and `capAdd` stay
+      refused however personal this gets. Root exists only inside a build
+      container with **no bind mount of the user's tree**, a capability set
+      trimmed to what a package install needs (`CHOWN`, `DAC_OVERRIDE`,
+      `FOWNER`, `FSETID`, `SETUID`, `SETGID` — not `SYS_ADMIN`), and a lifetime
+      of one install. What 11.2 refuses is a workspace with power over the host.
+      This is a build step with power over its own filesystem, which is what
+      every image build is.
+
+      **Off by default** (`DEVCONTAINER_FEATURES`), with
+      `DEVCONTAINER_FEATURE_REGISTRIES` deciding whose code may run. An operator
+      who did not ask to execute third-party install scripts on their host must
+      not begin doing so because they upgraded — and while it is off, the
+      refusal string is still the honest answer, now naming the variable that
+      turns it on.
+
+      Original note follows. Split out of 11.2 on 2026-09-05,
       because calling it "cheap" there was wrong and only became obvious with
       `mounts` finished beside it.
 
@@ -5987,7 +7307,29 @@ what is actually there.
       *image*; a snapshot resumes a running *process*. This row needs no new
       mechanism and that one needs a mechanism nothing here resembles.
 
-- [ ] **12.5 Start a stopped workspace to build it.** Split out of 12.2 on
+- [x] **12.5 Start a stopped workspace to build it.** **Shipped 2026-09-09 —
+      §2.52**, with the three numbers chosen rather than measured, and that
+      distinction is carried into the code: `PREBUILD_MAX_COMMITTED` (0.6),
+      `PREBUILD_RECENT_DAYS` (7) and `PREBUILD_STOP_AFTER` (true) are env vars
+      whose defaults are documented **as guesses**, and the feature itself is
+      off by default (`PREBUILD_STOPPED`). This row's warning is not resolved
+      by shipping it — it is preserved in the one form that lets the first
+      operator to see it misbehave retune it without a deploy.
+
+      All three collisions it named have an answer: headroom is measured in
+      MEMORY against the same budget `assertFits` uses, not in a count of
+      containers; the sweep stops what it started and only what it started; and
+      it re-checks headroom between workspaces rather than once at the start.
+
+      **One thing this row did not foresee, found by building it.** Deciding
+      whether a *stopped* workspace needs building was itself the hard part:
+      `warmStart`'s stamp lives in the container's writable layer, so the only
+      way to read it is to start the container — which is the cost the feature
+      exists to avoid. A host-side copy of the fingerprint on the project row
+      fixes it, and is a hint rather than a source of truth: stale in the safe
+      direction, with the container's own stamp still deciding what runs.
+
+      Original note follows. Split out of 12.2 on
       2026-09-05, the way 11.10 was split out of 11.2 — and for the same
       reason: building it revealed which half was a line of code and which was
       a decision nobody has taken.
@@ -6169,7 +7511,37 @@ container instead was refused on purpose — "an anonymous page view must not be
 able to start one on the owner's behalf". That refusal is right and every row
 below is written to respect it rather than to argue with it.
 
-- [ ] **13.1 A sandbox a stranger can open, run and fork with no account.**
+- [x] **13.1 A sandbox a stranger can open, run and fork with no account.**
+      **Shipped 2026-09-10 — §2.61.** `GET /api/v1/embeds/:token/sandbox`
+      behind a per-embed `sandbox` flag that is **off by default**, a page at
+      `/sandbox/:token` outside `ProtectedRoute`, and Fork as the one button
+      that asks who you are.
+
+      **The row's "against" was answered rather than accepted, and 13.2 is the
+      whole reason it could be.** The objection is an unauthenticated visitor
+      who can start a container; this starts none. The visitor's edits live in
+      their browser and the build happens there, so an anonymous page view
+      spends their memory and none of this host's. §6 decision 13 stands
+      untouched — what moved is *when* the account is asked for, not whether.
+
+      **Saving is forking, and forking still means signing in.** The stranger
+      changes a line and runs it first and meets the account only when they
+      want to keep the result, which is the same boundary the product always
+      had, placed after the interesting part instead of in front of it.
+
+      **Off by default, because an embed is something to read.** The column
+      defaults to `false` and the owner turns it on per link: a published embed
+      does not become editable because a migration ran. The refusal for a link
+      whose owner did not is a sentence — "that link is an embed, not a
+      sandbox" — and secret paths are filtered out of the payload on the way
+      out, both mutation-checked.
+
+      **What it inherits from 13.2 it inherits whole**, including the limits:
+      the five-template allowlist, no server-side anything, and a refusal that
+      names the container preview. A project outside the allowlist has no
+      sandbox, and that is the honest half of this row.
+
+      Original note follows.
       The defining act of the product this section names, and the one thing
       here that is a product decision before it is code.
 
@@ -6187,7 +7559,21 @@ below is written to respect it rather than to argue with it.
       what §6 decision 13 and the embed's design refused. Do not build it
       before 13.2, which is the version of it that costs nothing.
 
-- [ ] **13.2 A preview that does not need a container at all.**
+- [x] **13.2 A preview that does not need a container at all.**
+      **Shipped 2026-09-10 — §2.60.** `esbuild-wasm` in the reader's own
+      browser, imports resolved out of the files the server sent and bare ones
+      from esm.sh, rendered in an iframe with `allow-scripts` and **not**
+      `allow-same-origin`.
+
+      **This row's warning was followed rather than noted.** It says this is
+      "the row most likely to be over-sold", so eligibility is an **allowlist of
+      five templates** rather than a deny-list of servers: a template this
+      platform has not heard of is refused, because a new one is far likelier to
+      be another kind of server than another front end. Next.js is refused too,
+      front-end though it is — it has a server, and "previews except for the
+      server-rendered half" is not a preview.
+
+      Original note follows.
       `grep -riE "sandpack|webcontainer|esbuild-wasm"` over `apps/` and
       `packages/` returns **0 hits**. Every preview in this product is a
       reverse proxy to a dev server inside Docker.
@@ -6214,7 +7600,38 @@ below is written to respect it rather than to argue with it.
       neither of those is a person this deployment has, this row has no user,
       and 13.1 has no cheap version — which is the honest reading of both.
 
-- [ ] **13.3 Every pull request gets a URL.**
+- [x] **13.3 Every pull request gets a URL.**
+      **Shipped 2026-09-10 — §2.62.** `POST /api/v1/github/webhook` behind an
+      HMAC, a workspace per head ref, the existing deploy path pointed at it, a
+      comment edited rather than repeated, and the trash on merge or close.
+
+      **The row's own estimate was right: four of the five parts existed.**
+      What was missing was the receiver and the bookkeeping between them. What
+      the row did NOT name is the question that turned out to decide the
+      design — *whose account pays for a workspace a webhook creates* — and the
+      answer is `PullRequestRepo`, an explicit per-repository enrolment. The
+      alternative, matching a delivery against a connected account's login,
+      silently enrols every repository of every connected user, so a leaked
+      secret or a misdirected App would start containers nobody chose.
+
+      **A pull request from a fork is refused, and that is the honest limit.**
+      Building one means cloning a branch nobody here controls and running its
+      install scripts on this host — §6 decision 13's refusal arriving by
+      another road, wearing a collaborator's clothes. A fork PR is the ordinary
+      way an outside contributor sends a change, so this is the majority case
+      for a public repository, not an edge case.
+
+      **It does supply §12.2's missing trigger**, as the row predicted: a push
+      to a branch some open pull request is from refreshes that workspace, so
+      the prebuild policy fires on a reason instead of a schedule somebody
+      guessed.
+
+      **Not exercised end to end, and it is the expensive half.** No Docker
+      daemon here, so `importRepository` and `publish` have never run for a
+      real delivery; the tests prove which of them is called and when, not what
+      happens when they do. No delivery from GitHub has been received either.
+
+      Original note follows.
       The most valuable row in 13A for anybody working with other people, and
       the one whose mechanism is most nearly already here.
 
@@ -6237,7 +7654,45 @@ below is written to respect it rather than to argue with it.
       a `devcontainer.json` changes". A pull-request event is the first of
       those three, arriving with a reason attached.
 
-- [ ] **13.4 One repository, more than one workspace.**
+- [x] **13.4 One repository, more than one workspace.**
+      **Shipped 2026-09-10 — §2.63.** `WorkspaceGroup` owns the repository
+      identity and a shared environment; the projects under it are the
+      checkouts, listed as one entry with them beneath it.
+
+      **The row's parenthetical is stale and its motivation survives it.** It
+      says reviewing a colleague's branch means stashing "and §10.13 records
+      that stash does not exist" — §10.13 shipped, so it does. What is still
+      true is the part that matters: `switchBranch` REFUSES on a dirty worktree
+      rather than carrying changes across, so stashing means putting your work
+      down to pick up somebody else's. Two checkouts is what lets you keep
+      both. **Verified against the source rather than taken from the row**, and
+      the correction is recorded because a stale premise is how a row gets
+      built for the wrong reason.
+
+      **"Cheap only if 13.3 exists, since the two want the same object" was
+      right.** A pull request workspace *is* a second checkout of one
+      repository, so it joins the group and gets the shared environment
+      instead of being another unrelated project. That is one call in
+      `prWorkspaceService`, and it is the whole of the integration.
+
+      **The shared environment layers between the account's and the
+      checkout's**, which is the order somebody would say them in: more
+      specific than "everything I own", less specific than "this checkout".
+      Read in `getEnvVars` rather than at container start, for the reason the
+      two layers beside it give — `envSignature` is computed from what it
+      returns, so changing a group variable rebuilds every checkout on its next
+      start instead of leaving them on the old value.
+
+      **Dissolving a group does not delete the work in it.** `SET NULL`, not
+      `CASCADE`: grouping is not owning, and that has a test whose only job is
+      to say so.
+
+      **What is not built: the dashboard's own rendering.** The API returns one
+      entry per repository with its checkouts (`GET /projects/groups`), and no
+      web view consumes it yet — so "one entry on the dashboard", the third of
+      the row's three, is served by the server and not yet by the screen.
+
+      Original note follows.
       A `Project` is one directory and one row, and `switchBranch` changes the
       branch **in place** (`gitService.ts:475`). So reviewing a colleague's
       branch means stashing what you are doing (and §10.13 records that stash
@@ -6253,7 +7708,42 @@ below is written to respect it rather than to argue with it.
       **For:** anybody who reviews code. Cheap only if 13.3 exists, since the
       two want the same object.
 
-- [ ] **13.5 Devtools for the thing being previewed.**
+- [x] **13.5 Devtools for the thing being previewed.**
+      **Shipped 2026-09-11 — §2.64.** A `postMessage` bridge injected into the
+      preview document, a console tab, a network tab, an error overlay over the
+      iframe, and a device-size frame — the four things this row asks for.
+
+      **This row's text about the problems panel is stale.** It says the panel
+      "is fed **only** by the language server, with the matcher half unbuilt";
+      §10.10 shipped `taskProblems`, so it already has two feeds. The
+      architectural point survives — a runtime console is a third — but the
+      devtools ended up a panel of their own rather than a tab on that one: a
+      console, a request log and an overlay are not diagnostics with a file and
+      a line, and forcing them into the `Problem` shape would have meant
+      inventing positions they do not have.
+
+      **The security of this row is entirely in the parent, not the bridge.**
+      The previewed code runs with `allow-scripts` and can `postMessage`
+      anything, including something shaped exactly like a record. `event.origin`
+      is NOT usable to check it — a sandboxed iframe without
+      `allow-same-origin` has an opaque origin and reports `"null"`, which is
+      what every other opaque frame reports too. Sender identity against the
+      iframe's `contentWindow` is the check that still means something, and it
+      is mutation-checked.
+
+      **Bounded on both sides.** A `console.log` inside `requestAnimationFrame`
+      is sixty messages a second forever and is an ordinary thing to write by
+      accident, so the bridge rate-limits at the source and the store caps per
+      feed — separately, so a chatty log cannot push the errors out.
+
+      **Where it does NOT work: the container preview.** The bridge reaches a
+      document this platform generates (§13.2's browser preview, and therefore
+      §13.1's sandbox). The container preview is a reverse proxy, and injecting
+      into it means buffering and decompressing every HTML response through
+      `http-proxy-middleware` — a real cost and a separate decision, not done
+      here. The device-size frame works for both, being only CSS.
+
+      Original note follows.
       The preview is an iframe pointed at a proxy, and that is all it is. A
       runtime `TypeError` in the previewed app appears in the *real* browser's
       console — which the embed's reader does not have open, and which on a
@@ -6271,7 +7761,39 @@ below is written to respect it rather than to argue with it.
       with, who cannot open devtools on somebody else's page and would not know
       to.
 
-- [ ] **13.6 A pairing link for somebody with no account.**
+- [x] **13.6 A pairing link for somebody with no account.**
+      **Shipped 2026-09-11 — §2.65.** `PairingInvite` plus a `pairing` token
+      type: redeeming mints a scoped, expiring guest identity and writes **no
+      `ProjectCollaborator` row at all**.
+
+      **The row named the mechanism and it was the right one.** Preview and MFA
+      tokens are both typed, short-lived and checked on verify, and this is the
+      third of that shape — with one claim they do not have. `pid` names the
+      one project the credential is good for, and `pairingAccess` compares it
+      against the project being joined. Without it a pairing token would be a
+      general API credential belonging to nobody, which is the failure the
+      `typ` claim was added to stop, one level up. Mutation-checked.
+
+      **Every refusal says the same sentence.** Expired, revoked, moderated, or
+      never-existed all produce "that pairing link is not valid", because a link
+      that says *expired* tells whoever holds it that it was once real and that
+      this project exists. The distinctions live in the metrics.
+
+      **Creating a link is the owner's alone.** An EDITOR collaborator handing
+      out anonymous guest access would be spending the owner's compute on a
+      decision the owner never made.
+
+      **Revoking closes the door; it does not reach through it.** A guest
+      already holding a token keeps it until it expires, and
+      `PAIRING_TOKEN_TTL_HOURS` (4, a guess in §12.5's sense) is the bound on
+      how long that is.
+
+      **§10.5's warning stands and is worth repeating rather than arguing
+      with:** at n=1 this row and everything it reaches is dead weight. It was
+      built because §13 is a diff against two products, not because this
+      deployment is known to have a second person in it.
+
+      Original note follows.
       The collaborative layer is real and finished — Yjs per file, awareness,
       remote cursors, presence, follow mode — and reaching it requires being a
       row in `ProjectCollaborator`. An EDITOR share link exists
@@ -6368,7 +7890,39 @@ the machine is somewhere else.
       **For:** every user of a personal deployment, from their second project
       onwards.
 
-- [ ] **13.9 A credential the sandbox itself can clone and push with.**
+- [x] **13.9 A credential the sandbox itself can clone and push with.**
+      **DECIDED and shipped 2026-09-09 — §2.51.** The decision is the first of
+      the three options this row named: **agent forwarding over the Route C SSH
+      channel**, which exists because §10.1 went to B + C the same day. The row
+      predicted this: "the first is the only one that is not a secret sitting in
+      a container, and it exists only if §10.1 goes to Route C."
+
+      `AllowAgentForwarding yes`, and `AllowTcpForwarding` stays **no** — they
+      are separate lines and the difference is the whole safety argument. TCP
+      forwarding would be a tunnel out of a sandbox, straight through the egress
+      gateway. Agent forwarding carries a socket the sandbox may ask to SIGN
+      something; the private key never leaves the user's machine and cannot be
+      read out of the socket. The `ssh` command the dialog hands over says `-A`,
+      and says what it costs.
+
+      **What it costs, in the row rather than in a footnote:** while somebody is
+      connected, code running in the sandbox can USE their agent — for any
+      repository that key opens, not only this one. That is true of agent
+      forwarding everywhere it is used, it lasts exactly as long as the
+      connection, and `SANDBOX_SSH_AGENT_FORWARDING=false` turns it off for
+      anybody who would rather type a token.
+
+      **What this deliberately does NOT fix, which is half of the row's own
+      complaint.** The BROWSER terminal is `docker exec` and has no agent, so
+      `git clone git@github.com:me/private` typed there still fails. The other
+      two options would have fixed it and both are, in this row's own words, a
+      secret sitting in a container that runs untrusted code — so the answer is
+      "attach your editor, or use the server-side push that already exists",
+      not a credential in the sandbox. Recorded as a limit that was chosen, not
+      one that was missed.
+
+      Original note follows.
+
       Blocked on a decision, and named so the decision gets made rather than
       arrived at.
 
@@ -6395,7 +7949,41 @@ the machine is somewhere else.
       first is the only one that is not a secret sitting in a container, and it
       exists only if §10.1 goes to Route C.
 
-- [ ] **13.10 The editor on a device that is not a laptop.**
+- [x] **13.10 The editor on a device that is not a laptop.**
+      **Shipped 2026-09-11 — §2.66, and read the caveat below before valuing
+      it.** A terminal key bar for the keys a software keyboard does not have,
+      and a pointer-based capability layer beside the existing width
+      breakpoint.
+
+      **The row's diagnosis was right and its framing was one question short.**
+      One breakpoint was indeed the whole story — but width and pointer are
+      different questions, and the breakpoint only answers the first. A tablet
+      at 1024px is wide enough for the panes and has no keyboard; a desktop
+      window dragged to 800px is narrow and has a real `Ctrl`. Touch
+      affordances now key off `(pointer: coarse)`, a capability the browser
+      knows, and layout keeps keying off width, which is what width is for. The
+      old breakpoint is unchanged.
+
+      **"A terminal with no `Ctrl`" was the part worth building.** It is the
+      one item in the row that is not a matter of taste: a shell you cannot
+      interrupt is a shell you cannot use. The bar sends bytes — 0x03 for
+      interrupt, real escape sequences for the arrows — and `Ctrl` is one-shot,
+      applying to the next key and letting go, because a modifier that latches
+      invisibly is worse than no modifier. Mutation-checked: making it latch
+      turns five tests red.
+
+      **What it does NOT claim.** Monaco is not made into a mobile editor; the
+      handful of its defaults that are actively wrong without a mouse are
+      turned off and nothing else. The file tree gets finger-sized hit targets
+      and no redesign.
+
+      **The row says it is "not recommended" and that stands.** It was built
+      because the plan was to be finished, not because a user for it is known
+      to exist — and nothing here has been touched by an actual finger. §12's
+      warning about this method applies to this row harder than to any other on
+      the page, and shipping it has not made that less true.
+
+      Original note follows.
       `useMediaQuery("(max-width: 900px)")` in `ProjectPlayground.tsx:255` is
       the whole of the mobile story: one breakpoint that collapses the layout.
       Monaco on a touch keyboard, a terminal with no `Ctrl`, and a file tree
@@ -6520,7 +8108,9 @@ below was run, not remembered.
 - `gitService.ts:475` — `switchBranch` operates on the project's single working
   tree (13.4).
 - `ProjectPlayground.tsx:255` — one `useMediaQuery("(max-width: 900px)")`, and
-  no other breakpoint or touch handling in the tree (13.10).
+  no other breakpoint or touch handling in the tree (13.10). **No longer true as
+  of §2.66**: the breakpoint is unchanged and still the only width query, but
+  `(pointer: coarse)` now sits beside it, and the terminal has a key bar.
 - `editorSettingsStore`, `keybindingStore`, `openTabsStore` and
   `treeStructureStore` all persist to `localStorage`; no endpoint reads or
   writes any of them (13.11). **No longer true as of §2.49** — and the detail
@@ -6685,7 +8275,10 @@ database dump. Note what does **not** solve it and is sometimes mistaken for
 it: checkpoints are on the same disk as the thing they snapshot, and export is
 a manual per-project zip.
 
-**1b. Route C, properly (§10.1's third route, §11.1's spike).** The spike ran;
+~~**1b. Route C, properly (§10.1's third route, §11.1's spike).**~~ **Done
+2026-09-09 — §2.50**, together with the §10.1 decision it was waiting on. The
+`~/.vscode-server` volume this phase insisted must land *with* 1b did land with
+it. Original note follows. The spike ran;
 this is turning it into a feature. Four things, and the spike already named
 three of them:
 
@@ -6721,7 +8314,9 @@ account, and the screen says so), and one decision — whether a *collaborator*
 on somebody's project sees the owner's account secrets, for which the answer is
 almost certainly no.
 
-**1d. A credential the sandbox can clone and push with (§13.9).** Blocked on a
+~~**1d. A credential the sandbox can clone and push with (§13.9).**~~ **Done
+2026-09-09 — §2.51**, and it took one config line: Phase 0 chose Route C, and
+Route C is what makes agent forwarding exist. Original note follows. Blocked on a
 decision, and **Phase 0 changes the answer**, which is why it is here and not
 earlier: if the route includes C, agent forwarding over that SSH channel is
 available and is the only option where the credential never sits inside a
@@ -6748,7 +8343,10 @@ what happens when the pull and the person disagree — three rules, each with a
 test that fails without it. Explicitly not §10.9, which wants settings in
 *files* and is Phase 3.
 
-**2b. Prebuild a stopped workspace (§12.5).** §2.39 shipped the running-
+~~**2b. Prebuild a stopped workspace (§12.5).**~~ **Done 2026-09-09 — §2.52.**
+The three numbers were chosen rather than measured, and are env vars documented
+as guesses with the feature off by default — which is this phase's caution kept
+rather than overridden. Original note follows. §2.39 shipped the running-
 workspace half; this is the first open of a workspace that has been stopped all
 week. Blocked on **three numbers somebody has to choose by watching a real
 host** — how much headroom before a prebuild may run, how recently a workspace
@@ -6757,7 +8355,10 @@ afterwards. Choosing them without having watched a host is how a background
 task becomes the reason a machine is always busy, so this belongs *after*
 Phase 1 has produced a host somebody is actually using.
 
-**2c. Dev Container Features (§11.10).** A question with three answers, none
+~~**2c. Dev Container Features (§11.10).**~~ **Done 2026-09-10 — §2.53**, by
+answering the question rather than waiting to live in a devcontainer daily. The
+answer is the throwaway-root-container one, and it keeps §11.2's refusal
+intact. Original note follows. A question with three answers, none
 obviously right. Cheap to answer once somebody is living in a devcontainer
 daily, which Phase 1 produces and nothing before it does.
 
@@ -6774,26 +8375,42 @@ between a browser editor somebody tolerates and one they reach for. Ordered by
 what a personal user notices soonest, which is §10's own recommended order with
 10.6 and 10.7 struck out:
 
-1. **10.9 — settings, keybindings and snippets in files.** §10 calls this the
+1. ~~**10.9 — settings, keybindings and snippets in files.**~~ **Done
+   2026-09-10 — §2.54**, after 2a as this said, and the two do not disagree
+   about the source of truth: workspace values are merged at the point of use
+   and never written into the person's own store. Original note follows. §10 calls this the
    row that most decides whether the thing *feels* like a personal editor, and
    the cheapest of the nine. It also subsumes 2a's follow-the-person question
    for the settings half specifically, so do it after 2a rather than before, or
    the two will disagree about which is the source of truth.
-2. **10.13 — the rest of git.** Stash and blame are the two a personal user
+2. ~~**10.13 — the rest of git.**~~ **Done 2026-09-10 — §2.55**, except rebase
+   and the commit graph, which §2.55 names and explains. Stash and blame are the two a personal user
    notices in the first week; amend, revert, tags, cherry-pick and a graph
    after.
-3. **10.11 — a real diff editor.** `createDiffEditor` is unused. Compare with
+3. ~~**10.11 — a real diff editor.**~~ **Done 2026-09-10 — §2.56**, which also
+   records that "createDiffEditor is unused" was true as a grep and wrong as a
+   conclusion. Original note follows. `createDiffEditor` is unused. Compare with
    saved, compare two files, compare against a branch, and edit inside the
    diff.
-4. **10.10 — tasks**, whose problem-matcher half has somewhere to go: the
+4. ~~**10.10 — tasks**~~ **Done 2026-09-10 — §2.57.** Original note follows,
+   including the sequencing with 13.5, which still holds: the panel now has two
+   feeds and 13.5 is the third. **10.10 — tasks**, whose problem-matcher half has somewhere to go: the
    problems panel exists and is fed only by the language server. Sequence it
    with 13.5, which is the third feed for the same panel.
-5. **10.12 — local history and a timeline.** Checkpoints are the wrong
+5. ~~**10.12 — local history and a timeline.**~~ **Done 2026-09-10 — §2.57b**,
+   which found the premise half wrong: the checkpoints ARE per file and
+   automatic, and only the reader was missing. Original note follows.
+   Checkpoints are the wrong
    granularity for the question this answers.
-6. **10.8 — languages past Python and Go.** One policy entry and one image per
+6. ~~**10.8 — languages past Python and Go.**~~ **Done 2026-09-10 — §2.58**,
+   and "one image per language" turned out to be wrong in a way worth keeping:
+   TypeScript and JavaScript share one server in an image that already existed.
+   Original note follows. One policy entry and one image per
    language. Note decision 2's revisit trigger fires here: the moment somebody
    wants rename or code actions, `lspClient.ts` is the seam that has to grow.
-7. **10.14 — the small ones.** §10's own caution applies hardest here: a week
+7. ~~**10.14 — the small ones.**~~ **Done 2026-09-10 — §2.59**, which found two
+   of the six already shipped and carries two forward by name. Original note
+   follows. §10's own caution applies hardest here: a week
    of daily use would probably promote one of these and it would be a surprise
    which.
 
@@ -6804,7 +8421,9 @@ what a personal user notices soonest, which is §10's own recommended order with
 **This is where the CodeSandbox target begins, and it begins with an
 architectural addition rather than a feature.**
 
-**4a. A preview that needs no container (§13.2).** A browser-side bundler that
+~~**4a. A preview that needs no container (§13.2).**~~ **Done 2026-09-10 —
+§2.60**, with the over-selling this phase warns about answered by an allowlist
+rather than a deny-list. Original note follows. A browser-side bundler that
 resolves dependencies, builds in a worker and renders in an iframe with no
 server-side process. It boots in about a second, survives being embedded on a
 thousand pages, and costs this host nothing — which is why CodeSandbox's embeds
@@ -6816,21 +8435,40 @@ over-sold: it serves front-end projects with no server. `python-flask`,
 outside it permanently. That is about half the template registry, and it is the
 half people paste into issues.
 
-**4b. A sandbox a stranger can open, run and fork (§13.1).** Only after 4a,
+**4b. A sandbox a stranger can open, run and fork (§13.1).** **Shipped
+2026-09-10 — §2.61**, the day after 4a and in that order, which is what this
+note asked for. The version that costs nothing is the one that shipped: no
+container starts for an anonymous visitor, and the refusal stands.
+
+Original note follows. Only after 4a,
 which is what makes it affordable. Doing it first would mean an unauthenticated
 visitor who can start a container — spending this host's memory with no account
 behind it, which is exactly what §6 decision 13 and the embed's design refused
 on purpose. With 4a there is a version that costs nothing and the refusal
 stands.
 
-This pair is the largest single body of work in the plan and it should be
-costed as such before it is started.
+**Phase 4 is complete.** It was called "the largest single body of work in the
+plan" and it took two days, which is worth recording beside the estimate rather
+than instead of it: the cost was in 4a, and 4b was mostly the decision 4a had
+already paid for.
+
+Original note follows. This pair is the largest single body of work in the plan
+and it should be costed as such before it is started.
 
 ---
 
 ### 14.6 Phase 5 — the git workflow other people can see
 
-**5a. A URL per pull request (§13.3).** The most valuable row in §13 for
+**5a. A URL per pull request (§13.3).** **Shipped 2026-09-10 — §2.62.** The
+four fifths were there, as this note says; what it does not mention is the
+question that decided the design — whose account pays for a workspace a webhook
+creates — answered with explicit per-repository enrolment. Fork pull requests
+are refused, which is the honest limit. **Reading the only webhook in the tree
+as a pattern is also how §5's raw-body defect was found**: the billing receiver
+could never have verified a delivery, because `express.json()` was mounted in
+front of it.
+
+Original note follows. The most valuable row in §13 for
 anybody working with other people, and four fifths of the mechanism exists —
 `repoImportService`, `deployService`, `releaseService` and the trash. What is
 missing is a GitHub App with `pull_request` and `push` events, a workspace per
@@ -6841,7 +8479,11 @@ webhook receiver today; the only webhook in the server is Stripe's.
 sequence it beside 2b rather than far from it, and the prebuild policy gets a
 reason to fire instead of a schedule somebody guessed.
 
-**5b. One repository, more than one workspace (§13.4).** `switchBranch` changes
+**5b. One repository, more than one workspace (§13.4).** **Shipped 2026-09-10 —
+§2.63**, and the row's prediction that it and 5a "want the same object" held:
+a pull request workspace is a second checkout, and joins the same group.
+
+Original note follows. `switchBranch` changes
 the branch in place, so reviewing a colleague's branch means stashing (which
 10.13 has only just added) or importing the repository twice as unrelated
 projects. Cheap only once 5a exists, because the two want the same object.
@@ -6850,13 +8492,24 @@ projects. Cheap only once 5a exists, because the two want the same object.
 
 ### 14.7 Phase 6 — the preview, and the people
 
-**6a. Devtools for the previewed app (§13.5).** Console capture, network log,
+**6a. Devtools for the previewed app (§13.5).** **Shipped 2026-09-11 —
+§2.64**, all four, though not "feeding the problems panel that already exists":
+a console line and an HTTP request are not diagnostics with a file and a line,
+so they got a panel of their own. Reaches the browser preview and the sandbox,
+not the container preview's reverse proxy.
+
+Original note follows. Console capture, network log,
 an error overlay, a device-size frame. A runtime `TypeError` appears only in
 the real browser's console today — which the reader of an embed does not have
 open and which on a tablet does not exist. A `postMessage` bridge and a tab,
 feeding the problems panel that already exists.
 
-**6b. A pairing link for somebody with no account (§13.6).** The multiplayer
+**6b. A pairing link for somebody with no account (§13.6).** **Shipped
+2026-09-11 — §2.65.** "A token that mints a scoped, expiring identity rather
+than an account" is exactly what was built, with a `pid` claim scoping it to one
+project. No web join screen yet.
+
+Original note follows. The multiplayer
 layer is finished and reaching it requires being a row in
 `ProjectCollaborator`. A token that mints a scoped, expiring identity rather
 than an account — a thing this codebase already knows how to do twice, in
@@ -6872,10 +8525,16 @@ CodeSandbox track and nowhere in the personal one.
 
 Recorded so nobody reads their absence as an oversight.
 
-- **13.10 — the editor on a phone.** Ranked last in §13B, and §13B's own text
-  says it may have no user. Large work for a device nobody here has been
-  observed using. If somebody starts editing on a tablet, promote it; do not
-  build it on the theory that they might.
+- ~~**13.10 — the editor on a phone.**~~ **Built anyway on 2026-09-11 (§2.66),
+  and this entry is left here rather than deleted because it was the better
+  judgement.** The reasoning below still holds: it is work for a device nobody
+  here has been observed using, and nothing in it has been touched by a finger.
+  What was built is narrow — a terminal key bar and a pointer-based capability
+  layer — rather than the large work this entry warns about, which is the only
+  reason the warning and the row can both stand. Original entry: ranked last in
+  §13B, and §13B's own text says it may have no user. Large work for a device
+  nobody here has been observed using. If somebody starts editing on a tablet,
+  promote it; do not build it on the theory that they might.
 - **12.4 — GPUs.** Blocked on hardware, not on anybody. An afternoon of
   `DeviceRequests` if the host has one and unstartable if it does not.
 - **§3.3 autoscale.** A different product with a different cost model. §9.3's

@@ -61,6 +61,17 @@ const envSchema = z.object({
    *  well inside this window for anyone actually using the editor. */
   PREVIEW_TOKEN_TTL_HOURS: z.coerce.number().int().positive().default(12),
 
+  /// How long a guest stays paired before the link has to be used again.
+  /// plan.md §13.6. Four hours: longer than a pairing session, shorter than a
+  /// working day, so a laptop left open overnight is not still joined. A
+  /// GUESS rather than a measurement, in the sense §12.5 records.
+  PAIRING_TOKEN_TTL_HOURS: z.coerce.number().int().positive().default(4),
+
+  /// How long a pairing INVITE stays redeemable, in hours. Distinct from the
+  /// token's life: the invite is the thing that gets pasted into a chat and
+  /// outlives the conversation, so it expires on its own. plan.md §13.6.
+  PAIRING_INVITE_TTL_HOURS: z.coerce.number().int().positive().default(24),
+
   /** Port serving project previews, on an origin of its own.
    *
    *  Previews must NOT share the API's origin: a project's code would then run
@@ -232,6 +243,9 @@ const envSchema = z.object({
   /** GitHub sign-in. Both empty means the feature is simply off. */
   GITHUB_CLIENT_ID: z.string().optional(),
   GITHUB_CLIENT_SECRET: z.string().optional(),
+  /// The GitHub App's webhook signing secret. Absent means the receiver exists
+  /// and is unconfigured, which is what it then reports. plan.md §13.3.
+  GITHUB_WEBHOOK_SECRET: z.string().optional(),
 
   /** 32 bytes, base64, for secrets the server has to keep and later spend --
    *  today the GitHub token that makes importing and pushing possible without
@@ -764,6 +778,146 @@ const envSchema = z.object({
         .map((entry) => Number(entry.trim()))
         .filter((port) => Number.isInteger(port) && port > 0),
     ),
+
+  /** Make a workspace attachable over SSH, so somebody can open it with their
+   *  own VS Code, Cursor, Zed or nvim. plan.md §10.1 Route C.
+   *
+   *  Off by default, and the default is the decision rather than caution: this
+   *  publishes a port per running container on the host, and an operator who
+   *  did not ask for that should not get it because they upgraded. The image
+   *  also needs `openssh-server`, which only the images in this repository
+   *  carry -- a deployment on a custom image would open a port to a daemon
+   *  that is not there. */
+  // Explicit rather than z.coerce.boolean(), which reads the string "false"
+  // as true -- the trap line 328 already records.
+  SANDBOX_SSH_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true" || value === "1"),
+
+  /** Which host interface the per-container SSH port is published on.
+   *
+   *  127.0.0.1 by default, which means a client on the SERVER can reach it and
+   *  nothing else can. That is the safe half of the useful cases -- a personal
+   *  deployment on the machine you are sitting at, or anybody willing to run
+   *  `ssh -L`. Widening it to 0.0.0.0 exposes every open workspace's sshd to
+   *  the network, which is defensible on a host behind a firewall and is not a
+   *  thing to do by accident, so it is spelled out rather than inferred. */
+  SANDBOX_SSH_BIND: z.string().default("127.0.0.1"),
+
+  /** Install Dev Container Features. plan.md §11.10.
+   *
+   *  Off by default, and this default is load-bearing rather than cautious:
+   *  turning it on means third-party install scripts run as root in a container
+   *  on this host. That is what a Feature IS -- an OCI artifact whose payload
+   *  is an `install.sh` -- and it is a thing an operator should switch on
+   *  deliberately, never something they acquire by upgrading.
+   *
+   *  What it never does, however personal a deployment gets: give the
+   *  WORKSPACE root or a capability. §11.2's refusal of `privileged` and
+   *  `capAdd` stands. Root here lives in a build container with no bind mount
+   *  of the user's tree and a lifetime of one install. */
+  DEVCONTAINER_FEATURES: z
+    .string()
+    .optional()
+    .transform((value) => value === "true" || value === "1"),
+
+  /** Whose features may be installed, by registry host.
+   *
+   *  Hosts rather than full references, because this list decides whose code
+   *  runs as root and a host is the coarsest thing an operator can actually
+   *  reason about -- and the coarsest is the right grain for a list somebody
+   *  has to maintain. `*` permits any, and is exactly as alarming as it looks. */
+  DEVCONTAINER_FEATURE_REGISTRIES: z
+    .string()
+    .default("ghcr.io")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+
+  /** How many features one devcontainer may ask for.
+   *
+   *  Each one is a download and an install script; a file asking for forty is
+   *  either a mistake or an attempt to make the first open of a project take
+   *  an hour. */
+  DEVCONTAINER_FEATURE_LIMIT: z.coerce.number().int().min(1).max(32).default(10),
+
+  /** Prebuild a workspace that is STOPPED, not only one already running.
+   *  plan.md §12.5.
+   *
+   *  Off by default, and that is the honest setting for a feature whose three
+   *  gates below are guesses: it starts a container nobody asked for, on a
+   *  machine that may want the memory for a workspace somebody IS opening.
+   *  On is a choice an operator makes after watching their host. */
+  PREBUILD_STOPPED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true" || value === "1"),
+
+  /** How much of the memory budget may already be committed before a cold
+   *  prebuild is skipped, as a fraction.
+   *
+   *  0.6 is a GUESS. Nobody has watched a real host, and §12.5 says so twice:
+   *  choosing these numbers from a chair is how a background task becomes the
+   *  reason a machine is always busy. It is an env var precisely so the first
+   *  operator to see it misbehave can retune it without a deploy, and so the
+   *  number that eventually proves right is recorded somewhere rather than
+   *  compiled in. */
+  PREBUILD_MAX_COMMITTED: z.coerce.number().min(0).max(1).default(0.6),
+
+  /** How recently a workspace must have been opened to be worth prebuilding,
+   *  in days. Zero means any.
+   *
+   *  7 is a GUESS, on the reasoning that a workspace nobody has opened in a
+   *  week is one whose next open is not imminent -- and the whole value of a
+   *  prebuild is that it is spent shortly before somebody arrives. */
+  PREBUILD_RECENT_DAYS: z.coerce.number().int().min(0).default(7),
+
+  /** Stop a workspace this feature started, once it is built.
+   *
+   *  True, and it is the answer to §12.5's sharpest objection rather than a
+   *  preference: on a plan whose workspaces never sleep, leaving a prebuilt
+   *  container running would silently turn a stopped workspace into a running
+   *  one. That changes what the machine COSTS, not how fast it opens -- and it
+   *  would be indistinguishable, afterwards, from the user having opened it.
+   *  Only ever stops what this started; a workspace somebody opened mid-build
+   *  is left alone. */
+  PREBUILD_STOP_AFTER: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false" && value !== "0"),
+
+  /** Let an attached session use the SSH agent on the user's own machine.
+   *
+   *  On by default when SSH is, because it is this platform's answer to a real
+   *  gap -- plan.md §13.9. `git clone git@github.com:me/private`, the most
+   *  ordinary thing anybody does on a new machine, fails in a sandbox with no
+   *  credential, and every other way of fixing it puts a secret inside a
+   *  container that runs untrusted code.
+   *
+   *  Not TCP forwarding, which stays off: this carries a socket the sandbox can
+   *  ask to SIGN something, not a tunnel. The key never leaves the user's
+   *  machine and cannot be read out of the socket.
+   *
+   *  What it does cost, and why this is a knob rather than a constant: while
+   *  somebody is connected, code in the sandbox can USE their agent for any
+   *  repository that key opens. Off is defensible; it means typing a token. */
+  SANDBOX_SSH_AGENT_FORWARDING: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false" && value !== "0"),
+
+  /** The hostname to put in the `ssh` command shown to the user.
+   *
+   *  A server cannot know its own public name: behind a reverse proxy its own
+   *  idea of it is the proxy's. Unset, the API answers with the hostname the
+   *  browser itself used, which is right far more often than any constant --
+   *  set this when that is wrong, which is every deployment where the browser
+   *  and the SSH client take different routes in. */
+  SANDBOX_SSH_HOST: z.string().optional(),
 
   /** Start a project's dev server as soon as somebody opens it, instead of
    *  waiting for the Run button.

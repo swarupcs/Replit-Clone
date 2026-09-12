@@ -9,6 +9,7 @@ import {
   embedPayload,
   embedState,
   revokeEmbed,
+  sandboxPayload,
   updateEmbed,
 } from "../service/embedService.js";
 
@@ -37,10 +38,21 @@ async function authorise(
   return projectId;
 }
 
-const settingsSchema = z.object({
+/** Exported for its own test.
+ *
+ *  `z.object` strips what it does not name, so a setting missing here is a
+ *  control in the UI that silently does nothing — which is how §13.1's switch
+ *  was first written. That failure is invisible to a service-level test,
+ *  because the service is what the schema stops the value reaching. */
+export const settingsSchema = z.object({
   view: z.enum(["code", "preview", "split"]).optional(),
   preview: z.enum(["none", "deployment"]).optional(),
   activeFile: z.string().nullable().optional(),
+  // plan.md §13.1. `z.object` strips what it does not name, so a field missing
+  // here is a switch in the UI that silently does nothing -- which is how this
+  // was first written and is the reason the schema is worth reading before
+  // adding a setting anywhere else.
+  sandbox: z.boolean().optional(),
 });
 
 export async function getEmbedController(
@@ -147,5 +159,25 @@ export async function readEmbedFileController(
       req.params["token"] ?? "",
       typeof path === "string" ? path : "",
     ),
+  });
+}
+
+/** A sandbox a stranger can open, change and run. plan.md §13.1.
+ *
+ *  Beside the embed controllers because it is the same token and the same
+ *  absence of a session. What it is not, and what the whole row turns on: a way
+ *  for an anonymous visitor to start a container. Everything they do happens in
+ *  their own browser.
+ */
+export async function readSandboxController(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  publicHeaders(res);
+
+  res.json({
+    success: true,
+    message: "Sandbox",
+    data: await sandboxPayload(req.params["token"] ?? ""),
   });
 }

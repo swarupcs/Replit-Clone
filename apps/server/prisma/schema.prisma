@@ -53,7 +53,7 @@ model Plan {
   /// Whether a devcontainer.json on this plan may ask for extra host mounts.
   /// Gated again by DEVCONTAINER_MOUNT_ROOTS, which is empty by default.
   devcontainerMounts Boolean @default(false)
-  scheduledJobs    Boolean @default(false)
+  scheduledJobs      Boolean @default(false)
 
   /// Withdrawn from the catalogue without being deleted. Accounts already on
   /// it keep every number: a plan that stops being sold is not a plan that
@@ -135,28 +135,37 @@ model User {
   reportsFiled     ProjectReport[]
   tokens           UserToken[]
   githubConnection GithubConnection?
-  notifications    Notification[]
-  apiKeys          ApiKey[]
-  accountActions   AccountAction[]       @relation("AccountActionSubject")
-  computeUsage     ComputeUsage[]
-  subscription     Subscription?
+
+  /// Repositories whose pull requests get workspaces on this account. §13.3.
+  pullRequestRepos PullRequestRepo[]
+
+  /// Repositories this account has more than one checkout of. §13.4.
+  workspaceGroups WorkspaceGroup[]
+
+  /// Pairing links this account opened. §13.6.
+  pairingInvites PairingInvite[]
+  notifications  Notification[]
+  apiKeys        ApiKey[]
+  accountActions AccountAction[] @relation("AccountActionSubject")
+  computeUsage   ComputeUsage[]
+  subscription   Subscription?
 
   /// A second factor, when the account has one. A table of its own for the
   /// same reason as the row below it, and more sharply: the TOTP secret is a
   /// password equivalent, and `authenticateUser` does a bare `findUnique` on
   /// this model with no `select` at all.
-  twoFactor        UserTwoFactor?
+  twoFactor UserTwoFactor?
 
   /// Dotfiles and a signing key. A table of its own rather than columns here,
   /// and the private key is the reason: a column on `users` is returned by
   /// every `findUnique` that forgets a `select`, and this repository has
   /// already shipped one defect that was exactly a forgotten `select` key.
   /// A separate row cannot be loaded by accident.
-  personalization  UserPersonalization?
+  personalization UserPersonalization?
 
   /// Where the editor was left: which tabs, which splits, which settings.
   /// plan.md §13.11.
-  editorState      UserEditorState[]
+  editorState UserEditorState[]
 
   /// "Which accounts are on this plan" is the operator's question, and the one
   /// a pricing change has to answer before it is made.
@@ -267,6 +276,21 @@ model UserPersonalization {
   /// are. `toPersonalization` still never names it, so it cannot leak through
   /// that projection; `accountSecretService` is the only reader.
   envVars Json @default("{}")
+
+  /// Public SSH keys this account may open its workspaces with. plan.md §10.1
+  /// Route C.
+  ///
+  /// Deliberately NOT `signingKey` above, and the two are one field apart for
+  /// a reason worth stating: that one is a PRIVATE key the server holds so a
+  /// container can sign a commit, and it must never be read back. This is a
+  /// PUBLIC key the server hands to a container so a person can log in, and it
+  /// must always be readable. One column that was sometimes each would be a
+  /// column somebody eventually selects by accident.
+  ///
+  /// In the clear, because a public key is public -- and because "who can log
+  /// into this box" is a question an operator is entitled to answer by reading
+  /// the database.
+  sshKeys Json @default("[]")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -756,6 +780,191 @@ model BillingEvent {
   @@map("billing_events")
 }
 
+/// A link that pairs somebody into a project without an account. plan.md §13.6.
+///
+/// The EDITOR share link is "a named grant": redeeming it adds the signed-in
+/// user as a collaborator the owner can see and demote. That is the right
+/// default for a platform and the wrong one for ten minutes of pairing, which
+/// is the case the collaborative layer is most obviously for.
+///
+/// This is the other thing: redeeming mints a scoped, expiring GUEST identity
+/// and writes no `ProjectCollaborator` row at all. The guest is never an
+/// account, never appears in the collaborator list, and cannot outlive the
+/// token — so the owner has nothing to remember to revoke afterwards.
+model PairingInvite {
+  id String @id @default(uuid())
+
+  /// The bearer string in the link. Unique, and the only thing a guest has.
+  token String @unique
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Who opened the door. Kept so the owner can see who invited whom, and so
+  /// revoking is attributable.
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  /// Never more than this, whatever the guest asks for.
+  role ProjectRole @default(EDITOR)
+
+  /// What to call the link in the owner's list — "pairing with Sam", say.
+  label String?
+
+  /// When the LINK stops being redeemable. Distinct from the token's life: the
+  /// link is pasted into a chat and outlives the conversation.
+  expiresAt DateTime
+
+  /// Set when the owner ends it. A WHERE clause rather than a delete, so the
+  /// row survives as a record of what was granted and when it stopped.
+  revokedAt DateTime?
+
+  /// How many guests have come through. Not a limit — a fact the owner can
+  /// look at, and the thing that says whether a link was ever used.
+  redeemedCount Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([expiresAt])
+  @@map("pairing_invites")
+}
+
+/// Several checkouts of one repository that know they are related. plan.md §13.4.
+///
+/// A `Project` is one directory and one row, and `switchBranch` changes the
+/// branch IN PLACE — refusing outright when the worktree is dirty. So reviewing
+/// a colleague's branch meant stashing (which §10.13 has since shipped, so the
+/// row's parenthetical is stale) or importing the repository a second time as an
+/// unrelated project with its own env vars and its own history.
+///
+/// This is the object that makes the second checkout related rather than
+/// unrelated: it owns the repository identity and the shared environment, and
+/// the projects under it are the checkouts. §13.3's pull request workspaces join
+/// one too — the row predicted the two would want the same object, and they do.
+model WorkspaceGroup {
+  id String @id @default(uuid())
+
+  /// Whose checkouts these are. The group is per account, not global: two
+  /// people working on one repository each get their own.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Lower-cased, for the reason §13.3's rows give: GitHub sends whichever case
+  /// the event carried, and a case-sensitive key opens a second group for the
+  /// same repository.
+  owner String
+  repo  String
+
+  /// Environment shared by every checkout, sealed exactly as a project's own
+  /// vars are. Layered BETWEEN the account's and the project's: more specific
+  /// than "everything I own", less specific than "this checkout", which is the
+  /// order somebody would say them in.
+  envVars Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects Project[]
+
+  /// One group per repository per account.
+  @@unique([userId, owner, repo])
+  @@map("workspace_groups")
+}
+
+/// A repository whose pull requests may have workspaces here. plan.md §13.3.
+///
+/// **Enrolment is explicit, and that is the security decision in this row.**
+/// The alternative was to match a delivery against `GithubConnection.login` and
+/// build any repository a connected user happens to own. That silently enrols
+/// every repository of every connected account, so a leaked webhook secret — or
+/// an App pointed at this URL by mistake — would start containers for
+/// repositories nobody here chose. Somebody has to say "this repository, on my
+/// account", and this row is them saying it.
+model PullRequestRepo {
+  id String @id @default(uuid())
+
+  /// Lower-cased on the way in, because GitHub sends whichever case the event
+  /// carried and a case-sensitive key would miss the enrolment.
+  owner String
+  repo  String
+
+  /// Whose account pays for the workspaces: they own every project this
+  /// creates, and their quota is what it counts against.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  /// One enrolment per repository. Two accounts cannot both claim it, which
+  /// keeps "whose quota" a question with one answer.
+  @@unique([owner, repo])
+  @@index([userId])
+  @@map("pull_request_repos")
+}
+
+/// One pull request that has a workspace and a URL on this server. plan.md §13.3.
+model PullRequestWorkspace {
+  id String @id @default(uuid())
+
+  /// The base repository, lower-cased on the way in. GitHub treats owner and
+  /// repo names case-insensitively and sends whichever case the event happened
+  /// to carry, so a case-sensitive key would open a second workspace for the
+  /// same pull request the first time somebody typed the name differently.
+  owner  String
+  repo   String
+  number Int
+
+  /// The branch the pull request is from. Kept for the comment, and for telling
+  /// a reopened pull request from a new one on the same number.
+  headRef String
+
+  /// The commit the workspace was last built at. A `synchronize` carrying a sha
+  /// already recorded here is a redelivery, not new work.
+  headSha String
+
+  /// The workspace itself. Cascades: if the project is deleted by any of the
+  /// paths that delete projects, this row must not outlive it pointing at
+  /// nothing.
+  ///
+  /// Unique because a project belongs to at most one pull request. Without it
+  /// two rows could point at one workspace, and the second teardown would
+  /// delete a project the first had already given away.
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// The id of the comment posted back on the pull request, so the next push
+  /// edits it instead of adding another. Null until one is posted — which
+  /// includes every deployment whose token cannot write.
+  commentId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One workspace per pull request. This unique index is what makes a
+  /// redelivered `opened` event a no-op rather than a second container.
+  @@unique([owner, repo, number])
+  @@map("pull_request_workspaces")
+}
+
+/// A webhook delivery this server has already acted on. plan.md §13.3.
+///
+/// The billing equivalent is an efficiency measure. This one is a CORRECTNESS
+/// requirement: GitHub's signature covers the body and carries no timestamp, so
+/// a captured delivery stays valid forever and replaying it is free. Refusing a
+/// delivery id already seen is the only replay defence there is.
+model WebhookDelivery {
+  /// GitHub's `X-GitHub-Delivery`, verbatim. The primary key for the reason
+  /// `BillingEvent` gives: there is no second identity for this row.
+  id String @id
+
+  event      String
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+  @@map("webhook_deliveries")
+}
+
 enum SubscriptionStatus {
   /// Paid and current.
   ACTIVE
@@ -854,6 +1063,21 @@ model Project {
   localPath String? @unique
 
   moderationActions ModerationAction[]
+
+  /// The pull request this workspace exists for, when it is one this server
+  /// opened from a webhook rather than one a person made. plan.md §13.3.
+  pullRequest PullRequestWorkspace?
+
+  /// Links that pair somebody in without an account. §13.6.
+  pairingInvites PairingInvite[]
+
+  /// The repository this is a checkout of, when it is one of several. §13.4.
+  ///
+  /// Null for the ordinary case: a project that is nobody's second checkout.
+  /// `SetNull` rather than `Cascade` — dissolving a group must not delete the
+  /// work in it, which is the difference between grouping and owning.
+  groupId String?
+  group   WorkspaceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -969,13 +1193,27 @@ model Project {
   forkedFrom   Project?  @relation("ProjectForks", fields: [forkedFromId], references: [id], onDelete: SetNull)
   forks        Project[] @relation("ProjectForks")
 
-  collaborators      ProjectCollaborator[]
-  reports            ProjectReport[]
-  deployment         Deployment?
-  databaseConnection ProjectDatabaseConnection?
-  managedDatabase    ManagedDatabase?
-  embed              Embed?
-  scheduledJobs      ScheduledJob[]
+  collaborators       ProjectCollaborator[]
+  reports             ProjectReport[]
+  deployment          Deployment?
+  databaseConnection  ProjectDatabaseConnection?
+  managedDatabase     ManagedDatabase?
+  embed               Embed?
+  scheduledJobs       ScheduledJob[]
+  /// The dependency fingerprint a prebuild last completed for. plan.md §12.5.
+  ///
+  /// A host-side copy of the stamp `warmStart` keeps INSIDE the container.
+  /// That one is right where it is -- it describes the container's own
+  /// node_modules -- and it is unreadable for the question the cold sweep
+  /// asks, which is about a workspace that is not running and therefore has no
+  /// container to read anything from. Without this, deciding whether a stopped
+  /// workspace needs building would mean starting it to find out, which is the
+  /// cost the whole feature exists to avoid.
+  ///
+  /// A hint, not a source of truth: stale in the safe direction (a wasted
+  /// start that finds nothing to do), and the container's own stamp still
+  /// decides what actually runs.
+  prebuiltFingerprint String?
 
   @@index([ownerId])
   /// The gallery reads this, and only this.
@@ -1314,6 +1552,20 @@ model Embed {
   /// Project-relative POSIX path of the file that opens first, or null for
   /// whichever the tree offers.
   activeFile String?
+
+  /// Whether a stranger with this link may EDIT and RUN it. plan.md §13.1.
+  ///
+  /// Off by default, and the default is the decision: an embed is something to
+  /// read, and turning every existing one into an editable sandbox because the
+  /// column appeared would be changing what somebody already published.
+  ///
+  /// What it does NOT do, and must never do: start a container. The edits live
+  /// in the visitor's own browser and the build happens there too (§13.2), so
+  /// an anonymous visitor spends their own memory and none of this host's.
+  /// That is the refusal §6 decision 13 and the `preview` column above both
+  /// make, kept intact — this row is affordable precisely because 13.2 shipped
+  /// first.
+  sandbox Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

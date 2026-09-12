@@ -47,7 +47,18 @@ const STREAM_STDERR = 2;
 export async function execCapture(
   container: Container,
   argv: string[],
-  options: { workingDir?: string; env?: Record<string, string> } = {},
+  options: {
+    workingDir?: string;
+    env?: Record<string, string>;
+    /** Give up after this long and return what has been read so far.
+     *
+     *  Optional, and absent means what it has always meant: wait for the
+     *  command to end. Added for tasks (plan.md §10.10), where the command is
+     *  whatever a `tasks.json` in the repository says — a build that hangs
+     *  would otherwise hold the request open until the client gives up, and
+     *  leave nothing to tell anybody why. */
+    timeoutMs?: number;
+  } = {},
 ): Promise<ExecResult> {
   const exec = await container.exec({
     Cmd: argv,
@@ -62,6 +73,8 @@ export async function execCapture(
 
   const stream = await exec.start({ hijack: true, stdin: false });
 
+  let timedOut = false;
+
   const raw = await new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -69,8 +82,22 @@ export async function execCapture(
     const finish = (): void => {
       if (settled) return;
       settled = true;
+      if (timer) clearTimeout(timer);
       resolve(Buffer.concat(chunks));
     };
+
+    // Resolves rather than rejects: what has been read so far is the most
+    // useful thing anybody can be told about a command that hung, and throwing
+    // it away to raise an error would lose the output that says where it got
+    // to.
+    const timer =
+      options.timeoutMs === undefined
+        ? null
+        : setTimeout(() => {
+            timedOut = true;
+            finish();
+          }, options.timeoutMs);
+    timer?.unref?.();
 
     stream.on("data", (chunk: Buffer) => {
       // Keep reading past the cap so the stream still ends on its own; pausing
@@ -85,6 +112,18 @@ export async function execCapture(
   });
 
   const { stdout, stderr } = demux(raw);
+
+  if (timedOut) {
+    // The command is still running in the container; there is no exit code to
+    // ask for, and asking would report the previous one or zero. 124 is what
+    // `timeout(1)` uses, so the number means something to whoever sees it.
+    return {
+      stdout,
+      stderr: `${stderr}\n[timed out]`,
+      exitCode: 124,
+    };
+  }
+
   const { ExitCode } = await exec.inspect();
 
   return { stdout, stderr, exitCode: ExitCode ?? 0 };

@@ -13,7 +13,7 @@ import { UnauthorizedError } from "../utils/errors.js";
  *  credential — turning a cookie handed to untrusted project code into full API
  *  access for as long as it lived.
  */
-type TokenType = "access" | "refresh" | "preview" | "mfa";
+type TokenType = "access" | "refresh" | "preview" | "mfa" | "pairing";
 
 interface BaseClaims {
   sub: string;
@@ -154,6 +154,72 @@ export function verifyPreviewToken(token: string): { sub: string } {
     "preview",
   );
   return { sub: payload.sub as string };
+}
+
+/** A guest paired into ONE project, with no account. plan.md §13.6.
+ *
+ *  **The `pid` claim is what makes this safe, and it is why this is not an
+ *  access token with a short life.** An access token says who you are and is
+ *  good everywhere; this says who you are *here*, and is good for one project.
+ *  Without the project in the token, a pairing credential would be a general
+ *  API credential belonging to nobody — which is the exact failure the `typ`
+ *  claim was added to stop, one level up.
+ *
+ *  `sub` is a generated guest id and never a `userId`: there is no account, and
+ *  a guest id that collided with a real one would be an account takeover
+ *  spelled as a join link.
+ */
+export interface PairingClaims {
+  /** The guest's id for this session. Not a user, and not stored as one. */
+  sub: string;
+  /** The one project this credential is good for. */
+  pid: string;
+  /** What they may do in it. Never more than the invite granted. */
+  role: "VIEWER" | "EDITOR";
+  /** What to call them in presence. Theirs to choose, so it is bounded and
+   *  never trusted as an identity. */
+  nam: string;
+}
+
+export function signPairingToken(claims: PairingClaims): string {
+  const payload: BaseClaims & Omit<PairingClaims, "sub"> = {
+    sub: claims.sub,
+    typ: "pairing",
+    pid: claims.pid,
+    role: claims.role,
+    nam: claims.nam,
+  };
+
+  return jwt.sign(payload, env.JWT_ACCESS_SECRET, {
+    expiresIn: `${String(env.PAIRING_TOKEN_TTL_HOURS)}h`,
+  } as SignOptions);
+}
+
+export function verifyPairingToken(token: string): PairingClaims {
+  const payload = verifyTyped(token, env.JWT_ACCESS_SECRET, "pairing", "pairing");
+
+  const pid = payload["pid"];
+  const role = payload["role"];
+  const nam = payload["nam"];
+
+  // A pairing token with no project is a pairing token for every project, so
+  // it is refused rather than defaulted.
+  if (typeof pid !== "string" || pid.length === 0) {
+    throw new UnauthorizedError("Malformed pairing token");
+  }
+  if (role !== "VIEWER" && role !== "EDITOR") {
+    throw new UnauthorizedError("Malformed pairing token");
+  }
+
+  return {
+    sub: payload.sub as string,
+    pid,
+    role,
+    // An EMPTY name is as absent as a missing one: `typeof nam === "string"`
+    // alone admits "", which reaches the UI as a cursor with no label beside
+    // it. Checked for length, not just for type.
+    nam: typeof nam === "string" && nam.length > 0 ? nam : "Guest",
+  };
 }
 
 export const refreshCookieMaxAgeMs =

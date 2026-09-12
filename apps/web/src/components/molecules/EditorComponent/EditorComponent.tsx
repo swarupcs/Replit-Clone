@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 // Must precede the Editor import's first render: points Monaco at our bundle
 // rather than a CDN. See the file for why.
 import "../../../config/monacoSetup.ts";
@@ -7,7 +7,11 @@ import Editor, { DiffEditor } from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { Flex, Tooltip, Typography } from "antd";
-import { VscDiff, VscSparkle } from "react-icons/vsc";
+import {
+  VscDiff,
+  VscOpenPreview,
+  VscSparkle,
+} from "react-icons/vsc";
 import { MAX_FILE_BYTES, isNotebookPath } from "@replit-clone/shared";
 import { FileIcon } from "../../atoms/FileIcon/FileIcon.tsx";
 import {
@@ -40,6 +44,12 @@ import { useViewportSync } from "../../../hooks/useViewportSync.ts";
 import { useTreeStructureStore } from "../../../store/treeStructureStore.ts";
 import { NotebookEditor } from "../../organisms/NotebookEditor/NotebookEditor.tsx";
 import { useEditorSettingsStore } from "../../../store/editorSettingsStore.ts";
+import { useWorkspaceConfigStore } from "../../../store/workspaceConfigStore.ts";
+import { registerSnippets } from "../../../lib/snippetProvider.ts";
+import { MarkdownPreview } from "../MarkdownPreview/MarkdownPreview.tsx";
+import { useBlame } from "../../../hooks/useBlame.ts";
+import { useBlameStore } from "../../../store/blameStore.ts";
+import { useCompareStore } from "../../../store/compareStore.ts";
 import {
   buildDiffOptions,
   buildEditorOptions,
@@ -185,7 +195,14 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
    *  the "server owns saving" decision re-render. */
   const [collabTick, setCollabTick] = useState(0);
   useEffect(() => subscribeCollab(() => setCollabTick((value) => value + 1)), []);
-  const settings = useEditorSettingsStore();
+  const own = useEditorSettingsStore();
+  /** The repository's `.vscode/settings.json`, where it has an opinion --
+   *  plan.md §10.9. Subscribed rather than read once, so saving that file
+   *  changes the editor without a reload. The workspace wins: a file committed
+   *  to the repository is a more specific statement than a preference somebody
+   *  carries between machines. */
+  const workspace = useWorkspaceConfigStore((state) => state.config?.settings);
+  const settings = useMemo(() => ({ ...own, ...(workspace ?? {}) }), [own, workspace]);
   /** Both themes are ours. Light used to be Monaco's stock "vs", which is a
    *  perfectly good theme and the wrong one here: it is lit differently from
    *  the app around it, so the editor read as a pane borrowed from somewhere
@@ -205,6 +222,12 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
   const [writeError, setWriteError] = useState<string | null>(null);
   /** Showing the unsaved changes rather than the editor. */
   const [showDiff, setShowDiff] = useState(false);
+  /** Rendered markdown instead of the source -- plan.md §10.14. Per editor
+   *  instance rather than per file: it is a way of LOOKING at the thing you
+   *  have open, and a split showing source on one side and rendered on the
+   *  other is the arrangement people actually want. */
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewSource, setPreviewSource] = useState("");
 
   const review = useOpenTabsStore((state) => state.review);
   const endReview = useOpenTabsStore((state) => state.endReview);
@@ -565,6 +588,48 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     );
   }, [gutterRegionsForFile, mountTick]);
 
+  /** Blame, as an annotation at the end of each line. plan.md §10.13.
+   *
+   *  `after` content rather than a margin column, and the reason is the same
+   *  one VS Code arrived at: a blame column pushes the code sideways and every
+   *  line of it is the same three words, so it costs a lot of width to say very
+   *  little. At the end of the line it is there when you look and invisible when
+   *  you are reading.
+   *
+   *  Off until asked for -- see `useBlame`. Blame runs a process per file.
+   */
+  const compareLeft = useCompareStore((state) => state.left);
+  const blameEnabled = useBlameStore((state) => state.enabled);
+  const { lines: blameLines } = useBlame(
+    lspProjectId ?? undefined,
+    activeTab?.relPath ?? null,
+    blameEnabled,
+  );
+  const blameDecorations = useRef<string[]>([]);
+
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const codeEditor = editorRef.current;
+    if (!monaco || !codeEditor) return;
+
+    blameDecorations.current = codeEditor.deltaDecorations(
+      blameDecorations.current,
+      blameLines.map((line) => ({
+        range: new monaco.Range(line.line, 1, line.line, 1),
+        options: {
+          after: {
+            content: `    ${line.author} · ${line.summary}`,
+            inlineClassName: "rc-blame",
+          },
+          // The whole line, so the annotation sits at its end wherever that is.
+          hoverMessage: {
+            value: `${line.shortSha} — ${line.author}, ${line.at.slice(0, 10)}\n\n${line.summary}`,
+          },
+        },
+      })),
+    );
+  }, [blameLines, mountTick]);
+
   /** Clicking a bar opens the diff, which is what the bar is a summary of.
    *
    *  The margin is one strip whether or not a bar is under the pointer, so
@@ -673,6 +738,21 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     // The themes are NOT defined here. They are registered in monacoSetup at
     // module load, because this hook fires after the editor has already been
     // created and themed -- see that file.
+
+    // The repository's snippets -- plan.md §10.9. Per language and once each;
+    // the provider reads the current snippets on every keystroke, so a
+    // `.code-snippets` file that is edited takes effect without a reload.
+    const registerForCurrentModel = (): void => {
+      const language = codeEditor.getModel()?.getLanguageId();
+      if (language) registerSnippets(monaco, language);
+    };
+    registerForCurrentModel();
+    // And again whenever the model changes. `handleMount` fires once, but this
+    // editor instance shows every file the user opens -- registering only for
+    // the first one would mean snippets that work in the file you happened to
+    // land on and nowhere else.
+    codeEditor.onDidChangeModel(registerForCurrentModel);
+    codeEditor.onDidChangeModelLanguage(registerForCurrentModel);
 
     // Feeds the status bar. Monaco owns the cursor, so this is the only way to
     // observe it; the listener is disposed with the editor.
@@ -821,6 +901,13 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
     const { relPath } = activeTab;
     markDirty(relPath, true);
     queueIfAllowed(relPath, value, WRITE_DEBOUNCE_MS);
+
+    // Keeps the markdown preview on the LIVE buffer -- plan.md §10.14.
+    // Previewing what you have typed is the whole point, and a preview of the
+    // last save is wrong in the one case anybody looks at it. Only while the
+    // preview is open, so an ordinary edit does not re-render a hidden pane on
+    // every keystroke.
+    if (showPreview) setPreviewSource(value);
   }
 
   /** Publish what this pane is showing, for the app's one status bar.
@@ -924,6 +1011,10 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
    *  against a notebook" is therefore not available, rather than broken.
    */
   const isNotebook = isNotebookPath(activeTab.relPath);
+  /** plan.md §10.14. Extension rather than Monaco's language id, because the
+   *  id is only known once a model exists and this decides whether to make one
+   *  visible at all. */
+  const isMarkdown = /\.mdx?$/i.test(activeTab.relPath);
 
   // `collabTick` is what makes this re-read after a sync; the value lives
   // outside React so nothing else would.
@@ -977,6 +1068,31 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
             >
               +{others}
             </span>
+          </Tooltip>
+        )}
+
+        {/* Rendered markdown instead of the source -- plan.md §10.14. */}
+        {isMarkdown && (
+          <Tooltip title={showPreview ? "Show the source" : "Preview"}>
+            <button
+              className="rc-icon-button"
+              style={{ marginLeft: others > 0 ? 0 : "auto", marginRight: 4 }}
+              data-on={showPreview}
+              aria-label="Preview markdown"
+              aria-pressed={showPreview}
+              onClick={() => {
+                // Seeded from the editor as it opens, then kept current by
+                // `handleChange`. Reading it here rather than on every render
+                // is what keeps a hidden pane from re-parsing on every
+                // keystroke.
+                if (!showPreview) {
+                  setPreviewSource(editorRef.current?.getValue() ?? activeTab.value);
+                }
+                setShowPreview((value) => !value);
+              }}
+            >
+              <VscOpenPreview size={14} />
+            </button>
           </Tooltip>
         )}
 
@@ -1059,6 +1175,22 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
         />
       ) : (
         <>
+      {/* Hidden rather than unmounted, like the diff panes beside it: the
+          editor's model, undo history and scroll position all survive a trip
+          through the preview and back. */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: showPreview && !reviewing && !showDiff ? "block" : "none",
+        }}
+      >
+        {/* Reads the live buffer, not the saved file: previewing what you have
+            typed is the whole point, and a preview of the last save would be
+            wrong in the one case anybody looks. */}
+        <MarkdownPreview source={previewSource} />
+      </div>
+
       <div style={{ flex: 1, minHeight: 0, display: reviewing ? "block" : "none" }}>
         <DiffEditor
           height="100%"
@@ -1085,10 +1217,26 @@ export const EditorComponent = ({ pane = "primary" }: EditorComponentProps) => {
           width="100%"
           theme={monacoTheme}
           language={language}
-          // Left is the file as saved; right is what is in the buffer now.
-          original={activeTab.value}
+          // Left is whatever the person chose to compare against -- plan.md
+          // §10.11. The saved copy is the default and the behaviour that
+          // already existed; a branch or another file is fetched into
+          // `compareLeft`.
+          original={compareLeft ?? activeTab.value}
           modified={diffCurrent}
-          options={buildDiffOptions(settings)}
+          // Editable on the modified side when the file itself is -- §10.11
+          // asked for "edit inside the diff", and a diff you can only read is
+          // one you have to leave to act on. Changes go through the same
+          // dirty-marking and debounced write as the main editor, so there is
+          // one save path rather than two.
+          options={buildDiffOptions(settings, canEdit)}
+          onMount={(diffEditor) => {
+            diffEditor.getModifiedEditor().onDidChangeModelContent(() => {
+              if (!canEdit) return;
+              const text = diffEditor.getModifiedEditor().getValue();
+              markDirty(activeTab.relPath, true);
+              queueIfAllowed(activeTab.relPath, text, WRITE_DEBOUNCE_MS);
+            });
+          }}
         />
       </div>
 

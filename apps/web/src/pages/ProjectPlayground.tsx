@@ -5,21 +5,22 @@ import { useMutation } from "@tanstack/react-query";
 import { loader } from "@monaco-editor/react";
 import { Button, Flex, Tooltip, Typography, message } from "antd";
 import {
+  VscBeaker,
+  VscCloudUpload,
+  VscDatabase,
   VscFiles,
+  VscHistory,
+  VscKey,
   VscLayoutPanel,
   VscLayoutSidebarLeft,
-  VscKey,
-  VscSearch,
-  VscSourceControl,
   VscPackage,
-  VscDatabase,
-  VscSymbolClass,
-  VscCloudUpload,
-  VscWatch,
-  VscBeaker,
-  VscSettingsGear,
-  VscSparkle,
   VscRepoForked,
+  VscSearch,
+  VscSettingsGear,
+  VscSourceControl,
+  VscSparkle,
+  VscSymbolClass,
+  VscWatch,
 } from "react-icons/vsc";
 import {
   ArrowLeftOutlined,
@@ -33,6 +34,7 @@ import { StatusBar } from "../components/molecules/StatusBar/StatusBar.tsx";
 import { BottomPanel } from "../components/organisms/BottomPanel/BottomPanel.tsx";
 import { TreeStructure } from "../components/organisms/TreeStructure/TreeStructure.tsx";
 import { Browser } from "../components/organisms/Browser/Browser.tsx";
+import { BrowserPreview } from "../components/organisms/BrowserPreview/BrowserPreview.tsx";
 import { useTreeStructureStore } from "../store/treeStructureStore.ts";
 import {
   selectCanEdit,
@@ -46,6 +48,13 @@ import {
 import { useAuthStore } from "../store/authStore.ts";
 import { useRunStore } from "../store/runStore.ts";
 import { useWorkspaceStore } from "../store/workspaceStore.ts";
+import { useWorkspaceConfig } from "../hooks/useWorkspaceConfig.ts";
+import { RemoteAccessDialog } from "../components/organisms/RemoteAccessDialog/RemoteAccessDialog.tsx";
+import { GitToolsDialog } from "../components/organisms/GitTools/GitToolsDialog.tsx";
+import { CompareDialog } from "../components/organisms/CompareDialog/CompareDialog.tsx";
+import { useCompareStore } from "../store/compareStore.ts";
+import { TimelinePanel } from "../components/organisms/TimelinePanel/TimelinePanel.tsx";
+import { useBlameStore } from "../store/blameStore.ts";
 import { RunControl } from "../components/molecules/RunControl/RunControl.tsx";
 import { ErrorBoundary } from "../components/routing/ErrorBoundary.tsx";
 import { QuickOpen } from "../components/organisms/QuickOpen/QuickOpen.tsx";
@@ -132,6 +141,10 @@ export const ProjectPlayground = () => {
   });
   const { restored, remember } = useWorkspaceSession(projectIdFromUrl, editorSocket);
 
+  // What this repository says about the editor -- plan.md §10.9. Settings,
+  // keybindings and snippets from `.vscode/`, applied over the person's own.
+  useWorkspaceConfig(projectIdFromUrl);
+
   // Seeded from the remembered arrangement, so a reload comes back to the
   // layout the user left rather than the defaults.
   //
@@ -152,6 +165,23 @@ export const ProjectPlayground = () => {
   const [quickOpen, setQuickOpen] = useState(false);
   /** Go-to-symbol, and zen mode. Both are pure layout over what exists. */
   const [symbolSearchOpen, setSymbolSearchOpen] = useState(false);
+  const [remoteOpen, setRemoteOpen] = useState(false);
+  const [gitToolsOpen, setGitToolsOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+  /** Whether the preview pane builds in this browser instead of proxying a
+   *  container. plan.md §13.2. */
+  const [browserPreview, setBrowserPreview] = useState(false);
+  /** Subscribed, not read from `getState()` during render: the dialog has to
+   *  follow the active tab, and a snapshot taken at render time would name
+   *  whichever file happened to be open when the page mounted. */
+  const activeRelPathForCompare = useOpenTabsStore((state) => state.activeRelPath);
+
+  useEffect(() => {
+    // Switching files drops the comparison -- plan.md §10.11. The left-hand
+    // side was fetched for the file that WAS open; keeping it would diff two
+    // unrelated files and look, for a moment, like a real answer.
+    useCompareStore.getState().reset();
+  }, [activeRelPathForCompare]);
   const [zen, setZen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
@@ -167,6 +197,7 @@ export const ProjectPlayground = () => {
     | "tests"
     | "database"
     | "outline"
+    | "timeline"
     | "ai"
   >(
     "files",
@@ -488,6 +519,46 @@ export const ProjectPlayground = () => {
         run: () => {
           setSidebarView("packages");
           openView("sidebar");
+        },
+      },
+      {
+        id: "preview.browser",
+        category: "View",
+        title: "Switch between the container preview and the browser one",
+        run: () => {
+          setBrowserPreview((value) => !value);
+        },
+      },
+      {
+        id: "editor.compare",
+        category: "View",
+        title: "Compare this file with a branch, another file, or its saved copy",
+        run: () => {
+          setCompareOpen(true);
+        },
+      },
+      {
+        id: "git.blame",
+        category: "Source control",
+        title: "Show or hide who last changed each line",
+        run: () => {
+          useBlameStore.getState().toggle();
+        },
+      },
+      {
+        id: "git.tools",
+        category: "Source control",
+        title: "Tags, compare branches, amend, revert, cherry-pick",
+        run: () => {
+          setGitToolsOpen(true);
+        },
+      },
+      {
+        id: "workspace.remote",
+        category: "Workspace",
+        title: "Attach your own editor over SSH",
+        run: () => {
+          setRemoteOpen(true);
         },
       },
       {
@@ -952,6 +1023,19 @@ export const ProjectPlayground = () => {
                     <VscPackage size={16} />
                   </button>
                 </Tooltip>
+                {/* A file's own history -- plan.md §10.12. In the sidebar
+                    rather than the bottom panel because it is about the file
+                    you are looking at, which is what the sidebar is for. */}
+                <Tooltip title="Timeline" placement="right">
+                  <button
+                    className="rc-icon-button"
+                    data-on={sidebarView === "timeline"}
+                    aria-label="Timeline"
+                    onClick={() => setSidebarView("timeline")}
+                  >
+                    <VscHistory size={16} />
+                  </button>
+                </Tooltip>
                 <Tooltip title="Deploy" placement="right">
                   <button
                     className="rc-icon-button"
@@ -1060,6 +1144,17 @@ export const ProjectPlayground = () => {
 {/* Mounted only while it is showing, unlike search and the
                     assistant: it holds nothing worth keeping across a glance
                     at another view, and mounting it re-reads the manifest. */}
+                {sidebarView === "timeline" && projectIdFromUrl && (
+                  <div style={{ height: "100%" }}>
+                    <ErrorBoundary label="Timeline">
+                      <TimelinePanel
+                        projectId={projectIdFromUrl}
+                        relPath={activeRelPathForCompare}
+                      />
+                    </ErrorBoundary>
+                  </div>
+                )}
+
                 {sidebarView === "packages" && projectIdFromUrl && (
                   <div style={{ height: "100%" }}>
                     <ErrorBoundary label="Packages">
@@ -1203,7 +1298,7 @@ export const ProjectPlayground = () => {
                   second={
                     projectIdFromUrl ? (
                       <ErrorBoundary label="The terminal panel">
-                        <BottomPanel projectId={projectIdFromUrl} />
+                        <BottomPanel projectId={projectIdFromUrl} canRun={canEdit} />
                       </ErrorBoundary>
                     ) : null
                   }
@@ -1212,7 +1307,17 @@ export const ProjectPlayground = () => {
               second={
                 projectIdFromUrl ? (
                   <ErrorBoundary label="The preview">
-                    <Browser projectId={projectIdFromUrl} />
+                    {/* Two previews, and which one is showing is the user's
+                        choice -- plan.md §13.2. The container preview is the
+                        one that can show a server; the browser one costs this
+                        host nothing and starts in about a second. Neither
+                        replaces the other, which is why this is a toggle
+                        rather than a heuristic. */}
+                    {browserPreview ? (
+                      <BrowserPreview projectId={projectIdFromUrl} />
+                    ) : (
+                      <Browser projectId={projectIdFromUrl} />
+                    )}
                   </ErrorBoundary>
                 ) : null
               }
@@ -1229,6 +1334,35 @@ export const ProjectPlayground = () => {
       <StatusBar projectId={projectIdFromUrl} />
 
       <QuickOpen open={quickOpen} onClose={() => setQuickOpen(false)} />
+      {projectIdFromUrl && (
+        <CompareDialog
+          projectId={projectIdFromUrl}
+          open={compareOpen}
+          relPath={activeRelPathForCompare}
+          onClose={() => {
+            setCompareOpen(false);
+          }}
+        />
+      )}
+      {projectIdFromUrl && (
+        <GitToolsDialog
+          projectId={projectIdFromUrl}
+          open={gitToolsOpen}
+          canWrite={canEdit}
+          onClose={() => {
+            setGitToolsOpen(false);
+          }}
+        />
+      )}
+      {projectIdFromUrl && (
+        <RemoteAccessDialog
+          projectId={projectIdFromUrl}
+          open={remoteOpen}
+          onClose={() => {
+            setRemoteOpen(false);
+          }}
+        />
+      )}
       <SymbolSearch
         open={symbolSearchOpen}
         onClose={() => setSymbolSearchOpen(false)}

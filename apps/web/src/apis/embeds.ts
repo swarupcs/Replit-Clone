@@ -5,6 +5,7 @@ import type {
   EmbedPayload,
   EmbedSettings,
   EmbedState,
+  SandboxPayload,
 } from "@replit-clone/shared";
 import authed from "../config/axiosConfig.ts";
 
@@ -122,3 +123,17 @@ export function embedSnippet(url: string, title: string): string {
     `  loading="lazy"></iframe>`
   );
 }
+
+/** Everything a stranger needs to open a project, change a line and run it.
+ *  plan.md §13.1.
+ *
+ *  Beside the embed calls because it is the same token and the same absence of
+ *  a session — and, like them, it goes to a router that has no `requireAuth`
+ *  in front of it.
+ */
+export const getSandboxApi = async (token: string): Promise<SandboxPayload> => {
+  const response = await axios.get<ApiSuccess<SandboxPayload>>(
+    `/api/v1/embeds/${encodeURIComponent(token)}/sandbox`,
+  );
+  return response.data.data;
+};
